@@ -63,7 +63,7 @@ def box_blob(template: bytes, center: Tuple[float, float, float], half: Tuple[fl
 
 
 def surface_boxes(points, triangles, thickness=0.15, plane_tol=0.05, gap=0.05, min_area=0.04, max_boxes=48,
-                  axis_cos=0.92):
+                  axis_cos=0.92, leftovers=None):
     """Thin boxes behind the flat, axis-aligned surfaces of a mesh (floors, walls, ceilings, stair steps).
 
     Triangles whose normal is within ~23 degrees of an axis are grouped by (axis, facing, plane offset) and then split into
@@ -81,12 +81,14 @@ def surface_boxes(points, triangles, thickness=0.15, plane_tol=0.05, gap=0.05, m
         n = (n[0] / ln, n[1] / ln, n[2] / ln)
         ax = max(range(3), key=lambda k: abs(n[k]))
         if abs(n[ax]) < axis_cos:
+            if leftovers is not None:
+                leftovers.append((a, b, c))
             continue
         sign = 1 if n[ax] > 0 else -1
         d = (p0[ax] + p1[ax] + p2[ax]) / 3
         lo = [min(p0[k], p1[k], p2[k]) for k in range(3)]
         hi = [max(p0[k], p1[k], p2[k]) for k in range(3)]
-        groups.setdefault((ax, sign, round(d / plane_tol)), []).append((lo, hi, ln / 2, d))
+        groups.setdefault((ax, sign, round(d / plane_tol)), []).append((lo, hi, ln / 2, d, (a, b, c)))
     boxes = []
     for (ax, sign, _), tris in groups.items():
         others = [k for k in range(3) if k != ax]
@@ -110,6 +112,8 @@ def surface_boxes(points, triangles, thickness=0.15, plane_tol=0.05, gap=0.05, m
         for cl in clusters.values():
             area = sum(t[2] for t in cl)
             if area < min_area:
+                if leftovers is not None:
+                    leftovers.extend(t[4] for t in cl)
                 continue
             lo = [min(t[0][k] for t in cl) for k in range(3)]
             hi = [max(t[1][k] for t in cl) for k in range(3)]
@@ -123,6 +127,56 @@ def surface_boxes(points, triangles, thickness=0.15, plane_tol=0.05, gap=0.05, m
             boxes.append((area, centre, half))
     boxes.sort(key=lambda b: -b[0])
     return [(c, h) for _, c, h in boxes[:max_boxes]]
+
+
+def voxel_boxes(points, triangles, voxel=0.2, max_boxes=96):
+    """Cover arbitrary triangles (slopes, curves, rails, pipes) with axis-aligned boxes: mark the voxels the surface passes
+    through, then greedily merge runs of voxels into boxes (x, then y, then z). Coarsens the grid until it fits max_boxes."""
+    while True:
+        cells = set()
+        for a, b, c in triangles:
+            p0, p1, p2 = points[a], points[b], points[c]
+            edge = max(sum((p[k] - q[k]) ** 2 for k in range(3)) ** 0.5 for p, q in ((p0, p1), (p1, p2), (p2, p0)))
+            steps = max(1, int(edge / (voxel * 0.5)) + 1)
+            for i in range(steps + 1):
+                for j in range(steps + 1 - i):
+                    u, v = i / steps, j / steps
+                    w = 1 - u - v
+                    x = tuple(w * p0[k] + u * p1[k] + v * p2[k] for k in range(3))
+                    cells.add(tuple(int((x[k] // voxel)) for k in range(3)))
+        boxes, used = [], set()
+        for cell in sorted(cells):
+            if cell in used:
+                continue
+            x0, y0, z0 = cell
+            x1 = x0
+            while (x1 + 1, y0, z0) in cells and (x1 + 1, y0, z0) not in used:
+                x1 += 1
+            y1 = y0
+            while all((x, y1 + 1, z0) in cells and (x, y1 + 1, z0) not in used for x in range(x0, x1 + 1)):
+                y1 += 1
+            z1 = z0
+            while all((x, y, z1 + 1) in cells and (x, y, z1 + 1) not in used for x in range(x0, x1 + 1) for y in range(y0, y1 + 1)):
+                z1 += 1
+            for x in range(x0, x1 + 1):
+                for y in range(y0, y1 + 1):
+                    for z in range(z0, z1 + 1):
+                        used.add((x, y, z))
+            lo = (x0 * voxel, y0 * voxel, z0 * voxel)
+            hi = ((x1 + 1) * voxel, (y1 + 1) * voxel, (z1 + 1) * voxel)
+            boxes.append((tuple((lo[k] + hi[k]) / 2 for k in range(3)), tuple((hi[k] - lo[k]) / 2 for k in range(3))))
+        if len(boxes) <= max_boxes or voxel > 2.0:
+            return boxes[:max_boxes]
+        voxel *= 1.5
+
+
+def mesh_boxes(points, triangles, max_surface=96, max_voxel=96):
+    """Hybrid architecture collision: precise thin boxes behind flat axis-aligned surfaces, voxel boxes for the rest."""
+    rest = []
+    boxes = surface_boxes(points, triangles, max_boxes=max_surface, min_area=0.01, leftovers=rest)
+    if rest:
+        boxes += voxel_boxes(points, rest, max_boxes=max_voxel)
+    return boxes
 
 
 def read_box(blob: bytes):

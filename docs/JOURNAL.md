@@ -90,3 +90,8 @@ the same legacy input path as the key. See [spikes/WP10-vault111-first-light.md]
 
 Thin boxes behind flat surfaces, one body per box on child NiNodes; the player walks on the converted vault floor. Input guard
 correctly refused to type when the user's window had focus.
+
+## 2026-10-08: collision v2 (voxel boxes), effects excluded
+
+See spikes/WP10-vault111-first-light.md. Automation lesson: chained keystrokes drift when a dialog or load intervenes; run console steps one at a time with a screenshot between them.
+

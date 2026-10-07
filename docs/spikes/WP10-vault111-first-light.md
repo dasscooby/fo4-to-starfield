@@ -44,3 +44,15 @@ through ([screenshot](../media/vault111-walking-on-floor.png)); stairs, sloped a
 (no boxes for non-axis-aligned triangles). Lights reduced to 60 dimmer omnis + `DefaultLightingTemplate`; the scene is still
 over-exposed, but FO4's own Vault 111 concrete textures are genuinely light (mean ~200-220/255), so exposure, not texture
 conversion, is the cause.
+
+## Collision v2 and cleanup (2026-10-08)
+
+- `sfcollision.mesh_boxes`: thin boxes behind flat axis-aligned surfaces **plus voxel boxes** (0.2 m grid, greedily merged,
+  coarsened to stay under the cap) for slopes, curves, rails, pipes and small parts; up to ~190 bodies on the most complex
+  machinery. A user play-test of v1 found "some things have collision, some don't"; v2 covers the remainder.
+- In game: the player stood at z = 0.41 m, walked 3.5 s and ended at z = 0.00 (on the vault floor, no fall-through); walking
+  into the stair railings and posts stops the player.
+- Fallout 4 effect meshes (fog / light volumes under `meshes\Effects`) are no longer converted; they rendered as solid grey
+  shapes. 205 models, 1,003 references, 60 lights.
+- Open: banded "marbled" artefacts on some surfaces (likely normal/roughness channel mapping on certain materials), exposure,
+  the arrival point (no COC marker: the player lands at the cell origin inside geometry).

@@ -40,7 +40,7 @@ def main():
         cell = json.load(open(a.cell_json, encoding="utf-8-sig"))
         wanted = set(a.types.split(","))
         names = sorted({"meshes\\" + r["model"].lstrip("\\") for r in cell["refs"] if r["model"] and r["type"] in wanted
-                        and not re.search(r"marker", r["model"], re.I)},
+                        and not re.search(r"marker|^\\?effects[\\/]", r["model"], re.I)},   # editor markers, fog/light volumes
                        key=str.lower)
     else:
         names = src.mesh_names(a.pattern)

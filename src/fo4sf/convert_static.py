@@ -117,7 +117,7 @@ def convert_static(fo4_nif: bytes, out_name: str, material_path: str = PLACEHOLD
     node_name = out_name.rsplit("/", 1)[-1].encode()
     blob, child_blobs = None, []
     if collision_template is not None and collision_mode == "surfaces":
-        for c, h in sfcollision.surface_boxes(all_pts, all_tris):
+        for c, h in sfcollision.mesh_boxes(all_pts, all_tris):
             child_blobs.append(sfcollision.box_blob(collision_template, c, h))
     elif collision_template is not None:     # T3: one axis-aligned box around all geometry
         lo = [min(p[a] for p in all_pts) for a in range(3)]

@@ -66,6 +66,35 @@ class CollisionTests(unittest.TestCase):
         self.assertEqual(sfnif.parse_bsgeometry(g.blocks[4]).shader, 6)
         self.assertEqual(g.blocks[3][4:], blob)
 
+    def test_surface_boxes_floor_slab_and_leftovers(self):
+        pts = [(0, 0, 0), (2, 0, 0), (2, 2, 0), (0, 2, 0), (0, 0, 1), (1, 0, 0.5), (1, 1, 1)]
+        rest = []
+        boxes = sfcollision.surface_boxes(pts, [(0, 1, 2), (0, 2, 3), (0, 5, 6)], leftovers=rest, min_area=0.01)
+        self.assertEqual(len(boxes), 1)
+        c, h = boxes[0]
+        self.assertAlmostEqual(c[2], -0.075)                      # slab sits just under the floor
+        self.assertEqual((round(h[0], 3), round(h[1], 3)), (1.0, 1.0))
+        self.assertEqual(rest, [(0, 5, 6)])                       # the sloped triangle is left for voxel boxes
+
+    def test_voxel_boxes_cover_a_slope(self):
+        pts = [(0, 0, 0), (2, 0, 1), (2, 1, 1), (0, 1, 0)]          # 2 m long ramp rising 1 m
+        boxes = sfcollision.voxel_boxes(pts, [(0, 1, 2), (0, 2, 3)], voxel=0.25)
+        self.assertGreater(len(boxes), 3)
+        self.assertGreaterEqual(max(c[2] + h[2] for c, h in boxes), 1.0)
+        for c, h in boxes:
+            self.assertTrue(-0.3 <= c[0] <= 2.3 and -0.3 <= c[1] <= 1.3)
+
+    def test_voxel_boxes_respect_cap(self):
+        import math
+        pts, tris = [], []
+        for i in range(40):                                       # a curved wall strip
+            a = i / 40 * math.pi
+            pts += [(math.cos(a) * 3, math.sin(a) * 3, 0), (math.cos(a) * 3, math.sin(a) * 3, 3)]
+        for i in range(39):
+            k = 2 * i
+            tris += [(k, k + 2, k + 1), (k + 1, k + 2, k + 3)]
+        self.assertLessEqual(len(sfcollision.voxel_boxes(pts, tris, voxel=0.1, max_boxes=20)), 20)
+
     def test_no_collision_layout_unchanged(self):
         shape = sfnif.StaticShape(b"X:0", b"a" * 20 + b"\\" + b"b" * 20, 3, 3, "m.mat", (0, 0, 0, 1), (0,) * 6)
         g = nif.parse(nif.serialize(sfnif.build_static_nif(b"X", [shape])))
