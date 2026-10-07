@@ -15,7 +15,11 @@ included or distributed.
 **Newest: Fallout 4's Vault 111 interior loads in Starfield as a walk-in cell** (layout, models, textures; lighting still rough):
 [write-up](docs/spikes/WP10-vault111-first-light.md).
 
+**Also converted: Vault 81 and the Red Rocket cave** ([write-up](docs/spikes/WP10-more-interiors.md)).
+
 ![The Vault 111 cryo pods, converted from Fallout 4, inside Starfield](docs/media/vault111-cryo-row.jpg)
+
+![The cave under Red Rocket, converted from Fallout 4, inside Starfield](docs/media/redrocket-cave.jpg)
 
 ![Vault 111 corridor, converted from Fallout 4, inside Starfield](docs/media/vault111-corridor.jpg)
 

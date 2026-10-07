@@ -100,3 +100,8 @@ See spikes/WP10-vault111-first-light.md. Automation lesson: chained keystrokes d
 
 Material tint strength (Color.w) was 1.0 and replaced every albedo; set to 0. Texture-set materials, effect-shape skipping, neutral fallback, bounded voxel size. See spikes/WP10-vault111-first-light.md.
 
+
+## 2026-10-08: three interiors in one plugin
+
+Vault 111, Vault 81, Red Rocket cave. Rock smoothness, alpha cutouts, blended overlays skipped, no collision on vegetation. See spikes/WP10-more-interiors.md.
+

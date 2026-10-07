@@ -124,9 +124,12 @@ def texconv(texconv_exe, src, out_dir, fmt, extra=()):
 
 # ---- Fallout 4 spec/gloss -> Starfield PBR -------------------------------------------------
 
-def roughness_from_smoothness(g):
-    """FO4 gloss (0..255, 255 = mirror) -> Starfield roughness (255 = fully rough)."""
-    return (255 - g.astype(np.int32)).astype(np.uint8)
+def roughness_from_smoothness(g, smoothness: float = 1.0, spec_mult: float = 1.0):
+    """FO4 gloss (0..255, 255 = mirror) -> Starfield roughness (255 = fully rough).
+    The material's smoothness scalar multiplies the gloss map (FO4 cave rock: map all 255, smoothness 0.5). Starfield has no
+    specular multiplier, so a weak FO4 specular (spec_mult < 1) is approximated by scaling gloss by sqrt(spec_mult)."""
+    k = max(0.0, min(1.0, smoothness)) * max(0.0, min(1.0, spec_mult)) ** 0.5
+    return (255 - np.round(g.astype(np.float32) * k)).clip(0, 255).astype(np.uint8)
 
 
 def flip_green(g):

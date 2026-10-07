@@ -32,6 +32,13 @@ class Bgsm:
     greyscale: str
     envmap: str
     glow: str
+    alpha_blend: bool = False      # header byte 32: alpha blending (overlay shells, glass)
+    alpha_test: bool = False       # header byte 42
+    alpha_ref: int = 128           # header byte 41: alpha-test reference (0..255)
+    decal: bool = False            # header byte 47
+    two_sided: bool = False        # header byte 48
+    smoothness: float = 1.0        # scales the spec map's gloss channel (v2: 32 bytes after the 9 texture strings)
+    spec_mult: float = 1.0
 
 
 def parse_bgsm(d: bytes) -> Bgsm:
@@ -61,7 +68,26 @@ def parse_bgsm(d: bytes) -> Bgsm:
             continue
         out.append(d[pos + 4:pos + 4 + ln].rstrip(b"\0").decode("latin-1"))
         pos += 4 + ln
-    return Bgsm(version, bool(tiles & 2), bool(tiles & 1), (uo, vo), (us, vs), *out)
+    # v2 stores 9 texture strings; the lighting block after them holds specular mult (+28) and smoothness (+32),
+    # verified on PatioFurniture.BGSM (rim power 2.0, rolloff 0.3, spec colour 1,1,1, mult 0.8, smoothness 1.0, fresnel 5.0)
+    smooth, mult = 1.0, 1.0
+    if version == 2:
+        q = start
+        for _ in range(9):
+            if q + 4 > len(d):
+                break
+            ln, = struct.unpack_from("<I", d, q)
+            q += 4 + ln
+        if q + 36 <= len(d):
+            mult, smooth = struct.unpack_from("<ff", d, q + 28)
+            if not (0.0 <= smooth <= 1.0):
+                smooth = 1.0
+            if not (0.0 <= mult <= 100.0):
+                mult = 1.0
+    flags = d[32], d[42], d[47], d[48]
+    return Bgsm(version, bool(tiles & 2), bool(tiles & 1), (uo, vo), (us, vs), *out,
+                alpha_blend=bool(flags[0]), alpha_test=bool(flags[1]), decal=bool(flags[2]), two_sided=bool(flags[3]),
+                smoothness=smooth, spec_mult=mult, alpha_ref=d[41])
 
 
 def read_template(content_resources_zip: str) -> dict:
@@ -76,7 +102,7 @@ def _new_id(old: str, salt: str) -> str:
 
 
 def build_mat(template: dict, name: str, albedo: str, normal: str, rough: str,
-              tint=(1.0, 1.0, 1.0, 0.0), metalness: float = 0.0) -> dict:
+              tint=(1.0, 1.0, 1.0, 0.0), metalness: float = 0.0, opacity: str = None, alpha_threshold: float = 0.5) -> dict:
     """tint: x, y, z = colour, w = how strongly the tint replaces the albedo texture (1.0 = flat colour, texture
     ignored; measured in game). 0 keeps the converted texture as is."""
     """Return a new .mat dict. Texture arguments are game paths like 'Data\\Textures\\...\\x_color.dds'."""
@@ -107,6 +133,14 @@ def build_mat(template: dict, name: str, albedo: str, normal: str, rough: str,
                     and "Edges" in o and any(cc.get("Type") == "BSMaterial::TextureSetID" for cc in o["Components"]):
                 d = c["Data"]["Value"]["Data"]
                 d["x"], d["y"], d["z"], d["w"] = (str(tint[0]), str(tint[1]), str(tint[2]), str(tint[3]))
+    if opacity:                                    # alpha-tested cutout: opacity texture in slot 2 + alpha settings on the root
+        for o in mat["Objects"]:
+            comps = o.get("Components", [])
+            if any(c.get("Type") == "BSMaterial::MRTextureFile" for c in comps):
+                comps.append({"Data": {"FileName": opacity}, "Index": 2, "Type": "BSMaterial::MRTextureFile", "Version": 1})
+            if "ID" not in o and any(c.get("Type") == "BSMaterial::LayerID" for c in comps):
+                comps.append({"Data": {"AlphaTestThreshold": f"{alpha_threshold:.3f}", "HasOpacity": "true"}, "Index": 0,
+                              "Type": "BSMaterial::AlphaSettingsComponent"})
     layer = mat["Summary"]["Layer1"]
     layer["Tint"] = {"w": tint[3], "x": tint[0], "y": tint[1], "z": tint[2]}
     m = layer["Textures"]["Metalness"]

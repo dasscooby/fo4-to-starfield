@@ -88,6 +88,7 @@ class Converter:
         self._materials: Dict[str, Optional[str]] = {}
         self.stats = {"assets": 0, "failed": 0, "materials_ok": 0, "materials_fallback": 0}
         self.material_errors: Dict[str, str] = {}
+        self._blend_cache: Dict[str, bool] = {}
         self.neutral = self._make_neutral_material()
 
     def _make_neutral_material(self) -> str:
@@ -142,7 +143,9 @@ class Converter:
         if not (b.diffuse and b.normal):
             raise ValueError("material lacks diffuse/normal textures")
         rel = re.sub(r"^materials[\\/]", "", bgsm_path.replace("\\", "/"), flags=re.I)
-        return self._convert_texture_set(os.path.splitext(rel)[0].lower(), b.diffuse, b.normal, b.smooth_spec)
+        return self._convert_texture_set(os.path.splitext(rel)[0].lower(), b.diffuse, b.normal, b.smooth_spec,
+                                         smoothness=b.smoothness, spec_mult=b.spec_mult,
+                                         alpha_test=b.alpha_test, alpha_ref=b.alpha_ref)
 
     def texture_set_material(self, diffuse: str, normal: str, spec: str) -> Optional[str]:
         """Material for a shape that names its textures directly (BSShaderTextureSet, no .bgsm). Cached by diffuse path."""
@@ -159,7 +162,9 @@ class Converter:
                 self.material_errors[key] = f"{type(e).__name__}: {e}"
         return self._materials[key]
 
-    def _convert_texture_set(self, stem: str, diffuse: str, normal: str, spec: str) -> str:
+    def _convert_texture_set(self, stem: str, diffuse: str, normal: str, spec: str,
+                             smoothness: float = 1.0, spec_mult: float = 1.0,
+                             alpha_test: bool = False, alpha_ref: int = 128) -> str:
         """FO4 diffuse / normal / smooth-spec textures -> Starfield colour / normal / rough DDS + a .mat. Spec is optional."""
         import numpy as np
         tex_rel = f"textures/{self.prefix}/{stem}"
@@ -170,28 +175,54 @@ class Converter:
         out = {}
         with tempfile.TemporaryDirectory() as tmp:
             open(os.path.join(tmp, "d.dds"), "wb").write(d)
+            opacity = None
+            if alpha_test:                                 # cutout: the diffuse alpha becomes a BC4 opacity map
+                open(os.path.join(tmp, "a.dds"), "wb").write(d)
+                textures.texconv(self.texconv, os.path.join(tmp, "a.dds"), tmp, "R8G8B8A8_UNORM", ("-m", "1"))
+                raw_a = open(os.path.join(tmp, "a.dds"), "rb").read()
+                ha = textures.read_dds_header(raw_a)
+                px = np.frombuffer(raw_a[ha["data_offset"]:ha["data_offset"] + ha["width"] * ha["height"] * 4], np.uint8)
+                alpha = px.reshape(ha["height"], ha["width"], 4)[:, :, 3].copy()
+                if alpha.min() < 250:                     # only if the texture really has a cutout
+                    textures.write_r8(os.path.join(tmp, "o_in.dds"), alpha)
+                    textures.texconv(self.texconv, os.path.join(tmp, "o_in.dds"), tmp, "BC4_UNORM")
+                    opacity = "o_in.dds"
             textures.texconv(self.texconv, os.path.join(tmp, "d.dds"), tmp, "BC1_UNORM_SRGB", ("-srgbi",))
             nr, ng = _plane_pair(n, tmp, self.texconv)
             textures.write_rg8_snorm(os.path.join(tmp, "n_in.dds"), nr, ng)
             textures.texconv(self.texconv, os.path.join(tmp, "n_in.dds"), tmp, "BC5_SNORM")
             if s is not None:
                 _sr, sg = _plane_pair(s, tmp, self.texconv)
-                rough = textures.roughness_from_smoothness(sg)
+                rough = textures.roughness_from_smoothness(sg, smoothness, spec_mult)
             else:                                          # no spec map: uniformly fairly rough
                 rough = np.full((max(4, nr.shape[0] // 4), max(4, nr.shape[1] // 4)), 190, dtype=np.uint8)
             textures.write_r8(os.path.join(tmp, "r_in.dds"), rough)
             textures.texconv(self.texconv, os.path.join(tmp, "r_in.dds"), tmp, "BC4_UNORM")
-            for kind, fn in (("color", "d.dds"), ("normal", "n_in.dds"), ("rough", "r_in.dds")):
+            kinds = [("color", "d.dds"), ("normal", "n_in.dds"), ("rough", "r_in.dds")] + ([("opacity", opacity)] if opacity else [])
+            for kind, fn in kinds:
                 dst = os.path.join(self.staging, *f"{tex_rel}_{kind}.dds".split("/"))
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.copy2(os.path.join(tmp, fn), dst)
                 out[kind] = cm.game_path(f"{tex_rel}_{kind}.dds")
-        mat = cm.build_mat(self.template_mat, "FO4Port_" + os.path.basename(stem), out["color"], out["normal"], out["rough"])
+        mat = cm.build_mat(self.template_mat, "FO4Port_" + os.path.basename(stem), out["color"], out["normal"], out["rough"],
+                           opacity=out.get("opacity"), alpha_threshold=alpha_ref / 255.0)
         mat_rel = f"materials/{self.prefix}/{stem}.mat"
         p = os.path.join(self.staging, *mat_rel.split("/"))
         os.makedirs(os.path.dirname(p), exist_ok=True)
         open(p, "w", encoding="utf-8", newline="\n").write(cm.dump_mat(mat))
         return mat_rel.replace("/", "\\")
+
+    def _is_blended(self, bgsm_path: str) -> bool:
+        m = re.search(r"materials[\\/].*", bgsm_path, re.I)
+        key = (m.group(0) if m else bgsm_path).replace("/", "\\").lower()
+        if key not in self._blend_cache:
+            raw = self.src.material(key)
+            try:
+                self._blend_cache[key] = bool(raw) and cm.parse_bgsm(raw).alpha_blend
+            except Exception:                         # noqa: BLE001
+                self._blend_cache[key] = False
+        return self._blend_cache[key]
+
     # -- meshes -------------------------------------------------------------------------------
     def _shape_material(self, src, s) -> Optional[str]:
         """Starfield material path for one FO4 shape; None = skip the shape (effect shaders: glass, glow, frost)."""
@@ -206,6 +237,8 @@ class Converter:
         idx, = struct.unpack_from("<i", blk, 4)
         name = src.strings[idx] if 0 <= idx < len(src.strings) else b""
         if name.lower().endswith(b".bgsm"):
+            if self._is_blended(name.decode("latin-1")):
+                return None                 # alpha-blended overlay/decal shells: no alpha support yet, skip (else noisy)
             return self.material(name.decode("latin-1")) or self.neutral
         # no material file: shader type, name, extra data list, controller, flags1, flags2, UV offset, UV scale, texture set
         n_extra, = struct.unpack_from("<I", blk, 8)
@@ -244,9 +277,11 @@ class Converter:
             out_name = f"{self.prefix}/{os.path.splitext(rel)[0].lower()}"
             arch = bool(self.no_collision and self.no_collision.search(nif_name))
             mode = "surfaces" if arch else "box"        # architecture: thin boxes behind flat surfaces; props: one AABB
-            use_box = self.collision_template is not None
+            # vegetation (roots, plants, grass, cobwebs) is walk-through in FO4; a bounding box would be an invisible wall
+            soft = bool(re.search(r"[\\/]landscape[\\/](trees|plants|grass)|roots|cobweb|vines|hanging", nif_name, re.I))
+            use_box = self.collision_template is not None and not soft
             files = convert_static.convert_static(raw, out_name, material_paths=mats, collision_mode=mode, include_skinned=True,
-                                                  collision_template=self.collision_template)
+                                                  collision_template=self.collision_template if use_box else None)
             for relp, data in files.items():
                 p = os.path.join(self.staging, *relp.split("/"))
                 os.makedirs(os.path.dirname(p), exist_ok=True)

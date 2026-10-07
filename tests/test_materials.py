@@ -99,6 +99,11 @@ class TextureTests(unittest.TestCase):
         plane = textures.decode_bc4(blocks, 8, 4)
         self.assertTrue((plane[:, :4] == 10).all() and (plane[:, 4:] == 90).all())
 
+    def test_roughness_scaled_by_material_smoothness(self):
+        g = np.array([[255, 255]], dtype=np.uint8)
+        self.assertEqual(textures.roughness_from_smoothness(g, 0.5).tolist(), [[127, 127]])      # 255 - 127.5 -> 127
+        self.assertEqual(textures.roughness_from_smoothness(g, 1.0, 0.25).tolist(), [[127, 127]])  # sqrt(0.25) = 0.5
+
     def test_roughness_and_green_flip(self):
         g = np.array([[0, 255, 100]], dtype=np.uint8)
         self.assertEqual(textures.roughness_from_smoothness(g).tolist(), [[255, 0, 155]])

@@ -31,9 +31,9 @@ foreach (var (editorId, model, source) in items)
 }
 Console.WriteLine($"{items.Count} statics");
 
-if (args.Length > 2)
+foreach (var cellPath in args.Skip(2))
 {
-    using var cdoc = JsonDocument.Parse(File.ReadAllText(args[2]));
+    using var cdoc = JsonDocument.Parse(File.ReadAllText(cellPath));
     var root = cdoc.RootElement;
     var cellName = "FO4Port_" + root.GetProperty("cell").GetString();
     var sfEsm = ModKey.FromNameAndExtension("Starfield.esm");
