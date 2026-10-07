@@ -24,3 +24,7 @@ Related open tooling is listed in the README.
 **Source reading (no code run):** fo76utils/nifskope has `.mesh` readers (`src/io/MeshFile.cpp`), a meshlet
 generator (`lib/meshlet.cpp`, spell *Generate Meshlets*), Havok spells (`src/spells/havok.cpp`) and the
 full `nif.xml` with Starfield blocks; no `.mesh` writer was found. That is why S1 is the keystone spike.
+
+## 2026-10-06: repo published
+
+Public repo created. Pushing the CI workflow was rejected (token lacks the `workflow` scope), so it ships as `ci/github-actions-ci.yml` and is **not active**; the guard and tests were run locally (5 tests, guard ok, `um publish check` 21 files / 0 failures).

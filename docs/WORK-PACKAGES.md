@@ -117,5 +117,5 @@ Status: `blocked:WP-08,WP-15`. Difficulty: hard.
 
 ## WP-18: Coverage dashboard, CI and docs site
 Status: `ready`. Difficulty: easy.
-Generate `docs/COVERAGE.md` from the manifest; CI runs unit tests + guard; GitHub Pages renders the docs.
+Generate `docs/COVERAGE.md` from the manifest; enable the CI template in `ci/github-actions-ci.yml` (copy to `.github/workflows/ci.yml`; pushing it needs a GitHub token with the `workflow` scope, e.g. `gh auth refresh -s workflow`); GitHub Pages renders the docs.
 **Acceptance:** CI green; coverage table updates on every push.

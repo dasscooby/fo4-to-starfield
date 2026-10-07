@@ -44,4 +44,4 @@ slow scans.
 
 - Test in a **throwaway Starfield profile/save**. Don't test on your main save.
 - Don't point any tool at a game's online services; everything here is offline/single-player.
-- Run `python scripts/guard.py` before every commit (CI does too).
+- Run `python scripts/guard.py` before every commit.

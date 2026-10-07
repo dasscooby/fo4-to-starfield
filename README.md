@@ -69,7 +69,7 @@ python -I scripts/recon.py --fo4-esm <Fallout4.esm> --fo4-data <FO4 Data dir> --
 ## Rules of the repo
 
 - **No game data, ever.** No `.esm`, `.ba2`, `.nif`, `.dds`, `.mesh`, `.hkx`, `.wem`, executables, or
-  anything derived from them beyond statistics. CI enforces it.
+  anything derived from them beyond statistics. `scripts/guard.py` enforces it (a GitHub Actions template is in [`ci/`](ci/), not enabled yet).
 - Converters read your copies of the games; output stays on your machine.
 - Offline / single-player only.
 - AI-assisted: this project was started with AI coding assistance. Contributions of any kind are welcome;

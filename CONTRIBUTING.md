@@ -20,7 +20,7 @@ one in a sitting.
 
 ## Hard rules
 
-- **No game data in commits.** Run `python scripts/guard.py`; CI runs it too.
+- **No game data in commits.** Run `python scripts/guard.py` before every commit. A GitHub Actions template that runs it lives in `ci/` (not enabled yet; see WP-18).
 - Don't commit your `config.toml` or any path from your machine.
 - Offline / single-player only.
 - Python tools that read game data run with `python -I` so they don't import from the data folder.

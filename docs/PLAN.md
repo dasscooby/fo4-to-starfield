@@ -76,7 +76,7 @@ FO4 install ──► extract ──► IR (work dir) ──► convert-* ──
 | Artist-in-the-loop (rigging, weight fixes) | Blender 5.x + PyNifly (FO4) + Starfield Blender extension | Only where automation can't decide |
 
 Work and output directories live **outside the repo** (`config.toml` → `work_dir`, `staging_dir`). Nothing
-derived from game files is ever committed (enforced by `scripts/guard.py` in CI).
+derived from game files is ever committed (enforced by `scripts/guard.py`; CI template in `ci/`).
 
 Planned repo layout (grows as work packages land):
 ```
@@ -129,7 +129,7 @@ generated from it.
 
 ## 8. Quality bars for contributions
 
-- No game data in commits (CI guard fails the build).
+- No game data in commits (`scripts/guard.py` must pass).
 - Every converter ships with a synthetic-fixture test and states which oracle level it reaches.
 - Mapping changes are data edits with a short rationale in the PR.
 - Disclose AI-assisted code in the PR description; the project itself was started with AI assistance.
