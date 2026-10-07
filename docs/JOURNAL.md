@@ -39,3 +39,11 @@ Details: [spikes/S1-mesh-writer.md](spikes/S1-mesh-writer.md). Corrected an earl
 Not done: NifSkope check (L1), in-game check (L2/L3), units (S4).
 Environment: Creation Kit copied next to Starfield.exe; .NET 9 SDK installed; Blender still pending; SFSE 0.2.21 and the
 Starfield Blender Extension 1.6.0 Beta 5 downloaded to `C:\Modding\tools`.
+
+## 2026-10-07 (later): S2 / S4 / S9 offline results
+
+Mutagen Starfield alpha writes a loadable-looking plugin (form version 576). Unit scale measured at ~70 units/m from
+chair/stool/couch/barrel. Controlled Folder Access blocks writes to Documents, so loading uses a `- Main.ba2` built with the
+official Archive2 instead of loose files + ini. Installed `FO4Port.esm` + `FO4Port - Main.ba2` into a Starfield test install
+(reversible via `scripts/deploy_starfield.py`). **Next: launch the game and run the 5-step check in
+[spikes/S2-S4-S9-plugin-units-loading.md](spikes/S2-S4-S9-plugin-units-loading.md).**
