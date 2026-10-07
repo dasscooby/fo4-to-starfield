@@ -231,7 +231,8 @@ class Converter:
         try:
             raw = self.src.mesh(nif_name)
             src = nif.parse(raw)
-            shapes = [s for s in nif.fo4_trishapes(src) if not s.skinned and s.positions and s.triangles]
+            # skinned props (lockers, cabinets, desks: skinned only so drawers/doors can animate) are taken in bind pose
+            shapes = [s for s in nif.fo4_trishapes(src) if s.positions and s.triangles]
             if not shapes:
                 raise ValueError("no static BSTriShape geometry")
             mats: List[Optional[str]] = []
@@ -244,7 +245,7 @@ class Converter:
             arch = bool(self.no_collision and self.no_collision.search(nif_name))
             mode = "surfaces" if arch else "box"        # architecture: thin boxes behind flat surfaces; props: one AABB
             use_box = self.collision_template is not None
-            files = convert_static.convert_static(raw, out_name, material_paths=mats, collision_mode=mode,
+            files = convert_static.convert_static(raw, out_name, material_paths=mats, collision_mode=mode, include_skinned=True,
                                                   collision_template=self.collision_template)
             for relp, data in files.items():
                 p = os.path.join(self.staging, *relp.split("/"))

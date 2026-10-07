@@ -95,10 +95,11 @@ def collision_template_from_nif(sf_nif: bytes) -> bytes:
 
 def convert_static(fo4_nif: bytes, out_name: str, material_path: str = PLACEHOLDER_MATERIAL,
                    unit_scale: float = UNIT_SCALE, collision_template: bytes = None,
-                   material_paths: list = None, collision_mode: str = "box") -> Dict[str, bytes]:
+                   material_paths: list = None, collision_mode: str = "box",
+                   include_skinned: bool = False) -> Dict[str, bytes]:
     """collision_mode: "box" = one AABB on the root; "surfaces" = thin boxes behind flat surfaces, one body each."""
     src = nifmod.parse(fo4_nif)
-    shapes = [s for s in nifmod.fo4_trishapes(src) if not s.skinned and s.positions and s.triangles]
+    shapes = [s for s in nifmod.fo4_trishapes(src) if (include_skinned or not s.skinned) and s.positions and s.triangles]
     if not shapes:
         raise nifmod.NifError("no static BSTriShape geometry found")
     files, static_shapes, all_pts, all_tris = {}, [], [], []

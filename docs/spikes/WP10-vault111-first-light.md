@@ -82,3 +82,10 @@ The FO4 cell's `COCMarkerHeading` is now placed as Starfield's vanilla `COCMarke
 lands in the cryo room where Fallout 4 puts it, and the lighting template is `KreetBase01LGTtemplate` (an underground base).
 The cryo pods, tanks, gauges, corridor arches and Vault-Tec signage all show their original textures:
 [cryo row](../media/vault111-cryo-row.jpg), [cryo pod](../media/vault111-cryopod.jpg), [corridor](../media/vault111-corridor.jpg).
+
+## Skinned props (2026-10-08)
+
+Lockers, desks, dressers, file cabinets and the oxygen-tank stand are skinned in Fallout 4 only so their doors and drawers can
+animate. Taking their vertices in bind pose gives the correct resting shape (checked with `render_preview.py`), so the pipeline
+now converts skinned props as static meshes. Vault 111: 215 of 217 models convert (the 2 left are pure glass/glow). A railing
+blocked the player on a walk test, so prop collision holds.
