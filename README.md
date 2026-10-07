@@ -8,11 +8,11 @@ included or distributed.
 > **Status: a Fallout 4 prop renders in Starfield.** A Fallout 4 chair, converted by this toolchain and loaded as a
 > plugin, was spawned in the running game (Starfield 1.16.244): correct shape, size and orientation, lit and
 > shadowed by the scene ([screenshot](docs/media/fo4-chair-in-starfield.png), write-ups: [S1](docs/spikes/S1-mesh-writer.md),
-> [S2/S4/S9](docs/spikes/S2-S4-S9-plugin-units-loading.md)). It still uses a placeholder material and has no
-> collision; plugin records beyond a static, terrain, actors and animation are still to do.
+> [S2/S4/S9](docs/spikes/S2-S4-S9-plugin-units-loading.md)), now with its **original Fallout 4 texture**
+> converted to Starfield's material format ([S3](docs/spikes/S3-materials.md)). It has no collision yet; plugin records beyond a static, terrain, actors and animation are still to do.
 > See [Work packages](docs/WORK-PACKAGES.md).
 
-![Fallout 4 patio chair rendered inside Starfield](docs/media/fo4-chair-in-starfield.png)
+![Fallout 4 patio chair, with its original texture, rendered inside Starfield](docs/media/fo4-chair-textured-in-starfield.png)
 
 If you landed here searching for *"Fallout 4 in Starfield"*, *"convert Fallout 4 NIF to Starfield"*,
 *"Starfield .mesh format"*, *"what replaced LAND in Starfield"* or *"port Fallout 4 mods to Starfield"*:

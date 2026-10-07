@@ -41,14 +41,14 @@ tangents/normals packing, LOD, meshlets.
 CK without crashes (L2).
 
 ## WP-05: Texture converter
-Status: `ready` (needs mapping from S3 for final channel layout). Difficulty: medium.
+Status: `in progress`: colour/normal/roughness conversion works for one asset (`src/fo4sf/textures.py`, S3). Still needed: a native DX10 BA2 + LZ4 reader for bulk extraction, BC7/alpha, glow maps. Difficulty: medium.
 BC1/BC3/BC5/BC7 handling with DirectXTex/`texconv`; channel repack from FO4 `_d/_n/_s/_g/_l` to Starfield's
 colour/normal/roughness-metal/emissive maps; mip chain; sRGB flag correctness.
 **Acceptance:** converted texture pixel stats within tolerance of a hand-made reference; every FO4 texture
 converts or logs why not.
 
 ## WP-06: Material converter (`.bgsm`/`.bgem` → `.mat`)
-Status: `blocked:S3`. Difficulty: medium.
+Status: `in progress`: `.bgsm` to `.mat` works for opaque single-layer materials (`src/fo4sf/convert_material.py`, S3). Still needed: alpha, glow, two-sided, `.bgem`, metalness heuristics. Difficulty: medium.
 Parse FO4 materials and emit Starfield `.mat` JSON with the mapping table in `mappings/materials/`.
 **Acceptance:** 95% of vanilla `.bgsm` convert; unconverted ones are listed with reasons; chair renders (L2).
 

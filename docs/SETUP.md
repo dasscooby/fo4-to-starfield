@@ -12,6 +12,8 @@ You need legitimate copies of **both** games. Nothing here downloads or distribu
 | Python | 3.12+ | `python -I` for anything that reads game data |
 | .NET SDK | 9.x | For the Mutagen plugin translator |
 | Blender | 5.x | Optional, for artist-in-the-loop steps |
+| numpy (+ Pillow for previews) | any recent | Texture conversion and `scripts/render_preview.py`; `pip install numpy pillow` (a venv outside the repo is fine) |
+| `texconv` | the copy in xEdit's `Edit Scripts` | BC1/BC4/BC5/BC7 compression |
 
 ## Tools
 

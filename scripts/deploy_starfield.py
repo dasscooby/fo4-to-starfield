@@ -1,6 +1,6 @@
 """Install / uninstall converted files into a Starfield install for testing (reversible).
 
-install  : packs <staging>/{meshes,geometries,materials,textures} into "FO4Port - Main.ba2" with the official Archive2
+install  : packs <staging>/{meshes,geometries,materials} into "FO4Port - Main.ba2" and <staging>/textures into\n           "FO4Port - Textures.ba2" with the official Archive2
            (shipped with the Starfield Creation Kit), copies it and FO4Port.esm into Starfield\\Data, and enables the plugin
            in %LOCALAPPDATA%\\Starfield\\Plugins.txt. Starfield loads a plugin's "<name> - Main.ba2" automatically, so no
            ini change is needed. It refuses to overwrite existing files; everything it adds is recorded in
@@ -18,8 +18,9 @@ import sys
 
 PLUGIN = "FO4Port.esm"
 ARCHIVE = "FO4Port - Main.ba2"
+TEX_ARCHIVE = "FO4Port - Textures.ba2"
 MANIFEST = "FO4Port.deploy.json"
-ASSET_DIRS = ("meshes", "geometries", "materials", "textures")
+MAIN_DIRS = ("meshes", "geometries", "materials")
 
 
 def plugins_txt_path():
@@ -36,14 +37,11 @@ def write_lines(p, lines):
         f.write("\n".join(lines) + ("\n" if lines else ""))
 
 
-def build_archive(a, out):
+def build_archive(a, out, folders, fmt):
     tool = os.path.join(a.starfield, "Tools", "Archive2", "Archive2.exe")
     if not os.path.exists(tool):
         sys.exit(f"Archive2 not found at {tool} (install the Starfield Creation Kit)")
-    folders = [d for d in ASSET_DIRS if os.path.isdir(os.path.join(a.staging, d))]
-    if not folders:
-        sys.exit("nothing to archive: no meshes/geometries/materials/textures in staging")
-    r = subprocess.run([tool, ",".join(folders), f"-create={out}", f"-root={a.staging}", "-format=General",
+    r = subprocess.run([tool, ",".join(folders), f"-create={out}", f"-root={a.staging}", f"-format={fmt}",
                         "-compression=Default"], cwd=a.staging, capture_output=True, text=True)
     if r.returncode != 0 or not os.path.exists(out):
         sys.exit("Archive2 failed:\n" + r.stdout + r.stderr)
@@ -57,23 +55,29 @@ def install(a):
     esm = next((p for p in (os.path.join(a.staging, "Data", PLUGIN), os.path.join(a.staging, PLUGIN)) if os.path.exists(p)), None)
     if not esm:
         sys.exit(f"{PLUGIN} not found in staging")
-    targets = [os.path.join(data, PLUGIN), os.path.join(data, ARCHIVE)]
+    main_dirs = [d for d in MAIN_DIRS if os.path.isdir(os.path.join(a.staging, d))]
+    has_tex = os.path.isdir(os.path.join(a.staging, "textures"))
+    targets = [os.path.join(data, PLUGIN), os.path.join(data, ARCHIVE)] + ([os.path.join(data, TEX_ARCHIVE)] if has_tex else [])
     clash = [t for t in targets if os.path.exists(t)]
     if clash:
         sys.exit("refusing to overwrite existing files:\n  " + "\n  ".join(clash))
     pt = plugins_txt_path()
     pl = read_lines(pt)
     pl_add = [] if f"*{PLUGIN}" in pl or PLUGIN in pl else [f"*{PLUGIN}"]
-    print(f"install: {PLUGIN} + {ARCHIVE} -> {data}\nPlugins.txt ({pt}): add {pl_add or 'nothing'}")
+    print(f"install: {[os.path.basename(x) for x in targets]} -> {data}\nPlugins.txt ({pt}): add {pl_add or 'nothing'}")
     if a.dry_run:
         return
     built = os.path.join(a.staging, ARCHIVE)
-    build_archive(a, built)
+    build_archive(a, built, main_dirs, "General")
     shutil.copy2(esm, targets[0])
     shutil.copy2(built, targets[1])
+    if has_tex:
+        built_tex = os.path.join(a.staging, TEX_ARCHIVE)
+        build_archive(a, built_tex, ["textures"], "DDS")
+        shutil.copy2(built_tex, targets[2])
     if pl_add:
         write_lines(pt, pl + pl_add)
-    json.dump({"files": [PLUGIN, ARCHIVE], "plugins_txt": pt, "plugins_added": pl_add}, open(man_path, "w"), indent=1)
+    json.dump({"files": [os.path.basename(x) for x in targets], "plugins_txt": pt, "plugins_added": pl_add}, open(man_path, "w"), indent=1)
     print("installed. Undo with: python deploy_starfield.py uninstall --starfield <game dir>")
 
 
