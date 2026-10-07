@@ -94,7 +94,8 @@ def collision_template_from_nif(sf_nif: bytes) -> bytes:
 
 
 def convert_static(fo4_nif: bytes, out_name: str, material_path: str = PLACEHOLDER_MATERIAL,
-                   unit_scale: float = UNIT_SCALE, collision_template: bytes = None) -> Dict[str, bytes]:
+                   unit_scale: float = UNIT_SCALE, collision_template: bytes = None,
+                   material_paths: list = None) -> Dict[str, bytes]:
     src = nifmod.parse(fo4_nif)
     shapes = [s for s in nifmod.fo4_trishapes(src) if not s.skinned and s.positions and s.triangles]
     if not shapes:
@@ -110,7 +111,7 @@ def convert_static(fo4_nif: bytes, out_name: str, material_path: str = PLACEHOLD
         sphere, box = sfnif.bounds_from_points(pts)
         name = s.name or f"Shape{i}".encode()
         static_shapes.append(sfnif.StaticShape(name, f"{d}\\{f}".encode(), len(m.triangles) * 3, len(m.positions),
-                                               material_path, sphere, box))
+                                               material_paths[i] if material_paths else material_path, sphere, box))
     node_name = out_name.rsplit("/", 1)[-1].encode()
     blob = None
     if collision_template is not None:     # T3: one axis-aligned box around all geometry

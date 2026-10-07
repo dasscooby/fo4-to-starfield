@@ -171,7 +171,7 @@ def fo4_trishapes(n: NifFile) -> List[Fo4Shape]:
         raise NifError(f"fo4_trishapes needs BS 130, got {n.bs_version}")
     shapes = []
     for i, blk in enumerate(n.blocks):
-        if n.type_of(i) not in ("BSTriShape", "BSSubIndexTriShape"):
+        if n.type_of(i) not in ("BSTriShape", "BSSubIndexTriShape", "BSMeshLODTriShape"):
             continue
         p = 0
         name_idx, nextra = struct.unpack_from("<iI", blk, p)
@@ -186,6 +186,8 @@ def fo4_trishapes(n: NifFile) -> List[Fo4Shape]:
         skin, shader, alpha = struct.unpack_from("<iii", blk, p); p += 12
         desc, = struct.unpack_from("<Q", blk, p); p += 8
         ntri, nvert, dsize = struct.unpack_from("<IHI", blk, p); p += 10
+        if dsize == 0:
+            continue                                   # shape whose geometry is not stored in the block (e.g. destruction stubs)
         attrs = (desc >> 44) & 0xFFF
         vsize = (desc & 0xF) * 4
         if dsize != vsize * nvert + ntri * 6:
@@ -209,6 +211,12 @@ def fo4_trishapes(n: NifFile) -> List[Fo4Shape]:
                 col.append(tuple(blk[q:q + 4])); q += 4
         p += vsize * nvert
         tris = list(struct.iter_unpack("<HHH", blk[p:p + ntri * 6]))
+        if n.type_of(i) == "BSMeshLODTriShape" and len(blk) >= p + ntri * 6 + 12:
+            sizes = struct.unpack_from("<3I", blk, p + ntri * 6)
+            if sum(sizes) == ntri and max(sizes) > 0:   # triangles hold all LOD levels back to back: keep the most detailed
+                k = max(range(3), key=lambda j: sizes[j])
+                start = sum(sizes[:k])
+                tris = tris[start:start + sizes[k]]
         name = n.strings[name_idx] if 0 <= name_idx < len(n.strings) else b""
         shapes.append(Fo4Shape(name, tr, rot, scale, shader, alpha, skin, pos, uv, nor, tan, col, tris,
                                bool(attrs & VF_SKIN)))

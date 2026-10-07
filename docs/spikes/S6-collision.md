@@ -42,9 +42,10 @@ Box = axis-aligned bounds of all converted geometry, in metres.
 
 - The converted chair loads with collision with no errors.
 - Spawning two at the same spot made them **collide with each other and tip over** (so the shapes, positions and sizes are right).
-- Walking into them moved them / blocked the player (the view changed as the player pushed against them).
-- The template body is **dynamic**, so converted props are movable like a loose chair. Static architecture needs a static
-  template (not yet found: pick a vanilla box-collision NIF whose body is static and re-run the regression).
+- **Correction after a human play-test:** the player is blocked by them but **cannot push them; they do not move**. The tilt seen
+  right after spawning came from two bodies being created inside each other, not from a movable body. So converted props behave
+  as solid, fixed scenery (right for most set dressing). Movable clutter would need a dynamic-body template.
+- Shadows on the converted props look correct (play-test).
 
 ## Not covered yet
 

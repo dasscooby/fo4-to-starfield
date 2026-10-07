@@ -70,3 +70,10 @@ Found a deterministic rule for patching a vanilla box-collision Havok blob (36 b
 vanilla blobs). Chair now has collision: two overlapping copies pushed each other apart and tipped; walking into them moved
 them. Body is dynamic (inherited from the template). Lessons: the console achievements dialog needs a long E press and blocks
 other input while open; `placeatme` spawns at the player's feet, so the player gets pushed out by the new collision.
+
+## 2026-10-07 (play-test by the user)
+
+Batch build (400 Set Dressing props) installed. Human play-test: shadows look good, props have collision, and they do **not**
+move when pushed. Corrected the S6 note that called the bodies dynamic. Batch converter (`src/fo4sf/ba2.py`, `pipeline.py`,
+`scripts/convert_batch.py`, manifest-driven plugin writer) committed with this entry: 400 converted in ~30 s, 6 skipped (no
+static geometry), 146/151 materials full, 5 placeholder.

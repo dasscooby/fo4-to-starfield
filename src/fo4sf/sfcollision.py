@@ -5,7 +5,7 @@
 box. They were found by regressing 369 vanilla identity-rotation box blobs (6,168 bytes each) against the box centre and
 half-extents: 36 words depend on the box and fit exactly (6 centre/half-size words, the 8 corner points, 6 face planes; see
 docs/spikes/S6-collision.md). Six other varying words are constant/zero and the rest are mass/inertia or padding; they are left as
-in the template. The vanilla body is a movable (dynamic) one, so converted objects can be pushed.
+in the template. In game the resulting props are solid and fixed (the player cannot push them).
 """
 import struct
 from typing import Tuple
