@@ -1,0 +1,91 @@
+# fo4-to-starfield
+
+**Research and toolchain for porting Fallout 4 to Starfield's engine (Creation Engine 2).**
+Format notes, measurements, a risk-first plan, and (as they land) converters for meshes, materials,
+collision, plugin records, terrain and more. Converts from **your own** game copies; no game assets are
+included or distributed.
+
+> **Status: planning and measurement complete, no converter yet.** Nothing converts today. The plan,
+> the measured format differences and the first experiments are documented so anyone can pick up a piece.
+> See [Work packages](docs/WORK-PACKAGES.md).
+
+If you landed here searching for *"Fallout 4 in Starfield"*, *"convert Fallout 4 NIF to Starfield"*,
+*"Starfield .mesh format"*, *"what replaced LAND in Starfield"* or *"port Fallout 4 mods to Starfield"*:
+the answers we have so far are in [docs/FORMAT-GAP.md](docs/FORMAT-GAP.md) and [docs/RISKS.md](docs/RISKS.md).
+
+## Why this is hard (measured, not guessed)
+
+| | Fallout 4 (Creation Engine 1) | Starfield (Creation Engine 2) |
+|---|---|---|
+| Plugin form version | 131 | 581 |
+| Record types | 137 (116 shared) | 180 |
+| Sampled field overlap on shared types | | mostly 25–60% (`STAT` 0.23, `WEAP` 0.30, `NPC_` 0.51) |
+| Terrain | 37,020 `LAND` records | **none**; `.btd` files + procedural planets |
+| NIF mesh | BS 130, geometry inline | BS 175, geometry in external `.mesh` files (~684k of them) |
+| Materials | 7,077 `.bgsm` + 295 `.bgem` | `.mat` JSON, compiled into one `.cdb` |
+| Collision | Havok 2014 packfile | Havok tagfile, `hknp` shapes |
+| Animation | 15.7k `.hkx` | `.af`/`.afx`/`.agx`/`.rig` |
+| Voice | 123k `.fuz` | Wwise `.wem` + FaceFX `.ffxanim` |
+
+Details and sources: [docs/FORMAT-GAP.md](docs/FORMAT-GAP.md).
+
+## Approach in one paragraph
+
+A deterministic, resumable **conversion pipeline**, not a hand rebuild: Fallout 4 data → open intermediate
+formats (glTF, PNG/DDS, JSON) → Starfield formats, run by anyone on their own installs, verified by
+machine oracles at every step (parser round-trip → NifSkope/xEdit → Creation Kit → in-game screenshot),
+with fidelity tiers so the build always completes. It starts with spikes that kill or confirm the
+riskiest assumptions, then the order is **item → static → interior (Vault 111) → actor → exterior**.
+Full reasoning: [docs/PLAN.md](docs/PLAN.md).
+
+## Repo map
+
+| Path | What |
+|---|---|
+| [docs/PLAN.md](docs/PLAN.md) | Strategy, architecture, phases, verification ladder |
+| [docs/RISKS.md](docs/RISKS.md) | Risk register and the nine spikes (S1–S9) with go/no-go and fallbacks |
+| [docs/WORK-PACKAGES.md](docs/WORK-PACKAGES.md) | The task list; mirrored as GitHub issues |
+| [docs/FORMAT-GAP.md](docs/FORMAT-GAP.md) | Measured differences between the two games |
+| [docs/SETUP.md](docs/SETUP.md) | Tools and pinned versions |
+| [docs/JOURNAL.md](docs/JOURNAL.md) | Evidence journal: every experiment, newest last |
+| [docs/measurements/](docs/measurements/) | Raw JSON from the recon scripts (counts only, no game content) |
+| [scripts/](scripts/) | `recon.py`, `recon_physics.py`, `guard.py` |
+
+## Quick start (contributors)
+
+```
+git clone https://github.com/dasscooby/fo4-to-starfield
+cd fo4-to-starfield
+python -m unittest discover tests        # synthetic fixtures only
+python scripts/guard.py                   # must pass before every commit
+```
+Then read [docs/SETUP.md](docs/SETUP.md) and pick a work package marked `ready`.
+
+To reproduce the measurements on your own installs:
+```
+python -I scripts/recon.py --fo4-esm <Fallout4.esm> --fo4-data <FO4 Data dir> --sf-data <Starfield Data dir> --out out/
+```
+
+## Rules of the repo
+
+- **No game data, ever.** No `.esm`, `.ba2`, `.nif`, `.dds`, `.mesh`, `.hkx`, `.wem`, executables, or
+  anything derived from them beyond statistics. CI enforces it.
+- Converters read your copies of the games; output stays on your machine.
+- Offline / single-player only.
+- AI-assisted: this project was started with AI coding assistance. Contributions of any kind are welcome;
+  please say if yours was AI-assisted.
+
+## Related projects
+
+- [fo76utils/nifskope](https://github.com/fo76utils/nifskope): NifSkope fork with Starfield `.mesh` / `.mat` support
+- [Mutagen](https://github.com/Mutagen-Modding/Mutagen): .NET library with Fallout 4 and Starfield record support
+- [PyNifly](https://github.com/BadDogSkyrim/PyNifly): Blender NIF import/export (Fallout 4)
+- [xEdit](https://github.com/TES5Edit/TES5Edit): plugin editor (`xSFEdit`, `xFOEdit`)
+- [CoACD (fo76utils fork)](https://github.com/fo76utils/CoACD): convex decomposition for collision
+- [SFSE](https://sfse.silverlock.org/): Starfield Script Extender
+
+## Legal
+
+Fallout, Starfield and Creation Engine are trademarks of Bethesda Softworks / ZeniMax Media. This project is
+unofficial and unaffiliated. It contains no Bethesda content. You need legitimate copies of both games.
+Licence: [MIT](LICENSE) (code and documentation).
