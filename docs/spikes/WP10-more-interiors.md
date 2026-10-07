@@ -25,3 +25,10 @@ Full walk through `FO4Port_Vault81`: riveted panel walls, the security booth, sh
 nothing broken stood out ([booth](../media/vault81-booth-interior.jpg), [walls](../media/vault81-walls.jpg),
 [cave roots](../media/redrocket-cave-roots.jpg)). Fallout 4 doors are converted as static meshes (they cannot open yet), so they
 no longer get collision: a closed door is now see-through to the player rather than a wall.
+
+## Automated collision map (2026-10-08)
+
+New tool `scripts/game/probe.ps1` teleports the player 1.5 m above 30 floor pieces spread over Vault 81 and reads the landing
+height back by OCR. Result: **28 PASS, 2 HELD, 0 falls through** ([map](../media/vault81-collision-map.png)). The two HELD are
+expected: one is the top of a stair run, the other a floor mat sitting on a higher surface (the player landed 1.2 m up on something
+solid). See `scripts/game/README.md`.
