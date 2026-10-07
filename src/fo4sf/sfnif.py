@@ -113,7 +113,8 @@ class StaticShape:
 
 
 def build_static_nif(node_name: bytes, shapes: List[StaticShape], bs_version: int = 173,
-                     collision_blob: Optional[bytes] = None) -> nifmod.NifFile:
+                     collision_blob: Optional[bytes] = None,
+                     child_collision_blobs: Optional[List[bytes]] = None) -> nifmod.NifFile:
     """A static prop NIF laid out like vanilla `setdressing` props: NiNode, BSXFlags, [bhkNPCollisionObject,
     bhkPhysicsSystem,] then per shape BSGeometry + NiIntegerExtraData("MaterialID") + BSLightingShaderProperty
     (named by its .mat path). The root node owns the collision object; BSXFlags is 2 when there is collision."""
@@ -124,11 +125,13 @@ def build_static_nif(node_name: bytes, shapes: List[StaticShape], bs_version: in
     s_matid = f.string_index(b"MaterialID")
     ident = struct.pack("<3f9ff", 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1.0)
     first = 4 if collision_blob is not None else 2
-    children = [first + 3 * i for i in range(len(shapes))]
+    extra = list(child_collision_blobs or [])
+    extra_start = first + 3 * len(shapes)          # each extra body: NiNode, bhkNPCollisionObject, bhkPhysicsSystem
+    children = [first + 3 * i for i in range(len(shapes))] + [extra_start + 3 * j for j in range(len(extra))]
     coll_ref = 2 if collision_blob is not None else -1
     f.add_block("NiNode", struct.pack("<iIiiI", s_node, 1, 1, -1, 0xE) + ident
                 + struct.pack("<iI", coll_ref, len(children)) + struct.pack(f"<{len(children)}i", *children))
-    f.add_block("BSXFlags", struct.pack("<iI", s_bsx, 2 if collision_blob is not None else 0))
+    f.add_block("BSXFlags", struct.pack("<iI", s_bsx, 2 if (collision_blob is not None or extra) else 0))
     if collision_blob is not None:
         f.add_block("bhkNPCollisionObject", struct.pack("<iHiI", 0, 0x80, 3, 0))      # target = root node, data = block 3
         f.add_block("bhkPhysicsSystem", struct.pack("<I", len(collision_blob)) + collision_blob)
@@ -141,5 +144,11 @@ def build_static_nif(node_name: bytes, shapes: List[StaticShape], bs_version: in
         f.add_block("NiIntegerExtraData", struct.pack("<iI", s_matid, material_id(s.material_path)))
         f.add_block("BSLightingShaderProperty",
                     struct.pack("<iIi", f.string_index(s.material_path.encode("latin-1")), 0, -1))
+    for j, blob in enumerate(extra):              # one collision body per child node (identity transform)
+        node = extra_start + 3 * j
+        f.add_block("NiNode", struct.pack("<iIiI", f.string_index(b"Collision%d" % j), 0, -1, 0xE) + ident
+                    + struct.pack("<iI", node + 1, 0))
+        f.add_block("bhkNPCollisionObject", struct.pack("<iHiI", node, 0x80, node + 2, 0))
+        f.add_block("bhkPhysicsSystem", struct.pack("<I", len(blob)) + blob)
     f.footer = struct.pack("<II", 1, 0)
     return f

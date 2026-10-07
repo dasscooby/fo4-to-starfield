@@ -95,30 +95,35 @@ def collision_template_from_nif(sf_nif: bytes) -> bytes:
 
 def convert_static(fo4_nif: bytes, out_name: str, material_path: str = PLACEHOLDER_MATERIAL,
                    unit_scale: float = UNIT_SCALE, collision_template: bytes = None,
-                   material_paths: list = None) -> Dict[str, bytes]:
+                   material_paths: list = None, collision_mode: str = "box") -> Dict[str, bytes]:
+    """collision_mode: "box" = one AABB on the root; "surfaces" = thin boxes behind flat surfaces, one body each."""
     src = nifmod.parse(fo4_nif)
     shapes = [s for s in nifmod.fo4_trishapes(src) if not s.skinned and s.positions and s.triangles]
     if not shapes:
         raise nifmod.NifError("no static BSTriShape geometry found")
-    files, static_shapes, all_pts = {}, [], []
+    files, static_shapes, all_pts, all_tris = {}, [], [], []
     for i, s in enumerate(shapes):
         m = shape_to_mesh(s, unit_scale)
         data = sfmesh.serialize(m)
         d, f = mesh_file_path(data)
         files[f"geometries/{d}/{f}.mesh"] = data
         pts = [sfmesh.decode_position(p, m.scale) for p in m.positions]
+        all_tris += [(a + len(all_pts), b + len(all_pts), c + len(all_pts)) for a, b, c in m.triangles]
         all_pts += pts
         sphere, box = sfnif.bounds_from_points(pts)
         name = s.name or f"Shape{i}".encode()
         static_shapes.append(sfnif.StaticShape(name, f"{d}\\{f}".encode(), len(m.triangles) * 3, len(m.positions),
                                                material_paths[i] if material_paths else material_path, sphere, box))
     node_name = out_name.rsplit("/", 1)[-1].encode()
-    blob = None
-    if collision_template is not None:     # T3: one axis-aligned box around all geometry
+    blob, child_blobs = None, []
+    if collision_template is not None and collision_mode == "surfaces":
+        for c, h in sfcollision.surface_boxes(all_pts, all_tris):
+            child_blobs.append(sfcollision.box_blob(collision_template, c, h))
+    elif collision_template is not None:     # T3: one axis-aligned box around all geometry
         lo = [min(p[a] for p in all_pts) for a in range(3)]
         hi = [max(p[a] for p in all_pts) for a in range(3)]
         blob = sfcollision.box_blob(collision_template, tuple((lo[a] + hi[a]) / 2 for a in range(3)),
                                     tuple((hi[a] - lo[a]) / 2 for a in range(3)))
-    out = sfnif.build_static_nif(node_name, static_shapes, collision_blob=blob)
+    out = sfnif.build_static_nif(node_name, static_shapes, collision_blob=blob, child_collision_blobs=child_blobs)
     files[f"meshes/{out_name}.nif"] = nifmod.serialize(out)
     return files

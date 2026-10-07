@@ -85,3 +85,8 @@ lights and loaded it with `coc FO4Port_Vault111Cryo`: layout, scale and textures
 placements are in metres. Lessons: Mutagen needs `WithKnownMasters` once Starfield.esm is a master; the achievements dialog
 appears on the first console command of a session and steals keystrokes (close console, hold E, reopen); Shift must go through
 the same legacy input path as the key. See [spikes/WP10-vault111-first-light.md](spikes/WP10-vault111-first-light.md).
+
+## 2026-10-08: architecture collision (surface boxes)
+
+Thin boxes behind flat surfaces, one body per box on child NiNodes; the player walks on the converted vault floor. Input guard
+correctly refused to type when the user's window had focus.

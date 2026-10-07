@@ -39,8 +39,8 @@ if (args.Length > 2)
     var sfEsm = ModKey.FromNameAndExtension("Starfield.esm");
     var cell = new Cell(mod) { EditorID = cellName, Flags = Cell.Flag.IsInteriorCell };
     // lighting: vanilla ship-interior lighting template + a vanilla neutral omni light at each (deduplicated) FO4 light position
-    cell.LightingTemplate.SetTo(new FormKey(sfEsm, 0x006658));                 // ShipInteriorLT
-    var omni = new FormKey(sfEsm, 0x03D38C);                                    // LGT_ShipInterior_Omni_NS_Neutral_2k (8 m)
+    cell.LightingTemplate.SetTo(new FormKey(sfEsm, 0x0300E2));                 // DefaultLightingTemplate
+    var omni = new FormKey(sfEsm, 0x0027BB);                                    // LGT_SpaceStation_Omni_NS_Cool_001_1k (8 m, dimmer)
     var lit = new List<P3Float>();
     int lights = 0;
     int placed = 0, skipped = 0;
@@ -51,7 +51,7 @@ if (args.Length > 2)
         {
             var lp = r.GetProperty("pos");
             var pos = new P3Float(lp[0].GetSingle() / UnitsPerMetre, lp[1].GetSingle() / UnitsPerMetre, lp[2].GetSingle() / UnitsPerMetre);
-            if (lit.Any(q => Math.Abs(q.X - pos.X) < 3 && Math.Abs(q.Y - pos.Y) < 3 && Math.Abs(q.Z - pos.Z) < 3)) continue;
+            if (lit.Any(q => Math.Abs(q.X - pos.X) < 5 && Math.Abs(q.Y - pos.Y) < 5 && Math.Abs(q.Z - pos.Z) < 5)) continue;
             lit.Add(pos);
             cell.Temporary.Add(new PlacedObject(mod) { Base = new FormLinkNullable<IPlaceableObjectGetter>(omni), Position = pos });
             lights++;

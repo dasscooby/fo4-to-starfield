@@ -62,6 +62,69 @@ def box_blob(template: bytes, center: Tuple[float, float, float], half: Tuple[fl
     return bytes(out)
 
 
+def surface_boxes(points, triangles, thickness=0.15, plane_tol=0.05, gap=0.05, min_area=0.04, max_boxes=48,
+                  axis_cos=0.92):
+    """Thin boxes behind the flat, axis-aligned surfaces of a mesh (floors, walls, ceilings, stair steps).
+
+    Triangles whose normal is within ~23 degrees of an axis are grouped by (axis, facing, plane offset) and then split into
+    spatially connected clusters; each cluster becomes a box spanning its extent, `thickness` deep behind the surface.
+    Returns [(centre, half_extents)], largest area first. Sloped / curved geometry is ignored."""
+    groups = {}
+    for a, b, c in triangles:
+        p0, p1, p2 = points[a], points[b], points[c]
+        u = (p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2])
+        v = (p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2])
+        n = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+        ln = (n[0] ** 2 + n[1] ** 2 + n[2] ** 2) ** 0.5
+        if ln < 1e-9:
+            continue
+        n = (n[0] / ln, n[1] / ln, n[2] / ln)
+        ax = max(range(3), key=lambda k: abs(n[k]))
+        if abs(n[ax]) < axis_cos:
+            continue
+        sign = 1 if n[ax] > 0 else -1
+        d = (p0[ax] + p1[ax] + p2[ax]) / 3
+        lo = [min(p0[k], p1[k], p2[k]) for k in range(3)]
+        hi = [max(p0[k], p1[k], p2[k]) for k in range(3)]
+        groups.setdefault((ax, sign, round(d / plane_tol)), []).append((lo, hi, ln / 2, d))
+    boxes = []
+    for (ax, sign, _), tris in groups.items():
+        others = [k for k in range(3) if k != ax]
+        parent = list(range(len(tris)))
+
+        def find(i):
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+        order = sorted(range(len(tris)), key=lambda i: tris[i][0][others[0]])
+        for ii, i in enumerate(order):           # sweep along the first in-plane axis
+            for j in order[ii + 1:]:
+                if tris[j][0][others[0]] > tris[i][1][others[0]] + gap:
+                    break
+                if tris[j][0][others[1]] <= tris[i][1][others[1]] + gap and tris[i][0][others[1]] <= tris[j][1][others[1]] + gap:
+                    parent[find(i)] = find(j)
+        clusters = {}
+        for i in range(len(tris)):
+            clusters.setdefault(find(i), []).append(tris[i])
+        for cl in clusters.values():
+            area = sum(t[2] for t in cl)
+            if area < min_area:
+                continue
+            lo = [min(t[0][k] for t in cl) for k in range(3)]
+            hi = [max(t[1][k] for t in cl) for k in range(3)]
+            d = sum(t[3] for t in cl) / len(cl)
+            if sign > 0:                           # surface faces +axis: solid lies behind it
+                lo[ax], hi[ax] = d - thickness, d
+            else:
+                lo[ax], hi[ax] = d, d + thickness
+            centre = tuple((lo[k] + hi[k]) / 2 for k in range(3))
+            half = tuple((hi[k] - lo[k]) / 2 for k in range(3))
+            boxes.append((area, centre, half))
+    boxes.sort(key=lambda b: -b[0])
+    return [(c, h) for _, c, h in boxes[:max_boxes]]
+
+
 def read_box(blob: bytes):
     """Inverse of box_blob for the fields we write: (centre, half-extents) from the 8 corners."""
     pts = [struct.unpack_from("<3f", blob, 592 + 12 * k) for k in range(8)]

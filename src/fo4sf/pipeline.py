@@ -160,14 +160,16 @@ class Converter:
                 mats.append(m or convert_static.PLACEHOLDER_MATERIAL)
             rel = re.sub(r"^meshes[\\/]", "", nif_name.replace("\\", "/"), flags=re.I)
             out_name = f"{self.prefix}/{os.path.splitext(rel)[0].lower()}"
-            use_box = self.collision_template is not None and not (self.no_collision and self.no_collision.search(nif_name))
-            files = convert_static.convert_static(raw, out_name, material_paths=mats,
-                                                  collision_template=self.collision_template if use_box else None)
+            arch = bool(self.no_collision and self.no_collision.search(nif_name))
+            mode = "surfaces" if arch else "box"        # architecture: thin boxes behind flat surfaces; props: one AABB
+            use_box = self.collision_template is not None
+            files = convert_static.convert_static(raw, out_name, material_paths=mats, collision_mode=mode,
+                                                  collision_template=self.collision_template)
             for relp, data in files.items():
                 p = os.path.join(self.staging, *relp.split("/"))
                 os.makedirs(os.path.dirname(p), exist_ok=True)
                 open(p, "wb").write(data)
-            res.update(ok=True, out_name=out_name, shapes=len(shapes), materials=mats, collision=use_box,
+            res.update(ok=True, out_name=out_name, shapes=len(shapes), materials=mats, collision=mode if use_box else None,
                        fallback_materials=sum(1 for m in mats if m == convert_static.PLACEHOLDER_MATERIAL))
             self.stats["assets"] += 1
         except Exception as e:                           # noqa: BLE001  (recorded per asset, batch continues)

@@ -33,3 +33,14 @@ Screenshots: [entrance](../media/vault111-entrance-in-starfield.png), [stairs to
 2. Real collision for architecture (mesh or convex-decomposition shapes), then navmesh.
 3. Doors, furniture, the 12 failed models (animated/skinned), decals (texture sets), movable statics.
 4. Load doors / a way in other than `coc`.
+
+## Architecture collision: thin boxes behind flat surfaces (2026-10-08)
+
+Single AABBs cannot work for rooms, so `sfcollision.surface_boxes` groups each mesh's axis-aligned triangles by (axis, facing,
+plane offset), splits them into connected clusters and gives each cluster a box 15 cm deep behind the surface. Each box is its
+own body on a child `NiNode` (`sfnif.build_static_nif(child_collision_blobs=...)`). Vault floor tile `VltFloor01` -> one
+3.66 x 3.66 x 0.15 m slab; heavy machinery hits the 48-box cap. In game the player walks across the vault floor without falling
+through ([screenshot](../media/vault111-walking-on-floor.png)); stairs, sloped and curved surfaces are not covered yet
+(no boxes for non-axis-aligned triangles). Lights reduced to 60 dimmer omnis + `DefaultLightingTemplate`; the scene is still
+over-exposed, but FO4's own Vault 111 concrete textures are genuinely light (mean ~200-220/255), so exposure, not texture
+conversion, is the cause.
