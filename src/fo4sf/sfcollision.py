@@ -126,11 +126,14 @@ def surface_boxes(points, triangles, thickness=0.15, plane_tol=0.05, gap=0.05, m
                     lo[ax], hi[ax] = d, d + thickness
                 centre = tuple((lo[k] + hi[k]) / 2 for k in range(3))
                 half = tuple((hi[k] - lo[k]) / 2 for k in range(3))
-                boxes.append((half[others[0]] * half[others[1]] * 4, centre, half))
+                area_r = half[others[0]] * half[others[1]] * 4
+                # priority: walkable floors first (surface facing +Z), then everything else by area
+                boxes.append((area_r + (1e6 if (ax == 2 and sign > 0) else 0.0), centre, half))
     boxes.sort(key=lambda b: -b[0])
     if report is not None and len(boxes) > max_boxes:
         report["surface_dropped"] = report.get("surface_dropped", 0) + len(boxes) - max_boxes
-        report["surface_dropped_area"] = report.get("surface_dropped_area", 0.0) + sum(b[0] for b in boxes[max_boxes:])
+        report["surface_dropped_area"] = report.get("surface_dropped_area", 0.0) + sum(b[0] % 1e6 for b in boxes[max_boxes:])
+        report["floor_dropped"] = report.get("floor_dropped", 0) + sum(1 for b in boxes[max_boxes:] if b[0] >= 1e6)
     return [(c, h) for _, c, h in boxes[:max_boxes]]
 
 
@@ -221,8 +224,16 @@ def voxel_boxes(points, triangles, voxel=0.2, max_boxes=96, report=None):
 def mesh_boxes(points, triangles, max_surface=160, max_voxel=96, report=None):
     """Hybrid architecture collision: rasterised thin boxes behind flat axis-aligned surfaces (holes kept), voxel boxes for
     the rest. Anything dropped by a cap is counted in `report` (never silently)."""
-    rest = []
-    boxes = surface_boxes(points, triangles, max_boxes=max_surface, min_area=0.01, leftovers=rest, report=report)
+    for cell in (0.25, 0.5, 1.0):                  # coarsen the grid until the flat surfaces fit the cap
+        rest, trial = [], {}
+        boxes = surface_boxes(points, triangles, max_boxes=max_surface, min_area=0.01, leftovers=rest, cell=cell, report=trial)
+        if not trial.get("surface_dropped"):
+            break
+    if report is not None:
+        for k, v in trial.items():
+            report[k] = report.get(k, 0) + v
+        if cell != 0.25:
+            report["surface_cell"] = cell
     if rest:
         boxes += voxel_boxes(points, rest, max_boxes=max_voxel, report=report)
     if report is not None:

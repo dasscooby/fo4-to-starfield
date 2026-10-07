@@ -28,7 +28,15 @@ def plugins_txt_path():
 
 
 def read_lines(p):
-    return open(p, encoding="utf-8").read().splitlines() if os.path.exists(p) else []
+    if not os.path.exists(p):
+        return []
+    with open(p, encoding="utf-8") as f:
+        return f.read().splitlines()
+
+
+def write_manifest(p, state):
+    with open(p, "w") as f:
+        json.dump(state, f, indent=1)
 
 
 def write_lines(p, lines):
@@ -79,19 +87,31 @@ def install(a):
         if os.path.getsize(b) < 16 or head not in (b"TES4", b"BTDX"):
             sys.exit(f"build output looks invalid, nothing installed: {b}")
     # 2) record intent first, then copy; any failure rolls back what was copied
-    state = {"files": [], "plugins_txt": pt, "plugins_added": [], "complete": False}
-    json.dump(state, open(man_path, "w"), indent=1)
+    state = {"files": [], "plugins_txt": pt, "plugins_added": pl_add, "complete": False}
+    plugins_existed = os.path.exists(pt)
+    plugins_original = None
+    if plugins_existed:
+        with open(pt, "rb") as f:
+            plugins_original = f.read()
+    plugins_touched = False
+    write_manifest(man_path, state)
     try:
         for src, dst in zip(built, targets):
-            shutil.copy2(src, dst)
             state["files"].append(os.path.basename(dst))
-            json.dump(state, open(man_path, "w"), indent=1)
+            write_manifest(man_path, state)
+            shutil.copy2(src, dst)
         if pl_add:
+            plugins_touched = True
             write_lines(pt, pl + pl_add)
-            state["plugins_added"] = pl_add
         state["complete"] = True
-        json.dump(state, open(man_path, "w"), indent=1)
+        write_manifest(man_path, state)
     except Exception as e:                                   # noqa: BLE001 (roll back, then report)
+        if plugins_touched:
+            if plugins_existed:
+                with open(pt, "wb") as f:
+                    f.write(plugins_original)
+            elif os.path.exists(pt):
+                os.remove(pt)
         for rel in state["files"]:
             p = os.path.join(data, rel)
             if os.path.exists(p):

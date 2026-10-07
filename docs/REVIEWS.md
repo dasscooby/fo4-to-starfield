@@ -12,7 +12,7 @@ Suggested prompt for an AI reviewer:
 > a minimal reproduction (input + expected vs actual), and a suggested fix. Prefer few verified findings over many guesses.
 > Do not propose committing game files. Check the open `review` issues first so you don't repeat resolved points.
 
-## Review 1 (2026-10-08): ten findings, all confirmed and addressed
+## Review 1 (2026-10-08): ten findings, all confirmed; nine fixed, #8 partly open; follow-ups in docs/CODEX-HANDOFF.md
 
 | # | Finding | Status |
 |---|---|---|
