@@ -75,3 +75,10 @@ Also in this pass:
   Result: 162 materials converted, 1 fallback (was 120 / 6 with 209 placeholder shapes).
 - Voxel collision boxes are never coarser than ~0.5 m (coarse voxels behaved like invisible walls).
 - Tooling lesson: judging colours under the bar's orange/teal lights was misleading; test colour in neutral light.
+
+## Arrival point and lighting (2026-10-08)
+
+The FO4 cell's `COCMarkerHeading` is now placed as Starfield's vanilla `COCMarkerHeading` (000032), so `coc FO4Port_Vault111Cryo`
+lands in the cryo room where Fallout 4 puts it, and the lighting template is `KreetBase01LGTtemplate` (an underground base).
+The cryo pods, tanks, gauges, corridor arches and Vault-Tec signage all show their original textures:
+[cryo row](../media/vault111-cryo-row.jpg), [cryo pod](../media/vault111-cryopod.jpg), [corridor](../media/vault111-corridor.jpg).

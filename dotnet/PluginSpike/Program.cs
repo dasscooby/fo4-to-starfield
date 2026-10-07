@@ -39,7 +39,9 @@ if (args.Length > 2)
     var sfEsm = ModKey.FromNameAndExtension("Starfield.esm");
     var cell = new Cell(mod) { EditorID = cellName, Flags = Cell.Flag.IsInteriorCell };
     // lighting: vanilla ship-interior lighting template + a vanilla neutral omni light at each (deduplicated) FO4 light position
-    cell.LightingTemplate.SetTo(new FormKey(sfEsm, 0x0300E2));                 // DefaultLightingTemplate
+    var ltHex = Environment.GetEnvironmentVariable("LIGHTING_TEMPLATE") ?? "06BCF8";  // KreetBase01LGTtemplate (underground)
+    cell.LightingTemplate.SetTo(new FormKey(sfEsm, Convert.ToUInt32(ltHex, 16)));
+    var cocMarker = new FormKey(sfEsm, 0x000032);                                  // COCMarkerHeading
     var omni = new FormKey(sfEsm, 0x0027BB);                                    // LGT_SpaceStation_Omni_NS_Cool_001_1k (8 m, dimmer)
     var lit = new List<P3Float>();
     int lights = 0;
@@ -47,6 +49,18 @@ if (args.Length > 2)
     foreach (var r in root.GetProperty("refs").EnumerateArray())
     {
         var model = r.GetProperty("model").GetString() ?? "";
+        if (r.GetProperty("base_editor_id").GetString() == "COCMarkerHeading")   // arrival point for `coc`
+        {
+            var cp = r.GetProperty("pos"); var cr = r.GetProperty("rot");
+            cell.Temporary.Add(new PlacedObject(mod)
+            {
+                Base = new FormLinkNullable<IPlaceableObjectGetter>(cocMarker),
+                Position = new P3Float(cp[0].GetSingle() / UnitsPerMetre, cp[1].GetSingle() / UnitsPerMetre, cp[2].GetSingle() / UnitsPerMetre),
+                Rotation = new P3Float(cr[0].GetSingle(), cr[1].GetSingle(), cr[2].GetSingle()),
+            });
+            Console.WriteLine("placed COC marker");
+            continue;
+        }
         if (r.GetProperty("type").GetString() == "Light")
         {
             var lp = r.GetProperty("pos");

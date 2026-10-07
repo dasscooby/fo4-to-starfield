@@ -15,6 +15,10 @@ included or distributed.
 **Newest: Fallout 4's Vault 111 interior loads in Starfield as a walk-in cell** (layout, models, textures; lighting still rough):
 [write-up](docs/spikes/WP10-vault111-first-light.md).
 
+![The Vault 111 cryo pods, converted from Fallout 4, inside Starfield](docs/media/vault111-cryo-row.jpg)
+
+![Vault 111 corridor, converted from Fallout 4, inside Starfield](docs/media/vault111-corridor.jpg)
+
 ![Vault 111 in colour, converted from Fallout 4, inside Starfield](docs/media/vault111-color-catwalk.jpg)
 
 ![Vault 111 stairs, converted from Fallout 4, inside Starfield](docs/media/vault111-color-stairs.jpg)

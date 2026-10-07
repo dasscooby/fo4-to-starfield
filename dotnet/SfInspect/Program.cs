@@ -29,6 +29,10 @@ switch (args[1])
                      .OrderByDescending(g => g.Count()).Take(25))
             Console.WriteLine($"{g.Count(),5}  {g.Key}  {Name(g.Key)}  e.g. {g.First().EditorID}");
         break;
+    case "statics":
+        foreach (var s in mod.Statics.Where(s => (s.EditorID ?? "").Contains(args[2], StringComparison.OrdinalIgnoreCase)).Take(30))
+            Console.WriteLine($"{s.EditorID}  {s.FormKey}  model={s.Model?.File}");
+        break;
     case "lights":
         foreach (var l in mod.Lights.Where(l => (l.EditorID ?? "").Contains(args[2], StringComparison.OrdinalIgnoreCase)).Take(40))
             Console.WriteLine($"{l.EditorID}  {l.FormKey}  radius={l.Radius}  color={l.Color}  model={l.Model?.File}");
