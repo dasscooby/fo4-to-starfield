@@ -80,6 +80,31 @@ class MatTests(unittest.TestCase):
         self.assertNotEqual(a["Objects"][1]["ID"], c["Objects"][1]["ID"])
 
 
+class GlassTests(unittest.TestCase):
+    def test_parse_bgem_base_and_normal(self):
+        def s(t):
+            b = t.encode() + b"\0"
+            return struct.pack("<I", len(b)) + b
+        d = b"BGEM" + struct.pack("<II", 2, 3) + b"\x00" * 30 + s("a/base_d.dds") + s("") + s("env.dds") + s("a/base_n.dds") + s("")
+        self.assertEqual(cm.parse_bgem_textures(d), ("a/base_d.dds", "a/base_n.dds"))
+
+    def test_build_from_template_swaps_files_and_sets_opacity(self):
+        t = {"Objects": [
+                {"Components": [{"Type": "BSComponentDB::CTName", "Data": {"Name": "Old"}, "Index": 0}], "Parent": "p"},
+                {"ID": "res:00000001:00000002:00000003", "Parent": "q", "Components": [
+                    {"Type": "BSMaterial::MRTextureFile", "Index": 0, "Data": {"FileName": "Data\\old_color.dds"}},
+                    {"Type": "BSMaterial::TextureReplacement", "Index": 2,
+                     "Data": {"Color": {"Data": {"Value": {"Data": {"x": "0.09", "y": "0.09", "z": "0.09", "w": "1"}}}}}}]}],
+             "Summary": {"Layer1": {"Textures": {"Albedo": {"File": "Data\\old_color.dds"},
+                                                 "Opacity": {"File": "", "Replacement": {"x": 0.09}}}}}}
+        m = cm.build_from_template(t, "FO4Port_Glass", {"Albedo": "Data\\new_color.dds"}, opacity_value=0.2)
+        self.assertEqual(m["Objects"][1]["Components"][0]["Data"]["FileName"], "Data\\new_color.dds")
+        self.assertEqual(m["Summary"]["Layer1"]["Textures"]["Albedo"]["File"], "Data\\new_color.dds")
+        self.assertEqual(m["Objects"][1]["Components"][1]["Data"]["Color"]["Data"]["Value"]["Data"]["x"], "0.2")
+        self.assertNotEqual(m["Objects"][1]["ID"], t["Objects"][1]["ID"])
+        self.assertEqual(m["Objects"][0]["Components"][0]["Data"]["Name"], "FO4Port_Glass")
+
+
 @unittest.skipUnless(np, "numpy not installed")
 class TextureTests(unittest.TestCase):
     def test_bc4_endpoint_blocks(self):

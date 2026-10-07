@@ -90,6 +90,8 @@ class Converter:
         self.stats = {"assets": 0, "failed": 0, "materials_ok": 0, "materials_fallback": 0}
         self.material_errors: Dict[str, str] = {}
         self._blend_cache: Dict[str, bool] = {}
+        self._glass_template = None
+        self.content_resources = content_resources
         self.neutral = self._make_neutral_material()
 
     def _make_neutral_material(self) -> str:
@@ -214,6 +216,59 @@ class Converter:
         open(p, "w", encoding="utf-8", newline="\n").write(cm.dump_mat(mat))
         return mat_rel.replace("/", "\\")
 
+    def glass_material(self, base: str, normal: str) -> Optional[str]:
+        key = "glass:" + "|".join(x.replace("/", "\\").lower() for x in (base, normal))
+        if key not in self._materials:
+            try:
+                self._materials[key] = self._convert_glass(base, normal)
+                self.stats["materials_ok"] += 1
+            except Exception as e:                        # noqa: BLE001
+                self._materials[key] = None
+                self.stats["materials_fallback"] += 1
+                self.material_errors[key] = f"{type(e).__name__}: {e}"
+        return self._materials[key]
+
+    def _convert_glass(self, base: str, normal: str) -> str:
+        import numpy as np
+        d = self.src.texture(base) if base else None
+        n = self.src.texture(normal) if normal else None
+        if d is None:
+            raise FileNotFoundError("glass base texture missing")
+        rel = re.sub(r"^textures[\\/]", "", base.replace("\\", "/"), flags=re.I)
+        stem = ("glass/" + os.path.splitext(rel)[0].lower() + "_"
+                + hashlib.sha1((base + "|" + normal).lower().encode()).hexdigest()[:8])
+        tex_rel = f"textures/{self.prefix}/{stem}"
+        out = {}
+        with tempfile.TemporaryDirectory() as tmp:
+            if d is not None:
+                open(os.path.join(tmp, "d.dds"), "wb").write(d)
+                textures.texconv(self.texconv, os.path.join(tmp, "d.dds"), tmp, "BC1_UNORM_SRGB", ("-srgbi",))
+                out["Albedo"] = "d.dds"
+            if n is not None:
+                nr, ng = _plane_pair(n, tmp, self.texconv)
+                textures.write_rg8_snorm(os.path.join(tmp, "n_in.dds"), nr, ng)
+                textures.texconv(self.texconv, os.path.join(tmp, "n_in.dds"), tmp, "BC5_SNORM")
+                out["Normal"] = "n_in.dds"
+            textures.write_r8(os.path.join(tmp, "r_in.dds"), np.full((16, 16), 25, np.uint8))   # glass: very smooth
+            textures.texconv(self.texconv, os.path.join(tmp, "r_in.dds"), tmp, "BC4_UNORM")
+            out["Roughness"] = "r_in.dds"
+            files = {}
+            for slot, fn in out.items():
+                kind = {"Albedo": "color", "Normal": "normal", "Roughness": "rough"}[slot]
+                dst = os.path.join(self.staging, *f"{tex_rel}_{kind}.dds".split("/"))
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copy2(os.path.join(tmp, fn), dst)
+                files[slot] = cm.game_path(f"{tex_rel}_{kind}.dds")
+        if self._glass_template is None:
+            self._glass_template = cm.read_template_path(self.content_resources, cm.GLASS_TEMPLATE_MAT)
+        mat = cm.build_from_template(self._glass_template, "FO4Port_" + re.sub(r"[^a-z0-9]+", "_", stem), files,
+                                     opacity_value=0.15)
+        mat_rel = f"materials/{self.prefix}/{stem}.mat"
+        p = os.path.join(self.staging, *mat_rel.split("/"))
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        open(p, "w", encoding="utf-8", newline="\n").write(cm.dump_mat(mat))
+        return mat_rel.replace("/", "\\")
+
     def _is_blended(self, bgsm_path: str) -> bool:
         m = re.search(r"materials[\\/].*", bgsm_path, re.I)
         key = (m.group(0) if m else bgsm_path).replace("/", "\\").lower()
@@ -232,7 +287,21 @@ class Converter:
             return self.neutral
         kind = src.type_of(s.shader_ref)
         if kind == "BSEffectShaderProperty":
-            return None
+            idx, = struct.unpack_from("<i", src.blocks[s.shader_ref], 4)
+            name = src.strings[idx].decode("latin-1") if 0 <= idx < len(src.strings) else ""
+            if name.lower().endswith(".bgem"):
+                raw = self.src.material(name) or b""
+                try:
+                    base, normal = cm.parse_bgem_textures(raw)
+                except ValueError:
+                    base, normal = "", ""
+            else:                                       # textures stored inline in the effect block
+                dds = [x.decode("latin-1") for x in re.findall(rb"[\w\\/ .-]+\.dds", src.blocks[s.shader_ref])]
+                base = dds[0] if dds else ""
+                normal = next((x for x in dds if x.lower().endswith("_n.dds")), "")
+            if re.search(r"glass|window", base, re.I) and not re.search(r"[\\/]effects[\\/]", base, re.I):
+                return self.glass_material(base, normal)   # windows, cryo-pod glass: vanilla glass shader model
+            return None                                 # other effects (glow, frost, dust, smoke): skipped
         if kind != "BSLightingShaderProperty":
             return self.neutral
         blk = src.blocks[s.shader_ref]

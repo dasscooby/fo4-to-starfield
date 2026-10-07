@@ -149,6 +149,82 @@ def build_mat(template: dict, name: str, albedo: str, normal: str, rough: str,
     return mat
 
 
+GLASS_TEMPLATE_MAT = "Materials/SetDressing/Outpost/Mine/OPMineMaskBox01Glass.mat"   # 1LayerEffectGlassNoFrost, own textures
+
+
+def parse_bgem_textures(d: bytes):
+    """FO4 effect material (.bgem): return (base, normal) texture paths. Strings follow the header in the order base, greyscale,
+    envmap, normal, envmap mask, ... (length-prefixed). Found the same way as in parse_bgsm."""
+    if d[:4] != b"BGEM":
+        raise ValueError("not a BGEM file")
+    start = None
+    for off in range(8, len(d) - 8):
+        ln, = struct.unpack_from("<I", d, off)
+        if 4 < ln < 260 and off + 4 + ln <= len(d) and d[off + 3 + ln] == 0 \
+                and d[off + 4:off + 3 + ln].lower().endswith((b".dds", b".tga")):
+            start = off
+            break
+    if start is None:
+        raise ValueError("no texture paths found")
+    out, pos = [], start
+    for _ in range(5):
+        if pos + 4 > len(d):
+            out.append("")
+            continue
+        ln, = struct.unpack_from("<I", d, pos)
+        if ln > 512 or pos + 4 + ln > len(d):
+            out.append("")
+            pos = len(d)
+            continue
+        out.append(d[pos + 4:pos + 4 + ln].rstrip(b"\0").decode("latin-1"))
+        pos += 4 + ln
+    return out[0], out[3]
+
+
+def read_template_path(content_resources_zip: str, path: str) -> dict:
+    with zipfile.ZipFile(content_resources_zip) as z:
+        name = next(n for n in z.namelist() if n.lower() == path.lower())
+        return json.loads(z.read(name).decode("utf-8-sig"))
+
+
+def build_from_template(template: dict, name: str, files: dict, opacity_value: float = None) -> dict:
+    """Clone any single-layer vanilla material: every texture path the template's Summary names under Albedo / Normal /
+    Roughness / ... is replaced by files[slot] (slots not given keep the template's file), object IDs are remapped (as in
+    build_mat) and, for glass, the opacity replacement value is set."""
+    old_layer = template["Summary"]["Layer1"]["Textures"]
+    repl = {old_layer[k]["File"]: v for k, v in files.items() if k in old_layer and old_layer[k].get("File")}
+    mat = json.loads(json.dumps(template))
+    defined = {o["ID"] for o in mat["Objects"] if "ID" in o}
+    remap = {i: _new_id(i, name) for i in defined}
+
+    def walk(x):
+        if isinstance(x, dict):
+            for k, v in list(x.items()):
+                if k != "Parent":
+                    x[k] = walk(v)
+            return x
+        if isinstance(x, list):
+            return [walk(v) for v in x]
+        if isinstance(x, str):
+            return remap.get(x, repl.get(x, x))
+        return x
+    mat = walk(mat)
+    for o in mat["Objects"]:
+        for c in o.get("Components", []):
+            if c.get("Type") == "BSComponentDB::CTName" and o is mat["Objects"][0]:
+                c["Data"]["Name"] = name
+    if opacity_value is not None:
+        op = mat["Summary"]["Layer1"]["Textures"].get("Opacity")
+        if op:
+            op["Replacement"] = {"w": 1, "x": opacity_value, "y": opacity_value, "z": opacity_value}
+        for o in mat["Objects"]:
+            for c in o.get("Components", []):
+                if c.get("Type") == "BSMaterial::TextureReplacement" and c.get("Index") == 2:
+                    c["Data"]["Color"]["Data"]["Value"]["Data"].update(
+                        {"x": str(opacity_value), "y": str(opacity_value), "z": str(opacity_value)})
+    return mat
+
+
 ROOT = "Data\\Materials\\Layered\\Root\\"
 
 
