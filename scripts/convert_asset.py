@@ -36,6 +36,7 @@ def main():
     ap.add_argument("--texconv", required=True)
     ap.add_argument("--metalness", type=float, default=0.0)
     ap.add_argument("--flip-green", action="store_true")
+    ap.add_argument("--collision-template", default="", help="a vanilla Starfield NIF with plain box collision; enables box collision")
     a = ap.parse_args()
 
     raw = open(a.fo4_nif, "rb").read()
@@ -81,7 +82,11 @@ def main():
     open(mat_path, "w", encoding="utf-8", newline="\n").write(cm.dump_mat(mat))
     print("wrote", mat_rel)
 
-    files = convert_static.convert_static(raw, a.name, material_path=mat_rel.replace("/", "\\"))
+    template = None
+    if a.collision_template:
+        template = convert_static.collision_template_from_nif(open(a.collision_template, "rb").read())
+        print("collision: box from template", os.path.basename(a.collision_template))
+    files = convert_static.convert_static(raw, a.name, material_path=mat_rel.replace("/", "\\"), collision_template=template)
     for rel, data in files.items():
         p = os.path.join(a.staging, *rel.split("/"))
         os.makedirs(os.path.dirname(p), exist_ok=True)

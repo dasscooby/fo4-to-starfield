@@ -7,10 +7,11 @@ Unverified assumptions (see docs/RISKS.md S4): 1 Fallout 4 unit = 1/70 m, same h
 convention, Z-up in both. Collision, materials and skinning are not converted yet.
 """
 import hashlib
+import struct
 from typing import Dict
 
 from . import nif as nifmod
-from . import sfmesh, sfnif
+from . import sfcollision, sfmesh, sfnif
 
 UNIT_SCALE = 1.0 / 70.0           # Fallout 4 units -> metres (Starfield .mesh coordinates are metres)
 PLACEHOLDER_MATERIAL = "Materials\\Common\\Metal\\MetalIronCast01.mat"   # vanilla material, T0 look
@@ -80,24 +81,43 @@ def mesh_file_path(mesh_bytes: bytes):
     return h[:20], h[20:40]
 
 
+def collision_template_from_nif(sf_nif: bytes) -> bytes:
+    """Pull the Havok blob out of a vanilla Starfield NIF that has plain box collision (run-time input, not committed)."""
+    n = nifmod.parse(sf_nif)
+    for i, b in enumerate(n.blocks):
+        if n.type_of(i) == "bhkPhysicsSystem":
+            size, = struct.unpack_from("<I", b, 0)
+            blob = b[4:4 + size]
+            sfcollision.check_template(blob)
+            return blob
+    raise nifmod.NifError("template NIF has no bhkPhysicsSystem")
+
+
 def convert_static(fo4_nif: bytes, out_name: str, material_path: str = PLACEHOLDER_MATERIAL,
-                   unit_scale: float = UNIT_SCALE) -> Dict[str, bytes]:
+                   unit_scale: float = UNIT_SCALE, collision_template: bytes = None) -> Dict[str, bytes]:
     src = nifmod.parse(fo4_nif)
     shapes = [s for s in nifmod.fo4_trishapes(src) if not s.skinned and s.positions and s.triangles]
     if not shapes:
         raise nifmod.NifError("no static BSTriShape geometry found")
-    files, static_shapes = {}, []
+    files, static_shapes, all_pts = {}, [], []
     for i, s in enumerate(shapes):
         m = shape_to_mesh(s, unit_scale)
         data = sfmesh.serialize(m)
         d, f = mesh_file_path(data)
         files[f"geometries/{d}/{f}.mesh"] = data
         pts = [sfmesh.decode_position(p, m.scale) for p in m.positions]
+        all_pts += pts
         sphere, box = sfnif.bounds_from_points(pts)
         name = s.name or f"Shape{i}".encode()
         static_shapes.append(sfnif.StaticShape(name, f"{d}\\{f}".encode(), len(m.triangles) * 3, len(m.positions),
                                                material_path, sphere, box))
     node_name = out_name.rsplit("/", 1)[-1].encode()
-    out = sfnif.build_static_nif(node_name, static_shapes)
+    blob = None
+    if collision_template is not None:     # T3: one axis-aligned box around all geometry
+        lo = [min(p[a] for p in all_pts) for a in range(3)]
+        hi = [max(p[a] for p in all_pts) for a in range(3)]
+        blob = sfcollision.box_blob(collision_template, tuple((lo[a] + hi[a]) / 2 for a in range(3)),
+                                    tuple((hi[a] - lo[a]) / 2 for a in range(3)))
+    out = sfnif.build_static_nif(node_name, static_shapes, collision_blob=blob)
     files[f"meshes/{out_name}.nif"] = nifmod.serialize(out)
     return files

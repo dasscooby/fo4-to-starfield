@@ -9,7 +9,7 @@ included or distributed.
 > plugin, was spawned in the running game (Starfield 1.16.244): correct shape, size and orientation, lit and
 > shadowed by the scene ([screenshot](docs/media/fo4-chair-in-starfield.png), write-ups: [S1](docs/spikes/S1-mesh-writer.md),
 > [S2/S4/S9](docs/spikes/S2-S4-S9-plugin-units-loading.md)), now with its **original Fallout 4 texture**
-> converted to Starfield's material format ([S3](docs/spikes/S3-materials.md)). It has no collision yet; plugin records beyond a static, terrain, actors and animation are still to do.
+> converted to Starfield's material format ([S3](docs/spikes/S3-materials.md)). It now has **box collision** (it tips over and gets pushed around, [S6](docs/spikes/S6-collision.md)); plugin records beyond a static, terrain, actors and animation are still to do.
 > See [Work packages](docs/WORK-PACKAGES.md).
 
 ![Fallout 4 patio chair, with its original texture, rendered inside Starfield](docs/media/fo4-chair-textured-in-starfield.png)

@@ -53,7 +53,7 @@ Parse FO4 materials and emit Starfield `.mat` JSON with the mapping table in `ma
 **Acceptance:** 95% of vanilla `.bgsm` convert; unconverted ones are listed with reasons; chair renders (L2).
 
 ## WP-07: Collision converter
-Status: `blocked:S6`. Difficulty: hard.
+Status: `in progress`: box collision works in game (`src/fo4sf/sfcollision.py`, S6). Still needed: convex hulls, compound/mesh shapes, static bodies, converting FO4's own shapes. Difficulty: hard.
 FO4 `bhkNPCollisionObject` (Havok 2014 packfile) → Starfield `bhkNPCollisionObject` (hknp tagfile): boxes,
 convex hulls, then mesh shapes via decomposition.
 **Acceptance:** player is blocked by converted statics in-game (L3); tests verify shape volumes agree

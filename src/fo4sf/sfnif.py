@@ -112,21 +112,28 @@ class StaticShape:
     box: tuple
 
 
-def build_static_nif(node_name: bytes, shapes: List[StaticShape], bs_version: int = 173) -> nifmod.NifFile:
-    """A static prop NIF laid out like vanilla `setdressing` props: NiNode, BSXFlags, then per shape
-    BSGeometry + NiIntegerExtraData("MaterialID") + BSLightingShaderProperty (named by its .mat path)."""
+def build_static_nif(node_name: bytes, shapes: List[StaticShape], bs_version: int = 173,
+                     collision_blob: Optional[bytes] = None) -> nifmod.NifFile:
+    """A static prop NIF laid out like vanilla `setdressing` props: NiNode, BSXFlags, [bhkNPCollisionObject,
+    bhkPhysicsSystem,] then per shape BSGeometry + NiIntegerExtraData("MaterialID") + BSLightingShaderProperty
+    (named by its .mat path). The root node owns the collision object; BSXFlags is 2 when there is collision."""
     f = nifmod.NifFile(endian=1, user_version=12, bs_version=bs_version, author=b"\x00", unknown_int=0,
                        export_script=b"\x00", sf_data=b"\x7a\x00")
     s_node = f.string_index(node_name)
     s_bsx = f.string_index(b"BSX")
     s_matid = f.string_index(b"MaterialID")
     ident = struct.pack("<3f9ff", 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1.0)
-    children = [2 + 3 * i for i in range(len(shapes))]
+    first = 4 if collision_blob is not None else 2
+    children = [first + 3 * i for i in range(len(shapes))]
+    coll_ref = 2 if collision_blob is not None else -1
     f.add_block("NiNode", struct.pack("<iIiiI", s_node, 1, 1, -1, 0xE) + ident
-                + struct.pack("<iI", -1, len(children)) + struct.pack(f"<{len(children)}i", *children))
-    f.add_block("BSXFlags", struct.pack("<iI", s_bsx, 0))
+                + struct.pack("<iI", coll_ref, len(children)) + struct.pack(f"<{len(children)}i", *children))
+    f.add_block("BSXFlags", struct.pack("<iI", s_bsx, 2 if collision_blob is not None else 0))
+    if collision_blob is not None:
+        f.add_block("bhkNPCollisionObject", struct.pack("<iHiI", 0, 0x80, 3, 0))      # target = root node, data = block 3
+        f.add_block("bhkPhysicsSystem", struct.pack("<I", len(collision_blob)) + collision_blob)
     for i, s in enumerate(shapes):
-        base = 2 + 3 * i
+        base = first + 3 * i
         g = BSGeometry(name_idx=f.string_index(s.name), extra_refs=[base + 1], sphere=s.sphere, box=s.box,
                        shader=base + 2,
                        meshes=[MeshRef(s.indices_size, s.num_verts, 0x40, s.mesh_path), None, None, None])

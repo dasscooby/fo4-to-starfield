@@ -63,3 +63,10 @@ Built `textures` (BC4/BC5 decode, DDS writers, texconv wrapper) and `convert_mat
 object IDs). Archive2 `-includeFilters` ignored in practice (extracted 23 GB + 5 GB into scratch folders; deleted). Chair now
 renders with its original texture in Starfield. Deploy script builds `FO4Port - Textures.ba2` (DDS format) as well. Note: first
 console use after a launch shows an achievements warning; dismissed with E. See [spikes/S3-materials.md](spikes/S3-materials.md).
+
+## 2026-10-07 (late): S6 box collision confirmed in game
+
+Found a deterministic rule for patching a vanilla box-collision Havok blob (36 box-dependent float words, regressed over 369
+vanilla blobs). Chair now has collision: two overlapping copies pushed each other apart and tipped; walking into them moved
+them. Body is dynamic (inherited from the template). Lessons: the console achievements dialog needs a long E press and blocks
+other input while open; `placeatme` spawns at the player's feet, so the player gets pushed out by the new collision.
