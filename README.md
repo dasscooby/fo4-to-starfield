@@ -5,9 +5,10 @@ Format notes, measurements, a risk-first plan, and (as they land) converters for
 collision, plugin records, terrain and more. Converts from **your own** game copies; no game assets are
 included or distributed.
 
-> **Status: planning and measurement complete, no converter yet.** Nothing converts today. The plan,
-> the measured format differences and the first experiments are documented so anyone can pick up a piece.
-> See [Work packages](docs/WORK-PACKAGES.md).
+> **Status: first converter works offline.** A Fallout 4 static mesh converts to a Starfield NIF + `.mesh` that
+> passes every check we can run without launching the game (spike [S1](docs/spikes/S1-mesh-writer.md)); the
+> format is proven against thousands of vanilla files. **Not yet verified in NifSkope or in the game**, and
+> materials, collision, plugins, terrain and animation are still to do. See [Work packages](docs/WORK-PACKAGES.md).
 
 If you landed here searching for *"Fallout 4 in Starfield"*, *"convert Fallout 4 NIF to Starfield"*,
 *"Starfield .mesh format"*, *"what replaced LAND in Starfield"* or *"port Fallout 4 mods to Starfield"*:
@@ -21,7 +22,7 @@ the answers we have so far are in [docs/FORMAT-GAP.md](docs/FORMAT-GAP.md) and [
 | Record types | 137 (116 shared) | 180 |
 | Sampled field overlap on shared types | | mostly 25–60% (`STAT` 0.23, `WEAP` 0.30, `NPC_` 0.51) |
 | Terrain | 37,020 `LAND` records | **none**; `.btd` files + procedural planets |
-| NIF mesh | BS 130, geometry inline | BS 175, geometry in external `.mesh` files (~684k of them) |
+| NIF mesh | BS 130, geometry inline | BS 173 (base game) / 175 (DLC), geometry in external `.mesh` files (~684k of them) |
 | Materials | 7,077 `.bgsm` + 295 `.bgem` | `.mat` JSON, compiled into one `.cdb` |
 | Collision | Havok 2014 packfile | Havok tagfile, `hknp` shapes |
 | Animation | 15.7k `.hkx` | `.af`/`.afx`/`.agx`/`.rig` |
@@ -47,9 +48,11 @@ Full reasoning: [docs/PLAN.md](docs/PLAN.md).
 | [docs/WORK-PACKAGES.md](docs/WORK-PACKAGES.md) | The task list; mirrored as GitHub issues |
 | [docs/FORMAT-GAP.md](docs/FORMAT-GAP.md) | Measured differences between the two games |
 | [docs/SETUP.md](docs/SETUP.md) | Tools and pinned versions |
+| [docs/spikes/S1-mesh-writer.md](docs/spikes/S1-mesh-writer.md) | First result: the `.mesh` / NIF format, solved offline |
+| [src/fo4sf/](src/fo4sf/) | `sfmesh` (.mesh read/write), `nif` (container), `sfnif` (Starfield blocks), `convert_static` |
 | [docs/JOURNAL.md](docs/JOURNAL.md) | Evidence journal: every experiment, newest last |
 | [docs/measurements/](docs/measurements/) | Raw JSON from the recon scripts (counts only, no game content) |
-| [scripts/](scripts/) | `recon.py`, `recon_physics.py`, `guard.py` |
+| [scripts/](scripts/) | `recon.py`, `recon_physics.py`, `guard.py`, `render_preview.py`, [`oracles/`](scripts/oracles/) (the checks behind S1) |
 
 ## Quick start (contributors)
 

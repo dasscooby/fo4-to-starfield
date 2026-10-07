@@ -42,9 +42,9 @@ type for the subrecord comparison.
 
 | | Fallout 4 | Starfield |
 |---|---|---|
-| NIF BS version | 130 (user version 12) | 175 (user version 12) |
+| NIF BS version | 130 (user version 12) | 173 (base game) and 175 (newer DLC), user version 12 |
 | Geometry | inline `BSTriShape` / `BSSubIndexTriShape` | `BSGeometry` → external `.mesh` (`geometries\<hash>\<hash>.mesh`) |
-| `.mesh` header (first u32s) | n/a | three samples began `2, 3462, 65536, ...` / `2, 372, 65536, ...` / `2, 690, 65536, ...` (little-endian; the second field looks like a count but is **unverified**, see S1) |
+| `.mesh` file | n/a | version `2`, index count, triangles (u16 x3), scale, then int16 positions, half-float UVs, packed normals/tangents, meshlets and per-meshlet bounding boxes. Fully specified and verified, see [S1](spikes/S1-mesh-writer.md) |
 | Collision | Havok 2014.1.0-r1 packfile in `bhkPhysicsSystem` | Havok tagfile (`TAG0` / `SDKV`), `hknp*` shapes |
 | Material reference | `.bgsm` / `.bgem` paths | `.mat` paths (many with leading `\`) |
 | Facegen | `.nif` + `.tri` | `BSFaceGenNiNode` + morph `.dat` (`MRPH`) |

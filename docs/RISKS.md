@@ -7,7 +7,7 @@ Legend: **Impact** = what breaks if it fails; **Fallback** = what we do instead.
 
 | # | Question | Impact | Fallback |
 |---|---|---|---|
-| S1 | Can a script write a Starfield mesh (NIF BS 175 + external `.mesh`) that the game renders? | Blocks everything visual | Use the closed-source Starfield Blender extension per asset (manual), or NifSkope's own writer |
+| S1 | Can a script write a Starfield mesh (NIF BS 173/175 + external `.mesh`) that the game renders? **Offline part GO** ([result](spikes/S1-mesh-writer.md)); in-game check pending | Blocks everything visual | Use the closed-source Starfield Blender extension per asset (manual), or NifSkope's own writer |
 | S2 | Can Mutagen's alpha Starfield library write a plugin the game loads? | Blocks all records | xEdit (`xSFEdit`) scripts, or raw record writer |
 | S3 | Can loose `.mat` (JSON) + converted textures be loaded without the compiled material DB? | Blocks materials | Re-point to existing vanilla `.mat` files (T1 look) |
 | S4 | What are Starfield's unit scale and axis convention vs Fallout 4? | Silently wrong sizes everywhere | Calibrate from matching vanilla objects (doors, chairs) |
@@ -43,7 +43,7 @@ Legend: **Impact** = what breaks if it fails; **Fallback** = what we do instead.
 ### S1: write a Starfield mesh from a script
 1. Pick one trivial FO4 static (a patio chair).
 2. Parse it (nifly via PyNifly's library, or our own `BSTriShape` parser).
-3. Write `Starfield-style .nif` (BS 175, `BSGeometry`) and the `.mesh` it references, generating meshlets
+3. Write `Starfield-style .nif` (BS 173, `BSGeometry`) and the `.mesh` it references, generating meshlets
    as NifSkope's `spGenerateMeshlets` does.
 4. **Oracle:** (a) our reader round-trips it; (b) fo76utils NifSkope displays it with the right shape;
    (c) a STAT referencing it renders in the Starfield CK; (d) it appears in-game.

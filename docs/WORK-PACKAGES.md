@@ -34,7 +34,7 @@ material → JSON schema; record → JSON (one file per record, stable keys). Do
 IR and back to a viewable `.glb`.
 
 ## WP-04: Mesh converter (FO4 NIF → Starfield NIF + `.mesh`)
-Status: `blocked:S1`. Difficulty: hard (the keystone).
+Status: `in progress`: static meshes convert offline (`src/fo4sf/convert_static.py`, see S1); still needs skinned meshes, LODs, in-game verification. Difficulty: hard (the keystone).
 Productionise S1: write BS-175 NIFs and `.mesh` files, including skinned meshes, UV sets, vertex colours,
 tangents/normals packing, LOD, meshlets.
 **Acceptance:** round-trip tests; all vanilla `SetDressing` statics convert (T1); a random 100 render in the
