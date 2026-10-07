@@ -67,17 +67,37 @@ def install(a):
     print(f"install: {[os.path.basename(x) for x in targets]} -> {data}\nPlugins.txt ({pt}): add {pl_add or 'nothing'}")
     if a.dry_run:
         return
-    built = os.path.join(a.staging, ARCHIVE)
-    build_archive(a, built, main_dirs, "General")
-    shutil.copy2(esm, targets[0])
-    shutil.copy2(built, targets[1])
+    # 1) build and validate EVERYTHING before touching the game folder
+    built = [esm, os.path.join(a.staging, ARCHIVE)]
+    build_archive(a, built[1], main_dirs, "General")
     if has_tex:
-        built_tex = os.path.join(a.staging, TEX_ARCHIVE)
-        build_archive(a, built_tex, ["textures"], "DDS")
-        shutil.copy2(built_tex, targets[2])
-    if pl_add:
-        write_lines(pt, pl + pl_add)
-    json.dump({"files": [os.path.basename(x) for x in targets], "plugins_txt": pt, "plugins_added": pl_add}, open(man_path, "w"), indent=1)
+        built.append(os.path.join(a.staging, TEX_ARCHIVE))
+        build_archive(a, built[2], ["textures"], "DDS")
+    for b in built:
+        with open(b, "rb") as f:
+            head = f.read(4)
+        if os.path.getsize(b) < 16 or head not in (b"TES4", b"BTDX"):
+            sys.exit(f"build output looks invalid, nothing installed: {b}")
+    # 2) record intent first, then copy; any failure rolls back what was copied
+    state = {"files": [], "plugins_txt": pt, "plugins_added": [], "complete": False}
+    json.dump(state, open(man_path, "w"), indent=1)
+    try:
+        for src, dst in zip(built, targets):
+            shutil.copy2(src, dst)
+            state["files"].append(os.path.basename(dst))
+            json.dump(state, open(man_path, "w"), indent=1)
+        if pl_add:
+            write_lines(pt, pl + pl_add)
+            state["plugins_added"] = pl_add
+        state["complete"] = True
+        json.dump(state, open(man_path, "w"), indent=1)
+    except Exception as e:                                   # noqa: BLE001 (roll back, then report)
+        for rel in state["files"]:
+            p = os.path.join(data, rel)
+            if os.path.exists(p):
+                os.remove(p)
+        os.remove(man_path)
+        sys.exit(f"install failed and was rolled back: {type(e).__name__}: {e}")
     print("installed. Undo with: python deploy_starfield.py uninstall --starfield <game dir>")
 
 

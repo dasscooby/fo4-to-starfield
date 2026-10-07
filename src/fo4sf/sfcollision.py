@@ -63,7 +63,7 @@ def box_blob(template: bytes, center: Tuple[float, float, float], half: Tuple[fl
 
 
 def surface_boxes(points, triangles, thickness=0.15, plane_tol=0.05, gap=0.05, min_area=0.04, max_boxes=48,
-                  axis_cos=0.92, leftovers=None):
+                  axis_cos=0.92, leftovers=None, cell=0.25, report=None):
     """Thin boxes behind the flat, axis-aligned surfaces of a mesh (floors, walls, ceilings, stair steps).
 
     Triangles whose normal is within ~23 degrees of an axis are grouped by (axis, facing, plane offset) and then split into
@@ -115,21 +115,65 @@ def surface_boxes(points, triangles, thickness=0.15, plane_tol=0.05, gap=0.05, m
                 if leftovers is not None:
                     leftovers.extend(t[4] for t in cl)
                 continue
-            lo = [min(t[0][k] for t in cl) for k in range(3)]
-            hi = [max(t[1][k] for t in cl) for k in range(3)]
             d = sum(t[3] for t in cl) / len(cl)
-            if sign > 0:                           # surface faces +axis: solid lies behind it
-                lo[ax], hi[ax] = d - thickness, d
-            else:
-                lo[ax], hi[ax] = d, d + thickness
-            centre = tuple((lo[k] + hi[k]) / 2 for k in range(3))
-            half = tuple((hi[k] - lo[k]) / 2 for k in range(3))
-            boxes.append((area, centre, half))
+            for (u0, v0, u1, v1) in _plane_rects(points, [t[4] for t in cl], others, cell):
+                lo, hi = [0.0] * 3, [0.0] * 3
+                lo[others[0]], hi[others[0]] = u0, u1
+                lo[others[1]], hi[others[1]] = v0, v1
+                if sign > 0:                       # surface faces +axis: solid lies behind it
+                    lo[ax], hi[ax] = d - thickness, d
+                else:
+                    lo[ax], hi[ax] = d, d + thickness
+                centre = tuple((lo[k] + hi[k]) / 2 for k in range(3))
+                half = tuple((hi[k] - lo[k]) / 2 for k in range(3))
+                boxes.append((half[others[0]] * half[others[1]] * 4, centre, half))
     boxes.sort(key=lambda b: -b[0])
+    if report is not None and len(boxes) > max_boxes:
+        report["surface_dropped"] = report.get("surface_dropped", 0) + len(boxes) - max_boxes
+        report["surface_dropped_area"] = report.get("surface_dropped_area", 0.0) + sum(b[0] for b in boxes[max_boxes:])
     return [(c, h) for _, c, h in boxes[:max_boxes]]
 
 
-def voxel_boxes(points, triangles, voxel=0.2, max_boxes=96):
+def _plane_rects(points, tris, axes, cell):
+    """Rasterise triangles projected on two axes into `cell`-sized squares (a square is solid if its centre is inside a
+    triangle, or a triangle's centroid falls in it, so slivers still count), then greedily merge rows into rectangles.
+    Holes and concave outlines survive, unlike a bounding box. Returns [(u0, v0, u1, v1)] in world units."""
+    a0, a1 = axes
+    occ = set()
+    for t in tris:
+        P = [(points[i][a0], points[i][a1]) for i in t]
+        umin, umax = min(p[0] for p in P), max(p[0] for p in P)
+        vmin, vmax = min(p[1] for p in P), max(p[1] for p in P)
+        (x0, y0), (x1, y1), (x2, y2) = P
+        den = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
+        cu, cv = (x0 + x1 + x2) / 3, (y0 + y1 + y2) / 3
+        occ.add((int(cu // cell), int(cv // cell)))
+        if abs(den) < 1e-12:
+            continue
+        for i in range(int(umin // cell), int(umax // cell) + 1):
+            for j in range(int(vmin // cell), int(vmax // cell) + 1):
+                px, py = (i + 0.5) * cell, (j + 0.5) * cell
+                l1 = ((y1 - y2) * (px - x2) + (x2 - x1) * (py - y2)) / den
+                l2 = ((y2 - y0) * (px - x2) + (x0 - x2) * (py - y2)) / den
+                if l1 >= -1e-6 and l2 >= -1e-6 and 1 - l1 - l2 >= -1e-6:
+                    occ.add((i, j))
+    rects, used = [], set()
+    for (i, j) in sorted(occ, key=lambda c: (c[1], c[0])):
+        if (i, j) in used:
+            continue
+        i1 = i
+        while (i1 + 1, j) in occ and (i1 + 1, j) not in used:
+            i1 += 1
+        j1 = j
+        while all((x, j1 + 1) in occ and (x, j1 + 1) not in used for x in range(i, i1 + 1)):
+            j1 += 1
+        for x in range(i, i1 + 1):
+            for y in range(j, j1 + 1):
+                used.add((x, y))
+        rects.append((i * cell, j * cell, (i1 + 1) * cell, (j1 + 1) * cell))
+    return rects
+
+def voxel_boxes(points, triangles, voxel=0.2, max_boxes=96, report=None):
     """Cover arbitrary triangles (slopes, curves, rails, pipes) with axis-aligned boxes: mark the voxels the surface passes
     through, then greedily merge runs of voxels into boxes (x, then y, then z). Coarsens the grid until it fits max_boxes."""
     while True:
@@ -168,16 +212,21 @@ def voxel_boxes(points, triangles, voxel=0.2, max_boxes=96):
         if len(boxes) <= max_boxes or voxel >= 0.45:
             # never coarsen past ~0.5 m (coarse voxels become invisible walls); keep the biggest boxes if still too many
             boxes.sort(key=lambda b: -(b[1][0] * b[1][1] * b[1][2]))
+            if report is not None and len(boxes) > max_boxes:
+                report["voxel_dropped"] = report.get("voxel_dropped", 0) + len(boxes) - max_boxes
             return boxes[:max_boxes]
         voxel *= 1.5
 
 
-def mesh_boxes(points, triangles, max_surface=96, max_voxel=96):
-    """Hybrid architecture collision: precise thin boxes behind flat axis-aligned surfaces, voxel boxes for the rest."""
+def mesh_boxes(points, triangles, max_surface=160, max_voxel=96, report=None):
+    """Hybrid architecture collision: rasterised thin boxes behind flat axis-aligned surfaces (holes kept), voxel boxes for
+    the rest. Anything dropped by a cap is counted in `report` (never silently)."""
     rest = []
-    boxes = surface_boxes(points, triangles, max_boxes=max_surface, min_area=0.01, leftovers=rest)
+    boxes = surface_boxes(points, triangles, max_boxes=max_surface, min_area=0.01, leftovers=rest, report=report)
     if rest:
-        boxes += voxel_boxes(points, rest, max_boxes=max_voxel)
+        boxes += voxel_boxes(points, rest, max_boxes=max_voxel, report=report)
+    if report is not None:
+        report["boxes"] = len(boxes)
     return boxes
 
 

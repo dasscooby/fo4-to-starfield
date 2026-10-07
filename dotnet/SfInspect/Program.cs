@@ -33,6 +33,31 @@ switch (args[1])
         foreach (var s in mod.Statics.Where(s => (s.EditorID ?? "").Contains(args[2], StringComparison.OrdinalIgnoreCase)).Take(30))
             Console.WriteLine($"{s.EditorID}  {s.FormKey}  model={s.Model?.File}");
         break;
+    case "doors":
+        foreach (var d in mod.Doors.Where(d => (d.Model?.File?.ToString() ?? "").Contains(args[2], StringComparison.OrdinalIgnoreCase)).Take(3))
+        {
+            Console.WriteLine($"== {d.EditorID} {d.FormKey} model={d.Model?.File}");
+            foreach (var p in d.GetType().GetProperties())
+            {
+                object? v; try { v = p.GetValue(d); } catch { continue; }
+                var s = v switch { null => "null", string str => str, System.Collections.IEnumerable e and not string => "[" + string.Join(", ", e.Cast<object>().Take(6)) + "]", _ => v.ToString() };
+                if (s != null && s.Length > 160) s = s.Substring(0, 160);
+                Console.WriteLine($"   {p.Name} = {s}");
+            }
+        }
+        break;
+    case "agc":
+        foreach (var d in mod.Doors.Where(d => (d.EditorID ?? "").Contains(args[2], StringComparison.OrdinalIgnoreCase)).Take(int.Parse(args.Length > 3 ? args[3] : "3")))
+        {
+            Console.WriteLine($"== {d.EditorID} {d.FormKey} model={d.Model?.File} flags={d.Flags}");
+            foreach (var c in d.Components)
+                foreach (var p in c.GetType().GetProperties())
+                {
+                    object? v; try { v = p.GetValue(c); } catch { continue; }
+                    Console.WriteLine($"   {c.GetType().Name.Replace("BinaryOverlay","")}.{p.Name} = {v}");
+                }
+        }
+        break;
     case "lights":
         foreach (var l in mod.Lights.Where(l => (l.EditorID ?? "").Contains(args[2], StringComparison.OrdinalIgnoreCase)).Take(40))
             Console.WriteLine($"{l.EditorID}  {l.FormKey}  radius={l.Radius}  color={l.Color}  model={l.Model?.File}");

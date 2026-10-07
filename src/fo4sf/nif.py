@@ -165,10 +165,63 @@ class Fo4Shape:
     skinned: bool
 
 
+def _av_transform(blk: bytes):
+    """(translation, row-major rotation, scale) of an NiAVObject block (BS >= 130 layout)."""
+    _, nextra = struct.unpack_from("<iI", blk, 0)
+    p = 8 + 4 * nextra + 8                         # extra refs, controller, flags
+    tr = struct.unpack_from("<3f", blk, p)
+    rot = struct.unpack_from("<9f", blk, p + 12)
+    scale, = struct.unpack_from("<f", blk, p + 48)
+    return tr, rot, scale
+
+
+def node_children(n: NifFile, i: int) -> List[int]:
+    """Child refs of an NiNode-derived block (FO4 layout: NiAVObject fields + collision ref, then the children array)."""
+    blk = n.blocks[i]
+    _, nextra = struct.unpack_from("<iI", blk, 0)
+    p = 8 + 4 * nextra + 8 + 52 + 4
+    count, = struct.unpack_from("<I", blk, p)
+    if count > 100000 or p + 4 + 4 * count > len(blk):
+        return []
+    return [c for c in struct.unpack_from(f"<{count}i", blk, p + 4) if 0 <= c < len(n.blocks)]
+
+
+def _compose(parent, local):
+    """World transform of `local` under `parent`; both (t, R row-major 9-tuple, s) with v' = s*R*v + t."""
+    (tp, rp, sp), (tl, rl, sl) = parent, local
+    r = tuple(sum(rp[3 * a + k] * rl[3 * k + b] for k in range(3)) for a in range(3) for b in range(3))
+    t = tuple(sp * sum(rp[3 * a + k] * tl[k] for k in range(3)) + tp[a] for a in range(3))
+    return t, r, sp * sl
+
+
+def world_transforms(n: NifFile):
+    """block index -> world (t, R, s), composing every NiNode ancestor from the roots down (footer roots or parentless nodes)."""
+    nodes = [i for i in range(len(n.blocks)) if n.type_of(i).endswith("Node") and n.type_of(i) != "BSFaceGenNiNode"]
+    parent = {}
+    for i in nodes:
+        try:
+            for c in node_children(n, i):
+                parent.setdefault(c, i)
+        except struct.error:
+            pass
+    cache = {}
+
+    def world(i, depth=0):
+        if i in cache:
+            return cache[i]
+        local = _av_transform(n.blocks[i])
+        w = local if i not in parent or depth > 64 else _compose(world(parent[i], depth + 1), local)
+        cache[i] = w
+        return w
+    return world
+
+
 def fo4_trishapes(n: NifFile) -> List[Fo4Shape]:
-    """Decode every BSTriShape / BSSubIndexTriShape block (vertex data and triangles only)."""
+    """Decode every BSTriShape / BSSubIndexTriShape block (vertex data and triangles only). The returned translation /
+    rotation / scale are the shape's WORLD transform (all parent NiNodes composed), so geometry lands where FO4 draws it."""
     if n.bs_version != 130:
         raise NifError(f"fo4_trishapes needs BS 130, got {n.bs_version}")
+    world = world_transforms(n)
     shapes = []
     for i, blk in enumerate(n.blocks):
         if n.type_of(i) not in ("BSTriShape", "BSSubIndexTriShape", "BSMeshLODTriShape"):
@@ -218,6 +271,7 @@ def fo4_trishapes(n: NifFile) -> List[Fo4Shape]:
                 start = sum(sizes[:k])
                 tris = tris[start:start + sizes[k]]
         name = n.strings[name_idx] if 0 <= name_idx < len(n.strings) else b""
+        tr, rot, scale = world(i)
         shapes.append(Fo4Shape(name, tr, rot, scale, shader, alpha, skin, pos, uv, nor, tan, col, tris,
                                bool(attrs & VF_SKIN)))
     return shapes

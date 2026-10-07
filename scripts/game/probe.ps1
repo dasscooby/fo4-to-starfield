@@ -1,5 +1,7 @@
 # Collision mapper: for each probe point, teleport 1.5 m above it, wait, read the player's position by OCR.
-# PASS = player ended within 0.6 m of the floor height; FALL = ended well below (no floor collision); BLOCK = held well above.
+# PASS = within 0.6 m of the floor height; LOWER = landed 0.6-3 m below (e.g. a lower floor next to stairs);
+# FALL = dropped more than 3 m (no collision: falling into the void); HELD = stopped well above;
+# MOVED = ended more than 1 m away in X/Y (pushed out or never reached the point), so the height says nothing.
 # usage: probe.ps1 -Points pts.txt -Out results.csv   (Starfield focused, in the cell, console closed)
 param([string]$Points, [string]$Out, [double]$Drop = 1.5, [int]$SettleMs = 1800)
 $env:LEGACY = '1'
@@ -14,7 +16,8 @@ foreach ($line in Get-Content $Points) {
   $r = powershell -NoProfile -ExecutionPolicy Bypass -File $PSScriptRoot\readpos.ps1
   if ($r -eq 'fail' -or -not $r) { $res = 'UNREAD'; $e = @('', '', '') }
   else { $e = $r.Split(' '); $dz = [double]$e[2] - $z
-         $res = if ($dz -lt -0.6) { 'FALL' } elseif ($dz -gt 1.2) { 'HELD' } else { 'PASS' } }
+         $dxy = [math]::Sqrt([math]::Pow([double]$e[0] - [double]$x, 2) + [math]::Pow([double]$e[1] - [double]$y, 2))
+         $res = if ($dxy -gt 1.0) { 'MOVED' } elseif ($dz -lt -3) { 'FALL' } elseif ($dz -lt -0.6) { 'LOWER' } elseif ($dz -gt 1.2) { 'HELD' } else { 'PASS' } }
   "$x,$y,$z,$($e[0]),$($e[1]),$($e[2]),$res,$name" | Add-Content $Out
   "{0,-7} floor {1,7:F2} end {2,7}  {3}" -f $res, $z, $e[2], $name
 }

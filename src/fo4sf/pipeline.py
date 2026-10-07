@@ -7,6 +7,7 @@
 Each shape uses its own material; materials/textures are converted once and cached. Anything that cannot be converted falls
 back to a placeholder material (tier T1) instead of failing the asset. Needs numpy and texconv.
 """
+import hashlib
 import os
 import re
 import shutil
@@ -150,7 +151,8 @@ class Converter:
     def texture_set_material(self, diffuse: str, normal: str, spec: str) -> Optional[str]:
         """Material for a shape that names its textures directly (BSShaderTextureSet, no .bgsm). Cached by diffuse path."""
         stem = "texsets/" + re.sub(r"^textures[\\/]", "", diffuse.replace("\\", "/"), flags=re.I).lower()
-        stem = os.path.splitext(stem)[0]
+        ident = "|".join(x.replace("\\", "/").lower() for x in (diffuse, normal, spec))      # every input is part of identity
+        stem = os.path.splitext(stem)[0] + "_" + hashlib.sha1(ident.encode()).hexdigest()[:8]
         key = "texset:" + stem
         if key not in self._materials:
             try:
@@ -204,7 +206,7 @@ class Converter:
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.copy2(os.path.join(tmp, fn), dst)
                 out[kind] = cm.game_path(f"{tex_rel}_{kind}.dds")
-        mat = cm.build_mat(self.template_mat, "FO4Port_" + os.path.basename(stem), out["color"], out["normal"], out["rough"],
+        mat = cm.build_mat(self.template_mat, "FO4Port_" + re.sub(r"[^a-z0-9]+", "_", stem), out["color"], out["normal"], out["rough"],
                            opacity=out.get("opacity"), alpha_threshold=alpha_ref / 255.0)
         mat_rel = f"materials/{self.prefix}/{stem}.mat"
         p = os.path.join(self.staging, *mat_rel.split("/"))
@@ -281,13 +283,15 @@ class Converter:
             soft = bool(re.search(r"[\\/]landscape[\\/](trees|plants|grass)|roots|cobweb|vines|hanging"
                                   r"|[\\/]doors?[\\/]|door[^\\/]*\.nif$", nif_name, re.I))   # doors: no opening yet, keep passable
             use_box = self.collision_template is not None and not soft
+            coll_report = {}
             files = convert_static.convert_static(raw, out_name, material_paths=mats, collision_mode=mode, include_skinned=True,
+                                                  report=coll_report,
                                                   collision_template=self.collision_template if use_box else None)
             for relp, data in files.items():
                 p = os.path.join(self.staging, *relp.split("/"))
                 os.makedirs(os.path.dirname(p), exist_ok=True)
                 open(p, "wb").write(data)
-            res.update(ok=True, out_name=out_name, shapes=len(shapes), materials=mats, collision=mode if use_box else None,
+            res.update(ok=True, out_name=out_name, shapes=len(shapes), materials=mats, collision=mode if use_box else None, collision_report=coll_report,
                        skipped_effect_shapes=sum(1 for m in mats if m is None),
                        fallback_materials=sum(1 for m in mats if m == self.neutral))
             self.stats["assets"] += 1

@@ -65,11 +65,19 @@ def shape_to_mesh(shape: nifmod.Fo4Shape, unit_scale: float = UNIT_SCALE) -> sfm
     m.triangles = [tuple(t) for t in shape.triangles]
     if shape.uvs:
         m.uv1 = [(sfmesh.float_to_half(u), sfmesh.float_to_half(v)) for u, v in shape.uvs]
-    if shape.normals:
-        m.normals = [sfmesh.encode_packed(*n, w=1.0 / 3.0) for n in shape.normals]
-    if shape.normals and shape.tangents and shape.uvs:
+    def rot_dir(v):                                   # directions take the rotation only (uniform scale), renormalised
+        d = (r[0] * v[0] + r[1] * v[1] + r[2] * v[2], r[3] * v[0] + r[4] * v[1] + r[5] * v[2],
+             r[6] * v[0] + r[7] * v[1] + r[8] * v[2])
+        ln = (d[0] ** 2 + d[1] ** 2 + d[2] ** 2) ** 0.5 or 1.0
+        return (d[0] / ln, d[1] / ln, d[2] / ln)
+    normals = [rot_dir(v) for v in shape.normals]
+    tangents = [rot_dir(v) for v in shape.tangents]
+    if normals:
+        m.normals = [sfmesh.encode_packed(*n, w=1.0 / 3.0) for n in normals]
+    if normals and tangents and shape.uvs:
+        # handedness is rotation-invariant: compute it in the shape's local space
         signs = tangent_signs(shape.positions, shape.uvs, shape.normals, shape.tangents, shape.triangles)
-        m.tangents = [sfmesh.encode_packed(*t, w=float(s)) for t, s in zip(shape.tangents, signs)]
+        m.tangents = [sfmesh.encode_packed(*t, w=float(s)) for t, s in zip(tangents, signs)]
     if shape.colors:
         m.colors = [(c[2]) | (c[1] << 8) | (c[0] << 16) | (c[3] << 24) for c in shape.colors]   # RGBA -> BGRA u32
     sfmesh.build_meshlets(m)
@@ -96,7 +104,7 @@ def collision_template_from_nif(sf_nif: bytes) -> bytes:
 def convert_static(fo4_nif: bytes, out_name: str, material_path: str = PLACEHOLDER_MATERIAL,
                    unit_scale: float = UNIT_SCALE, collision_template: bytes = None,
                    material_paths: list = None, collision_mode: str = "box",
-                   include_skinned: bool = False) -> Dict[str, bytes]:
+                   include_skinned: bool = False, report: dict = None) -> Dict[str, bytes]:
     """collision_mode: "box" = one AABB on the root; "surfaces" = thin boxes behind flat surfaces, one body each."""
     src = nifmod.parse(fo4_nif)
     shapes = [s for s in nifmod.fo4_trishapes(src) if (include_skinned or not s.skinned) and s.positions and s.triangles]
@@ -120,7 +128,7 @@ def convert_static(fo4_nif: bytes, out_name: str, material_path: str = PLACEHOLD
     node_name = out_name.rsplit("/", 1)[-1].encode()
     blob, child_blobs = None, []
     if collision_template is not None and collision_mode == "surfaces":
-        for c, h in sfcollision.mesh_boxes(all_pts, all_tris):
+        for c, h in sfcollision.mesh_boxes(all_pts, all_tris, report=report):
             child_blobs.append(sfcollision.box_blob(collision_template, c, h))
     elif collision_template is not None:     # T3: one axis-aligned box around all geometry
         lo = [min(p[a] for p in all_pts) for a in range(3)]
