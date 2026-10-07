@@ -15,7 +15,9 @@ included or distributed.
 **Newest: Fallout 4's Vault 111 interior loads in Starfield as a walk-in cell** (layout, models, textures; lighting still rough):
 [write-up](docs/spikes/WP10-vault111-first-light.md).
 
-**Also converted: Vault 81 and the Red Rocket cave** ([write-up](docs/spikes/WP10-more-interiors.md)).
+**Also converted: Vault 81, the Red Rocket cave, Vault 114, the Prydwen, Hotel Rexford, Boston Public Library and Parsons State** ([write-up](docs/spikes/WP10-more-interiors.md)).
+
+![Hotel Rexford lobby, converted from Fallout 4, inside Starfield](docs/media/hotel-rexford.jpg)
 
 ![The Vault 111 cryo pods, converted from Fallout 4, inside Starfield](docs/media/vault111-cryo-row.jpg)
 

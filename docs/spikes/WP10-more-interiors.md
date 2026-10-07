@@ -32,3 +32,13 @@ New tool `scripts/game/probe.ps1` teleports the player 1.5 m above 30 floor piec
 height back by OCR. Result: **28 PASS, 2 HELD, 0 falls through** ([map](../media/vault81-collision-map.png)). The two HELD are
 expected: one is the top of a stair run, the other a floor mat sitting on a higher surface (the player landed 1.2 m up on something
 solid). See `scripts/game/README.md`.
+
+## Five more interiors (2026-10-08)
+
+Vault 114, the Prydwen (hull 01), Hotel Rexford (Goodneighbor), Boston Public Library and Parsons State asylum now load from the
+same plugin (8 cells, 2,547 models, 1,001/1,007 materials, ~20,000 placed objects, ~6.5 min conversion). Toured in game:
+[Prydwen](../media/prydwen.jpg), [Hotel Rexford](../media/hotel-rexford.jpg), [library](../media/boston-public-library.jpg),
+[Parsons](../media/parsons-state.jpg), [Vault 114](../media/vault114.jpg).
+Visible problems: Parsons' wallpaper shows black crack overlays drawn opaque (damage overlay alpha); Hotel Rexford has pink-purple
+walls (likely FO4 greyscale-to-palette materials); scenes are bright overall; huge pieces (Prydwen hull, subway platforms) have
+incomplete collision (box cap; see manifest `floor_dropped`).
