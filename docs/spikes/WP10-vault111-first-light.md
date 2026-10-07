@@ -65,8 +65,8 @@ surfaces with the template's marble look. Diagnosis by experiment:
 - A test chair with a pure-magenta 64x64 colour texture rendered **white** in neutral light, so no albedo was applied at all.
 - Cause: `build_mat` set the material's `BSMaterial::Color` to `(1, 1, 1, 1)`. The **w component is the tint strength**:
   at 1.0 the flat tint colour replaces the albedo texture. Vanilla `MetalIronCast01` uses 0.72. Now the default tint is
-  `(1, 1, 1, 0)` and the vault renders in its real colours ([catwalk](../media/vault111-color-catwalk.png),
-  [stairs](../media/vault111-color-stairs.png)).
+  `(1, 1, 1, 0)` and the vault renders in its real colours ([catwalk](../media/vault111-color-catwalk.jpg),
+  [stairs](../media/vault111-color-stairs.jpg)).
 
 Also in this pass:
 - Shapes without a `.bgsm` now use their `BSShaderTextureSet` textures (diffuse, normal, smooth-spec at index 7); effect-shader
