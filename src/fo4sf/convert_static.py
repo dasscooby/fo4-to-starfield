@@ -103,6 +103,8 @@ def convert_static(fo4_nif: bytes, out_name: str, material_path: str = PLACEHOLD
         raise nifmod.NifError("no static BSTriShape geometry found")
     files, static_shapes, all_pts, all_tris = {}, [], [], []
     for i, s in enumerate(shapes):
+        if material_paths and material_paths[i] is None:      # caller asked to drop this shape (e.g. effect shader)
+            continue
         m = shape_to_mesh(s, unit_scale)
         data = sfmesh.serialize(m)
         d, f = mesh_file_path(data)

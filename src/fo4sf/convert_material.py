@@ -43,14 +43,22 @@ def parse_bgsm(d: bytes) -> Bgsm:
     start = None
     for off in range(8, len(d) - 8):
         ln, = struct.unpack_from("<I", d, off)
-        if 4 < ln < 260 and d[off + 3 + ln] == 0 and d[off + 4:off + 3 + ln].lower().endswith((b".dds", b".tga")):
+        if 4 < ln < 260 and off + 4 + ln <= len(d) and d[off + 3 + ln] == 0 \
+                and d[off + 4:off + 3 + ln].lower().endswith((b".dds", b".tga")):
             start = off
             break
     if start is None:
         raise ValueError("no texture paths found")
     out, pos = [], start
-    for _ in range(6):
+    for _ in range(6):                      # missing trailing strings (short decal/label materials) read as ""
+        if pos + 4 > len(d):
+            out.append("")
+            continue
         ln, = struct.unpack_from("<I", d, pos)
+        if ln > 512 or pos + 4 + ln > len(d):
+            out.append("")
+            pos = len(d)
+            continue
         out.append(d[pos + 4:pos + 4 + ln].rstrip(b"\0").decode("latin-1"))
         pos += 4 + ln
     return Bgsm(version, bool(tiles & 2), bool(tiles & 1), (uo, vo), (us, vs), *out)
@@ -68,7 +76,9 @@ def _new_id(old: str, salt: str) -> str:
 
 
 def build_mat(template: dict, name: str, albedo: str, normal: str, rough: str,
-              tint=(1.0, 1.0, 1.0, 1.0), metalness: float = 0.0) -> dict:
+              tint=(1.0, 1.0, 1.0, 0.0), metalness: float = 0.0) -> dict:
+    """tint: x, y, z = colour, w = how strongly the tint replaces the albedo texture (1.0 = flat colour, texture
+    ignored; measured in game). 0 keeps the converted texture as is."""
     """Return a new .mat dict. Texture arguments are game paths like 'Data\\Textures\\...\\x_color.dds'."""
     mat = json.loads(json.dumps(template))
     defined = {o["ID"] for o in mat["Objects"] if "ID" in o}
@@ -103,6 +113,40 @@ def build_mat(template: dict, name: str, albedo: str, normal: str, rough: str,
     m["Replacement"] = {"w": 1, "x": metalness, "y": metalness, "z": metalness}
     m["UseReplacement"] = True
     return mat
+
+
+ROOT = "Data\\Materials\\Layered\\Root\\"
+
+
+def _rid(name: str, role: str) -> str:
+    return f"res:{zlib.crc32((name + '|' + role).encode()) & 0xFFFFFFFF:08X}:{zlib.crc32(name.encode()) & 0xFFFFFF:08X}:A487E721"
+
+
+def build_mat_standalone(name: str, albedo: str, normal: str, rough: str, tint=(1.0, 1.0, 1.0, 0.0)) -> dict:
+    """A single-layer material built from scratch like the Creation Kit's own test materials (TestQA1.mat): every object
+    parents the generic Root classes, nothing inherits from a vanilla material, so no vanilla texture can leak through."""
+    L, U, M, T = (_rid(name, r) for r in ("layer", "uv", "material", "textureset"))
+    def obj(components, parent, outer=None, oid=None):
+        o = {"Components": components,
+             "Edges": [{"EdgeIndex": 0, "To": ROOT + parent, "Type": "BSMaterial::MaterialParent"}]}
+        if outer:
+            o["Edges"].append({"EdgeIndex": 0, "To": outer, "Type": "BSComponentDB2::OuterEdge"})
+        if oid:
+            o["ID"] = oid
+        return o
+    ctn = lambda n: {"Data": {"Name": n}, "Index": 0, "Type": "BSComponentDB::CTName"}  # noqa: E731
+    tex = lambda i, f: {"Data": {"FileName": f}, "Index": i, "Type": "BSMaterial::MRTextureFile", "Version": 1}  # noqa: E731
+    colour = {"Data": {"Value": {"Data": {"w": str(tint[3]), "x": str(tint[0]), "y": str(tint[1]), "z": str(tint[2])},
+                                 "Type": "XMFLOAT4"}}, "Index": 0, "Type": "BSMaterial::Color"}
+    return {"Objects": [
+        obj([ctn(name), {"Data": {"ID": L}, "Index": 0, "Type": "BSMaterial::LayerID"}], "LayeredMaterials.mat"),
+        obj([ctn(name + "_Layer1"), {"Data": {"ID": M}, "Index": 0, "Type": "BSMaterial::MaterialID"},
+             {"Data": {"ID": U}, "Index": 0, "Type": "BSMaterial::UVStreamID"}], "Layers.mat", "<this>", L),
+        obj([ctn(name + "_UVStream1")], "UVStreams.mat", L, U),
+        obj([ctn(name + "_Material1"), {"Data": {"ID": T}, "Index": 0, "Type": "BSMaterial::TextureSetID", "Version": 1},
+             colour], "Materials.mat", L, M),
+        obj([ctn(name + "_TextureSet1"), tex(0, albedo), tex(1, normal), tex(3, rough)], "TextureSets.mat", M, T),
+    ], "Version": 1}
 
 
 def dump_mat(mat: dict) -> str:

@@ -165,7 +165,9 @@ def voxel_boxes(points, triangles, voxel=0.2, max_boxes=96):
             lo = (x0 * voxel, y0 * voxel, z0 * voxel)
             hi = ((x1 + 1) * voxel, (y1 + 1) * voxel, (z1 + 1) * voxel)
             boxes.append((tuple((lo[k] + hi[k]) / 2 for k in range(3)), tuple((hi[k] - lo[k]) / 2 for k in range(3))))
-        if len(boxes) <= max_boxes or voxel > 2.0:
+        if len(boxes) <= max_boxes or voxel >= 0.45:
+            # never coarsen past ~0.5 m (coarse voxels become invisible walls); keep the biggest boxes if still too many
+            boxes.sort(key=lambda b: -(b[1][0] * b[1][1] * b[1][2]))
             return boxes[:max_boxes]
         voxel *= 1.5
 

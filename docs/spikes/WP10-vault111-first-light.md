@@ -56,3 +56,22 @@ conversion, is the cause.
   shapes. 205 models, 1,003 references, 60 lights.
 - Open: banded "marbled" artefacts on some surfaces (likely normal/roughness channel mapping on certain materials), exposure,
   the arrival point (no COC marker: the player lands at the cell origin inside geometry).
+
+## Colour fixed: the material tint was replacing every texture (2026-10-08)
+
+Play-test feedback: "weird textures". A walk-through showed white, clay-like surfaces (normal and roughness detail only) and some
+surfaces with the template's marble look. Diagnosis by experiment:
+- Converted colour textures were correct (decoded contact sheets) and stored in the archive in vanilla formats.
+- A test chair with a pure-magenta 64x64 colour texture rendered **white** in neutral light, so no albedo was applied at all.
+- Cause: `build_mat` set the material's `BSMaterial::Color` to `(1, 1, 1, 1)`. The **w component is the tint strength**:
+  at 1.0 the flat tint colour replaces the albedo texture. Vanilla `MetalIronCast01` uses 0.72. Now the default tint is
+  `(1, 1, 1, 0)` and the vault renders in its real colours ([catwalk](../media/vault111-color-catwalk.png),
+  [stairs](../media/vault111-color-stairs.png)).
+
+Also in this pass:
+- Shapes without a `.bgsm` now use their `BSShaderTextureSet` textures (diffuse, normal, smooth-spec at index 7); effect-shader
+  shapes (glass, frost, glow) are skipped instead of drawn with a placeholder; the `.bgsm` parser no longer crashes on short
+  decal/label materials; the last-resort fallback is a plain grey material instead of the vanilla marble template.
+  Result: 162 materials converted, 1 fallback (was 120 / 6 with 209 placeholder shapes).
+- Voxel collision boxes are never coarser than ~0.5 m (coarse voxels behaved like invisible walls).
+- Tooling lesson: judging colours under the bar's orange/teal lights was misleading; test colour in neutral light.

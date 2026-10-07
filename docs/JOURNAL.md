@@ -95,3 +95,8 @@ correctly refused to type when the user's window had focus.
 
 See spikes/WP10-vault111-first-light.md. Automation lesson: chained keystrokes drift when a dialog or load intervenes; run console steps one at a time with a screenshot between them.
 
+
+## 2026-10-08: Vault 111 in colour
+
+Material tint strength (Color.w) was 1.0 and replaced every albedo; set to 0. Texture-set materials, effect-shape skipping, neutral fallback, bounded voxel size. See spikes/WP10-vault111-first-light.md.
+

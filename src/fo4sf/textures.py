@@ -115,7 +115,8 @@ def write_rg8_snorm(path, r_unorm, g_unorm):
 
 
 def texconv(texconv_exe, src, out_dir, fmt, extra=()):
-    r = subprocess.run([texconv_exe, "-nologo", "-y", "-m", "0", "-dx10", "-f", fmt, *extra, "-o", out_dir, src],
+    mips = () if "-m" in extra else ("-m", "0")          # full mip chain unless the caller sets -m
+    r = subprocess.run([texconv_exe, "-nologo", "-y", *mips, "-dx10", "-f", fmt, *extra, "-o", out_dir, src],
                        capture_output=True, text=True)
     if r.returncode != 0 or "FAILED" in r.stdout:
         raise DdsError(f"texconv failed for {src}: {r.stdout.strip()[-300:]} {r.stderr.strip()[-200:]}")
