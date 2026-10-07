@@ -77,3 +77,11 @@ Batch build (400 Set Dressing props) installed. Human play-test: shadows look go
 move when pushed. Corrected the S6 note that called the bodies dynamic. Batch converter (`src/fo4sf/ba2.py`, `pipeline.py`,
 `scripts/convert_batch.py`, manifest-driven plugin writer) committed with this entry: 400 converted in ~30 s, 6 skipped (no
 static geometry), 146/151 materials full, 5 placeholder.
+
+## 2026-10-08: Vault 111 first light
+
+Exported `Vault111Cryo` with Mutagen (3,087 refs), converted its 268 models (234 ok), wrote a cell with 1,365 refs + 132 vanilla
+lights and loaded it with `coc FO4Port_Vault111Cryo`: layout, scale and textures correct; over-exposed. Confirmed Starfield
+placements are in metres. Lessons: Mutagen needs `WithKnownMasters` once Starfield.esm is a master; the achievements dialog
+appears on the first console command of a session and steals keystrokes (close console, hold E, reopen); Shift must go through
+the same legacy input path as the key. See [spikes/WP10-vault111-first-light.md](spikes/WP10-vault111-first-light.md).

@@ -60,7 +60,7 @@ convex hulls, then mesh shapes via decomposition.
 within 5% of the source.
 
 ## WP-08: Record translation framework (.NET / Mutagen)
-Status: `blocked:S2`. Difficulty: medium.
+Status: `in progress`: `dotnet/Fo4Export` (FO4 cell -> JSON) and the manifest/cell plugin writer in `dotnet/PluginSpike` work for STAT, CELL, REFR and lights. Difficulty: medium.
 `dotnet/` solution that reads FO4 records and writes Starfield records via per-type translators and
 `mappings/records/*.json`; deterministic FormID allocation (see PLAN §3.6); a report of unmapped fields.
 **Acceptance:** `STAT`, `MISC`, `ALCH`, `BOOK` round-trip into a plugin xSFEdit opens cleanly (L1).
@@ -72,7 +72,7 @@ animations and sounds; map keywords.
 **Acceptance:** the 10mm pistol equips and fires in Starfield with its FO4 mesh and material (L4).
 
 ## WP-10: Interior cells (Vault 111 slice)
-Status: `blocked:WP-04,WP-07,WP-08,S8`. Difficulty: hard.
+Status: `in progress`: first light, `Vault111Cryo` loads as a Starfield cell with 1,365 converted references and 132 lights (`docs/spikes/WP10-vault111-first-light.md`). Still needed: lighting quality, architecture collision, navmesh, doors, decals, failed models. Difficulty: hard.
 `CELL` + `REFR` (static, door, furniture, light, container) → Starfield interior, with lights translated, navmesh
 generated, load doors wired.
 **Acceptance:** walk the Vault 111 cryo chamber → corridor in Starfield (L3 screenshots at 5 waypoints).

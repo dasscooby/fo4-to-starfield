@@ -27,19 +27,29 @@ def main():
     ap.add_argument("--pattern", default=r"^meshes[\\/]setdressing[\\/]")
     ap.add_argument("--limit", type=int, default=20)
     ap.add_argument("--max-tris", type=int, default=20000, help="skip meshes with more triangles than this")
+    ap.add_argument("--cell-json", default="", help="convert the models placed in a cell exported by dotnet/Fo4Export")
+    ap.add_argument("--types", default="Static,MovableStatic,Furniture,Door,Activator,Container,MiscItem,Terminal",
+                    help="base record types to take from --cell-json")
     a = ap.parse_args()
 
     t0 = time.time()
     src = pipeline.Fo4Archives(a.fo4_data)
     template = convert_static.collision_template_from_nif(open(a.collision_template, "rb").read())
     conv = pipeline.Converter(src, a.staging, a.texconv, a.content_resources, template)
-    names = src.mesh_names(a.pattern)
+    if a.cell_json:
+        cell = json.load(open(a.cell_json, encoding="utf-8-sig"))
+        wanted = set(a.types.split(","))
+        names = sorted({"meshes\\" + r["model"].lstrip("\\") for r in cell["refs"] if r["model"] and r["type"] in wanted
+                        and not re.search(r"marker", r["model"], re.I)},
+                       key=str.lower)
+    else:
+        names = src.mesh_names(a.pattern)
     print(f"{len(names)} candidate meshes; converting up to {a.limit}")
     items, failures, used = [], [], set()
     for name in names:
         if len(items) >= a.limit:
             break
-        if re.search(r"(lod|_dmg|damaged|destr)", name, re.I):
+        if not a.cell_json and re.search(r"(lod|_dmg|damaged|destr)", name, re.I):
             continue
         r = conv.convert_nif(name)
         if not r["ok"]:

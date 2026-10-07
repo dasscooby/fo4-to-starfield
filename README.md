@@ -12,6 +12,11 @@ included or distributed.
 > converted to Starfield's material format ([S3](docs/spikes/S3-materials.md)). It now has **box collision** (solid and fixed in place, [S6](docs/spikes/S6-collision.md)); plugin records beyond a static, terrain, actors and animation are still to do.
 > See [Work packages](docs/WORK-PACKAGES.md).
 
+**Newest: Fallout 4's Vault 111 interior loads in Starfield as a walk-in cell** (layout, models, textures; lighting still rough):
+[write-up](docs/spikes/WP10-vault111-first-light.md).
+
+![Vault 111 entrance, converted from Fallout 4, inside Starfield](docs/media/vault111-entrance-in-starfield.png)
+
 ![Fallout 4 patio chair, with its original texture, rendered inside Starfield](docs/media/fo4-chair-textured-in-starfield.png)
 
 If you landed here searching for *"Fallout 4 in Starfield"*, *"convert Fallout 4 NIF to Starfield"*,
