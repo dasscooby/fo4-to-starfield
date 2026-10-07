@@ -53,8 +53,19 @@ next to a vanilla one.
 ## How to check it in the game (one person, about 5 minutes)
 
 1. Launch Starfield, load any save (use a throwaway), open the console with `~`.
-2. `help FO4Port_ChairPatio01 4` shows the form ID (the first two hex digits depend on load order).
-3. `player.placeatme <formid>`: a patio chair should appear in front of the player.
+2. Starfield does not keep editor IDs at runtime, so `help` cannot find the chair. The FormID is `<slot>000800`, where `<slot>`
+   is the plugin's load slot (it was `02` here). Try `player.placeatme 02000800`; "not found" means try another slot.
+3. The chair spawns at the player's feet: close the console and step back to see it.
 4. Walk into it (no collision yet, expected), and compare its size with a vanilla chair.
 5. Report: renders? right size? right orientation (not mirrored/inside-out)? crash on load?
 6. Remove everything with `python scripts/deploy_starfield.py uninstall --starfield <game dir>`.
+
+## In-game result (2026-10-07)
+
+- The game loaded `FO4Port.esm` (Mutagen, form version 576) with `FO4Port - Main.ba2`; no prompt, no crash.
+- Runtime FormID of the chair: the plugin sat at **load slot 02** on this machine (`player.placeatme 02000800` succeeded;
+  slots 01 and 03-0B returned "not found"). The slot depends on the load order, so probe if yours differs.
+- `help <editor id> 4` finds nothing: Starfield does not keep editor IDs of statics at runtime. Use the FormID.
+- Console input from automation: the game ignores `SendInput` keyboard events but accepts legacy `keybd_event` and mouse
+  clicks (see journal).
+- The chair rendered correctly (see S1). Screenshot: [media/fo4-chair-in-starfield.png](media/fo4-chair-in-starfield.png).

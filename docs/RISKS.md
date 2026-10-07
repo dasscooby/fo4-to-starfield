@@ -7,15 +7,15 @@ Legend: **Impact** = what breaks if it fails; **Fallback** = what we do instead.
 
 | # | Question | Impact | Fallback |
 |---|---|---|---|
-| S1 | Can a script write a Starfield mesh (NIF BS 173/175 + external `.mesh`) that the game renders? **Offline part GO** ([result](spikes/S1-mesh-writer.md)); in-game check pending | Blocks everything visual | Use the closed-source Starfield Blender extension per asset (manual), or NifSkope's own writer |
-| S2 | Can Mutagen's alpha Starfield library write a plugin the game loads? **Offline GO** (writes/reads a valid plugin; form version 576 vs vanilla 581; game load pending, [result](spikes/S2-S4-S9-plugin-units-loading.md)) | Blocks all records | xEdit (`xSFEdit`) scripts, or raw record writer |
+| S1 | Can a script write a Starfield mesh (NIF BS 173/175 + external `.mesh`) that the game renders? **GO, confirmed in game** (a converted chair renders correctly in Starfield 1.16.244; [result](spikes/S1-mesh-writer.md)) | Blocks everything visual | Use the closed-source Starfield Blender extension per asset (manual), or NifSkope's own writer |
+| S2 | Can Mutagen's alpha Starfield library write a plugin the game loads? **GO, confirmed in game** (Mutagen-written plugin with form version 576 loads and the record spawns; [result](spikes/S2-S4-S9-plugin-units-loading.md)) | Blocks all records | xEdit (`xSFEdit`) scripts, or raw record writer |
 | S3 | Can loose `.mat` (JSON) + converted textures be loaded without the compiled material DB? | Blocks materials | Re-point to existing vanilla `.mat` files (T1 look) |
-| S4 | What are Starfield's unit scale and axis convention vs Fallout 4? **Scale: ~70 units per metre (offline)**; axes and winding need the game | Silently wrong sizes everywhere | Calibrate from matching vanilla objects (doors, chairs) |
+| S4 | What are Starfield's unit scale and axis convention vs Fallout 4? **GO: ~70 units per metre, confirmed in game** (chair looks natural-size; orientation and winding are correct) | Silently wrong sizes everywhere | Calibrate from matching vanilla objects (doors, chairs) |
 | S5 | How are custom exterior worldspaces + terrain created and stored? | Blocks P4 | Bake terrain as static mesh tiles with a landscape material |
 | S6 | How is `bhkNPCollisionObject` / hknp collision generated from a mesh? | Blocks walkable interiors | Box/convex-hull approximations via templates, CoACD for decomposition |
 | S7 | What is Starfield's skeleton + animation authoring path, and can FO4 rigs/animations map across? | Blocks P3 | Rebuild actors on Starfield's human skeleton; use Starfield animations |
 | S8 | Can interior navmesh be generated from CK for converted geometry, and can it be scripted? | Blocks AI/walking | Manual CK navmesh per cell, then automate later |
-| S9 | How does Starfield load loose files and a non-Creations plugin (`StarfieldCustom.ini`, `plugins.txt`, SFSE)? **Harness built**: plugin + `- Main.ba2` + Plugins.txt, no ini needed; install tested, game launch pending | Blocks testing | Follow a known-good tutorial mod setup first |
+| S9 | How does Starfield load loose files and a non-Creations plugin (`StarfieldCustom.ini`, `plugins.txt`, SFSE)? **GO, confirmed**: plugin + `- Main.ba2` + Plugins.txt, no ini needed; the game loads it | Blocks testing | Follow a known-good tutorial mod setup first |
 
 ## Known facts that shape the spikes (measured here, or from public sources)
 

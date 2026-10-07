@@ -47,3 +47,12 @@ chair/stool/couch/barrel. Controlled Folder Access blocks writes to Documents, s
 official Archive2 instead of loose files + ini. Installed `FO4Port.esm` + `FO4Port - Main.ba2` into a Starfield test install
 (reversible via `scripts/deploy_starfield.py`). **Next: launch the game and run the 5-step check in
 [spikes/S2-S4-S9-plugin-units-loading.md](spikes/S2-S4-S9-plugin-units-loading.md).**
+
+## 2026-10-07 (evening): first converted asset renders in Starfield
+
+Launched Starfield 1.16.244 from Steam, loaded an existing save (backed up first to a folder outside the game), opened the
+console and ran `player.placeatme 02000800`: the converted Fallout 4 patio chair appeared with correct orientation, size,
+lighting and shadow. Plugin slot was 02. Lessons: (1) an early misreading of the console's "selected reference" label as our
+FormID wasted two rounds; (2) Starfield ignores `SendInput` keyboard events but accepts `keybd_event`; (3) Windows Controlled
+Folder Access blocks writes to Documents, so assets ship in `- Main.ba2`. Next: real materials (S3), collision (S6), then
+a record translation framework (WP-08) and a bulk static converter.

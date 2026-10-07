@@ -5,10 +5,14 @@ Format notes, measurements, a risk-first plan, and (as they land) converters for
 collision, plugin records, terrain and more. Converts from **your own** game copies; no game assets are
 included or distributed.
 
-> **Status: first converter works offline.** A Fallout 4 static mesh converts to a Starfield NIF + `.mesh` that
-> passes every check we can run without launching the game (spike [S1](docs/spikes/S1-mesh-writer.md)); the
-> format is proven against thousands of vanilla files. **Not yet verified in NifSkope or in the game**, and
-> materials, collision, plugins, terrain and animation are still to do. See [Work packages](docs/WORK-PACKAGES.md).
+> **Status: a Fallout 4 prop renders in Starfield.** A Fallout 4 chair, converted by this toolchain and loaded as a
+> plugin, was spawned in the running game (Starfield 1.16.244): correct shape, size and orientation, lit and
+> shadowed by the scene ([screenshot](docs/media/fo4-chair-in-starfield.png), write-ups: [S1](docs/spikes/S1-mesh-writer.md),
+> [S2/S4/S9](docs/spikes/S2-S4-S9-plugin-units-loading.md)). It still uses a placeholder material and has no
+> collision; plugin records beyond a static, terrain, actors and animation are still to do.
+> See [Work packages](docs/WORK-PACKAGES.md).
+
+![Fallout 4 patio chair rendered inside Starfield](docs/media/fo4-chair-in-starfield.png)
 
 If you landed here searching for *"Fallout 4 in Starfield"*, *"convert Fallout 4 NIF to Starfield"*,
 *"Starfield .mesh format"*, *"what replaced LAND in Starfield"* or *"port Fallout 4 mods to Starfield"*:

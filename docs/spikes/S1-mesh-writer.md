@@ -51,3 +51,11 @@ python -I scripts/oracles/roundtrip_nif.py        src scripts <FO4 Meshes.ba2> <
 python -I scripts/oracles/roundtrip_bsgeometry.py src scripts <Starfield Data>
 python -I scripts/oracles/convert_chair.py        src scripts <FO4 Meshes.ba2> setdressing\patiofurniture\chairpatio01.nif <out dir> fo4port/setdressing/chairpatio01
 ```
+
+## In-game result (2026-10-07): L3 passed
+
+The converted `ChairPatio01` loads in Starfield 1.16.244 and renders: correct silhouette, **not inside-out** (winding is right),
+natural size (the 1/70 m assumption holds), lit and shadowed by the scene, with the placeholder `MetalIronCast01.mat`
+material. Screenshot: [media/fo4-chair-in-starfield.png](media/fo4-chair-in-starfield.png). Header bytes copied from vanilla
+(`Unknown Data`, `BSXFlags`) were accepted. Still open: skinned meshes, LOD slots, collision (S6; the chair has none yet), real
+materials (S3).
