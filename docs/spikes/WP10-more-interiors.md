@@ -18,3 +18,10 @@ converts the union of models, and the plugin writer takes several cell files. On
 3. **Alpha-blended overlay/decal shells** (`...Alpha.BGSM`, BGSM byte 32 set) are skipped until blending is supported.
 4. **Hanging roots blocked the player** (user play-test): vegetation (`landscape\trees|plants|grass`, roots, cobwebs, vines)
    no longer gets collision. Walk test: 4 s through the roots, uphill, no fall-through.
+
+## Vault 81 tour and doors (2026-10-08, later)
+
+Full walk through `FO4Port_Vault81`: riveted panel walls, the security booth, shelving, crates and dirt mounds are all textured;
+nothing broken stood out ([booth](../media/vault81-booth-interior.jpg), [walls](../media/vault81-walls.jpg),
+[cave roots](../media/redrocket-cave-roots.jpg)). Fallout 4 doors are converted as static meshes (they cannot open yet), so they
+no longer get collision: a closed door is now see-through to the player rather than a wall.

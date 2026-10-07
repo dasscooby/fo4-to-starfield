@@ -278,7 +278,8 @@ class Converter:
             arch = bool(self.no_collision and self.no_collision.search(nif_name))
             mode = "surfaces" if arch else "box"        # architecture: thin boxes behind flat surfaces; props: one AABB
             # vegetation (roots, plants, grass, cobwebs) is walk-through in FO4; a bounding box would be an invisible wall
-            soft = bool(re.search(r"[\\/]landscape[\\/](trees|plants|grass)|roots|cobweb|vines|hanging", nif_name, re.I))
+            soft = bool(re.search(r"[\\/]landscape[\\/](trees|plants|grass)|roots|cobweb|vines|hanging"
+                                  r"|[\\/]doors?[\\/]|door[^\\/]*\.nif$", nif_name, re.I))   # doors: no opening yet, keep passable
             use_box = self.collision_template is not None and not soft
             files = convert_static.convert_static(raw, out_name, material_paths=mats, collision_mode=mode, include_skinned=True,
                                                   collision_template=self.collision_template if use_box else None)
