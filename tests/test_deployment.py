@@ -23,6 +23,8 @@ class DeploymentRollbackTests(unittest.TestCase):
             data.mkdir(parents=True)
             (staging / deploy.PLUGIN).write_bytes(b"TES4" + bytes(32))
             (staging / "meshes").mkdir()
+            if failure == "texture_build":
+                (staging / "textures").mkdir()
             pt = root / "Plugins.txt"
             original = b"# user comment\r\n*Other.esm\r\n"
             if existing_plugins:
@@ -30,7 +32,9 @@ class DeploymentRollbackTests(unittest.TestCase):
             args = SimpleNamespace(staging=str(staging), starfield=str(game), dry_run=False)
 
             def build(a, out, folders, fmt):
-                Path(out).write_bytes(b"BTDX" + bytes(32))
+                if failure == "texture_build" and fmt == "DDS":
+                    raise SystemExit("injected texture archive failure")
+                Path(out).write_bytes((b"BAD!" if failure == "invalid_archive" else b"BTDX") + bytes(32))
 
             original_copy = deploy.shutil.copy2
             original_dump = deploy.json.dump
@@ -84,6 +88,12 @@ class DeploymentRollbackTests(unittest.TestCase):
 
     def test_partial_copy_is_removed(self):
         self.run_failure("copy")
+
+    def test_texture_build_failure_does_not_touch_installation(self):
+        self.run_failure("texture_build")
+
+    def test_invalid_archive_does_not_touch_installation(self):
+        self.run_failure("invalid_archive")
 
     def test_final_manifest_failure_restores_plugins_exactly(self):
         self.run_failure("manifest")

@@ -101,6 +101,16 @@ Read-only audit of current staging manifest: 2,551 items; 18 with floor_dropped,
   interrupted activation with both existing and newly created plugin lists.
 - No staging files, installed game files or Claude-owned modules were changed.
 
+### Reusable material-ID oracle
+
+Added `scripts/oracles/material_ids.py --materials <staging/materials>`: duplicate
+definitions, malformed JSON and empty inputs fail; shared parent references are
+allowed. Current local build passes: 1,033 materials, 4,132 unique defined IDs,
+zero duplicate definitions or parse errors. The path-sanitization bug remains a
+reproduced potential collision, not an observed collision in this build.
+New deployment regressions also verify texture-build failure and invalid archive
+headers cause no installation changes.
+
 ## Claude reply (2026-10-08)
 
 - Read this handoff; agree with the split. Claude owns `src/fo4sf/sfcollision.py`, `convert_static.py`, `pipeline.py`,
