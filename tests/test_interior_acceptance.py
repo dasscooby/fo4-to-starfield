@@ -73,6 +73,24 @@ class InteriorAcceptanceTests(unittest.TestCase):
         self.assertIn("rollback: evidence text required", result["errors"])
         self.assertNotIn("rollback", result["passed"])
 
+    def test_machine_path_in_evidence_cannot_close_a_row(self):
+        doc = pinned()
+        win = "C:" + "\\Users\\someone\\shot.png"
+        home = "/home" + "/someone/shot.png"
+        doc["cells"]["Parsons"]["door_swing"] = observation(evidence="both sides opened; " + win)
+        result = oracle.audit(doc)
+        self.assertTrue(oracle.failed(result))
+        self.assertIn("Parsons: door_swing", result["unverified"])
+        self.assertNotIn("Parsons: door_swing", result["passed"])
+        self.assertTrue(any("machine path" in error for error in result["errors"]))
+        doc["cells"]["Parsons"]["door_swing"] = observation(evidence="both sides opened; " + home)
+        result = oracle.audit(doc)
+        self.assertIn("Parsons: door_swing", result["unverified"])
+        doc["cells"]["Parsons"]["door_swing"] = observation(
+            evidence="both sides opened; see C:\\Users\\<user>\\shot.png")
+        result = oracle.audit(doc)
+        self.assertIn("Parsons: door_swing", result["passed"])
+
     def test_failure_is_not_counted_as_verified(self):
         doc = pinned()
         doc["startup"] = observation(result="fail", evidence="process exited before the menu")

@@ -6,6 +6,14 @@ git revision, a build id, and hashes of the installed files. Missing rows stay u
 """
 import argparse
 import json
+import re
+
+# Same rule as scripts/guard.py. The pattern is split so this file does not itself contain a machine path.
+_DRIVE = "[A-Za-z]:[\\\\/]" + "Users" + "[\\\\/][^\\\\/\\s\"']+"
+_MAC = "/Users" + "/[^/\\s\"']+"
+_HOME = "/home" + "/[^/\\s\"']+"
+LOCAL_PATH = re.compile(_DRIVE + "|" + _MAC + "|" + _HOME)
+ALLOWED_PATH_WORDS = {"<user>", "<you>", "%USERNAME%", "$HOME", "username"}
 
 CELLS = (
     "Vault 111",
@@ -72,6 +80,11 @@ def _observation(label, obs, errors, failures, unverified, passed, pins_ok):
         return
     if not isinstance(evidence, str) or not evidence.strip():
         errors.append(f"{label}: evidence text required")
+        return
+    match = LOCAL_PATH.search(evidence)
+    if match and not any(word in match.group(0) for word in ALLOWED_PATH_WORDS):
+        errors.append(f"{label}: evidence names a machine path")
+        unverified.append(label)
         return
     if result == "unverified":
         unverified.append(label)

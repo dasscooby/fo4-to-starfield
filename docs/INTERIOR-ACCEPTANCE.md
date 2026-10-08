@@ -48,7 +48,8 @@ those pins does not close a row. A missing row stays unverified. The oracle exit
 while any row is unverified, failed, or malformed.
 
 `door_swing` stays open when the route file never recorded OPEN. Both sides ending past
-the plane is geometry. It is not a swing.
+the plane is geometry. It is not a swing. Evidence that names a machine-specific path
+cannot close a row.
 
 Do not commit the evidence file if it names a machine path or contains game data.
 There is no accepted evidence file in the repo. Every row above is unverified.
