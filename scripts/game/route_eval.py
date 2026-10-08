@@ -34,9 +34,11 @@ def judge(route, res):
         top_rise = high[2] - low[2]
         if rise > top_rise + 2.0:                     # higher than the stair goes: a misread, not a climb
             return "UNREAD", f"implausible rise {rise:.2f} (stair top is {top_rise:.2f})"
-        off_top = math.hypot(end[0] - high[0], end[1] - high[1])
-        if off_top > 4.0:                             # right height in the wrong place is still a bad read
-            return "UNREAD", f"end {off_top:.1f} m from the stair top"
+        dx, dy = high[0] - low[0], high[1] - low[1]
+        span = math.hypot(dx, dy) or 1.0
+        off_axis = abs((end[0] - low[0]) * dy - (end[1] - low[1]) * dx) / span
+        if off_axis > 3.0:                            # not on this stair's line: a shifted OCR column
+            return "UNREAD", f"end {off_axis:.1f} m off the stair"
         if end[2] < low[2] - 0.5:
             return "FALL", f"z {end[2]:.2f} < floor {low[2]:.2f}"
         return ("PASS" if rise >= e["min_rise"] else "STUCK"), f"rise {rise:.2f} / need {e['min_rise']:.2f}"
@@ -47,9 +49,13 @@ def judge(route, res):
     unit = tuple(part / length for part in normal)
     delta = tuple(end[i] - e["plane_point"][i] for i in range(3))
     past = sum(delta[i] * unit[i] for i in range(3))
-    lateral = math.sqrt(max(0.0, sum(part * part for part in delta) - past * past))
-    if past > 6.0 or lateral > 3.0:                   # a one-second walk cannot finish across the cell
-        return "UNREAD", f"implausible door end past {past:.1f} m, {lateral:.1f} m off the opening"
+    # Lateral in the horizontal plane only. A door centre is above the floor, so Z is not "off to the side".
+    ux, uy = unit[0], unit[1]
+    horizontal = math.hypot(ux, uy) or 1.0
+    ux, uy = ux / horizontal, uy / horizontal
+    side = abs((end[0] - e["plane_point"][0]) * uy - (end[1] - e["plane_point"][1]) * ux)
+    if past > 12.0 or side > 3.0:
+        return "UNREAD", f"implausible door end past {past:.1f} m, {side:.1f} m off the opening"
     return ("PASS" if past >= e["min_past"] else "BLOCKED"), f"past plane {past:.2f} m"
 
 

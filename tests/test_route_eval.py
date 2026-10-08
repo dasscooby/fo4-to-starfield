@@ -28,8 +28,10 @@ class RouteEvalTests(unittest.TestCase):
 
     def test_impossible_reads_are_not_passes(self):
         self.assertEqual(stair("2 0 33"), "UNREAD")        # the 31 m Vault 114 climb
-        self.assertEqual(stair("12 0 1.9"), "UNREAD")      # height matches, place does not
+        self.assertEqual(stair("2 10 1.9"), "UNREAD")      # height matches, but it is off this stair
+        self.assertEqual(stair("-6 0 0.1"), "STUCK")       # walked the other way along the same line
         self.assertEqual(stair("2 0 1.9", start="0 0 0.3"), "PASS")
+        self.assertEqual(door("8 0.2 0"), "PASS")          # a few metres down the corridor is still a crossing
         self.assertEqual(evaluator.judge(
             {"kind": "stairs", "expect": {"low": [0, 0, 0], "high": [2, 0, 2], "min_rise": 1.6}},
             {"start_read": "0 0 0", "end_read": "20 0 1"})[0], "UNREAD")
