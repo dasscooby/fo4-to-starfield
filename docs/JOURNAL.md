@@ -487,3 +487,14 @@ floor (route generator to fix: needs a floor check).
   The plugin itself had the right position (0, 5.486), checked by reading the REFR from the deployed ESM. For this
   test I moved the reference to its plugin position in the console. Results after a base-record change need a save
   made before the cell was visited.
+- **One-sided door blocks: likely the runner, not the doors.** In each pair the first route opened the door and was
+  blocked, and the second found the door already open (no prompt through the doorway) and walked through. With E pressed
+  from the route start (no 350 ms step-in, so outside the leaf's swing arc) and only when the prompt says OPEN, the
+  first blocked side tried, Parsons door `060990`, **passes (3.83 m through)**. The step-in had put the player inside the
+  swing arc. The remaining blocked sides are still to rerun (stopped: another window came to the front).
+  A 600 ms back-off after E fixed only 2 of 9, which fits a door stopped by the player mid-swing.
+- **Runner safety, second Skills-menu incident, now prevented.** `console_open.ps1` + `hud_visible.py`: the console is
+  opened only from plain gameplay (oxygen ring and health bar bright) and must be confirmed open (HUD dimmed) before
+  anything is typed. `readpos` and `route_run` stop instead of typing otherwise. Checked both ways in game: a normal
+  read works; with the console already open, `readpos` returns `fail console 3` and types nothing.
+- Runner options: `-StepIn` (0 = press E from the start), `-BackOff`, `-Only 13,15`. Results record the prompt verb.

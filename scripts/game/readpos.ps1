@@ -6,7 +6,9 @@ New-Item -ItemType Directory -Force $Work | Out-Null
 $env:LEGACY = '1'
 $i = (Join-Path $PSScriptRoot 'input.ps1')
 $py = $(if ($env:FO4SF_PYTHON) { $env:FO4SF_PYTHON } else { 'python' })
-powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq 'key:grave|wait:900|type:player.getpos x|key:enter|wait:350|type:player.getpos y|key:enter|wait:350|type:player.getpos z|key:enter|wait:700' | Out-Null
+powershell -NoProfile -ExecutionPolicy Bypass -File $PSScriptRoot\console_open.ps1 -Work $Work | Out-Null
+if ($LASTEXITCODE -ne 0) { "fail console $LASTEXITCODE"; exit 3 }   # never type unless the console is confirmed open
+powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq 'type:player.getpos x|key:enter|wait:350|type:player.getpos y|key:enter|wait:350|type:player.getpos z|key:enter|wait:700' | Out-Null
 if ($LASTEXITCODE -ne 0) { "fail guard"; exit 2 }
 $cap = Join-Path $Work 'readpos_cap.png'; $prep = Join-Path $Work 'readpos_prep.png'
 powershell -NoProfile -ExecutionPolicy Bypass -File $PSScriptRoot\shot_region.ps1 -Out $cap | Out-Null

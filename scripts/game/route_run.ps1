@@ -2,7 +2,10 @@
 # usage: route_run.ps1 -Routes routes.json -Out <dir> [-First 0] [-Count 999]
 # Requires: Starfield in front, in the route's cell, console CLOSED. Every keystroke goes through input.ps1's foreground
 # guard (stops if anything else is in front). Results: <Out>\results.jsonl (one line per route), <Out>\r<k>.png.
-param([string]$Routes, [string]$Out, [int]$First = 0, [int]$Count = 999)
+param([string]$Routes, [string]$Out, [int]$First = 0, [int]$Count = 999, [int]$BackOff = 0, [string]$Only = '', [int]$StepIn = 350)
+# -StepIn <ms>: walk towards a door before looking for the prompt (0 = press E from the route start, outside the swing arc)
+# -BackOff <ms>: after E, walk backwards this long before crossing (gets out of the leaf's swing arc; one-sided blocks test)
+# -Only 13,15: run just these route indices
 $env:LEGACY = '1'
 if (-not $env:FO4SF_PYTHON) { $env:FO4SF_PYTHON = 'C:\Modding\venv-render\Scripts\python.exe' }   # OCR prep needs numpy
 $here = $PSScriptRoot
@@ -28,11 +31,15 @@ function Read-Pos {
 }
 
 $prevEnd = $null; $prevFar = $false
+$onlySet = @($Only.Split(',', [StringSplitOptions]::RemoveEmptyEntries) | ForEach-Object { [int]$_ })
 for ($k = $First;$k -lt [Math]::Min($list.Count, $First + $Count); $k++) {
+  if ($onlySet.Count -gt 0 -and $onlySet -notcontains $k) { continue }
   $r = $list[$k]
   $x, $y, $z = $r.start | ForEach-Object { $_.ToString($inv) }
   $h = $r.heading.ToString($inv)
-  $seq = "key:grave|wait:1000|type:player.setpos x $x|key:enter|wait:350|type:player.setpos y $y|key:enter|wait:350|" +
+  powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $here 'console_open.ps1') | Out-Null
+  if ($LASTEXITCODE -ne 0) { "console not confirmed open at route $k (code $LASTEXITCODE): stopping"; break }
+  $seq = "type:player.setpos x $x|key:enter|wait:350|type:player.setpos y $y|key:enter|wait:350|" +
          "type:player.setpos z $z|key:enter|wait:350|type:player.setangle z $h|key:enter|wait:350|" +
          "type:player.setangle x 10|key:enter|wait:400|key:grave|wait:1800"   # x 0 points the camera at the floor
   powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq $seq | Out-Null
@@ -41,6 +48,7 @@ for ($k = $First;$k -lt [Math]::Min($list.Count, $First + $Count); $k++) {
   # stuck looking at the floor, so E never reached a door). Look fully up (clamps), then down a calibrated amount.
   powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq 'move:0,-2500|wait:250|move:0,-2500|wait:300|move:0,700|wait:500' | Out-Null
   $p0 = Read-Pos
+  if ("$p0" -like 'fail console*') { "start read: $p0 at route ${k}: stopping"; break }
   # we just teleported there: a start read far from the target is an OCR misread (Parsons: "-0.00 6.40 0.00"), read again
   $v0 = "$p0".Trim().Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
   $far = $true
@@ -58,10 +66,10 @@ for ($k = $First;$k -lt [Math]::Min($list.Count, $First + $Count); $k++) {
       "start read $p0 equals last end at route ${k}: console out of step, stopping"; break
     }
   }
-  $prompt = $null
+  $prompt = $null; $verb = $null
   if ($r.use) {
     # step closer first: the activation prompt only appears within reach, and placements differ by ~1 m from the plane
-    powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq 'hold:w,350|wait:500' | Out-Null
+    if ($StepIn -gt 0) { powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq "hold:w,$StepIn|wait:500" | Out-Null }
     # the levelled pitch is not reproducible between sessions (Parsons: aimed over the door, no prompt, E did nothing):
     # tilt down in small steps until the activation prompt is on screen. The last _pre shot is the evidence.
     $pre = Join-Path $Out "r${k}_pre.png"
@@ -71,14 +79,21 @@ for ($k = $First;$k -lt [Math]::Min($list.Count, $First + $Count); $k++) {
       if ((& $env:FO4SF_PYTHON (Join-Path $here 'prompt_visible.py') $pre) -eq 'yes') { $prompt = $true; break }
       powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq 'move:0,150|wait:450' | Out-Null
     }
-    powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq 'key:e|wait:2200' | Out-Null
+    # only open a closed door: a door left open by an earlier route shows CLOSE (or no prompt through the opening), and
+    # E would shut it in the player's face. The verb is recorded with the result.
+    $verb = ''
+    if ($prompt) { $verb = ((powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $here 'ocr.ps1') -Image $pre -X 940 -Y 198 -W 100 -H 30 -Scale 3) -join ' ').Trim() }
+    if ($verb -match 'OPEN') { powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq 'key:e|wait:2200' | Out-Null }
     powershell -NoProfile -ExecutionPolicy Bypass -File $shot -Out (Join-Path $Out "r${k}_open.png") | Out-Null
+    if ($BackOff -gt 0) { powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq "hold:s,$BackOff|wait:400" | Out-Null }
   }
-  powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq "hold:w,$($r.walk_ms)|wait:700" | Out-Null
+  $walk = $r.walk_ms + $(if ($r.use) { $BackOff } else { 0 })   # walk back the distance we backed off
+  powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq "hold:w,$walk|wait:700" | Out-Null
   if ($LASTEXITCODE -ne 0) { "guard stopped at route $k"; break }
   $p1 = Read-Pos
+  if ("$p1" -like 'fail console*') { "end read: $p1 at route ${k}: stopping"; break }
   powershell -NoProfile -ExecutionPolicy Bypass -File $shot -Out (Join-Path $Out "r$k.png") | Out-Null
-  $line = @{ index = $k; ref = $r.ref; kind = $r.kind; start_read = $p0; end_read = $p1; prompt = $prompt } | ConvertTo-Json -Compress
+  $line = @{ index = $k; ref = $r.ref; kind = $r.kind; start_read = $p0; end_read = $p1; prompt = $prompt; verb = $verb } | ConvertTo-Json -Compress
   Add-Content $res $line
   $prevEnd = $p1; $prevFar = $far
   "route $k $($r.kind) $($r.ref): $p0 -> $p1"
