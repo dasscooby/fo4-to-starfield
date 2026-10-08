@@ -27,8 +27,14 @@ one in a sitting.
 
 ## Using an AI agent
 
-Point it at `docs/PLAN.md`, `docs/WORK-PACKAGES.md` and `docs/JOURNAL.md`, and ask it to do the first
-`ready` package, add tests, run the guard, and update the journal. Please note AI assistance in the PR.
+Read [team status and file ownership](docs/CODEX-HANDOFF.md) first. Claude, Codex and Grok must check
+[new or updated GitHub issues](https://github.com/dasscooby/fo4-to-starfield/issues) and relevant comments
+before each work session, choosing the next task, or declaring a fix complete. The owner uses issues
+as the shared inbox for bug reports and priorities. Follow the active milestone and coordinate ownership.
+
+Reference issue numbers in fixes and keep evidence concise. Offline checks do not establish in-game
+acceptance. Keep full discussions in issues instead of copying them into the handoff. Add appropriate
+synthetic tests, run the guard, and note AI assistance in the PR.
 
 ## Style
 
