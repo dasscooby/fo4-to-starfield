@@ -387,3 +387,19 @@ same vertices (convex hull, coplanar points merged into one polygon, wound count
 Starfield hulls), then planes and links are recomputed. Test: a cube plus an interior point gives 6 closed outward quads.
 Coverage 3,012 native (+6). Left: 3 hulls that are probably flat, 16 merged SCOL meshes with the same junk shared-vertex
 index (2130), and 2 `hknpConvexShape` bodies. Staged only; not yet in game.
+
+## 2026-10-09: overnight routes: Vault 81 doors, Vault 114 (partial)
+
+- **Vault 81 stall doors** (corrected door routes: facing from the closed leaf, both sides): 1 of 3 doors passes from both
+  sides (1.25 m / 2.95 m through); the other two are BLOCKED from both sides (-0.4 to -0.6 m, i.e. stopped at the door).
+  ([pass](media/route-v81-stalldoor-pass.jpg))
+- **Vault 114** (24 of 47 routes ran before the user came back; run stopped):
+  - Stairs: 7 PASS (subway hall stairs, subway platform, cinder block, stairwell; rise 0.9-5 m)
+    ([subway stairs](media/route-v114-subway-stairs.jpg)).
+  - 2 STUCK: `IndCatStairsFull01` (rise 0.08) and `VltGearDoorStairs01` (1.41 of 3.22)
+    ([stuck](media/route-v114-catwalk-stuck.jpg)).
+  - 5 UNREAD (OCR). One "PASS" with an implausible 31 m rise must be treated as unread: the plausibility check has to cover
+    the scored rise too.
+  - Doors: stall doors and `SubDoor01Right` BLOCKED from both sides ([blocked](media/route-v114-stalldoor-blocked.jpg)).
+- Next: why these doors block, from the converted files (leaf swing, frame collision covering the opening), and the
+  two stuck staircases.
