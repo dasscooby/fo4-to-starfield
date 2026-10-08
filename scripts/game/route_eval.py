@@ -11,7 +11,7 @@ A start more than 3 m off in X/Y, or more than 2 m off in Z, is UNREAD: the rout
 A drop of more than 6 m after a matched start is FALL, including a door that opens onto the void.
 Any other move no walk of this length could make is UNREAD.
 Prints one line per route, a summary, and a both-sides door count.
-Exit code 1 unless every route is PASS and no load door was passed, walked through, or fallen through.
+Exit code 1 unless the file records results, every one is PASS, and no load door was passed, walked through, or fallen through.
 """
 import json
 import math
@@ -121,6 +121,15 @@ def door_rows(routes, results):
     return {"both": both, "one": one, "none": none, "load_fail": len(load_fail)}
 
 
+def finished(counts, rows, result_count):
+    """True only when every recorded route passed and no load door was crossed or fallen through.
+
+    An empty file is not a pass: Red Rocket has no stair or door routes, and a run that
+    writes nothing must not exit 0.
+    """
+    return result_count > 0 and set(counts) <= {"PASS"} and rows["load_fail"] == 0
+
+
 def main():
     routes = json.load(open(sys.argv[1], encoding="utf-8-sig"))["routes"]
     results = [json.loads(l) for l in open(sys.argv[2], encoding="utf-8-sig") if l.strip()]
@@ -133,8 +142,7 @@ def main():
     print("summary:", counts)
     rows = door_rows(routes, results)
     print("doors:", rows)
-    # A load door that passes on geometry is not a swing pass, and it must not exit 0.
-    sys.exit(0 if set(counts) <= {"PASS"} and rows["load_fail"] == 0 else 1)
+    sys.exit(0 if finished(counts, rows, len(results)) else 1)
 
 
 if __name__ == "__main__":

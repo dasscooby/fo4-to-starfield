@@ -112,3 +112,7 @@ class RouteEvalTests(unittest.TestCase):
         twice = evaluator.door_rows(routes, [dict(opened, index=0), dict(opened, index=0), dict(held, index=2)])
         self.assertEqual(twice["both"], 0)
         self.assertEqual(twice["one"], 1)
+        self.assertFalse(evaluator.finished({}, {"load_fail": 0}, 0))
+        self.assertTrue(evaluator.finished({"PASS": 2}, {"load_fail": 0}, 2))
+        self.assertFalse(evaluator.finished({"PASS": 1}, {"load_fail": 1}, 1))
+        self.assertFalse(evaluator.finished({"PASS": 1, "BLOCKED": 1}, {"load_fail": 0}, 2))
