@@ -142,6 +142,11 @@ def install(a):
     if plugins_existed:
         with open(pt, "rb") as f:
             plugins_original = f.read()
+    # Archive builds can be long; merge activation into the current list,
+    # not the preflight snapshot from before the build.
+    pl = plugins_original.decode("utf-8-sig").splitlines() if plugins_original is not None else []
+    pl_add = [] if f"*{PLUGIN}" in pl or PLUGIN in pl else [f"*{PLUGIN}"]
+    state["plugins_added"] = pl_add
     state["plugins_original"] = base64.b64encode(plugins_original).decode("ascii") if plugins_existed else None
     state["plugins_restore_pending"] = False
     write_manifest(man_path, state)
