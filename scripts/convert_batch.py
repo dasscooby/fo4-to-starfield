@@ -14,7 +14,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
-from fo4sf import convert_static, pipeline  # noqa: E402
+from fo4sf import ba2, convert_static, pipeline, sfcollision, sfnif  # noqa: E402
 
 
 def main():
@@ -24,6 +24,8 @@ def main():
     ap.add_argument("--content-resources", required=True)
     ap.add_argument("--texconv", required=True)
     ap.add_argument("--collision-template", required=True)
+    ap.add_argument("--starfield-data", default="",
+                    help="Starfield Data folder: enables opening doors (needs the vanilla door body as a keyframed donor)")
     ap.add_argument("--pattern", default=r"^meshes[\\/]setdressing[\\/]")
     ap.add_argument("--limit", type=int, default=20)
     ap.add_argument("--max-tris", type=int, default=20000, help="skip meshes with more triangles than this")
@@ -35,7 +37,12 @@ def main():
     t0 = time.time()
     src = pipeline.Fo4Archives(a.fo4_data)
     template = convert_static.collision_template_from_nif(open(a.collision_template, "rb").read())
-    conv = pipeline.Converter(src, a.staging, a.texconv, a.content_resources, template)
+    donor = None
+    if a.starfield_data:                          # opening doors: leaf body copied from a vanilla animated door
+        donor = sfcollision.physics_blob_from_nif(ba2.Ba2(os.path.join(a.starfield_data, "Starfield - Meshes01.ba2")).read(
+            sfnif.DOOR_TEMPLATE["nif"]))
+    conv = pipeline.Converter(src, a.staging, a.texconv, a.content_resources, template,
+                              rig_doors=donor is not None, door_physics_donor=donor)
     if a.cell_json:
         cell = json.load(open(a.cell_json, encoding="utf-8-sig"))
         wanted = set(a.types.split(","))

@@ -1,6 +1,6 @@
 # Doors: how they animate in each game (research, 2026-10-08)
 
-**Status: experimental, off by default** (`Converter(rig_doors=True)`). By default converted doors are static with no collision, so they never block a room.
+**Status: working** (2026-10-08). Hinged FO4 doors open and close in game. Turn it on with `convert_batch.py --starfield-data <Starfield Data>`, which needs the vanilla door body as a donor. Without it, doors stay static and walk-through.
 
 ## Fallout 4
 Door NIFs (`meshes\SetDressing\Doors\*`, 28 sampled) carry their own keyframe animation:
@@ -77,3 +77,20 @@ Next:
 2. Then test separately: vanilla NIF + our record, our NIF + the vanilla record (via an ESM copy), and the keyframed leaf.
 3. Put the leaf in FO4's *closed* pose: the hinge rotation at the end of the FO4 `Close` sequence (NiTransformData), not
    its rest pose.
+
+## Attempt 3 (2026-10-08): it works
+
+A one-door test cell (`FO4PORT_DOORTEST=<door editor id>` in PluginSpike) holds a vanilla 8x8 m platform, the converted door,
+vanilla door 0AA24A 3 m to the side, and a COC marker. With it, scripted aiming is no longer a problem.
+
+**The fix was the keyframed leaf body** (`sfcollision.keyframed`). A body cloned from a static prop pins its node, so the
+animation could not move the leaf.
+- Test cell: the leaf swings open on E ([screenshot](../media/door-testcell-swing.jpg)).
+- Hotel Rexford: the door is closed at rest, swings into the bathroom on E, and the player walks through
+  ([screenshot](../media/door-rexford-opens.jpg)).
+
+Known limits:
+- The swing angle, direction and speed come from the Akila template, not from the FO4 door.
+- The static frame part (`Frame` node) has no collision.
+- Open/close sounds are not set.
+- Sliding vault doors and elevators are excluded (`NOT_HINGED_RE`). They need a sliding template.

@@ -85,8 +85,8 @@ class Converter:
                  no_collision_pattern: str = r"^meshes[\\/](architecture|interiors)[\\/]", rig_doors: bool = False,
                  door_physics_donor: Optional[bytes] = None):
         self.src, self.staging, self.texconv = src, staging, texconv_exe
-        # rig_doors: experimental. Hinged doors become activatable DOOR NIFs, but the leaf does not swing yet and blocks the
-        # doorway (docs/spikes/WP-doors-research.md), so by default doors stay static and walk-through.
+        # rig_doors: hinged doors become DOOR NIFs that open (needs door_physics_donor: without a keyframed leaf body the leaf
+        # is pinned and blocks the doorway). Off by default because the donor comes from the Starfield install.
         self.rig_doors = rig_doors
         self.door_physics_donor = door_physics_donor   # body of a vanilla door leaf (sfcollision.physics_blob_from_nif)
         self.template_mat = cm.read_template(content_resources)
@@ -362,7 +362,7 @@ class Converter:
             use_box = self.collision_template is not None and not soft
             coll_report = {}
             files = None
-            if self.rig_doors and DOOR_RE.search(nif_name) and not NOT_HINGED_RE.search(nif_name) and nif.door_hinge(src):
+            if self.rig_doors and self.door_physics_donor is not None and DOOR_RE.search(nif_name) and not NOT_HINGED_RE.search(nif_name) and nif.door_hinge(src):
                 try:                                     # hinged door: rigged like the vanilla template door so it opens
                     files, offset, bounds = convert_static.convert_door(raw, out_name, mats,
                                                                 collision_template=self.collision_template,

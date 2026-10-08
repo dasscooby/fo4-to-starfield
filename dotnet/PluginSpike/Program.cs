@@ -182,6 +182,34 @@ foreach (var cellPath in args.Skip(2))
     Console.WriteLine($"cell {cellName} {cell.FormKey}: placed {placed} references + {lights} lights ({disabled} initially disabled), skipped {skipped}");
 }
 
+// ---- door test cell (FO4PORT_DOORTEST=<door editor id>) ------------------------------------------------------------------
+// One 8x8 m vanilla platform, the converted door at the origin (facing +X like an FO4 door with no rotation), the vanilla
+// Akila door 0AA24A 3 m to the side for comparison, and a COC marker 1.5 m in front of the converted door, facing it.
+if (Environment.GetEnvironmentVariable("FO4PORT_DOORTEST") is string testDoor)
+{
+    var cell = new Cell(Id("CELL:FO4Port_DoorTest"), release) { EditorID = "FO4Port_DoorTest", Flags = Cell.Flag.IsInteriorCell };
+    cell.LightingTemplate.SetTo(new FormKey(sfEsm, 0x006658));
+    cell.ImageSpace.SetTo(new FormKey(sfEsm, 0x122393));
+    cell.EnvironmentMap = "Data\\Textures\\cubemaps\\blackcube.dds";
+    var entry = items.First(i => i.editorId == testDoor);
+    var (doorKey, doorOff) = bySource[entry.source.Replace('/', '\\')];
+    PlacedObject P(string key, FormKey b, P3Float pos, P3Float rot) =>
+        new(Id("REFR:FO4Port_DoorTest:" + key), release) { Base = new FormLinkNullable<IPlaceableObjectGetter>(b), Position = pos, Rotation = rot };
+    var zero = new P3Float(0, 0, 0);
+    cell.Temporary.Add(P("floor", new FormKey(sfEsm, 0x050776), new P3Float(-2, 0, 0), zero));  // NA_Transit_PlatformA_Str08x08_01: x -2..6, top z 0
+    cell.Temporary.Add(P("door", doorKey, doorOff, zero));
+    cell.Temporary.Add(P("vanilla", new FormKey(sfEsm, 0x0AA24A), new P3Float(0, 3, 0), zero));
+    cell.Temporary.Add(P("coc", new FormKey(sfEsm, 0x000032), new P3Float(-1.5f, 0, 0.1f), new P3Float(0, 0, (float)(Math.PI / 2))));
+    cell.Temporary.Add(P("light", new FormKey(sfEsm, 0x03D38C), new P3Float(-1, 1.5f, 3), zero));
+    var cid = cell.FormKey.ID;
+    var block = new CellBlock { BlockNumber = (int)(cid % 10), GroupType = GroupTypeEnum.InteriorCellBlock };
+    var sub = new CellSubBlock { BlockNumber = (int)((cid / 10) % 10), GroupType = GroupTypeEnum.InteriorCellSubBlock };
+    sub.Cells.Add(cell);
+    block.SubBlocks.Add(sub);
+    mod.Cells.Records.Add(block);
+    Console.WriteLine($"door test cell {cell.FormKey} with {testDoor}");
+}
+
 mod.ModHeader.Stats.NextFormID = next;
 var path = Path.Combine(outDir, modKey.FileName);
 var sfData = Environment.GetEnvironmentVariable("STARFIELD_DATA") ?? throw new InvalidOperationException("set STARFIELD_DATA to the Starfield Data folder");

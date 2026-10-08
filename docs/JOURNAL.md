@@ -162,3 +162,10 @@ A vanilla Starfield door swings inside our converted cell, so the remaining prob
 `sfcollision.keyframed()` turns the leaf's static box into a vanilla-style keyframed body. With it the doorway is passable
 again and the leaf rests in FO4's rest pose, but I could not aim scripted input at it to confirm a swing. Next: a
 one-door test cell with a fixed spawn. Rigging stays off by default; the deployed build has walk-through static doors.
+
+## 2026-10-08: doors open
+
+FO4 hinged doors now open and close in Starfield (24 door models in our 8 cells). The missing piece was the leaf's
+collision body: it must be keyframed like a vanilla door leaf, not static. Verified in a one-door test cell and in Hotel
+Rexford: closed at rest, swings on E, walk through ([screenshot](media/door-rexford-opens.jpg)). Enable it with
+`convert_batch.py --starfield-data`. Next for doors: sounds, frame collision, and a sliding template for vault doors.

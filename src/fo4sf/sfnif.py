@@ -157,6 +157,7 @@ def build_static_nif(node_name: bytes, shapes: List[StaticShape], bs_version: in
 # Vanilla hinged door used as the animation template (DOOR 0AA24A AK_Ext_Bld_WallA_DoorA_01_Alt02). Its skeleton.rig stores
 # the bind pose of these nodes, so a converted door must use the same node names and the same hinge position.
 DOOR_TEMPLATE = {
+    "nif": "meshes/architecture/city/akila/animated/doors/ak_ext_bld_walla_doora_01/ak_ext_bld_walla_doora_01.nif",
     "anim_graph": "AnimTextData\\Tables\\Graphs\\SimpleOpenClose01.agx",
     "skeleton": "architecture\\city\\akila\\animated\\doors\\ak_ext_bld_walla_doora_01\\characterassets\\skeleton.rig",
     "animations": "architecture\\city\\akila\\animated\\doors\\ak_ext_bld_walla_doora_01\\animations",
