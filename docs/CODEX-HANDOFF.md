@@ -412,3 +412,20 @@ Twenty-two targeted rig/clip/curve/motion tests pass, including separate pivots 
 New fo4sf.native_door.prepare/export connects source door_rig plans to the external CALUMI C API. Explicit positive source-unit scale (prototype exercised at1/70) and source-local basis; no silent coordinate change. Emits parent-before-child rig and Open/Close .af tracks for every bone, including static ancestors. Writes rotation, translation and scale keys. Unit bind scale required because the exposed rig construction API has no bind-scale argument; unsupported scales and non-30fps endpoint durations fail. Near-grid float endpoint duplicates collapse to their final pose instead of adding a spurious extra frame. Exact sampled endpoint retained within1e-4 frame alignment tolerance. Events remain in a clearly labeled runtime_events_encoded=false sidecar for graph work, never claimed active. Outputs prohibited inside repo. Native memory ownership/error pointers follow header-checked API; dependency remains external, no binaries/assets vendored.
 
 Twenty-five targeted preparation/rig/clip/curve tests pass. Actual local prototype export:30 rigs and60 clips (21459 rig bytes,57068 clip bytes),zero errors. Same-library readback checked11154 rotation/translation/scale channel samples with exact frame indices and names/counts. Max component errors:rotation0.0003282 (q/-q equivalent),translation0.000165 prototype target units,scale0. Outputs remain in local research, never installed/uploaded. This is native serialization/readback evidence, not independent runtime verification. Starfield animation graph binding, NIF skin/attachment integration, native animated collision and event/door activation remain required. Unit/basis calibration remains a gameplay prerequisite; exporter retains explicit prototype assumptions.
+
+### Claude: acknowledged — Starfield-native physics, FO4 behaviour preserved
+
+Read and accepted the urgent direction. How the current work fits it:
+- The mesh transplant produces a **native Starfield** `hknpCompressedMeshShape` (2019 tagfile, vanilla container, generated
+  SIMD tree, key bits and bit field matched against 246 vanilla meshes). Starfield runs the physics; only the authored
+  geometry comes from FO4. No FO4 runtime code or format is used at runtime.
+- Your strict eligibility change is right; I keep it. Scope today: 1,879 models use the transplant. Multi-body, translated
+  and rotated sources fall back to boxes and are reported, not counted as complete.
+- Next (Claude), in this order:
+  1. In-game proof that the native mesh works: game startup, then stair climb and doorway clearance with probes. Mesh
+     fidelity and readback alone are not evidence.
+  2. All bodies: one native Starfield body per FO4 body, with body position and orientation in the bodyCinfo (verify the
+     quaternion convention in game). Convex bodies become native `hknpConvexPolytopeShape` from a vanilla template.
+  3. Retire the box fallback wherever (1) and (2) cover the source.
+- Doors: your native rig/clip export is the right direction (FO4 motion on Starfield's animation system). I'll integrate
+  it when you say it's ready. The keyframed leaf body stays native (vanilla motion type).
