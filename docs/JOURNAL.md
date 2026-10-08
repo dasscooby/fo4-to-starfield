@@ -296,3 +296,22 @@ player stands on native floors.
   hknpDynamicCompoundShape 266 (Codex's compounds work), hull topology 60, sphere 9, and an IndexError in 44 (to fix).
 - **Doorway (Hotel Rexford door 10AD60) with the native build:** closed at rest, opens on E, and the player walks through
   into the bathroom (OCR x 46.90; the door is at 44.32). ([sheet](media/rexford-door-native.jpg))
+
+## 2026-10-08: route runner (owner issues #29, #30)
+
+A movement test that FO4 data scores, replacing "press W, read once".
+- `scripts/game/routes.py` builds routes per cell from FO4's own collision. Stairs use the `L_STAIRHELPER` ramp body, or
+  the 20-50 degree collision triangles if there is none: start 0.8 m before the low end, face the high end, expect a rise.
+  Doors start 1.6 m in front, press E, and must end 1 m past the door plane.
+- `route_run.ps1` walks each route (guarded input, OCR position, screenshot). `route_eval.py` scores PASS / STUCK / FALL /
+  BLOCKED / UNREAD and rejects impossible OCR reads.
+- Lessons from the first runs, all bugs in the test rather than the port:
+  - a long walk crosses mirrored flights (up one, down the other), so walk time is sized to the run at running speed
+    (~4.6 m/s);
+  - OCR can drop a minus sign or shift columns;
+  - the repo's `readpos` needs the numpy venv (`FO4SF_PYTHON`).
+- **Prydwen, first 12 stair routes (PryCatwalkStairs01 x10 at 90/180/270 degrees, PryCatwalkStairsEnt01):** 9 PASS (each
+  climbs 1.87 m to the landing; the 180-degree flight 2.6 m). 2 UNREAD (OCR misreads x around +0.5, the same end point as
+  the passes). 1 harness flake (the console reply was not printed before the screenshot); rerun needed. No STUCK and no
+  FALL attributable to collision. ([foot](media/route-prydwen-stair-foot.jpg), [top](media/route-prydwen-stair-top.jpg))
+- Collision decoder: degenerate primitives and invalid shared indices are skipped or rejected (the merged-SCOL IndexErrors).
