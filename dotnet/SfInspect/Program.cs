@@ -58,6 +58,23 @@ switch (args[1])
                 }
         }
         break;
+    case "celldump":
+        foreach (var c in cells.Where(c => string.Equals(c.EditorID, args[2], StringComparison.OrdinalIgnoreCase)).Take(1))
+            foreach (var p in c.GetType().GetProperties())
+            {
+                object? v; try { v = p.GetValue(c); } catch { continue; }
+                if (v == null || p.Name is "Temporary" or "Persistent" or "NavigationMeshes") continue;
+                var s = v.ToString() ?? ""; if (s.Length > 140) s = s.Substring(0, 140);
+                Console.WriteLine($"   {p.Name} = {s}");
+            }
+        break;
+    case "imgs":
+        {
+            var useCount = cells.Where(c => !c.ImageSpace.IsNull).GroupBy(c => c.ImageSpace.FormKey).ToDictionary(g => g.Key, g => g.Count());
+            foreach (var i in mod.ImageSpaces.OrderByDescending(i => useCount.GetValueOrDefault(i.FormKey)).Take(30))
+                Console.WriteLine($"{useCount.GetValueOrDefault(i.FormKey),5}  {i.FormKey}  {i.EditorID}");
+        }
+        break;
     case "lights":
         foreach (var l in mod.Lights.Where(l => (l.EditorID ?? "").Contains(args[2], StringComparison.OrdinalIgnoreCase)).Take(40))
             Console.WriteLine($"{l.EditorID}  {l.FormKey}  radius={l.Radius}  color={l.Color}  model={l.Model?.File}");

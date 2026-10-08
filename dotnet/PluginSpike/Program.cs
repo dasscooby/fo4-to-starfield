@@ -53,6 +53,18 @@ foreach (var (editorId, model, source) in items)
 }
 Console.WriteLine($"{items.Count} statics");
 
+// Optional per-cell lighting overrides: <output dir>/lighting.json = { "<cell>": { "LIGHTING_TEMPLATE": "06BCF8", ... },
+// "*": { ...defaults for every cell... } }. Keys: LIGHTING_TEMPLATE, IMAGE_SPACE, OMNI_LIGHT, LIGHT_MERGE_M.
+// Lookup order: cell entry, "*" entry, environment variable, built-in default.
+var lightCfgPath = Path.Combine(outDir, "lighting.json");
+var lightCfg = File.Exists(lightCfgPath)
+    ? JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, string>>>(File.ReadAllText(lightCfgPath))!
+    : new Dictionary<string, Dictionary<string, string>>();
+string Setting(string cell, string key, string fallback) =>
+    lightCfg.TryGetValue(cell, out var c) && c.TryGetValue(key, out var v) ? v
+    : lightCfg.TryGetValue("*", out var d) && d.TryGetValue(key, out var w) ? w
+    : Environment.GetEnvironmentVariable(key) ?? fallback;
+
 // ---- cells ------------------------------------------------------------------------------------------------------------
 P3Float Pos(JsonElement p) => new(p[0].GetSingle() / UnitsPerMetre, p[1].GetSingle() / UnitsPerMetre, p[2].GetSingle() / UnitsPerMetre);
 P3Float Rot(JsonElement o) => new(o[0].GetSingle(), o[1].GetSingle(), o[2].GetSingle());
@@ -61,12 +73,18 @@ foreach (var cellPath in args.Skip(2))
 {
     using var cdoc = JsonDocument.Parse(File.ReadAllText(cellPath));
     var root = cdoc.RootElement;
-    var cellName = "FO4Port_" + root.GetProperty("cell").GetString();
+    var src4 = root.GetProperty("cell").GetString()!;
+    var cellName = "FO4Port_" + src4;
     var cell = new Cell(Id("CELL:" + cellName), release) { EditorID = cellName, Flags = Cell.Flag.IsInteriorCell };
-    var ltHex = Environment.GetEnvironmentVariable("LIGHTING_TEMPLATE") ?? "06BCF8";   // KreetBase01LGTtemplate (underground)
+    var ltHex = Setting(src4, "LIGHTING_TEMPLATE", "06BCF8");   // KreetBase01LGTtemplate (underground); ShipInteriorLT 006658 is brighter
     cell.LightingTemplate.SetTo(new FormKey(sfEsm, Convert.ToUInt32(ltHex, 16)));
+    // exposure + reflections like the vanilla underground interior DR017UndergroundInterior (25CAA7): without these the cell
+    // reflects a bright default sky and auto-exposure washes everything out
+    cell.ImageSpace.SetTo(new FormKey(sfEsm, Convert.ToUInt32(Setting(src4, "IMAGE_SPACE", "122393"), 16)));
+    cell.EnvironmentMap = Environment.GetEnvironmentVariable("ENV_MAP") ?? "Data\\Textures\\cubemaps\\blackcube.dds";
     var cocMarker = new FormKey(sfEsm, 0x000032);                                        // COCMarkerHeading
-    var omni = new FormKey(sfEsm, 0x0027BB);                                             // LGT_SpaceStation_Omni_NS_Cool_001_1k
+    var omni = new FormKey(sfEsm, Convert.ToUInt32(Setting(src4, "OMNI_LIGHT", "03D38C"), 16)); // LGT_ShipInterior_Omni_NS_Neutral_2k
+    var merge = float.Parse(Setting(src4, "LIGHT_MERGE_M", "3"), System.Globalization.CultureInfo.InvariantCulture);
     var lit = new List<P3Float>();
     int lights = 0, placed = 0, skipped = 0, disabled = 0;
     foreach (var r in root.GetProperty("refs").EnumerateArray())
@@ -81,8 +99,9 @@ foreach (var cellPath in args.Skip(2))
         }
         else if (r.GetProperty("type").GetString() == "Light")
         {
+            if (Environment.GetEnvironmentVariable("FO4PORT_NO_LIGHTS") == "1") continue;
             var pos = Pos(r.GetProperty("pos"));
-            if (lit.Any(q => Math.Abs(q.X - pos.X) < 5 && Math.Abs(q.Y - pos.Y) < 5 && Math.Abs(q.Z - pos.Z) < 5)) continue;
+            if (lit.Any(q => Math.Abs(q.X - pos.X) < merge && Math.Abs(q.Y - pos.Y) < merge && Math.Abs(q.Z - pos.Z) < merge)) continue;
             lit.Add(pos);
             obj = new PlacedObject(Id($"REFR:{cellName}:{src}"), release) { Base = new FormLinkNullable<IPlaceableObjectGetter>(omni), Position = pos };
             lights++;
