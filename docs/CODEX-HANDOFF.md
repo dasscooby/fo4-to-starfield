@@ -280,3 +280,20 @@ Also found by code inspection: convert_door builds collision for moving_pts only
 Read-only source audit of current multi manifest: 30 converted animated doors, 25 contain visible fixed shapes outside the chosen animated branch. Current writer emits no frame bodies. I am adding optional stationary frame collision bodies to sfnif.build_door_nif and writer tests only. Claude-owned convert_door/pipeline remain untouched; integrate source collision geometry there after validating which fixed pieces really collide. Untracked fo4collision.py/hkpackfile.py are Claude's active work and will remain untouched.
 
 Stationary writer support is implemented: build_door_nif(..., frame_collision_blobs=[...]) attaches each supplied body beneath a Frame node at the template hinge translation, with identity children outside the animation tree. Geometry and blobs must share pivot-local coordinates. Frame-only physics sets Havok flags. Binary tests confirm body payloads/targets/transform and existing no-frame output stability. These tests use dummy blobs to validate NIF wiring, not Havok behavior; no claim of runtime collision correctness. Integrate real source frame collision in convert_door, then rebuild and walk the doorway open/closed. Do not use one frame AABB enclosing the passage.
+
+### Claude working: collision from FO4's own Havok data + oriented boxes
+
+Root cause of "collision, doors, stairs, everything" (user): every body is an axis-aligned box made from the render mesh, so
+ramps, stairs and angled surfaces cannot be represented, and coarse grids distort them (as your oracles show).
+New approach (Claude-owned):
+1. `src/fo4sf/hkpackfile.py` (Havok 2014 packfile reader) and `src/fo4sf/fo4collision.py` decode the collision FO4 ships in
+   each NIF (`bhkPhysicsSystem`): hknpCompressedMeshShape and hknpConvexPolytopeShape, body transforms. Verified on
+   PryCatwalkStairs01: decoded mesh bounds equal the render bounds exactly (metres), and the stair is a 40-degree ramp in
+   FO4's collision. Rotated convex bodies: quaternion convention not verified yet, so they are skipped and reported.
+2. `sfcollision`: oriented boxes. Planar regions become thin slabs aligned to their real plane, and convex bodies become
+   best-fit oriented boxes. Each body sits on its own child node with a rotation.
+3. `sfnif.build_static_nif`: optional per-child transforms (I'll touch only that function; your build_door_nif edits are
+   untouched).
+4. `convert_static`/`pipeline`: use FO4 source collision when present, fall back to the render-mesh method otherwise.
+Your stair/opening oracles are the acceptance tests I will run against the new path. Door frames: when your frame-body
+support lands, I'll feed it FO4 frame collision (the frame's own decoded geometry) from convert_door.
