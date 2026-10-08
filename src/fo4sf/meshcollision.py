@@ -16,6 +16,7 @@ install at conversion time, never shipped): its TYPE section, physics system, ma
 data arrays, sections and trees come from FO4. Starfield's optional SIMD tree is left out (hasSimdTree = false).
 """
 import struct
+import math
 from typing import Dict, List, Optional, Tuple
 
 from . import hkpackfile, hktagfile
@@ -84,20 +85,37 @@ def _field(tf: hktagfile.Tagfile, type_idx: int, name: str) -> hktagfile.Field:
 
 
 def _fo4_mesh_body(p: hkpackfile.Packfile):
-    """(data object offset, body position) of the first unrotated compressed-mesh body, or None."""
+    """Locate the single supported body; never discard additional bodies.
+
+    Unsupported source systems raise so the converter records its fallback.
+    Convex-only single-body systems return None for the separate convex path.
+    """
     from . import fo4collision as fc
     classes = dict(p.objects())
-    sysobj = next(o for o, c in classes.items() if c == "hknpPhysicsSystemData")
-    at, n = p.array(sysobj + fc.SYS_BODIES)
-    for k in range(n):
-        b = at + fc.BODY_SIZE * k
-        shape = p.pointer(b)
-        if classes.get(shape) != "hknpCompressedMeshShape":
-            continue
-        if any(abs(x) > 1e-4 for x in p.unpack("<3f", b + fc.BODY_ROT)):
-            continue
-        return p.pointer(shape + fc.CMS_DATA), p.unpack("<3f", b + fc.BODY_POS)
-    return None
+    systems = [o for o, c in classes.items() if c == "hknpPhysicsSystemData"]
+    if len(systems) != 1:
+        raise hkpackfile.PackfileError("mesh transplant requires one source physics system")
+    at, n = p.array(systems[0] + fc.SYS_BODIES)
+    if n > 1:
+        raise hkpackfile.PackfileError(f"mesh transplant cannot preserve all {n} source collision bodies")
+    if n < 0 or (n and at is None):
+        raise hkpackfile.PackfileError("invalid source collision body array")
+    if n == 0:
+        return None
+    shape = p.pointer(at)
+    if classes.get(shape) != "hknpCompressedMeshShape":
+        return None
+    rotation = p.unpack("<4f", at + fc.BODY_ROT)
+    if (not all(math.isfinite(x) for x in rotation) or
+            any(abs(x) > 1e-4 for x in rotation[:3]) or abs(abs(rotation[3]) - 1) > 1e-4):
+        raise hkpackfile.PackfileError("mesh transplant cannot preserve source body rotation")
+    pos = p.unpack("<3f", at + fc.BODY_POS)
+    if not all(math.isfinite(x) for x in pos) or any(abs(x) > 1e-5 for x in pos):
+        raise hkpackfile.PackfileError("mesh transplant cannot preserve source body translation")
+    data = p.pointer(shape + fc.CMS_DATA)
+    if data is None:
+        raise hkpackfile.PackfileError("compressed mesh body has no data")
+    return data, pos
 
 
 def _convert_section(fo4: bytes) -> bytearray:
@@ -117,7 +135,8 @@ def _convert_section(fo4: bytes) -> bytearray:
 
 def transplant(fo4_blob: bytes, sf_template_blob: bytes) -> Optional[bytes]:
     """Starfield bhkPhysicsSystem blob holding FO4's compressed mesh collision, or None if the FO4 blob has no unrotated
-    mesh body (convex-only collision is handled elsewhere). Body translations are not supported (returns None)."""
+    mesh body (convex-only collision is handled elsewhere). Unsupported multi-body systems or body transforms raise
+    PackfileError so the caller records an explicit fallback; no source bodies are silently omitted."""
     p = hkpackfile.Packfile(fo4_blob)
     found = _fo4_mesh_body(p)
     if found is None:
