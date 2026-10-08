@@ -5,13 +5,13 @@ claim that independent leaves can share the vanilla single-hinge animation.
 """
 import struct
 import base64
-from . import nif
+from . import nif, animation_curves
 
 
 def transform_track(source, index):
-    """Retain bind values and opaque source keys without guessing interpolation.
+    """Retain bind values, raw keys and decoded curves without resampling.
 
-    NiTransformData bytes still require a dedicated curve decoder/target emitter.
+    Decoded curves still require a target animation emitter.
     Local generated reports contain source animation data and must not be published.
     """
     if index == -1:
@@ -33,6 +33,7 @@ def transform_track(source, index):
             raise nif.NifError("invalid door transform-data link")
         result["source_keys"] = {"type": "NiTransformData", "encoding": "base64",
                                  "data": base64.b64encode(source.blocks[data]).decode("ascii")}
+        result["decoded_keys"] = animation_curves.decode(source.blocks[data])
     return result
 
 

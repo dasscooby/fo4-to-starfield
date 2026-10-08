@@ -23,7 +23,7 @@ def fixture():
 class DoorMotionTests(unittest.TestCase):
     def test_bind_values_and_source_keys_preserved(self):
         f = fixture()
-        keys = struct.pack("<II5f", 1, 1, 0, 1, 0, 0, 0)
+        keys = struct.pack("<II5fII", 1, 1, 0, 1, 0, 0, 0, 0, 0)
         data = f.add_block("NiTransformData", keys)
         interp = f.add_block("NiTransformInterpolator", struct.pack("<8fi", 1, 2, 3, 1, 0, 0, 0, 2, data))
         result = door_motion.transform_track(f, interp)
