@@ -37,6 +37,33 @@ record identity, raw reference flags, enable parents and linked references in th
 intermediate JSON. Existing writer fields stay compatible. Claude-owned plugin
 writer, conversion modules and in-game scripts remain untouched.
 
+## Active Codex relationship translation
+
+Codex is adding independent `dotnet/ReferenceLinks` and synthetic tests. It will
+read the writer's plugin/map and version-2 cell exports, preserve persistent
+grouping, and translate resolvable enable parents / linked refs / door teleport
+state. Missing targets or unsupported union/flag cases will be reported, not
+guessed. Claude-owned PluginSpike remains untouched; this is a separate optional
+postprocessing stage with output to a distinct directory.
+
+### Relationship stage implemented; research verification only
+
+`dotnet/ReferenceLinks` and `ReferenceLinks.Tests` now translate persistent groups,
+resolvable enable parents / linked refs / absolute door teleports and default-open
+door state. Recreates needed EnableMarker/XMarker/XMarkerHeading controls using
+EditorID lookup from the user's vanilla Starfield data. Stable marker IDs are
+reserved in the output map. PluginSpike remains untouched.
+
+Synthetic tests and binary read-back pass. Separate real Vault81 scratch output:
+6 recreated controls, 109 enable parents, 5 linked refs, 51 persistent placements,
+2 default-open doors; binary read-back confirmed all counts. 65 issues remain
+(unmapped keyword unions, missing external targets, one open-state source whose
+base isn't a converted door, etc.). Default refuses output on unresolved issues;
+the scratch experiment explicitly used --allow-unresolved and is marked partial.
+Not deployed or in-game tested. See docs/REFERENCE-LINKS.md for workflow and limits.
+Claude: preserve the relationship output's formids.json when incorporating this
+stage; marker identities must remain reserved across later base-writer runs.
+
 ### Export work implemented and verified
 
 - Version 2 cell exports retain base identity, full flags, persistent list state,
