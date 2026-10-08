@@ -43,6 +43,27 @@ class DoorFrameCollisionTests(unittest.TestCase):
         self.assertEqual(nif.serialize(sfnif.build_door_nif(b"Door", [], [])),
                          nif.serialize(sfnif.build_door_nif(b"Door", [], [], frame_collision_blobs=[])))
 
+    def test_rotated_frame_body_keeps_pivot_local_transform(self):
+        rotation = (0, -1, 0, 1, 0, 0, 0, 0, 1)
+        f = nif.parse(nif.serialize(sfnif.build_door_nif(
+            b"Door", [], [], frame_collision_blobs=[b"framebod"],
+            frame_collision_transforms=[((1, 2, 3), rotation)])))
+        collision = next(b for i, b in enumerate(f.blocks) if f.type_of(i) == "bhkNPCollisionObject")
+        target = struct.unpack_from("<i", collision)[0]
+        translation, actual_rotation, scale = nif.world_transforms(f)(target)
+        for actual, expected in zip(translation, (1 + sfnif.DOOR_TEMPLATE["hinge_pos"][0], 2 + sfnif.DOOR_TEMPLATE["hinge_pos"][1], 3)):
+            self.assertAlmostEqual(actual, expected, places=6)
+        self.assertEqual(actual_rotation, rotation)
+        self.assertEqual(scale, 1)
+
+    def test_invalid_transforms_are_rejected(self):
+        invalid = [[], [((0, 0, 0), (1,) * 9)],
+                   [((float("nan"), 0, 0), (1, 0, 0, 0, 1, 0, 0, 0, 1))],
+                   [((0, 0, 0), (-1, 0, 0, 0, 1, 0, 0, 0, 1))]]
+        for transforms in invalid:
+            with self.subTest(transforms=transforms), self.assertRaises(ValueError):
+                sfnif.build_door_nif(b"Door", [], [], frame_collision_blobs=[b"framebod"], frame_collision_transforms=transforms)
+
 
 if __name__ == "__main__":
     unittest.main()

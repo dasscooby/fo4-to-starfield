@@ -172,22 +172,44 @@ DOOR_TEMPLATE = {
 def build_door_nif(node_name: bytes, static_shapes: List[StaticShape], moving_shapes: List[StaticShape],
                    template: dict = DOOR_TEMPLATE, bs_version: int = 173,
                    leaf_collision: Optional[bytes] = None,
-                   frame_collision_blobs: Optional[List[bytes]] = None) -> nifmod.NifFile:
+                   frame_collision_blobs: Optional[List[bytes]] = None,
+                   frame_collision_transforms: Optional[list] = None) -> nifmod.NifFile:
     """Door NIF laid out like the template door: root -> [frame node at the hinge position -> static shapes]
     and root -> anim root -> hinge (at the template's hinge position) -> moving shapes + attach nodes. All shape geometry is
     expected relative to the FO4 pivot, so both groups sit at the hinge position. Animated nodes carry NiStringExtraData
     "sgoKeep" like vanilla so they survive optimisation. leaf_collision (a bhkPhysicsSystem blob, hinge-local) goes on the
     node holding the moving shapes: activation ("Open") needs a body to hit.
     frame_collision_blobs are stationary bodies in the same pivot-local space,
-    attached below Frame outside the animation tree. Caller must preserve openings."""
+    attached below Frame outside the animation tree. Caller must preserve openings.
+    frame_collision_transforms optionally supplies (translation xyz, rotation
+    row-major 3x3) per body in pivot-local space; blobs are then body-local."""
     frame_collision_blobs = list(frame_collision_blobs or [])
+    import math
+    identity = (1, 0, 0, 0, 1, 0, 0, 0, 1)
+    transforms = list(frame_collision_transforms) if frame_collision_transforms is not None else [
+        ((0.0, 0.0, 0.0), identity) for _ in frame_collision_blobs]
+    if len(transforms) != len(frame_collision_blobs):
+        raise ValueError("frame collision transform count must match body count")
+    for translation, rotation in transforms:
+        if len(translation) != 3 or len(rotation) != 9 or not all(math.isfinite(v) for v in (*translation, *rotation)):
+            raise ValueError("frame collision transform must contain finite xyz and a 3x3 rotation")
+        for i in range(3):
+            for j in range(3):
+                dot = sum(rotation[3 * i + k] * rotation[3 * j + k] for k in range(3))
+                if abs(dot - (1 if i == j else 0)) > 1e-4:
+                    raise ValueError("frame collision rotation must be orthonormal")
+        a, b, c, d, e, g, h, j, k = rotation
+        if abs(a * (e * k - g * j) - b * (d * k - g * h) + c * (d * j - e * h) - 1) > 1e-4:
+            raise ValueError("frame collision rotation must preserve handedness")
     f = nifmod.NifFile(endian=1, user_version=12, bs_version=bs_version, author=b"\x00", unknown_int=0,
                        export_script=b"\x00", sf_data=b"\x7a\x00")
     s_matid = f.string_index(b"MaterialID")
     s_keep = f.string_index(b"sgoKeep")
     rot_scale = struct.pack("<9ff", 1, 0, 0, 0, 1, 0, 0, 0, 1, 1.0)
 
-    def node(name: bytes, pos, keep: bool, coll: Optional[bytes] = None) -> int:
+    node_rotations = {}
+
+    def node(name: bytes, pos, keep: bool, coll: Optional[bytes] = None, rotation=None) -> int:
         i = f.add_block("NiNode", b"")                     # filled in by finish()
         extra = [f.add_block("NiStringExtraData", struct.pack("<ii", s_keep, s_keep))] if keep else []
         c = -1
@@ -195,12 +217,14 @@ def build_door_nif(node_name: bytes, static_shapes: List[StaticShape], moving_sh
             c = f.add_block("bhkNPCollisionObject", struct.pack("<iHiI", i, 0x80, len(f.blocks) + 1, 0))
             f.add_block("bhkPhysicsSystem", struct.pack("<I", len(coll)) + coll)
         pending[i] = (f.string_index(name), extra, pos, [], c)
+        if rotation is not None:
+            node_rotations[i] = struct.pack("<9ff", *rotation, 1.0)
         return i
 
     def finish(i):
         name, extra, pos, kids, coll = pending[i]
         f.blocks[i] = (struct.pack("<iI", name, len(extra)) + struct.pack(f"<{len(extra)}i", *extra)
-                       + struct.pack("<iI", -1, 0xE) + struct.pack("<3f", *pos) + rot_scale
+                       + struct.pack("<iI", -1, 0xE) + struct.pack("<3f", *pos) + node_rotations.get(i, rot_scale)
                        + struct.pack("<iI", coll, len(kids)) + struct.pack(f"<{len(kids)}i", *kids))
 
     def shape(s: StaticShape) -> int:
@@ -235,7 +259,8 @@ def build_door_nif(node_name: bytes, static_shapes: List[StaticShape], moving_sh
         pending[root][3].append(frame)
         pending[frame][3].extend(shape(s) for s in static_shapes)
         for i, blob in enumerate(frame_collision_blobs):
-            pending[frame][3].append(node(b"FrameCollision%d" % i, (0.0, 0.0, 0.0), False, blob))
+            translation, rotation = transforms[i]
+            pending[frame][3].append(node(b"FrameCollision%d" % i, translation, False, blob, rotation))
     for i in pending:
         finish(i)
     f.footer = struct.pack("<II", 1, 0)
