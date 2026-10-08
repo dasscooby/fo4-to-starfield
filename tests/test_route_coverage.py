@@ -35,3 +35,12 @@ class RouteCoverageTests(unittest.TestCase):
     def test_a_stair_route_for_the_same_ref_does_not_count(self):
         routes = [{"kind": "stairs", "ref": "swing"}]
         self.assertEqual(coverage.unrouted(cell(), items(), routes), ["swing"])
+
+    def test_one_visit_is_not_both_sides(self):
+        routes = [
+            {"kind": "door", "ref": "swing", "model": "Doors\\Wood.nif"},
+            {"kind": "door", "ref": "swing", "model": "Doors\\Wood.nif"},
+            {"kind": "door", "ref": "only", "model": "Doors\\Wood.nif"},
+            {"kind": "door", "ref": "entrance", "model": "Doors\\WoodLoad.nif"},
+        ]
+        self.assertEqual(coverage.single_sided(routes), ["only"])

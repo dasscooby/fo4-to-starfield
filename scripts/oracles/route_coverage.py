@@ -1,8 +1,9 @@
 """Report manifest swinging doors that a route file never visits.
 
 A swinging door is a placed ref whose manifest item has a door record. Doorways and
-load doors have no door record and are not this list. Exit 1 when any swinging door
-has no door route. This does not score a walk.
+load doors have no door record and are not this list. A hinged ref with only one door
+route is single-sided. Exit 1 when any swinging door is missing or single-sided.
+This does not score a walk.
 
 usage: python scripts/oracles/route_coverage.py --cell cell.json --manifest manifest.json --routes routes.json
 """
@@ -31,6 +32,22 @@ def unrouted(cell, items, routes):
     return missing
 
 
+def single_sided(routes):
+    """Hinged door refs with fewer than two door routes. One visit cannot show both sides.
+
+    Load doors stay out of this list. Their model name contains "load".
+    """
+    counts = {}
+    for route in routes:
+        if route.get("kind") != "door":
+            continue
+        if "load" in route.get("model", "").lower():
+            continue
+        ref = route.get("ref")
+        counts[ref] = counts.get(ref, 0) + 1
+    return [ref for ref, count in counts.items() if count < 2]
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cell", required=True)
@@ -41,8 +58,9 @@ def main(argv=None):
     items = _items(json.load(open(args.manifest, encoding="utf-8-sig")))
     routes = json.load(open(args.routes, encoding="utf-8-sig"))["routes"]
     missing = unrouted(cell, items, routes)
-    print(json.dumps({"cell": cell.get("cell"), "unrouted": missing}, indent=2))
-    return 1 if missing else 0
+    ones = single_sided(routes)
+    print(json.dumps({"cell": cell.get("cell"), "unrouted": missing, "single_sided": ones}, indent=2))
+    return 1 if missing or ones else 0
 
 
 if __name__ == "__main__":
