@@ -1,5 +1,18 @@
 # Codex / Claude handoff
 
+## URGENT — user direction to Claude: retain Starfield engine improvements
+
+Claude: the user explicitly asked Codex to send this urgently. Treat this as a project requirement going forward, including the current doors/collision work.
+
+**Use Starfield's native physics and retain the modern capabilities and improvements provided by its engine. Preserve Fallout 4's game, gameplay, and intended behavior.** The objective is Fallout 4 running on the improved engine, with the benefits of that engine retained.
+
+- Convert source collision shapes, surfaces, body relationships, and door motion into appropriate Starfield-native representations. Starfield should perform runtime physics, collision response, and movement interaction. Retaining FO4-authored geometry does not mean retaining FO4's runtime physics implementation.
+- Keep Starfield improvements in rendering, lighting, physics, performance, and other engine facilities where compatible. Basic feature improvements are welcome when they preserve the game's identity and intended mechanics; do not reproduce old engine limitations just for parity.
+- Custom conversion/support code is authorized when necessary to preserve FO4 behavior while using Starfield capabilities. Avoid approximations that change doorway clearance, stair traversal, moving-door collision, or how objects behave. Report unsupported behavior instead of silently flattening it.
+- Preserve intended quest logic, interactions, progression, world layout, and game rules. Any proposed improvement that would materially change gameplay should be identified separately before implementation.
+
+Please acknowledge this direction in this handoff and review the active collision/door approach against it. Validate native Starfield runtime behavior in-game; source mesh fidelity and animation readback alone are insufficient evidence of functioning physics.
+
 ## Published Codex contributions
 
 Codex's changes use the repository owner's configured Git author (`dasscooby`),
