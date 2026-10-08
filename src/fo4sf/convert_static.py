@@ -173,10 +173,13 @@ def fo4_mesh_collision(src, sf_mesh_template: bytes, report: dict = None):
 def convert_static(fo4_nif: bytes, out_name: str, material_path: str = PLACEHOLDER_MATERIAL,
                    unit_scale: float = UNIT_SCALE, collision_template: bytes = None,
                    material_paths: list = None, collision_mode: str = "box",
-                   include_skinned: bool = False, report: dict = None, sf_mesh_template: bytes = None) -> Dict[str, bytes]:
+                   include_skinned: bool = False, report: dict = None, sf_mesh_template: bytes = None,
+                   allow_guess: bool = True) -> Dict[str, bytes]:
     """collision_mode: "box" = one AABB on the root; "surfaces" = thin boxes behind flat surfaces, one body each.
     sf_mesh_template: a vanilla Starfield mesh-collision blob; when given, FO4's own collision mesh is transplanted
-    (meshcollision.transplant) and the box methods are only the fallback."""
+    (meshcollision.transplant) and the box methods are only the fallback.
+    allow_guess=False: FO4's own collision or nothing, never a guessed box (vegetation, mounds, door frames: a box
+    around them would be an invisible wall). A failed native conversion is reported as "fo4-native-failed"."""
     src = nifmod.parse(fo4_nif)
     shapes = [s for s in nifmod.fo4_trishapes(src) if (include_skinned or not s.skinned) and s.positions and s.triangles]
     if not shapes:
@@ -209,6 +212,9 @@ def convert_static(fo4_nif: bytes, out_name: str, material_path: str = PLACEHOLD
             report["source"] = "fo4-none"
     elif native:
         child_blobs = native                         # one body per child node, as vanilla multi-body files do
+    elif not allow_guess:
+        if report is not None and fo4_has_collision:
+            report["source"] = "fo4-native-failed"
     elif collision_template is not None and collision_mode == "surfaces":
         for c, h in sfcollision.mesh_boxes(all_pts, all_tris, report=report):
             child_blobs.append(sfcollision.box_blob(collision_template, c, h))

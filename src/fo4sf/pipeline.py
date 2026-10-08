@@ -401,14 +401,20 @@ class Converter:
             out_name = f"{self.prefix}/{os.path.splitext(rel)[0].lower()}"
             arch = bool(self.no_collision and self.no_collision.search(nif_name))
             mode = "surfaces" if arch else "box"        # architecture: thin boxes behind flat surfaces; props: one AABB
-            # vegetation (roots, plants, grass, cobwebs) is walk-through in FO4; a bounding box would be an invisible wall
-            soft = bool(re.search(r"[\\/]landscape[\\/](trees|plants|grass)|roots|cobweb|vines|hanging"
-                                  r"|[\\/]doors?[\\/]|door[^\\/]*\.nif$", nif_name, re.I))   # doors: no opening yet, keep passable
+            # Vegetation, mounds and door-named models (wall plugs around doorways, vault hall pieces, signs) keep FO4's
+            # own collision but never get a guessed box: a box around a tree or a doorway is an invisible wall. (These
+            # used to get no collision at all, so walls beside doors and grass mounds could be walked through.)
+            no_guess = bool(re.search(r"[\\/]landscape[\\/](trees|plants|grass)|roots|cobweb|vines|hanging"
+                                      r"|[\\/]doors?[\\/]|door[^\\/]*\.nif$", nif_name, re.I))
             load_door = bool(LOAD_DOOR_RE.search(nif_name))
             if load_door:
-                soft = False                             # shut and solid, see LOAD_DOOR_RE
                 res["load_door"] = "teleport not ported: door stays shut"
-            use_box = self.collision_template is not None and not soft
+            # A door leaf that animates in FO4 ("Open" sequence) but is not rigged here (sliding / vault / elevator doors,
+            # or rigging failed) cannot open: keep it passable rather than a closed wall, and say so.
+            seq_names = [struct.unpack_from("<i", src.blocks[i], 0)[0] for i in range(len(src.blocks))
+                         if src.type_of(i) == "NiControllerSequence"]
+            animated = any(0 <= s < len(src.strings) and src.strings[s] == b"Open" for s in seq_names)
+            use_box = self.collision_template is not None
             coll_report = {}
             files = None
             if self.rig_doors and self.door_physics_donor is not None and DOOR_RE.search(nif_name) and not NOT_HINGED_RE.search(nif_name) and not load_door and nif.door_hinge(src):
@@ -423,10 +429,16 @@ class Converter:
                 except Exception as e:                   # noqa: BLE001  (falls back to a static door)
                     res["door_error"] = f"{type(e).__name__}: {e}"
             if files is None:
+                if animated and not load_door and DOOR_RE.search(nif_name):
+                    use_box = False
+                    res["door_not_opening"] = "open animation not ported: passable"
                 files = convert_static.convert_static(raw, out_name, material_paths=mats, collision_mode=mode,
                                                       include_skinned=True, report=coll_report,
                                                       sf_mesh_template=self.sf_mesh_template if use_box else None,
-                                                      collision_template=self.collision_template if use_box else None)
+                                                      collision_template=self.collision_template if use_box else None,
+                                                      allow_guess=not no_guess)
+                if "door_not_opening" in res:
+                    coll_report["source"] = "passable-door"   # deliberately none (see above), not a failed conversion
             for relp, data in files.items():
                 p = os.path.join(self.staging, *relp.split("/"))
                 os.makedirs(os.path.dirname(p), exist_ok=True)

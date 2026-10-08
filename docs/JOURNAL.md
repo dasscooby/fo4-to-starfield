@@ -498,3 +498,23 @@ floor (route generator to fix: needs a floor check).
   anything is typed. `readpos` and `route_run` stop instead of typing otherwise. Checked both ways in game: a normal
   read works; with the console already open, `readpos` returns `fail console 3` and types nothing.
 - Runner options: `-StepIn` (0 = press E from the start), `-BackOff`, `-Only 13,15`. Results record the prompt verb.
+
+## 2026-10-08 (night): door-named walls and grass mounds had no collision (offline, in game next)
+
+While making stair routes start where a sunken ramp leaves the ground, the ground probe found nothing around Parsons'
+retaining-wall stairs: the grass mounds there had no collision. An old rule from before native collision ("doors and
+vegetation: keep walk-through, a guessed box would be an invisible wall") was also dropping FO4's own collision.
+It matched by file name, so it hit **every wall piece around a doorway** (`Bld*WallPlug*Door01`), the vault hall
+pieces with door openings (`VltHallResDoorWide`, `VltHallUtilCorInDoorR01`), `PrySmRoomDoorway01`, the trapdoor ladder,
+grass mounds, maple trees and hanging lights. That fits the falls to z -56 in the Parsons atrium and walls beside
+doors you could walk through.
+
+Fix: these models keep FO4's own collision but never get a guessed box (`convert_static(allow_guess=False)`). The only
+deliberately passable models are door leaves that animate in FO4 but aren't rigged here (vault sliding doors,
+elevator doors). Each is reported as `door_not_opening: open animation not ported: passable` (collision source
+`passable-door`). Rebuild: **114 models gain FO4-native collision**, 41 stay without (none in FO4 either), 8 passable
+doors, 1 failed (`SubLight02Hanging`, open). Editor IDs and all 38,314 FormIDs unchanged. Not deployed yet: the
+game running now is the owner's session. Next: deploy, rerun Parsons/Vault 111/Vault 114 routes.
+
+`routes.py`: stair routes now start where the ramp comes out of the surrounding ground (sampling the neighbours'
+walkable FO4 collision along the ramp; `buried_fraction` per route). Load doors no longer get door routes.
