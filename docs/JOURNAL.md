@@ -194,3 +194,16 @@ The foreground guard tripped (another app was in front and Starfield was not run
   Parsons' 135, 225 and 315 degree doors get shifted to the wrong spot.
 - `RotateOffset` now uses the clockwise convention. Built in staging only and not deployed. Next in-game check: the Parsons
   double doors sit closed in their frames.
+
+## 2026-10-08: four more interiors converted (offline; tours pending)
+
+The guard tripped again (another app in front), so this was offline only. Exported and converted four more FO4 interiors:
+Valentine's Detective Agency (`DmndValentines01`), `SuperDuperMart01`, `Vault95` and `CambridgePolymerLabs01`. Twelve cells
+in total.
+- Full batch over the 12 cells (with doors and decals on): 3,389 models converted, 18 failed, 408 s.
+- Almost all failures are glass-only lab props (beakers, test tubes, chemistry set). Their effect textures are not named
+  "glass", so they are skipped; next material fix.
+- Plugin: 3,359 statics and 30 doors. New cells: Valentine's 268 refs / 8 lights, Super Duper Mart 4,185 / 113,
+  Vault 95 4,353 / 172, Cambridge Polymer 3,206 / 165.
+- Staged in `C:\Modding\staging\multi` but not deployed. In-game tours and the Parsons door-rotation check run when the PC
+  is free.
