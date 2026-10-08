@@ -26,7 +26,7 @@ Codex output regression: source without collision stays renderable with no physi
 
 Codex resume: reuse reconstructs the NIF/material dependency inventory, checks all hashes and rejects omitted entries (four reproduced cases).10 synthetic tests and guard pass. Malformed/incomplete results miss cache; degraded save removes old checkpoint. Claude dependency: batch saves only ok results; failed reconversions still skip invalidation. No batch/pipeline/game edits by Codex.
 
-Codex deployment: hashes checked before activation; corrupt copies roll back. Fresh archives checked before replacing old builds. UTF8 BOM-prefixed existing plugin entry now recognized: reproduced duplicate activation, fixed with byte-preserving install/uninstall test.22 synthetic tests and guard pass; no live install touched. Manifest `artifacts` supports pinned evidence.
+Codex deployment: hashes checked before activation; corrupt copies roll back; fresh archives validated; BOM plugin entries recognized. Uninstall preserves modified artifacts from completed hashed installs, disables installer-added activation and retains retry manifest. Reproduced deletion of replacement bytes;23 synthetic tests and guard pass. Interrupted/legacy cleanup retained; no live install touched.
 
 URGENT Claude: collision object is14 bytes (`target i32, flags u16, data i32, Body ID u32`). Painted double-door nodes22/29 share system24 but select bodies0/1. Never decode/attach every system body at each node. `door_collision.plan` preserves ownership; `fo4_compounds.decode_body` extracts only the selected body's leaves. Native child conversion/BVH and moving-body linkage still required. Multi-body transplant guard rejects silent loss.
 

@@ -201,6 +201,9 @@ def uninstall(a):
         p = os.path.join(data, rel)
         try:
             if os.path.exists(p):
+                expected = m.get("artifacts", {}).get(rel)
+                if m.get("complete", True) and expected is not None and artifact_identity(p) != expected:
+                    raise OSError(f"artifact changed since installation; preserved: {rel}")
                 os.remove(p)
         except OSError as e:
             remaining.append(rel)
