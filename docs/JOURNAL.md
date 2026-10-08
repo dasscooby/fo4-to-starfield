@@ -261,3 +261,16 @@ a startup crash caused by the new collision, or the user closing it. The mod was
 clean. Also: `cycle.ps1` closed the user's own open Starfield session (sitting in the character menu). It now refuses to
 close a game it did not launch (PID file).
 Next: confirm whether the transplanted collision crashes the game, using a test cell holding one transplanted model.
+
+## 2026-10-08: transplant fixed against vanilla Starfield (offline)
+
+The user was active, so this was offline only. Compared the transplant with 246 vanilla Starfield mesh shapes:
+- `numShapeKeyBits` equals the tree's `bitsPerKey` in vanilla (224 of 246; the other 22 not yet examined); the transplant
+  had kept the template's 2 (the stair needs 10), a likely cause of the suspected crash.
+- `numTriangles` is 0 in vanilla, and the interior bit field holds `maxKeyValue + 1` bits.
+- Every vanilla mesh has a SIMD tree. It is now generated (`build_simd_tree`): a 4-wide AABB tree whose leaves are
+  triangle shape keys `section << 8 | primitive << 1 | quad half`. That formula reproduces FO4's `maxKeyValue` exactly.
+- New `decode_sf_mesh` reads a Starfield blob back. Round trip on the Prydwen stair: 756 / 756 triangles, max vertex
+  difference 0.0 m. New tests cover the section mapping, the SIMD tree and the varints.
+Reconverted and staged; not deployed. Next: in-game check (startup, a single transplanted model in the test cell, then
+stairs and doorways).

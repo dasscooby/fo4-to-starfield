@@ -13,7 +13,7 @@ container format and a few section fields differ:
 
 The Starfield side is rebuilt around a template tagfile taken from a vanilla Starfield static (read from the user's
 install at conversion time, never shipped): its TYPE section, physics system, material and body are reused; the shape's
-data arrays, sections and trees come from FO4. Starfield's optional SIMD tree is left out (hasSimdTree = false).
+data arrays, sections and trees come from FO4. Starfield's SIMD tree (a 4-wide AABB tree over triangle shape keys, present in every vanilla mesh) is generated.
 """
 import struct
 import math
@@ -180,14 +180,18 @@ def transplant(fo4_blob: bytes, sf_template_blob: bytes) -> Optional[bytes]:
     cms = bytearray(tmpl_bytes("hknpCompressedMeshShape"))
     i_cms = w.add(T_CMS, 0x10, cms, 1)
     w.ptr(_field(tf, T_BODY, "shape").type, i_body, _field(tf, T_BODY, "shape").offset, i_cms)
-    struct.pack_into("<ii", w.items[i_cms - 1][2], _field(tf, T_CMS, "numTriangles").offset, n_tris, 0)
+    # vanilla: numTriangles 0, numShapeKeyBits = tree bitsPerKey, interior bit field sized maxKeyValue + 1
+    n_prim_keys, bits_per_key, max_key = struct.unpack_from("<iiI", p.raw(d + FO4_TREE + 48, 12))
+    struct.pack_into("<ii", w.items[i_cms - 1][2], _field(tf, T_CMS, "numTriangles").offset, 0, 0)
+    w.items[i_cms - 1][2][_field(tf, T_CMS, "numShapeKeyBits").offset] = bits_per_key
+    n_bits = max_key + 1
     bits = _field(tf, T_CMS, "triangleIsInterior")
-    nwords = (n_tris + 31) // 32
+    nwords = (n_bits + 31) // 32
     words_ptr_type = _field(tf, bits.type, "storage").type
     words_arr_type = _field(tf, words_ptr_type, "words").type
     i_words = w.add(dict(tf.types[words_arr_type].params)["tT"], 0x20, bytes(4 * nwords), nwords)
     w.ptr(words_arr_type, i_cms, bits.offset + _field(tf, words_ptr_type, "words").offset, i_words)
-    struct.pack_into("<i", w.items[i_cms - 1][2], bits.offset + _field(tf, words_ptr_type, "numBits").offset, n_tris)
+    struct.pack_into("<i", w.items[i_cms - 1][2], bits.offset + _field(tf, words_ptr_type, "numBits").offset, n_bits)
 
     data = bytearray(tmpl_bytes("hknpCompressedMeshShapeData"))
     for f in ("nodes", "sections", "primitives", "sharedVerticesIndex", "packedVertices", "sharedVertices",
@@ -199,8 +203,14 @@ def transplant(fo4_blob: bytes, sf_template_blob: bytes) -> Optional[bytes]:
     data[simd.offset:simd.offset + tf.size_of(simd.type)] = bytes(tf.size_of(simd.type))
     conn = _field(tf, T_DATA, "connectivity")
     data[conn.offset:conn.offset + tf.size_of(conn.type)] = bytes(tf.size_of(conn.type))
-    data[_field(tf, T_DATA, "hasSimdTree").offset] = 0
+    data[_field(tf, T_DATA, "hasSimdTree").offset] = 1            # every vanilla mesh has one; built over FO4 triangles
+    data[simd.offset + _field(tf, simd.type, "isCompact").offset] = 1
     i_data = w.add(T_DATA, 0x10, data, 1)
+    from . import fo4collision
+    simd_raw = build_simd_tree(fo4collision.compressed_mesh_keys(p, d))
+    simd_arr_t, simd_elem_t = arr_types(simd.type, "nodes")
+    i_simd = w.add(simd_elem_t, 0x20, simd_raw, len(simd_raw) // 128)
+    w.ptr(simd_arr_t, i_data, simd.offset + _field(tf, simd.type, "nodes").offset, i_simd)
     w.ptr(_field(tf, T_CMS, "data").type, i_cms, _field(tf, T_CMS, "data").offset, i_data)
 
     for name in ("nodes", "primitives", "sharedVerticesIndex", "packedVertices", "sharedVertices",
@@ -241,3 +251,106 @@ def template_from_nif(sf_nif: bytes) -> bytes:
             n, = struct.unpack_from("<I", f.blocks[i], 0)
             return f.blocks[i][4:4 + n]
     raise ValueError("template NIF has no bhkPhysicsSystem")
+
+
+FLT_MAX = 3.40282e38
+
+
+def build_simd_tree(leaves) -> bytes:
+    """hkcdSimdTree nodes (128 bytes each: lx hx ly hy lz hz as 4-lane float vectors, data u32[4], isLeaf, isActive) over
+    [(key, (lo, hi))]: node 0 is an empty sentinel, node 1 the root; inner lanes hold child node indices and child boxes,
+    leaf lanes hold triangle shape keys (unused lanes: empty box, data 0xffffffff in leaves / 0 in inner nodes)."""
+    nodes = [None]                                     # index 0: sentinel
+
+    def bounds(items):
+        lo = tuple(min(it[1][0][a] for it in items) for a in range(3))
+        hi = tuple(max(it[1][1][a] for it in items) for a in range(3))
+        return lo, hi
+
+    def emit(index, lanes, leaf):
+        lx, hx, ly, hy, lz, hz, data = [], [], [], [], [], [], []
+        for i in range(4):
+            if i < len(lanes):
+                (lo, hi), d = lanes[i]
+                lx.append(lo[0]); hx.append(hi[0]); ly.append(lo[1]); hy.append(hi[1]); lz.append(lo[2]); hz.append(hi[2])
+                data.append(d)
+            else:
+                lx.append(FLT_MAX); hx.append(-FLT_MAX); ly.append(FLT_MAX); hy.append(-FLT_MAX)
+                lz.append(FLT_MAX); hz.append(-FLT_MAX)
+                data.append(0xFFFFFFFF if leaf else 0)
+        nodes[index] = (struct.pack("<24f", *lx, *hx, *ly, *hy, *lz, *hz) + struct.pack("<4I", *data)
+                        + bytes([1 if leaf else 0, 0]) + bytes(14))
+
+    def build(index, items):
+        if len(items) <= 4:
+            emit(index, [(it[1], it[0]) for it in items], True)
+            return
+        lo, hi = bounds(items)
+        axis = max(range(3), key=lambda a: hi[a] - lo[a])
+        items = sorted(items, key=lambda it: it[1][0][axis] + it[1][1][axis])
+        n = len(items)
+        groups = [g for g in (items[i * n // 4:(i + 1) * n // 4] for i in range(4)) if g]
+        first = len(nodes)
+        nodes.extend([None] * len(groups))             # children get consecutive indices, then recurse (as vanilla)
+        emit(index, [(bounds(g), first + i) for i, g in enumerate(groups)], False)
+        for i, g in enumerate(groups):
+            build(first + i, g)
+
+    nodes.append(None)
+    build(1, list(leaves))
+    sentinel = (struct.pack("<24f", *([FLT_MAX] * 4 + [-FLT_MAX] * 4) * 3) + bytes(16) + bytes(16))
+    nodes[0] = sentinel
+    return b"".join(nodes)
+
+
+def decode_sf_mesh(sf_blob: bytes):
+    """Triangles of the first hknpCompressedMeshShapeData in a Starfield tagfile, decoded with Starfield's section fields
+    (used to verify transplants round-trip; also handy for vanilla collision)."""
+    tf = hktagfile.Tagfile(sf_blob)
+    b, D = tf.blob, tf.data_start
+    T_DATA = _type(tf, "hknpCompressedMeshShapeData")
+    data_item = next(it for it in tf.items[1:] if it.type == T_DATA)
+    T_TREE = _type(tf, "hknpCompressedMeshShapeTree")
+    tree = D + data_item.offset + _field(tf, T_DATA, "meshTree").offset
+    by_off = {D + it.offset: it for it in tf.items[1:]}
+    ptr_items = {}
+    for _, offs in tf.patches:
+        for o in offs:
+            ptr_items[D + o] = tf.items[struct.unpack_from("<Q", b, D + o)[0]]
+
+    def arr(name):
+        it = ptr_items.get(tree + _field(tf, T_TREE, name).offset)
+        return (D + it.offset, it.count) if it else (0, 0)
+    dmin = struct.unpack_from("<3f", b, tree + 16)
+    dmax = struct.unpack_from("<3f", b, tree + 32)
+    sec_at, nsec = arr("sections")
+    prim_at, _ = arr("primitives")
+    sidx_at, _ = arr("sharedVerticesIndex")
+    pack_at, _ = arr("packedVertices")
+    shar_at, nshared = arr("sharedVertices")
+    shared = []
+    for k in range(nshared):
+        v, = struct.unpack_from("<Q", b, shar_at + 8 * k)
+        q = (v & 0x1FFFFF, (v >> 21) & 0x1FFFFF, v >> 42)
+        bits = (0x1FFFFF, 0x1FFFFF, 0x3FFFFF)
+        shared.append(tuple(dmin[a] + q[a] * (dmax[a] - dmin[a]) / bits[a] for a in range(3)))
+    tris = []
+    for s in range(nsec):
+        so = sec_at + 96 * s
+        off, scale = struct.unpack_from("<3f", b, so + 48), struct.unpack_from("<3f", b, so + 60)
+        first_packed, first_shared, first_prim, _ = struct.unpack_from("<4I", b, so + 72)
+        npacked, nprim = b[so + 88], b[so + 89]
+
+        def vert(i):
+            if i < npacked:
+                v, = struct.unpack_from("<I", b, pack_at + 4 * (first_packed + i))
+                q = (v & 0x7FF, (v >> 11) & 0x7FF, v >> 22)
+                return tuple(off[a] + q[a] * scale[a] for a in range(3))
+            j, = struct.unpack_from("<H", b, sidx_at + 2 * (first_shared + i - npacked))
+            return shared[j]
+        for k in range(nprim):
+            i0, i1, i2, i3 = b[prim_at + 4 * (first_prim + k):prim_at + 4 * (first_prim + k) + 4]
+            tris.append((vert(i0), vert(i1), vert(i2)))
+            if i2 != i3:
+                tris.append((vert(i0), vert(i2), vert(i3)))
+    return tris

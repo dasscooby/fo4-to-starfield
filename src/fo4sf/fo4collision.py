@@ -162,3 +162,25 @@ def decode(blob: bytes) -> Tuple[List[Vec], List[Tuple[int, int, int]], List[str
         points += [tuple(r + t for r, t in zip(_rotate(rot, v), pos)) for v in pts]
         tris += [(a + base, b_ + base, c + base) for a, b_, c in tr]
     return points, tris, skipped
+
+def compressed_mesh_keys(p: hkpackfile.Packfile, data_obj: int):
+    """[(shape key, (min xyz, max xyz))] per triangle of a compressed mesh. Key = section << 8 | primitive << 1 | t,
+    t = 1 for the second triangle of a quad (matches maxKeyValue / numPrimitiveKeys in FO4 and vanilla Starfield)."""
+    pts, _ = [], None
+    sec_at, nsec = p.array(data_obj + CMD_SECTIONS)
+    points, tris = _compressed_mesh(p, data_obj)        # same order: per section, per primitive, quads split
+    out, k = [], 0
+    prim_at, _ = p.array(data_obj + CMD_PRIMITIVES)
+    for s in range(nsec):
+        prim_d, = p.unpack("<I", sec_at + SECTION_SIZE * s + 80)
+        pstart, pcount = prim_d >> 8, prim_d & 0xFF
+        for j in range(pcount):
+            a, b, c, d = p.raw(prim_at + 4 * (pstart + j), 4)
+            for t in ((0,) if c == d else (0, 1)):
+                tri = tris[k]
+                k += 1
+                P = [points[i] for i in tri]
+                lo = tuple(min(q[x] for q in P) for x in range(3))
+                hi = tuple(max(q[x] for q in P) for x in range(3))
+                out.append(((s << 8) | (j << 1) | t, (lo, hi)))
+    return out
