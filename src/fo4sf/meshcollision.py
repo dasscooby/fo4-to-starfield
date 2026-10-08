@@ -448,8 +448,57 @@ def _emit_sphere(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, shape: int, R, 
     return i_shape
 
 
+STAIR_HELPER_MAX_SLOPE = 40.0      # degrees; FO4 helpers up to ~46 degrees stop Starfield's character controller
+
+
+def _flatten_helper(verts, faces, node_rot, max_slope=STAIR_HELPER_MAX_SLOPE):
+    """Stretch a stair-helper wedge so its slope (measured in the collision node's orientation) is at most max_slope:
+    the low front vertices move horizontally away from the top edge; the top stays where FO4 put it. Returns new verts."""
+    import math
+    R = node_rot or (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+    W = [tuple(sum(R[3 * i + k] * v[k] for k in range(3)) for i in range(3)) for v in verts]
+    zmin, zmax = min(w[2] for w in W), max(w[2] for w in W)
+    rise = zmax - zmin
+    if rise < 0.3:
+        return verts
+    top = [w for w in W if w[2] >= zmax - 0.05]
+    tc = (sum(w[0] for w in top) / len(top), sum(w[1] for w in top) / len(top))
+    # bottom edge = every vertex in the lowest 0.15 m (a slab helper has its two faces' bottom vertices at slightly
+    # different heights); they all move by ONE vector along the ramp, so the slab stays planar and keeps its width
+    low = [i for i, w in enumerate(W) if w[2] <= zmin + 0.15]
+    lc = (sum(W[i][0] for i in low) / len(low), sum(W[i][1] for i in low) / len(low))
+    dx, dy = lc[0] - tc[0], lc[1] - tc[1]
+    run = math.hypot(dx, dy)
+    if run < 1e-3 or math.degrees(math.atan2(rise, run)) <= max_slope:
+        return verts
+    extra = rise / math.tan(math.radians(max_slope)) - run
+    out = list(W)
+    for i in low:
+        out[i] = (W[i][0] + extra * dx / run, W[i][1] + extra * dy / run, W[i][2])
+    # back to node space (R is a rotation: inverse = transpose)
+    return [tuple(sum(R[3 * k + i] * w[k] for k in range(3)) for i in range(3)) for w in out]
+
+
+def _planes_from_faces(verts, faces) -> bytes:
+    """Outward face planes (n, d) with n.x + d = 0, recomputed after vertices moved."""
+    import math
+    c = tuple(sum(v[i] for v in verts) / len(verts) for i in range(3))
+    out = b""
+    for f in faces:
+        a, b, d_ = verts[f[0]], verts[f[1]], verts[f[2]]
+        u = [b[i] - a[i] for i in range(3)]
+        v = [d_[i] - a[i] for i in range(3)]
+        n = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+        ln = math.sqrt(sum(x * x for x in n)) or 1.0
+        n = tuple(x / ln for x in n)
+        if sum(n[i] * (c[i] - a[i]) for i in range(3)) > 0:
+            n = tuple(-x for x in n)
+        out += struct.pack("<4f", *n, -sum(n[i] * a[i] for i in range(3)))
+    return out
+
+
 def _emit_convex(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, shape: int, rot=(0.0, 0.0, 0.0, 1.0),
-                 pos=(0.0, 0.0, 0.0)) -> int:
+                 pos=(0.0, 0.0, 0.0), flatten_node_rot=None) -> int:
     """FO4 hknpConvexPolytopeShape -> Starfield hknpConvexShape (hull: float3 vertices, planes, faces, indices, links).
     The FO4 body transform (absolute, NIF-root space) is baked into vertices and planes."""
     from . import fo4collision as fc
@@ -476,6 +525,11 @@ def _emit_convex(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, shape: int, rot
         verts = [verts[v] for v in used]
         faces = [[remap[v] for v in f] for f in faces]
         nv = len(verts)
+    if flatten_node_rot is not None:                       # steep stair helper: stretch to a walkable slope
+        moved = _flatten_helper(verts, faces, flatten_node_rot)
+        if moved != verts:
+            verts = moved
+            planes = _planes_from_faces(verts, faces)
     nidx = sum(len(f) for f in faces)
     links, vedges = _hull_links(faces, nv)
     T_CVX = t.type("hknpConvexShape")
@@ -591,7 +645,8 @@ FO4_BODY_FILTER = 20                                  # FO4 hknpBodyCinfo collis
 UNMAPPED_LAYERS = {37: "L_DOORDETECTION", 43: "L_CUSTOMPICK1"}
 
 
-def convert_bodies(fo4_blob: bytes, template_blob: bytes, select: Optional[List[int]] = None) -> List[bytes]:
+def convert_bodies(fo4_blob: bytes, template_blob: bytes, select: Optional[List[int]] = None,
+                   node_rot=None) -> List[bytes]:
     """One native Starfield single-body physics blob per selected FO4 body (all bodies when select is None).
     FO4 shapes live in the space of the NIF node that owns the collision object; the body cinfo transform is not a
     placement (a crate whose shape already matches its render mesh carries a 0.29 m body position; a stair helper's
@@ -651,7 +706,9 @@ def convert_bodies(fo4_blob: bytes, template_blob: bytes, select: Optional[List[
             elif kind == "sphere":
                 i_shape = _emit_sphere(w, t, p, obj, R, tr)
             else:
-                i_shape = _emit_convex(w, t, p, obj, R, tr)
+                helper = (filt & 0x7F) == 31
+                i_shape = _emit_convex(w, t, p, obj, R, tr,
+                                       flatten_node_rot=(node_rot or IDENTITY3) if helper else None)
             w.ptr(t.field(T_BODY, "shape").type, i_body, t.field(T_BODY, "shape").offset, i_shape)
             out.append(w.build(sdk, type_sec))
     return out

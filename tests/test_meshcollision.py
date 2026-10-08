@@ -89,6 +89,36 @@ class HullTests(unittest.TestCase):
         self.assertEqual(struct.unpack("<HBBHBB", out), (0, 3, 127, 3, 4, 127))
 
 
+class StairHelperTests(unittest.TestCase):
+    # thin slab helper like V111HallStairs01: top edge at y 1.2 / z 0.45, bottom edge at y -0.75 / z -1.45 (~44 deg)
+    VERTS = [(0.9, 1.2, 0.43), (0.9, -0.75, -1.45), (0.9, 1.14, 0.48), (-0.9, 1.2, 0.43),
+             (0.9, -0.80, -1.40), (-0.9, 1.14, 0.48), (-0.9, -0.75, -1.45), (-0.9, -0.80, -1.40)]
+
+    def slope(self, verts):
+        import math
+        top = [v for v in verts if v[2] > 0.4]
+        low = [v for v in verts if v[2] < -1.3]
+        ty = sum(v[1] for v in top) / len(top)
+        ly = sum(v[1] for v in low) / len(low)
+        return math.degrees(math.atan2(0.45 + 1.425, ty - ly))
+
+    def test_steep_helper_is_stretched_to_the_limit_and_keeps_width_and_top(self):
+        out = meshcollision._flatten_helper(self.VERTS, [], None)
+        self.assertLessEqual(self.slope(out), meshcollision.STAIR_HELPER_MAX_SLOPE + 0.5)
+        self.assertEqual([v for v in out if v[2] > 0.4], [v for v in self.VERTS if v[2] > 0.4])   # top untouched
+        self.assertEqual({round(abs(v[0]), 6) for v in out}, {0.9})                              # width unchanged
+
+    def test_gentle_helper_unchanged(self):
+        gentle = [(x, y * 2.0, z) for x, y, z in self.VERTS]                                       # ~25 degrees
+        self.assertEqual(meshcollision._flatten_helper(gentle, [], None), gentle)
+
+    def test_planes_point_outward(self):
+        cube = [(x, y, z) for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)]
+        top = [[1, 5, 7, 3]]                                                                        # z = +1 face
+        nx, ny, nz, d = struct.unpack("<4f", meshcollision._planes_from_faces(cube, top))
+        self.assertEqual((round(nx, 6), round(ny, 6), round(nz, 6), round(d, 6)), (0, 0, 1, -1))
+
+
 class VarintTests(unittest.TestCase):
     def test_lengths(self):
         self.assertEqual(hktagfile._varint(bytes([0x05]), 0), (5, 1))

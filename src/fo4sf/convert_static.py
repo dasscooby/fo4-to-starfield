@@ -135,7 +135,7 @@ def fo4_native_collision(src, universal_template: bytes, report: dict = None):
         n, = struct.unpack_from("<I", src.blocks[data], 0)
         try:
             new = meshcollision.convert_bodies(src.blocks[data][4:4 + n], universal_template,
-                                               select=[body] if shared > 1 else None)
+                                               select=[body] if shared > 1 else None, node_rot=tuple(rot))
             blobs += new if place is None else [(b, place[0], place[1]) for b in new]
         except Exception as e:                           # noqa: BLE001  (fallback by design, reason recorded)
             if report is not None:

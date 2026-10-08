@@ -38,7 +38,7 @@ def judge(route, res):
 
 
 def main():
-    routes = json.load(open(sys.argv[1]))["routes"]
+    routes = json.load(open(sys.argv[1], encoding="utf-8-sig"))["routes"]
     results = [json.loads(l) for l in open(sys.argv[2], encoding="utf-8-sig") if l.strip()]
     counts = {}
     for res in results:

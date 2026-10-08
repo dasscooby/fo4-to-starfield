@@ -352,3 +352,16 @@ The user had been active within 10 minutes, so this tick was offline.
   open hulls, 16 junk shared-vertex tables, 2 `hknpConvexShape`.
 - **Not yet verified in game.** Next with a free PC: startup, then a prop-heavy room (compounds are mostly props), then the
   Vault 111 hall-stair experiment.
+
+## 2026-10-08: steep FO4 stair helpers flattened; Vault 111 hall stairs climb
+
+In game: the compound / capsule / sphere build starts and loads Vault 111.
+- `V111HallStairs01` without its helper is still stuck: the 0.30 m treads are too tall for Starfield's step-up.
+- Fix: `meshcollision._flatten_helper`. An `L_STAIRHELPER` hull steeper than 40 degrees (measured in its collision
+  node's orientation) is stretched: its whole bottom edge moves by one vector along the ramp, so the top stays where FO4
+  put it, the width is unchanged and the slab stays planar. Planes are recomputed from the faces. This helper went from
+  44.7 to 38.9 degrees. Starfield's controller stops at roughly 45 degrees; FO4 allowed steeper.
+- **Both hall staircases now PASS** (rise 1.94 / 1.95 m) ([screenshot](media/route-v111-hallstairs-pass.jpg)). Vault 111 is
+  10 of 11 routes passing; the 11th was an OCR misread.
+- New tests: slope limit reached, top and width kept, gentle helpers untouched, plane orientation. Also: `route_eval`
+  reads BOM-prefixed route files.
