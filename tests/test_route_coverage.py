@@ -44,3 +44,12 @@ class RouteCoverageTests(unittest.TestCase):
             {"kind": "door", "ref": "entrance", "model": "Doors\\WoodLoad.nif"},
         ]
         self.assertEqual(coverage.single_sided(routes), ["only"])
+
+    def test_two_routes_on_one_side_are_not_both_sides(self):
+        routes = [
+            {"kind": "door", "ref": "swing", "model": "Doors\\Wood.nif", "side": 1},
+            {"kind": "door", "ref": "swing", "model": "Doors\\Wood.nif", "side": 1},
+            {"kind": "door", "ref": "both", "model": "Doors\\Wood.nif", "side": 1},
+            {"kind": "door", "ref": "both", "model": "Doors\\Wood.nif", "side": -1},
+        ]
+        self.assertEqual(coverage.single_sided(routes), ["swing"])

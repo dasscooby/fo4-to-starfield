@@ -13,6 +13,7 @@ Any other move no walk of this length could make is UNREAD.
 Prints one line per route, a summary, and a door tally: both OPEN, one side, geometry, load failures.
 Exit code 1 unless the file records results, every one is PASS, no load door was passed,
 walked through, or fallen through, and no hinged pair is geometry (crossed with no recorded OPEN).
+That exit does not mean every hinged door opened from both sides. A one-route file can exit 0.
 """
 import json
 import math
@@ -147,6 +148,57 @@ def door_rows(routes, results):
     return {"both": both, "one": one, "none": none, "geometry": geometry, "load_fail": len(load_fail)}
 
 
+def unproven(routes, results):
+    """Hinged refs that lack two OPEN crossings, and load doors that were crossed or fallen through.
+
+    `door_rows` counts only the refs that appear in the results. A file can be all PASS, exit 0,
+    and still leave every other door untested. This lists those refs too. One recorded OPEN does
+    not prove the other side. Two crossings with no OPEN stay unproven.
+    """
+    by_ref = {}
+    order = []
+    for route in routes:
+        if route.get("kind") != "door":
+            continue
+        if "load" in str(route.get("model", "")).lower():
+            continue
+        ref = route.get("ref")
+        if ref not in by_ref:
+            order.append(ref)
+            by_ref[ref] = {}
+    load_fail = []
+    seen_load = set()
+    for res in results:
+        if not isinstance(res, dict):
+            continue
+        index = res.get("index")
+        if not isinstance(index, int) or index < 0 or index >= len(routes):
+            continue
+        route = routes[index]
+        if route.get("kind") != "door":
+            continue
+        verdict, _why = judge(route, res)
+        ref = route.get("ref")
+        if "load" in str(route.get("model", "")).lower():
+            if verdict in ("PASS", "UNOPENED", "FALL") and ref not in seen_load:
+                seen_load.add(ref)
+                load_fail.append(ref)
+            continue
+        if ref not in by_ref:
+            order.append(ref)
+            by_ref[ref] = {}
+        by_ref[ref][index] = (verdict, res)
+    missing = []
+    for ref in order:
+        activated = 0
+        for verdict, res in by_ref[ref].values():
+            if verdict == "PASS" and _opened(res):
+                activated += 1
+        if activated < 2:
+            missing.append(ref)
+    return {"unproven": missing, "load_fail": load_fail}
+
+
 def finished(counts, rows, result_count):
     """True only when every recorded route passed, no load door was crossed or fallen through,
     and no hinged pair is geometry.
@@ -154,7 +206,7 @@ def finished(counts, rows, result_count):
     Geometry is two crossings with no recorded OPEN. That is not both sides opening.
     An empty file is not a pass: Red Rocket has no stair or door routes, and a run that
     writes nothing must not exit 0. A partial file with one recorded OPEN can still pass
-    this check; the door tally shows that the other side was not in the file.
+    this check. `unproven` lists the hinged refs that file does not show opening from both sides.
     """
     return (result_count > 0 and set(counts) <= {"PASS"} and rows["load_fail"] == 0
             and rows.get("geometry", 0) == 0)

@@ -2,8 +2,8 @@
 
 A swinging door is a placed ref whose manifest item has a door record. Doorways and
 load doors have no door record and are not this list. A hinged ref with only one door
-route is single-sided. Exit 1 when any swinging door is missing or single-sided.
-This does not score a walk.
+route is single-sided. Two routes on the same side are still one side. Exit 1 when any
+swinging door is missing or single-sided. This does not score a walk.
 
 usage: python scripts/oracles/route_coverage.py --cell cell.json --manifest manifest.json --routes routes.json
 """
@@ -33,19 +33,32 @@ def unrouted(cell, items, routes):
 
 
 def single_sided(routes):
-    """Hinged door refs with fewer than two door routes. One visit cannot show both sides.
+    """Hinged door refs that do not have routes on both sides.
 
+    One visit cannot show both sides. When `side` is recorded, the two routes must be
+    side 1 and side -1. Two routes on the same side are still one side. A route file
+    that never stored `side` still counts two visits as both sides.
     Load doors stay out of this list. Their model name contains "load".
     """
-    counts = {}
+    grouped = {}
+    order = []
     for route in routes:
         if route.get("kind") != "door":
             continue
         if "load" in route.get("model", "").lower():
             continue
         ref = route.get("ref")
-        counts[ref] = counts.get(ref, 0) + 1
-    return [ref for ref, count in counts.items() if count < 2]
+        if ref not in grouped:
+            order.append(ref)
+            grouped[ref] = []
+        grouped[ref].append(route.get("side"))
+    bad = []
+    for ref in order:
+        sides = grouped[ref]
+        present = [side for side in sides if side is not None]
+        if len(sides) < 2 or (present and set(present) != {1, -1}):
+            bad.append(ref)
+    return bad
 
 
 def main(argv=None):

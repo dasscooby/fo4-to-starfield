@@ -50,9 +50,13 @@ while any row is unverified, failed, or malformed.
 `door_swing` stays open when the route file never recorded OPEN. Both sides ending past
 the plane is geometry. It is not a swing. A route file that omits a manifest swinging
 door does not cover that cell; `scripts/oracles/route_coverage.py` lists those refs.
+Two routes on the same side are still one side.
 A generation that keeps only the first routes can drop doors that sit later in the cell.
-Prydwen's saved file is 40 stairs, and its three swinging doors are past that cut.
-Evidence that names a machine-specific path cannot close a row.
+The earlier Prydwen file was 40 stairs, and its three swinging doors were past that cut.
+The regenerated file lists both sides of those three. The list is not a walk.
+`scripts/oracles/route_activation.py` lists every hinged ref in a results file that
+lacks two OPEN crossings. `route_eval` can exit 0 on one recorded OPEN. That is not
+`door_swing`. Evidence that names a machine-specific path cannot close a row.
 
 Do not commit the evidence file if it names a machine path or contains game data.
 There is no accepted evidence file in the repo. Every row above is unverified.
