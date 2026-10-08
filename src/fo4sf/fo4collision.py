@@ -107,10 +107,37 @@ def _rotate(q, v):
     return tuple(r[3 * i] * v[0] + r[3 * i + 1] * v[1] + r[3 * i + 2] * v[2] for i in range(3))
 
 
+def decode_bodies(blob: bytes):
+    """[(shape class, points, triangles)] per body of a FO4 bhkPhysicsSystem blob, in the space of the NIF node that owns
+    the collision object (metres: FO4's Havok scale is 1/70 game unit, the same as our conversion), plus skipped classes.
+    Bodies with a rotation are skipped for now (quaternion convention not verified against a reference)."""
+    p = hkpackfile.Packfile(blob)
+    classes = dict(p.objects())
+    sysobj = next(o for o, c in classes.items() if c == "hknpPhysicsSystemData")
+    bodies_at, nbodies = p.array(sysobj + SYS_BODIES)
+    bodies, skipped = [], []
+    for k in range(nbodies):
+        b = bodies_at + BODY_SIZE * k
+        shape = p.pointer(b)
+        cls = classes.get(shape, "?")
+        rot = p.unpack("<4f", b + BODY_ROT)
+        if any(abs(x) > 1e-4 for x in rot[:3]):
+            skipped.append(cls + " (rotated body)")
+            continue
+        if cls == "hknpCompressedMeshShape":
+            pts, tr = _compressed_mesh(p, p.pointer(shape + CMS_DATA))
+        elif cls == "hknpConvexPolytopeShape":
+            pts, tr = _convex(p, shape)
+        else:
+            skipped.append(cls)
+            continue
+        pos = p.unpack("<3f", b + BODY_POS)
+        bodies.append((cls, [tuple(c + t for c, t in zip(v, pos)) for v in pts], tr))
+    return bodies, skipped
+
+
 def decode(blob: bytes) -> Tuple[List[Vec], List[Tuple[int, int, int]], List[str]]:
-    """Triangles of every body in a FO4 bhkPhysicsSystem blob, in the space of the NIF node that owns the collision
-    object (metres; FO4's Havok scale is 1/70 of a game unit, the same as our conversion). Returns (points, triangles,
-    skipped shape classes)."""
+    """Triangles of every body in a FO4 bhkPhysicsSystem blob merged into one list (see decode_bodies)."""
     p = hkpackfile.Packfile(blob)
     classes = dict(p.objects())
     sysobj = next(o for o, c in classes.items() if c == "hknpPhysicsSystemData")
