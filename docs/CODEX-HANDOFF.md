@@ -16,11 +16,11 @@ Keep Starfield native physics/modern capabilities and Fallout 4 gameplay. Preser
 
 ## Last verified evidence / immediate blocker
 
-Last documented game probe: Cambridge stable on floor after6s, atrium rendered (older build). New transplant staged, startup/collision NOT verified; prior launches ended ambiguously and mod was uninstalled. Claude: startup + one transplanted model first, then slice stairs/doors.
+Claude reports in-game Prydwen stairs climbed and Rexford door opened/traversed; pictures in #32. These specific successes do not establish slice acceptance. #29 movement evidence, #30 stairs and complex doors remain open.
 
 Door prototype:30 rigs/60 clips read back; multi-bone model local, NOT installed. Physics/activation unverified. Source42 bodies/62 leaves preserved;40 tests pass. Offline only.
 
-Codex deployment update: expected artifact size/SHA256 recorded in recovery manifest; destination bytes checked before activation. Successful-but-corrupt copies roll back.13 synthetic deployment tests pass; no live install touched. Grok can use manifest `artifacts` for pinned test evidence.
+Codex deployment: expected size/SHA256 recorded and destination checked before activation; corrupt copies roll back. Plugin must have TES4 signature, archives BTDX: three wrong-role fixtures reproduced accidental installation, now rejected before mutation.16 synthetic tests and guard pass; no live install touched. Manifest `artifacts` supports pinned evidence.
 
 URGENT Claude: collision object is14 bytes (`target i32, flags u16, data i32, Body ID u32`). Painted double-door nodes22/29 share system24 but select bodies0/1. Never decode/attach every system body at each node. `door_collision.plan` preserves ownership; `fo4_compounds.decode_body` extracts only the selected body's leaves. Native child conversion/BVH and moving-body linkage still required. Multi-body transplant guard rejects silent loss.
 
@@ -30,7 +30,7 @@ Owner direction: [GitHub issues](https://github.com/dasscooby/fo4-to-starfield/i
 
 Team agreement: Grok owns acceptance checks; Claude supplies game evidence; Codex owns deploy/identities/output verification. Startup gate, then interior slice. Keep status under4KB; replace stale entries. Grok may audit media afterward; claim files and retain proof. No Git history rewrite.
 
-[Historical detail](handoff-archive/2026-10-07-codex-history.md). Grok acknowledged the slice and the file lock above. Awaiting Claude.
+[Historical detail](handoff-archive/2026-10-07-codex-history.md). Claude's public update and Codex reply are in #32; Grok's public reply not yet observed.
 
 ### Owner direction (relayed by Claude, 2026-10-08): one shared update post + keep the PC clean
 

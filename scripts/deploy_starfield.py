@@ -119,10 +119,11 @@ def install(a):
     if has_tex:
         built.append(os.path.join(a.staging, TEX_ARCHIVE))
         build_archive(a, built[2], ["textures"], "DDS")
-    for b in built:
+    for index, b in enumerate(built):
         with open(b, "rb") as f:
             head = f.read(4)
-        if os.path.getsize(b) < 16 or head not in (b"TES4", b"BTDX"):
+        expected_head = b"TES4" if index == 0 else b"BTDX"
+        if os.path.getsize(b) < 16 or head != expected_head:
             sys.exit(f"build output looks invalid, nothing installed: {b}")
     # 2) record intent first, then copy; any failure rolls back what was copied
     identities = {os.path.basename(dst): artifact_identity(src) for src, dst in zip(built, targets)}

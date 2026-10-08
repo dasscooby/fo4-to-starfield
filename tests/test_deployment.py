@@ -60,8 +60,10 @@ class DeploymentRollbackTests(unittest.TestCase):
             (staging / "meshes").mkdir()
             if failure == "unfinished_build":
                 (staging / "build-state.json").write_text(json.dumps({"complete": False, "status": "converting"}))
-            if failure == "texture_build":
+            if failure in ("texture_build", "plugin_as_texture_archive"):
                 (staging / "textures").mkdir()
+            if failure == "archive_as_plugin":
+                (staging / deploy.PLUGIN).write_bytes(b"BTDX" + bytes(32))
             pt = root / "Plugins.txt"
             original = b"# user comment\r\n*Other.esm\r\n"
             if existing_plugins:
@@ -71,7 +73,12 @@ class DeploymentRollbackTests(unittest.TestCase):
             def build(a, out, folders, fmt):
                 if failure == "texture_build" and fmt == "DDS":
                     raise SystemExit("injected texture archive failure")
-                Path(out).write_bytes((b"BAD!" if failure == "invalid_archive" else b"BTDX") + bytes(32))
+                head = b"BTDX"
+                if failure == "invalid_archive":
+                    head = b"BAD!"
+                if failure == "plugin_as_main_archive" or (failure == "plugin_as_texture_archive" and fmt == "DDS"):
+                    head = b"TES4"
+                Path(out).write_bytes(head + bytes(32))
 
             original_copy = deploy.shutil.copy2
             original_dump = deploy.json.dump
@@ -161,6 +168,15 @@ class DeploymentRollbackTests(unittest.TestCase):
 
     def test_invalid_archive_does_not_touch_installation(self):
         self.run_failure("invalid_archive")
+
+    def test_archive_cannot_be_installed_as_plugin(self):
+        self.run_failure("archive_as_plugin")
+
+    def test_plugin_cannot_be_installed_as_main_archive(self):
+        self.run_failure("plugin_as_main_archive")
+
+    def test_plugin_cannot_be_installed_as_texture_archive(self):
+        self.run_failure("plugin_as_texture_archive")
 
     def test_interrupted_build_cannot_be_deployed(self):
         self.run_failure("unfinished_build")
