@@ -14,6 +14,29 @@ spec.loader.exec_module(deploy)
 
 
 class DeploymentRollbackTests(unittest.TestCase):
+    def test_bom_prefixed_active_plugin_is_not_duplicated_or_removed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            staging, game = root / "staging", root / "game"
+            staging.mkdir()
+            (game / "Data").mkdir(parents=True)
+            (staging / deploy.PLUGIN).write_bytes(b"TES4" + bytes(32))
+            (staging / "meshes").mkdir()
+            pt = root / "Plugins.txt"
+            original = b"\xef\xbb\xbf*FO4Port.esm\r\n*Other.esm\r\n"
+            pt.write_bytes(original)
+            args = SimpleNamespace(staging=str(staging), starfield=str(game), dry_run=False)
+            def build(a, out, folders, fmt):
+                Path(out).write_bytes(b"BTDX" + bytes(32))
+            with patch.object(deploy, "plugins_txt_path", return_value=str(pt)), \
+                    patch.object(deploy, "build_archive", side_effect=build):
+                deploy.install(args)
+            manifest = json.loads((game / "Data" / deploy.MANIFEST).read_text())
+            self.assertEqual(manifest["plugins_added"], [])
+            self.assertEqual(pt.read_bytes(), original)
+            deploy.uninstall(args)
+            self.assertEqual(pt.read_bytes(), original)
+
     def check_archive_build(self, outcome):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

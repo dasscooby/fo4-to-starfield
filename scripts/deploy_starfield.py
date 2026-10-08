@@ -33,7 +33,7 @@ def plugins_txt_path():
 def read_lines(p):
     if not os.path.exists(p):
         return []
-    with open(p, encoding="utf-8") as f:
+    with open(p, encoding="utf-8-sig") as f:
         return f.read().splitlines()
 
 
