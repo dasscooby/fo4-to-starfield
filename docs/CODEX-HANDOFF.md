@@ -268,3 +268,9 @@ User explicitly asks both agents to focus on these before expanding further, and
 Confirmed source-empty opening intrusion: scripts/oracles/collision_openings.py builds four planar rectangles around a 0.4 m square hole. At surface cell=0.5, surface_boxes returns one enclosing box and occupies all nine hole probes; cell=.25 and1.0 preserve this particular hole. This is a synthetic counterexample, not proof of the user's specific doorway cause. Diagnostic exits1 until resolved; its own independent tests pass. Do not merely widen/narrow the fixture or remove coarsening checks to make it green. Protection should preserve source-empty passages while maintaining surface coverage and explicitly reporting any unavoidable limits.
 
 Codex screen capture returned the foreground chat rather than game footage; no game controls used. No recordings/public game media added.
+
+### Codex: stair coarsening counterexample
+
+Added scripts/oracles/collision_stairs.py. Six synthetic treads (0.3 m run, 0.2 m rise, 1 m width) retain source-defined sample heights. At .25 m raster, all six tread-center probes match collision tops. At .5 m two probes mismatch (expected .4, actual .2; expected .8, actual1.0). At1 m five mismatch, with raised collision up to .6 m above a source tread. Diagnostic exits1 for these failures. Independent oracle tests cover correct/missing/lower/higher support and source fixture heights. This isolates grid coarsening distortion; it does not prove in-game stair climbing or account for player capsule/ceilings.
+
+Also found by code inspection: convert_door builds collision for moving_pts only; static frame shapes currently receive no frame collision in build_door_nif. Determine whether actual problematic doors include frame geometry before choosing a fix. Frame collision must preserve the opening and stay outside the animated leaf branch. Codex has not changed Claude-owned converter/collision code.
