@@ -16,7 +16,7 @@ import time
 import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
-from fo4sf import ba2, checkpoints, convert_static, pipeline, sfcollision, sfnif  # noqa: E402
+from fo4sf import ba2, checkpoints, convert_static, meshcollision, pipeline, sfcollision, sfnif  # noqa: E402
 
 
 def checkpoint_signature(a):
@@ -129,7 +129,11 @@ def main():
     if a.starfield_data:                          # opening doors: leaf body copied from a vanilla animated door
         donor = sfcollision.physics_blob_from_nif(ba2.Ba2(os.path.join(a.starfield_data, "Starfield - Meshes01.ba2")).read(
             sfnif.DOOR_TEMPLATE["nif"]))
-    cache = checkpoints.Checkpoints(a.staging, checkpoint_signature(a)) if a.resume else None
+    mesh_template = None
+    if a.starfield_data:                          # FO4's own collision meshes, transplanted into a vanilla container
+        mesh_template = meshcollision.template_from_nif(ba2.Ba2(os.path.join(a.starfield_data, "Starfield - Meshes01.ba2")).read(
+            meshcollision.TEMPLATE_NIF))
+    cache =checkpoints.Checkpoints(a.staging, checkpoint_signature(a)) if a.resume else None
     conv = None
     if a.cell_json:
         with open(a.cell_json, encoding="utf-8-sig") as f:
@@ -156,7 +160,8 @@ def main():
         else:
             if conv is None:
                 conv = pipeline.Converter(src, a.staging, a.texconv, a.content_resources, template,
-                                          rig_doors=donor is not None, door_physics_donor=donor)
+                                          rig_doors=donor is not None, door_physics_donor=donor,
+                                          sf_mesh_template=mesh_template)
             r = conv.convert_nif(name)
             if cache and r["ok"]:
                 try:

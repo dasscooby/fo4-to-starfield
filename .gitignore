@@ -34,3 +34,4 @@ __pycache__/
 bin/
 obj/
 .vs/
+scripts/game/cycle_pid.txt

@@ -47,11 +47,11 @@ class Packfile:
             tag = data[h:h + 20].split(b"\0")[0].decode("latin-1")
             start, loc, glo, vir, exp, imp, end = struct.unpack_from("<7i", data, h + 20)
             s = Section(tag, start, end)
-            for p in range(start + loc, start + glo, 8):
+            for p in range(start + loc, start + glo - 7, 8):
                 a, b = struct.unpack_from("<ii", data, p)
                 if a != -1:
                     s.local[a] = b
-            for p in range(start + glo, start + vir, 12):
+            for p in range(start + glo, start + vir - 11, 12):         # tables are padded: skip a partial tail
                 a, sec, b = struct.unpack_from("<iii", data, p)
                 if a != -1:
                     s.glob[a] = (sec, b)
@@ -60,7 +60,7 @@ class Packfile:
         for s in self.sections:                              # virtual fixups need the class-name section
             h = hdr + 64 * self.sections.index(s)
             start, loc, glo, vir, exp = struct.unpack_from("<5i", data, h + 20)
-            for p in range(start + vir, start + exp, 12):
+            for p in range(start + vir, start + exp - 11, 12):
                 a, sec, b = struct.unpack_from("<iii", data, p)
                 if a != -1:
                     nm_at = self.sections[sec].start + b

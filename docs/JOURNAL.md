@@ -238,3 +238,26 @@ There had been no user input for 18 minutes, so I ran the in-game checks. The gu
   - Cambridge now spawns and stays on the floor (OCR z 3.87, stable after 6 s), and the atrium renders
     ([screenshot](media/cambridge-atrium.jpg)).
   - Earlier cells may also have had gaps from missing SCOLs; worth a re-probe.
+
+## 2026-10-08: FO4's own collision transplanted into Starfield (built; in-game check pending)
+
+The user's report: collision, doors, stairs, "everything". The root cause is that every converted body was an axis-aligned box
+guessed from the render mesh, so stairs, ramps and angled surfaces could not be represented. New approach: use the collision
+Bethesda authored for FO4.
+- `hkpackfile.py` reads FO4's Havok 2014 packfiles and `fo4collision.py` decodes their shapes (compressed meshes, convex
+  polytopes, body transforms). Verified: the decoded PryCatwalkStairs01 mesh matches the render bounds exactly, and its
+  stair is a 40-degree ramp.
+- `hktagfile.py` reads Starfield's Havok 2019 tagfiles, with type layouts taken from the file's own TYPE section.
+  Finding: Starfield's `hknpCompressedMeshShapeTree` has the same layout as FO4's (sections, primitives, packed/shared
+  vertices, compressed AABB trees). Only a few section fields are packed differently.
+- `meshcollision.transplant` rebuilds a Starfield tagfile around FO4's mesh data. A vanilla Starfield static from the
+  user's install is the container; the optional SIMD tree is off.
+- 1,960 of 3,490 models now carry FO4's exact collision mesh (0 errors). 317 still use oriented/axis boxes (collision not on
+  the root or a moved body), and 1,213 props keep a single box or none.
+- Oriented-box tools were also added (`sfcollision.oriented_surface_boxes`, `convex_obb`). They are not used by default.
+
+In game: **not verified.** The first launch with this build ended with Starfield gone twice, with no crash log. It may be
+a startup crash caused by the new collision, or the user closing it. The mod was uninstalled so the user's game starts
+clean. Also: `cycle.ps1` closed the user's own open Starfield session (sitting in the character menu). It now refuses to
+close a game it did not launch (PID file).
+Next: confirm whether the transplanted collision crashes the game, using a test cell holding one transplanted model.

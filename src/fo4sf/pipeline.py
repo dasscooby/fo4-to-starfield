@@ -83,12 +83,14 @@ class Converter:
     def __init__(self, src: Fo4Archives, staging: str, texconv_exe: str, content_resources: str,
                  collision_template: Optional[bytes] = None, prefix: str = "fo4port",
                  no_collision_pattern: str = r"^meshes[\\/](architecture|interiors|scol)[\\/]", rig_doors: bool = False,
-                 door_physics_donor: Optional[bytes] = None):
+                 door_physics_donor: Optional[bytes] = None, sf_mesh_template: Optional[bytes] = None):
         self.src, self.staging, self.texconv = src, staging, texconv_exe
         # rig_doors: hinged doors become DOOR NIFs that open (needs door_physics_donor: without a keyframed leaf body the leaf
         # is pinned and blocks the doorway). Off by default because the donor comes from the Starfield install.
         self.rig_doors = rig_doors
-        self.door_physics_donor = door_physics_donor   # body of a vanilla door leaf (sfcollision.physics_blob_from_nif)
+        self.door_physics_donor = door_physics_donor
+        # vanilla Starfield mesh-collision blob: FO4's own collision meshes are transplanted (meshcollision.transplant)
+        self.sf_mesh_template = sf_mesh_template   # body of a vanilla door leaf (sfcollision.physics_blob_from_nif)
         self.template_mat = cm.read_template(content_resources)
         self.collision_template = collision_template
         self.prefix = prefix
@@ -415,6 +417,7 @@ class Converter:
             if files is None:
                 files = convert_static.convert_static(raw, out_name, material_paths=mats, collision_mode=mode,
                                                       include_skinned=True, report=coll_report,
+                                                      sf_mesh_template=self.sf_mesh_template if use_box else None,
                                                       collision_template=self.collision_template if use_box else None)
             for relp, data in files.items():
                 p = os.path.join(self.staging, *relp.split("/"))

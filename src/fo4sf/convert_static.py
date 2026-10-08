@@ -102,11 +102,36 @@ def collision_template_from_nif(sf_nif: bytes) -> bytes:
     raise nifmod.NifError("template NIF has no bhkPhysicsSystem")
 
 
+def fo4_mesh_collision(src, sf_mesh_template: bytes, report: dict = None):
+    """Starfield collision blob made from the FO4 NIF's own mesh collision (on the root node), or None.
+    FO4 bhkNPCollisionObject: target node i32, flags u16, data (bhkPhysicsSystem) i32."""
+    from . import meshcollision
+    for i in range(len(src.blocks)):
+        if src.type_of(i) != "bhkNPCollisionObject":
+            continue
+        target, _, data = struct.unpack_from("<iHi", src.blocks[i], 0)
+        if target != 0 or not (0 <= data < len(src.blocks)) or src.type_of(data) != "bhkPhysicsSystem":
+            continue
+        n, = struct.unpack_from("<I", src.blocks[data], 0)
+        try:
+            out = meshcollision.transplant(src.blocks[data][4:4 + n], sf_mesh_template)
+        except Exception as e:                       # noqa: BLE001  (fallback by design, reason recorded)
+            if report is not None:
+                report["fo4_collision_error"] = f"{type(e).__name__}: {e}"
+            return None
+        if out is not None and report is not None:
+            report["source"] = "fo4-mesh"
+        return out
+    return None
+
+
 def convert_static(fo4_nif: bytes, out_name: str, material_path: str = PLACEHOLDER_MATERIAL,
                    unit_scale: float = UNIT_SCALE, collision_template: bytes = None,
                    material_paths: list = None, collision_mode: str = "box",
-                   include_skinned: bool = False, report: dict = None) -> Dict[str, bytes]:
-    """collision_mode: "box" = one AABB on the root; "surfaces" = thin boxes behind flat surfaces, one body each."""
+                   include_skinned: bool = False, report: dict = None, sf_mesh_template: bytes = None) -> Dict[str, bytes]:
+    """collision_mode: "box" = one AABB on the root; "surfaces" = thin boxes behind flat surfaces, one body each.
+    sf_mesh_template: a vanilla Starfield mesh-collision blob; when given, FO4's own collision mesh is transplanted
+    (meshcollision.transplant) and the box methods are only the fallback."""
     src = nifmod.parse(fo4_nif)
     shapes = [s for s in nifmod.fo4_trishapes(src) if (include_skinned or not s.skinned) and s.positions and s.triangles]
     if not shapes:
@@ -128,7 +153,11 @@ def convert_static(fo4_nif: bytes, out_name: str, material_path: str = PLACEHOLD
                                                material_paths[i] if material_paths else material_path, sphere, box))
     node_name = out_name.rsplit("/", 1)[-1].encode()
     blob, child_blobs = None, []
-    if collision_template is not None and collision_mode == "surfaces":
+    if sf_mesh_template is not None and collision_template is not None:
+        blob = fo4_mesh_collision(src, sf_mesh_template, report)       # FO4's own mesh collision, transplanted
+    if blob is not None:
+        pass
+    elif collision_template is not None and collision_mode == "surfaces":
         for c, h in sfcollision.mesh_boxes(all_pts, all_tris, report=report):
             child_blobs.append(sfcollision.box_blob(collision_template, c, h))
     elif collision_template is not None:     # T3: one axis-aligned box around all geometry

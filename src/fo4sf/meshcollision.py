@@ -211,3 +211,14 @@ def transplant(fo4_blob: bytes, sf_template_blob: bytes) -> Optional[bytes]:
     type_sec = next((blob[s - 8:e] for tag, s, e in hktagfile.sections(blob, 8, len(blob)) if tag == "TYPE"))
     sdk = next((blob[s:e] for tag, s, e in hktagfile.sections(blob, 8, len(blob)) if tag == "SDKV"))
     return w.build(sdk, type_sec)
+
+
+def template_from_nif(sf_nif: bytes) -> bytes:
+    """The first bhkPhysicsSystem blob of a vanilla Starfield NIF (use TEMPLATE_NIF: a static with a mesh body)."""
+    from . import nif as nifmod
+    f = nifmod.parse(sf_nif)
+    for i in range(len(f.blocks)):
+        if f.type_of(i) == "bhkPhysicsSystem":
+            n, = struct.unpack_from("<I", f.blocks[i], 0)
+            return f.blocks[i][4:4 + n]
+    raise ValueError("template NIF has no bhkPhysicsSystem")
