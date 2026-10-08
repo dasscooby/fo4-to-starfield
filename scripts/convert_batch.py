@@ -7,14 +7,68 @@ Writes <staging>/manifest.json: converted items (EditorID + model path for the p
 Needs numpy. Deterministic: names are processed in sorted order.
 """
 import argparse
+import hashlib
 import json
 import os
 import re
 import sys
 import time
+import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 from fo4sf import ba2, convert_static, pipeline, sfcollision, sfnif  # noqa: E402
+
+
+def source_identity(source):
+    return source.replace("\\", "/").lower()
+
+
+def load_editor_ids(staging):
+    path = os.path.join(staging, "editorids.json")
+    ids = {}
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            ids = {source_identity(k): v for k, v in json.load(f).items()}
+    # Adopt existing plugin names rather than renaming deployed records on upgrade.
+    manifest = os.path.join(staging, "manifest.json")
+    if os.path.exists(manifest):
+        with open(manifest, encoding="utf-8") as f:
+            for item in json.load(f)["items"]:
+                key, value = source_identity(item["source"]), item["editor_id"]
+                if key in ids and ids[key] != value:
+                    raise ValueError(f"conflicting editor ID for {key}")
+                ids[key] = value
+    if len({v.lower() for v in ids.values()}) != len(ids):
+        raise ValueError("duplicate editor IDs in persistent source mapping")
+    return ids
+
+
+def editor_id(source, ids):
+    key = source_identity(source)
+    if key not in ids:
+        basename = key.rsplit("/", 1)[-1]
+        stem = re.sub(r"[^A-Za-z0-9_]", "_", os.path.splitext(basename)[0])
+        name = "FO4Port_" + stem
+        reserved = {v.lower() for v in ids.values()}
+        if name.lower() in reserved:
+            name += "_" + hashlib.sha256(key.encode()).hexdigest()[:16]
+        if name.lower() in reserved:
+            raise ValueError(f"editor ID collision for {key}")
+        ids[key] = name
+    return ids[key]
+
+
+def write_json_atomic(path, value):
+    fd, temporary = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".fo4port-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(value, f, indent=1)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.remove(temporary)
 
 
 def main():
@@ -34,9 +88,12 @@ def main():
                     help="base record types to take from --cell-json")
     a = ap.parse_args()
 
+    ids = load_editor_ids(a.staging)
+
     t0 = time.time()
     src = pipeline.Fo4Archives(a.fo4_data)
-    template = convert_static.collision_template_from_nif(open(a.collision_template, "rb").read())
+    with open(a.collision_template, "rb") as f:
+        template = convert_static.collision_template_from_nif(f.read())
     donor = None
     if a.starfield_data:                          # opening doors: leaf body copied from a vanilla animated door
         donor = sfcollision.physics_blob_from_nif(ba2.Ba2(os.path.join(a.starfield_data, "Starfield - Meshes01.ba2")).read(
@@ -44,7 +101,8 @@ def main():
     conv = pipeline.Converter(src, a.staging, a.texconv, a.content_resources, template,
                               rig_doors=donor is not None, door_physics_donor=donor)
     if a.cell_json:
-        cell = json.load(open(a.cell_json, encoding="utf-8-sig"))
+        with open(a.cell_json, encoding="utf-8-sig") as f:
+            cell = json.load(f)
         wanted = set(a.types.split(","))
         names = sorted({"meshes\\" + r["model"].lstrip("\\") for r in cell["refs"] if r["model"] and r["type"] in wanted
                         and not re.search(r"marker|^\\?effects[\\/]", r["model"], re.I)},   # editor markers, fog/light volumes
@@ -52,7 +110,7 @@ def main():
     else:
         names = src.mesh_names(a.pattern)
     print(f"{len(names)} candidate meshes; converting up to {a.limit}")
-    items, failures, used = [], [], set()
+    items, failures = [], []
     for name in names:
         if len(items) >= a.limit:
             break
@@ -62,12 +120,7 @@ def main():
         if not r["ok"]:
             failures.append({"nif": name, "reason": r["reason"]})
             continue
-        stem = re.sub(r"[^A-Za-z0-9_]", "_", os.path.splitext(os.path.basename(name))[0])
-        eid, k = "FO4Port_" + stem, 1
-        while eid in used:
-            k += 1
-            eid = f"FO4Port_{stem}_{k}"
-        used.add(eid)
+        eid = editor_id(name, ids)
         items.append({"editor_id": eid, "model": r["out_name"].replace("/", "\\") + ".nif", "source": name,
                       "shapes": r["shapes"], "fallback_materials": r["fallback_materials"], "form_index": len(items),
                       "collision_report": r.get("collision_report") or {}, **({"door": r["door"]} if "door" in r else {})})
@@ -77,7 +130,8 @@ def main():
     manifest = {"items": items, "failures": failures, "material_fallbacks": conv.material_errors, "stats": conv.stats,
                 "seconds": round(time.time() - t0, 1)}
     os.makedirs(a.staging, exist_ok=True)
-    json.dump(manifest, open(os.path.join(a.staging, "manifest.json"), "w"), indent=1)
+    write_json_atomic(os.path.join(a.staging, "editorids.json"), ids)
+    write_json_atomic(os.path.join(a.staging, "manifest.json"), manifest)
     print(json.dumps({"converted": len(items), "failed": len(failures), **conv.stats, "seconds": manifest["seconds"]}))
 
 

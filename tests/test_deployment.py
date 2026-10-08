@@ -1,5 +1,6 @@
 """Deployment failure injection: synthetic files, no game installation required."""
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -33,9 +34,11 @@ class DeploymentRollbackTests(unittest.TestCase):
 
             original_copy = deploy.shutil.copy2
             original_dump = deploy.json.dump
+            original_remove = deploy.os.remove
+            original_write_lines = deploy.write_lines
 
             def copy(src, dst):
-                if failure == "copy":
+                if failure in ("copy", "cleanup"):
                     Path(dst).write_bytes(b"partial")
                     raise OSError("injected partial copy")
                 return original_copy(src, dst)
@@ -45,12 +48,34 @@ class DeploymentRollbackTests(unittest.TestCase):
                     raise OSError("injected final manifest failure")
                 return original_dump(state, stream, **kwargs)
 
+            def remove(path):
+                if failure == "cleanup" and Path(path) == data / deploy.PLUGIN:
+                    raise PermissionError("injected locked destination")
+                return original_remove(path)
+
+            def write_lines(path, lines):
+                original_write_lines(path, lines)
+                if failure == "interrupt":
+                    raise KeyboardInterrupt("injected interruption after activation")
+
             with patch.object(deploy, "plugins_txt_path", return_value=str(pt)), \
                     patch.object(deploy, "build_archive", side_effect=build), \
                     patch.object(deploy.shutil, "copy2", side_effect=copy), \
-                    patch.object(deploy.json, "dump", side_effect=dump):
-                with self.assertRaises(SystemExit):
+                    patch.object(deploy.json, "dump", side_effect=dump), \
+                    patch.object(deploy.os, "remove", side_effect=remove), \
+                    patch.object(deploy, "write_lines", side_effect=write_lines):
+                with self.assertRaises(KeyboardInterrupt if failure == "interrupt" else SystemExit):
                     deploy.install(args)
+            if failure == "cleanup":
+                state = json.loads((data / deploy.MANIFEST).read_text())
+                self.assertEqual(state["files"], [deploy.PLUGIN])
+                self.assertFalse(state["complete"])
+                deploy.uninstall(args)
+            if failure == "interrupt":
+                state = json.loads((data / deploy.MANIFEST).read_text())
+                self.assertTrue(state["plugins_restore_pending"])
+                self.assertFalse(state["complete"])
+                deploy.uninstall(args)
             self.assertEqual(list(data.iterdir()), [])
             if existing_plugins:
                 self.assertEqual(pt.read_bytes(), original)
@@ -65,3 +90,23 @@ class DeploymentRollbackTests(unittest.TestCase):
 
     def test_rollback_removes_new_plugins_file(self):
         self.run_failure("manifest", existing_plugins=False)
+
+    def test_failed_cleanup_retains_retryable_manifest(self):
+        self.run_failure("cleanup")
+
+    def test_interrupted_activation_is_recoverable(self):
+        self.run_failure("interrupt")
+
+    def test_interrupted_activation_removes_new_plugin_list(self):
+        self.run_failure("interrupt", existing_plugins=False)
+
+    def test_failed_manifest_write_preserves_previous_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "manifest.json"
+            previous = {"files": ["owned.file"], "complete": False}
+            deploy.write_manifest(str(path), previous)
+            with patch.object(deploy.json, "dump", side_effect=OSError("disk full")):
+                with self.assertRaises(OSError):
+                    deploy.write_manifest(str(path), {"files": []})
+            self.assertEqual(json.loads(path.read_text()), previous)
+            self.assertEqual(list(Path(tmp).iterdir()), [path])

@@ -10,11 +10,13 @@ uninstall: removes exactly what the manifest lists, including the Plugins.txt li
 usage: python deploy_starfield.py install|uninstall --staging <dir> --starfield <game dir> [--dry-run]
 """
 import argparse
+import base64
 import json
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 
 PLUGIN = "FO4Port.esm"
 ARCHIVE = "FO4Port - Main.ba2"
@@ -35,8 +37,27 @@ def read_lines(p):
 
 
 def write_manifest(p, state):
-    with open(p, "w") as f:
-        json.dump(state, f, indent=1)
+    fd, temporary = tempfile.mkstemp(prefix=".fo4port-deploy-", dir=os.path.dirname(p))
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(state, f, indent=1)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary, p)
+    finally:
+        if os.path.exists(temporary):
+            os.remove(temporary)
+
+
+def restore_plugins(state):
+    p = state["plugins_txt"]
+    original = state["plugins_original"]
+    if original is None:
+        if os.path.exists(p):
+            os.remove(p)
+    else:
+        with open(p, "wb") as f:
+            f.write(base64.b64decode(original))
 
 
 def write_lines(p, lines):
@@ -93,7 +114,8 @@ def install(a):
     if plugins_existed:
         with open(pt, "rb") as f:
             plugins_original = f.read()
-    plugins_touched = False
+    state["plugins_original"] = base64.b64encode(plugins_original).decode("ascii") if plugins_existed else None
+    state["plugins_restore_pending"] = False
     write_manifest(man_path, state)
     try:
         for src, dst in zip(built, targets):
@@ -101,21 +123,34 @@ def install(a):
             write_manifest(man_path, state)
             shutil.copy2(src, dst)
         if pl_add:
-            plugins_touched = True
+            state["plugins_restore_pending"] = True
+            write_manifest(man_path, state)
             write_lines(pt, pl + pl_add)
         state["complete"] = True
         write_manifest(man_path, state)
     except Exception as e:                                   # noqa: BLE001 (roll back, then report)
-        if plugins_touched:
-            if plugins_existed:
-                with open(pt, "wb") as f:
-                    f.write(plugins_original)
-            elif os.path.exists(pt):
-                os.remove(pt)
+        state["complete"] = False
+        errors = []
+        if state["plugins_restore_pending"]:
+            try:
+                restore_plugins(state)
+                state["plugins_restore_pending"] = False
+            except OSError as cleanup_error:
+                errors.append(str(cleanup_error))
+        remaining = []
         for rel in state["files"]:
             p = os.path.join(data, rel)
-            if os.path.exists(p):
-                os.remove(p)
+            try:
+                if os.path.exists(p):
+                    os.remove(p)
+            except OSError as cleanup_error:
+                remaining.append(rel)
+                errors.append(str(cleanup_error))
+        state["files"] = remaining
+        if errors:
+            write_manifest(man_path, state)
+            sys.exit(f"install failed: {e}; recovery manifest retained at {man_path}. "
+                     f"Retry uninstall after resolving: {'; '.join(errors)}")
         os.remove(man_path)
         sys.exit(f"install failed and was rolled back: {type(e).__name__}: {e}")
     print("installed. Undo with: python deploy_starfield.py uninstall --starfield <game dir>")
@@ -126,7 +161,8 @@ def uninstall(a):
     man_path = os.path.join(data, MANIFEST)
     if not os.path.exists(man_path):
         sys.exit("nothing to uninstall (no manifest)")
-    m = json.load(open(man_path))
+    with open(man_path) as f:
+        m = json.load(f)
     print(f"removing {m['files']} and Plugins.txt entries {m['plugins_added']}")
     if a.dry_run:
         return
@@ -134,7 +170,9 @@ def uninstall(a):
         p = os.path.join(data, rel)
         if os.path.exists(p):
             os.remove(p)
-    if m["plugins_added"]:
+    if not m.get("complete", True) and m.get("plugins_restore_pending"):
+        restore_plugins(m)
+    elif m["plugins_added"]:
         pl = [l for l in read_lines(m["plugins_txt"]) if l not in m["plugins_added"]]
         if pl:
             write_lines(m["plugins_txt"], pl)
