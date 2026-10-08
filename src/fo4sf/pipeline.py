@@ -99,6 +99,7 @@ class Converter:
         self.material_errors: Dict[str, str] = {}
         self._blend_cache: Dict[str, bool] = {}
         self._glass_template = None
+        self._decal_template = None
         self.content_resources = content_resources
         self.neutral = self._make_neutral_material()
 
@@ -158,6 +159,30 @@ class Converter:
                                          smoothness=b.smoothness, spec_mult=b.spec_mult,
                                          alpha_test=b.alpha_test, alpha_ref=b.alpha_ref)
 
+    def decal_material(self, bgsm_path: str) -> Optional[str]:
+        """Alpha-blended FO4 material -> Starfield decal material (or None: the shape is skipped, as before decals)."""
+        m = re.search(r"materials[\\/].*", bgsm_path, re.I)
+        bgsm_path = m.group(0) if m else bgsm_path
+        key = "decal:" + bgsm_path.replace("/", "\\").lower()
+        if key not in self._materials:
+            try:
+                raw = self.src.material(bgsm_path)
+                if raw is None:
+                    raise FileNotFoundError("bgsm not in archives")
+                b = cm.parse_bgsm(raw)
+                if not (b.diffuse and b.normal):
+                    raise ValueError("material lacks diffuse/normal textures")
+                rel = re.sub(r"^materials[\\/]", "", bgsm_path.replace("\\", "/"), flags=re.I)
+                self._materials[key] = self._convert_texture_set("decals/" + os.path.splitext(rel)[0].lower(), b.diffuse,
+                                                                 b.normal, b.smooth_spec, smoothness=b.smoothness,
+                                                                 spec_mult=b.spec_mult, decal=True)
+                self.stats["materials_ok"] += 1
+            except Exception as e:                        # noqa: BLE001
+                self._materials[key] = None
+                self.stats["materials_fallback"] += 1
+                self.material_errors[key] = f"{type(e).__name__}: {e}"
+        return self._materials[key]
+
     def texture_set_material(self, diffuse: str, normal: str, spec: str) -> Optional[str]:
         """Material for a shape that names its textures directly (BSShaderTextureSet, no .bgsm). Cached by diffuse path."""
         stem = "texsets/" + re.sub(r"^textures[\\/]", "", diffuse.replace("\\", "/"), flags=re.I).lower()
@@ -176,8 +201,10 @@ class Converter:
 
     def _convert_texture_set(self, stem: str, diffuse: str, normal: str, spec: str,
                              smoothness: float = 1.0, spec_mult: float = 1.0,
-                             alpha_test: bool = False, alpha_ref: int = 128) -> str:
-        """FO4 diffuse / normal / smooth-spec textures -> Starfield colour / normal / rough DDS + a .mat. Spec is optional."""
+                             alpha_test: bool = False, alpha_ref: int = 128, decal: bool = False) -> str:
+        """FO4 diffuse / normal / smooth-spec textures -> Starfield colour / normal / rough DDS + a .mat. Spec is optional.
+        decal: alpha-blended overlay; the diffuse alpha always becomes the opacity map and the .mat is cloned from the
+        vanilla decal template (cm.DECAL_TEMPLATE_MAT) so it blends over the surface behind it."""
         import numpy as np
         tex_rel = f"textures/{self.prefix}/{stem}"
         d, n = self.src.texture(diffuse), self.src.texture(normal)
@@ -188,14 +215,14 @@ class Converter:
         with tempfile.TemporaryDirectory() as tmp:
             open(os.path.join(tmp, "d.dds"), "wb").write(d)
             opacity = None
-            if alpha_test:                                 # cutout: the diffuse alpha becomes a BC4 opacity map
+            if alpha_test or decal:                        # cutout / blend: the diffuse alpha becomes a BC4 opacity map
                 open(os.path.join(tmp, "a.dds"), "wb").write(d)
                 textures.texconv(self.texconv, os.path.join(tmp, "a.dds"), tmp, "R8G8B8A8_UNORM", ("-m", "1"))
                 raw_a = open(os.path.join(tmp, "a.dds"), "rb").read()
                 ha = textures.read_dds_header(raw_a)
                 px = np.frombuffer(raw_a[ha["data_offset"]:ha["data_offset"] + ha["width"] * ha["height"] * 4], np.uint8)
                 alpha = px.reshape(ha["height"], ha["width"], 4)[:, :, 3].copy()
-                if alpha.min() < 250:                     # only if the texture really has a cutout
+                if decal or alpha.min() < 250:            # only if the texture really has a cutout
                     textures.write_r8(os.path.join(tmp, "o_in.dds"), alpha)
                     textures.texconv(self.texconv, os.path.join(tmp, "o_in.dds"), tmp, "BC4_UNORM")
                     opacity = "o_in.dds"
@@ -216,8 +243,15 @@ class Converter:
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.copy2(os.path.join(tmp, fn), dst)
                 out[kind] = cm.game_path(f"{tex_rel}_{kind}.dds")
-        mat = cm.build_mat(self.template_mat, "FO4Port_" + re.sub(r"[^a-z0-9]+", "_", stem), out["color"], out["normal"], out["rough"],
-                           opacity=out.get("opacity"), alpha_threshold=alpha_ref / 255.0)
+        if decal:
+            if self._decal_template is None:
+                self._decal_template = cm.read_template_path(self.content_resources, cm.DECAL_TEMPLATE_MAT)
+            mat = cm.build_from_template(self._decal_template, "FO4Port_" + re.sub(r"[^a-z0-9]+", "_", stem),
+                                         {"Albedo": out["color"], "Normal": out["normal"], "Roughness": out["rough"],
+                                          "Opacity": out["opacity"]})
+        else:
+            mat = cm.build_mat(self.template_mat, "FO4Port_" + re.sub(r"[^a-z0-9]+", "_", stem), out["color"], out["normal"],
+                               out["rough"], opacity=out.get("opacity"), alpha_threshold=alpha_ref / 255.0)
         mat_rel = f"materials/{self.prefix}/{stem}.mat"
         p = os.path.join(self.staging, *mat_rel.split("/"))
         os.makedirs(os.path.dirname(p), exist_ok=True)
@@ -317,7 +351,7 @@ class Converter:
         name = src.strings[idx] if 0 <= idx < len(src.strings) else b""
         if name.lower().endswith(b".bgsm"):
             if self._is_blended(name.decode("latin-1")):
-                return None                 # alpha-blended overlay/decal shells: no alpha support yet, skip (else noisy)
+                return self.decal_material(name.decode("latin-1"))   # overlay shells (cracks, grime): decal; None = skip
             return self.material(name.decode("latin-1")) or self.neutral
         # no material file: shader type, name, extra data list, controller, flags1, flags2, UV offset, UV scale, texture set
         n_extra, = struct.unpack_from("<I", blk, 8)

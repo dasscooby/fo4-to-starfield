@@ -162,6 +162,7 @@ def build_mat(template: dict, name: str, albedo: str, normal: str, rough: str,
 
 
 GLASS_TEMPLATE_MAT = "Materials/SetDressing/Outpost/Mine/OPMineMaskBox01Glass.mat"   # 1LayerEffectGlassNoFrost, own textures
+DECAL_TEMPLATE_MAT = "Materials/Architecture/City/Akila/Decal/AKDecalPrintedTechWall01.mat"   # 1LayerStandardDecal, albedo/normal/rough/opacity
 
 
 def parse_bgem_textures(d: bytes):

@@ -169,3 +169,16 @@ FO4 hinged doors now open and close in Starfield (24 door models in our 8 cells)
 collision body: it must be keyframed like a vanilla door leaf, not static. Verified in a one-door test cell and in Hotel
 Rexford: closed at rest, swings on E, walk through ([screenshot](media/door-rexford-opens.jpg)). Enable it with
 `convert_batch.py --starfield-data`. Next for doors: sounds, frame collision, and a sliding template for vault doors.
+
+## 2026-10-08: alpha-blended overlays become decals
+
+FO4 materials with alpha blending (sign lettering, wall cracks, grime and greeble overlays) were skipped. They now convert
+to Starfield decal materials. The diffuse alpha becomes the opacity map, and the `.mat` is cloned from the vanilla decal
+`AKDecalPrintedTechWall01.mat` (shader model `1LayerStandardDecal`; `cm.DECAL_TEMPLATE_MAT`,
+`Converter.decal_material`). Re-converted 222 models with blended shapes (141 new materials, 0 failures, 84 s).
+In game, the Vault 81 wall placards now show their lettering, "OVERSEER / COMMISSARY"
+([screenshot](media/decal-vault81-placard.jpg)). It reads dimmer than in FO4, probably because FO4 sign letters use glow
+or emissive maps, which are not converted yet.
+Seen on the way: FO4 double doors (`PaintedWoodDoorDouble01`, Parsons) rest with their moving leaf open
+([comparison](media/decal-parsons-cmp.jpg)). Their FO4 rest pose is not the closed pose. Next door fix: take the leaf pose
+from the end of the FO4 `Close` sequence.
