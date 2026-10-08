@@ -63,3 +63,46 @@ def decode(data):
     if offset != len(data):
         raise NifError("unparsed transform curve bytes")
     return {"rotation": rotation, "translation_source_units": translation, "scale": scale}
+
+def evaluate_group(group, time, default):
+    """Sample scalar/vector keys in source units, clamping outside key times.
+
+    Quadratic tangents are segment-normalized: outgoing is the first key's
+    backward field, incoming the next key's forward field. Do not multiply
+    these by the interval duration. TBC requires separate verified semantics.
+    """
+    if not math.isfinite(time):
+        raise NifError("nonfinite sample time")
+    keys = group["keys"]
+    if not keys:
+        return list(default)
+    mode = group["interpolation"]
+    if mode not in (1, 2):
+        raise NifError("unsupported sampled key interpolation")
+    dimensions = len(default)
+    previous = -math.inf
+    for key in keys:
+        t = key["time"]
+        fields = [key["value"]]
+        if mode == 2:
+            fields += [key["forward"], key["backward"]]
+        if not math.isfinite(t) or t <= previous:
+            raise NifError("sampled key times must be strictly increasing")
+        if any(len(v) != dimensions or not all(math.isfinite(x) for x in v) for v in fields):
+            raise NifError("invalid sampled key values")
+        previous = t
+    if time <= keys[0]["time"]:
+        return list(keys[0]["value"])
+    if time >= keys[-1]["time"]:
+        return list(keys[-1]["value"])
+    for left, right in zip(keys, keys[1:]):
+        if time > right["time"]:
+            continue
+        u = (time - left["time"]) / (right["time"] - left["time"])
+        if mode == 1:
+            return [a + (b - a) * u for a, b in zip(left["value"], right["value"])]
+        u2, u3 = u * u, u * u * u
+        weights = (2*u3-3*u2+1, -2*u3+3*u2, u3-2*u2+u, u3-u2)
+        return [sum(w * v for w, v in zip(weights, values)) for values in
+                zip(left["value"], right["value"], left["backward"], right["forward"])]
+    raise NifError("sample interval not found")
