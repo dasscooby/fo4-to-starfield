@@ -155,3 +155,10 @@ walk-through one, rigging is off by default (`Converter(rig_doors=True)` to test
 [WP-doors-research](spikes/WP-doors-research.md). New: `nif.door_hinge` / `descendants`, `sfnif.build_door_nif`,
 `convert_static.convert_door`, DOOR records in the plugin writer (with origin offset and bounds), `tests/test_doors.py`,
 `SfInspect doorprops`.
+
+## 2026-10-08: doors, attempt 2
+
+A vanilla Starfield door swings inside our converted cell, so the remaining problem is our door NIF or record.
+`sfcollision.keyframed()` turns the leaf's static box into a vanilla-style keyframed body. With it the doorway is passable
+again and the leaf rests in FO4's rest pose, but I could not aim scripted input at it to confirm a swing. Next: a
+one-door test cell with a fixed spawn. Rigging stays off by default; the deployed build has walk-through static doors.

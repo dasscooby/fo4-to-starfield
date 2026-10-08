@@ -82,11 +82,13 @@ def _plane_pair(dds: bytes, tmp: str, texconv_exe: str):
 class Converter:
     def __init__(self, src: Fo4Archives, staging: str, texconv_exe: str, content_resources: str,
                  collision_template: Optional[bytes] = None, prefix: str = "fo4port",
-                 no_collision_pattern: str = r"^meshes[\\/](architecture|interiors)[\\/]", rig_doors: bool = False):
+                 no_collision_pattern: str = r"^meshes[\\/](architecture|interiors)[\\/]", rig_doors: bool = False,
+                 door_physics_donor: Optional[bytes] = None):
         self.src, self.staging, self.texconv = src, staging, texconv_exe
         # rig_doors: experimental. Hinged doors become activatable DOOR NIFs, but the leaf does not swing yet and blocks the
         # doorway (docs/spikes/WP-doors-research.md), so by default doors stay static and walk-through.
         self.rig_doors = rig_doors
+        self.door_physics_donor = door_physics_donor   # body of a vanilla door leaf (sfcollision.physics_blob_from_nif)
         self.template_mat = cm.read_template(content_resources)
         self.collision_template = collision_template
         self.prefix = prefix
@@ -363,7 +365,8 @@ class Converter:
             if self.rig_doors and DOOR_RE.search(nif_name) and not NOT_HINGED_RE.search(nif_name) and nif.door_hinge(src):
                 try:                                     # hinged door: rigged like the vanilla template door so it opens
                     files, offset, bounds = convert_static.convert_door(raw, out_name, mats,
-                                                                collision_template=self.collision_template)
+                                                                collision_template=self.collision_template,
+                                                                leaf_physics_donor=self.door_physics_donor)
                     t = sfnif.DOOR_TEMPLATE
                     res["door"] = {"origin_offset": [round(x, 5) for x in offset], "anim_graph": t["anim_graph"],
                                    "bounds": [[round(x, 4) for x in b] for b in bounds],

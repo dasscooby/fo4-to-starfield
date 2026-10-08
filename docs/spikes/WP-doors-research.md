@@ -57,3 +57,23 @@ Clues:
 
 Next: place vanilla DOOR 0AA24A somewhere easy to aim at, to confirm a vanilla door animates in our cell (lighting
 template, cell flags). Then compare its node poses (`sgoKeep` nodes, open.af) with ours. Decoding `.af` is the fallback.
+## Attempt 2 (2026-10-08)
+
+- **A vanilla door animates in our cells.** With the vanilla DOOR `0AA24A` placed at the Rexford door spot
+  (`FO4PORT_DOOR_BASE=0AA24A`, a PluginSpike test hook), E swings its leaf ([screenshot](../media/door-vanilla-swings.jpg)).
+  So the cell, lighting and graph loading are fine, and the difference is in our NIF or our DOOR record.
+- **Collision body.** Our leaf body was cloned from a static box. Diffing it against the vanilla leaf body (same 6,168-byte
+  box layout) leaves only a few non-geometry words: 240 (2 vs 1, likely motion type), 232 and 264 (filter / flags), 448,
+  456 and 472, and the mass block at 1064-1095. `sfcollision.keyframed()` copies those words from a donor (read from the
+  user's install with `physics_blob_from_nif`, so no game data enters the repo). With a keyframed leaf the doorway became
+  passable and the leaf rested in FO4's rest pose (swung about 97 degrees). I could not aim at it with scripted input to
+  confirm a swing.
+- **Record.** Vanilla records also carry `FLLD` (on the model), keywords, `NTRM` and open/close sounds. Not yet tested
+  in isolation: aiming at a vanilla NIF placed with our record failed (the teleport landed inside a stall wall).
+
+Next:
+1. Build a dedicated door test cell: a floor, one door, the player spawned 1.5 m in front of it facing it. That removes
+   the aiming problem.
+2. Then test separately: vanilla NIF + our record, our NIF + the vanilla record (via an ESM copy), and the keyframed leaf.
+3. Put the leaf in FO4's *closed* pose: the hinge rotation at the end of the FO4 `Close` sequence (NiTransformData), not
+   its rest pose.

@@ -247,3 +247,35 @@ def read_box(blob: bytes):
     lo = [min(p[a] for p in pts) for a in range(3)]
     hi = [max(p[a] for p in pts) for a in range(3)]
     return tuple((lo[a] + hi[a]) / 2 for a in range(3)), tuple((hi[a] - lo[a]) / 2 for a in range(3))
+
+
+# Words that differ between the static box template and the body on a vanilla animated door leaf
+# (AK_Ext_Bld_WallA_DoorA_01 mesh001, same 6,168-byte box layout) apart from the box geometry: motion type (240: 2 vs 1),
+# filter / flags (232, 264), body ids / hashes (448, 456, 472) and the compressed mass properties (1064-1095).
+# Copying them from that donor turns a static box into a keyframed one that follows its animated node.
+KEYFRAMED_FIELDS = ((232, 4), (240, 4), (264, 4), (448, 4), (456, 4), (472, 4), (1064, 16), (1088, 8))
+
+
+def keyframed(blob: bytes, donor: bytes) -> bytes:
+    """Return blob with the KEYFRAMED_FIELDS taken from donor (a vanilla animated-door body of the same layout)."""
+    if len(blob) != len(donor):
+        raise ValueError("donor body has a different layout")
+    out = bytearray(blob)
+    for off, n in KEYFRAMED_FIELDS:
+        out[off:off + n] = donor[off:off + n]
+    return bytes(out)
+
+
+def physics_blob_from_nif(sf_nif: bytes, node_name: bytes = b"mesh001") -> bytes:
+    """The bhkPhysicsSystem blob attached (via bhkNPCollisionObject) to the named node of a Starfield NIF."""
+    from . import nif as nifmod
+    f = nifmod.parse(sf_nif)
+    for i in range(len(f.blocks)):
+        if f.type_of(i) != "bhkNPCollisionObject":
+            continue
+        target, _, data = struct.unpack_from("<iHi", f.blocks[i], 0)
+        idx, = struct.unpack_from("<i", f.blocks[target], 0)
+        if f.strings[idx] == node_name:
+            n, = struct.unpack_from("<I", f.blocks[data], 0)
+            return f.blocks[data][4:4 + n]
+    raise ValueError("no collision body on node %r" % node_name)

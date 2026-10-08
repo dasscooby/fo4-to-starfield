@@ -43,5 +43,17 @@ class DoorNifTests(unittest.TestCase):
         self.assertIn(target, nif.descendants(f, names(f)[sfnif.DOOR_TEMPLATE["hinge"]]))
 
 
+class KeyframedBodyTests(unittest.TestCase):
+    def test_copies_only_listed_fields(self):
+        from fo4sf import sfcollision
+        blob, donor = bytes(2000), bytes(range(256)) * 8
+        out = sfcollision.keyframed(blob, donor[:2000])
+        for off, n in sfcollision.KEYFRAMED_FIELDS:
+            self.assertEqual(out[off:off + n], donor[off:off + n])
+        self.assertEqual(out[600:700], bytes(100))                  # box geometry untouched
+        with self.assertRaises(ValueError):
+            sfcollision.keyframed(blob, donor[:1999])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -142,7 +142,8 @@ def convert_static(fo4_nif: bytes, out_name: str, material_path: str = PLACEHOLD
 
 
 def convert_door(fo4_nif: bytes, out_name: str, material_paths: list, unit_scale: float = UNIT_SCALE,
-                 template: dict = None, collision_template: bytes = None) -> Tuple[Dict[str, bytes], tuple, tuple]:
+                 template: dict = None, collision_template: bytes = None,
+                 leaf_physics_donor: bytes = None) -> Tuple[Dict[str, bytes], tuple, tuple]:
     """FO4 hinged door -> Starfield door NIF rigged like the vanilla template door (see sfnif.DOOR_TEMPLATE).
     Shapes under the node the FO4 "Open" sequence animates become the moving leaf; everything else is the static frame.
     Geometry is re-centred on the FO4 pivot and hung under the template's hinge position, so the NIF origin moves:
@@ -183,6 +184,8 @@ def convert_door(fo4_nif: bytes, out_name: str, material_paths: list, unit_scale
         hi = [max(p[a] for p in moving_pts) for a in range(3)]
         blob = sfcollision.box_blob(collision_template, tuple((lo[a] + hi[a]) / 2 for a in range(3)),
                                     tuple(max(0.02, (hi[a] - lo[a]) / 2) for a in range(3)))
+        if leaf_physics_donor is not None:      # a static body pins its node: make it keyframed like vanilla door leaves
+            blob = sfcollision.keyframed(blob, leaf_physics_donor)
     out = sfnif.build_door_nif(out_name.rsplit("/", 1)[-1].encode(), static_shapes, moving_shapes, template,
                                leaf_collision=blob)
     files[f"meshes/{out_name}.nif"] = nifmod.serialize(out)

@@ -163,7 +163,7 @@ DOOR_TEMPLATE = {
     "anim_root": b"AK_Door_Anim_02_Root",
     "hinge": b"Hinge01_Point",
     "hinge_pos": (-0.823, 1.698, 0.0),                       # metres, from skeleton.rig (and the vanilla NIF)
-    "leaf": None,                                             # (b"door" tested: no movement) rig: AK_Door_Anim_02_Root > Hinge01_Point > door > attach nodes
+    "leaf": b"mesh001",                                       # node holding leaf geometry + body, as vanilla. rig: AK_Door_Anim_02_Root > Hinge01_Point > door > attach nodes
     "hinge_children": {b"REF_ATTACH_NODE": (1.123, 0.009, 1.069), b"LookAtNode": (1.117, -0.001, 1.024)},
 }
 
