@@ -86,6 +86,8 @@ class Checkpoints:
         try:
             with self.path(source).open(encoding="utf-8") as f:
                 cached = json.load(f)
+            if not isinstance(cached, dict) or not isinstance(cached.get("outputs"), dict) or not isinstance(cached.get("result"), dict):
+                return None
             if cached["signature"] != self.signature or not cached["outputs"]:
                 return None
             for relative, expected in cached["outputs"].items():

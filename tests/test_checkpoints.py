@@ -33,6 +33,19 @@ def generated(staging, stem="chair"):
 
 
 class CheckpointTests(unittest.TestCase):
+    def test_valid_json_with_wrong_checkpoint_structure_is_a_cache_miss(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result, _ = generated(tmp)
+            cache = checkpoints.Checkpoints(tmp, {})
+            cache.save("chair.nif", result)
+            original = json.loads(cache.path("chair.nif").read_text())
+            invalid = [[], None, {**original, "outputs": ["meshes/fo4port/chair.nif"]},
+                       {**original, "result": []}, {**original, "outputs": "not an inventory"}]
+            for value in invalid:
+                with self.subTest(value=value):
+                    cache.path("chair.nif").write_text(json.dumps(value))
+                    self.assertIsNone(cache.load("chair.nif"))
+
     def test_batch_conflict_is_marked_incomplete_without_publishing_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -16,9 +16,11 @@ Keep Starfield native physics/modern capabilities and Fallout 4 gameplay. Preser
 
 ## Last verified evidence / immediate blocker
 
-Claude reports in-game Prydwen stairs climbed and Rexford door opened/traversed; pictures in #32. These specific successes do not establish slice acceptance. #29 movement evidence, #30 stairs and complex doors remain open.
+Claude reports Vault111 routes:8 pass,2 stuck,1 unreadable (#32). Both V111HallStairs01 copies stop at0.26m; steep helper ramp suspected, not established. Slice acceptance, #29/#30 and complex doors remain open.
 
 Door prototype:30 rigs/60 clips read back; multi-bone model local, NOT installed. Physics/activation unverified. Source42 bodies/62 leaves preserved;40 tests pass. Offline only.
+
+Codex resume: valid JSON with list/string output inventory reproduced crashes. Checkpoint containers now validated before reuse; malformed structures are cache misses.7 synthetic checkpoint tests and guard pass; no pipeline/game changes.
 
 Codex deployment: size/SHA256 checked before activation; corrupt copies roll back; plugin requires TES4, archives BTDX. Archive2 builds to fresh temporary output: missing output cannot reuse an old archive, failed runs preserve the prior archive. Two failures reproduced before fix;19 synthetic tests and guard pass. No live install touched. Manifest `artifacts` supports pinned evidence.
 
