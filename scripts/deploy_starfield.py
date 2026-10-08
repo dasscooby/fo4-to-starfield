@@ -71,10 +71,14 @@ def build_archive(a, out, folders, fmt):
     tool = os.path.join(a.starfield, "Tools", "Archive2", "Archive2.exe")
     if not os.path.exists(tool):
         sys.exit(f"Archive2 not found at {tool} (install the Starfield Creation Kit)")
-    r = subprocess.run([tool, ",".join(folders), f"-create={out}", f"-root={a.staging}", f"-format={fmt}",
-                        "-compression=Default"], cwd=a.staging, capture_output=True, text=True)
-    if r.returncode != 0 or not os.path.exists(out):
-        sys.exit("Archive2 failed:\n" + r.stdout + r.stderr)
+    # A previous output must not masquerade as a successful new build.
+    with tempfile.TemporaryDirectory(prefix=".fo4port-archive-", dir=os.path.dirname(os.path.abspath(out))) as temporary:
+        fresh = os.path.join(temporary, os.path.basename(out))
+        r = subprocess.run([tool, ",".join(folders), f"-create={fresh}", f"-root={a.staging}", f"-format={fmt}",
+                            "-compression=Default"], cwd=a.staging, capture_output=True, text=True)
+        if r.returncode != 0 or not os.path.isfile(fresh):
+            sys.exit("Archive2 failed (no successful fresh output):\n" + r.stdout + r.stderr)
+        os.replace(fresh, out)
 
 
 def artifact_identity(path):

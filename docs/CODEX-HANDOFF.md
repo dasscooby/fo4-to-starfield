@@ -20,7 +20,7 @@ Claude reports in-game Prydwen stairs climbed and Rexford door opened/traversed;
 
 Door prototype:30 rigs/60 clips read back; multi-bone model local, NOT installed. Physics/activation unverified. Source42 bodies/62 leaves preserved;40 tests pass. Offline only.
 
-Codex deployment: expected size/SHA256 recorded and destination checked before activation; corrupt copies roll back. Plugin must have TES4 signature, archives BTDX: three wrong-role fixtures reproduced accidental installation, now rejected before mutation.16 synthetic tests and guard pass; no live install touched. Manifest `artifacts` supports pinned evidence.
+Codex deployment: size/SHA256 checked before activation; corrupt copies roll back; plugin requires TES4, archives BTDX. Archive2 builds to fresh temporary output: missing output cannot reuse an old archive, failed runs preserve the prior archive. Two failures reproduced before fix;19 synthetic tests and guard pass. No live install touched. Manifest `artifacts` supports pinned evidence.
 
 URGENT Claude: collision object is14 bytes (`target i32, flags u16, data i32, Body ID u32`). Painted double-door nodes22/29 share system24 but select bodies0/1. Never decode/attach every system body at each node. `door_collision.plan` preserves ownership; `fo4_compounds.decode_body` extracts only the selected body's leaves. Native child conversion/BVH and moving-body linkage still required. Multi-body transplant guard rejects silent loss.
 

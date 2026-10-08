@@ -14,6 +14,42 @@ spec.loader.exec_module(deploy)
 
 
 class DeploymentRollbackTests(unittest.TestCase):
+    def check_archive_build(self, outcome):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tool = root / "Tools" / "Archive2" / "Archive2.exe"
+            tool.parent.mkdir(parents=True)
+            tool.touch()
+            out = root / deploy.ARCHIVE
+            old = b"BTDX old build"
+            fresh = b"BTDX new build"
+            out.write_bytes(old)
+            args = SimpleNamespace(starfield=str(root), staging=str(root))
+
+            def run(command, **kwargs):
+                destination = Path(next(arg[len("-create="):] for arg in command if arg.startswith("-create=")))
+                if outcome in ("success", "failure"):
+                    destination.write_bytes(fresh)
+                return SimpleNamespace(returncode=1 if outcome == "failure" else 0, stdout="", stderr="")
+
+            with patch.object(deploy.subprocess, "run", side_effect=run):
+                if outcome == "success":
+                    deploy.build_archive(args, str(out), ["meshes"], "General")
+                else:
+                    with self.assertRaises(SystemExit):
+                        deploy.build_archive(args, str(out), ["meshes"], "General")
+            self.assertEqual(out.read_bytes(), fresh if outcome == "success" else old)
+            self.assertEqual(sorted(p.name for p in root.iterdir()), [deploy.ARCHIVE, "Tools"])
+
+    def test_archive_success_without_new_output_rejects_stale_build(self):
+        self.check_archive_build("missing")
+
+    def test_archive_failure_preserves_previous_build(self):
+        self.check_archive_build("failure")
+
+    def test_archive_success_replaces_previous_build(self):
+        self.check_archive_build("success")
+
     def test_uninstall_disables_plugin_even_when_one_file_is_locked(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
