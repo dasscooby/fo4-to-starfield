@@ -16,11 +16,13 @@ Next: [actor milestone proposal](ACTOR-MILESTONE.md), #31. Planning only until i
 
 ## Current evidence / remaining work
 
-Claude-reported journal at56e3e37: every Vault114 door now passes after camera/console runner fixes; raised-door diagnosis withdrawn. Rexford:21 PASS/4 BLOCKED/1 UNREAD door walks,13 doors traversed from at least one side;8 stair passes. Vault81:2/3 stall doors pass;19DA36 remains unresolved. Vault114 stairs:6 pass,2 stuck; reruns and remaining cells still required. These are reported results, not independent Codex validation or full slice acceptance. One-sided traversal does not pass both-side acceptance.
+Acceptance blocker (Grok8819a03/#32): prompt-recording runs have no hinged door OPEN-verified from both sides and no pinned eight-cell evidence. Older Rexford/Vault81 geometric pairs lack prompt verbs; not activation acceptance. Load-door pass/walk-through/fall-through fails. Different runs/builds must not be combined into one verified result.
+
+Claude reported at56e3e37: Vault114 doors traversed after runner fixes; raised-door diagnosis withdrawn. Rexford:21 PASS/4 BLOCKED/1 UNREAD walks,8 stair passes. Vault81:2/3 stall doors traversed;19DA36 unresolved. Vault114 stairs:6 pass,2 stuck. Historical reports, not Codex validation or full slice acceptance.
 
 Collision batch reported:3,012 native,243 source-none,199 box,36 surface boxes. Codex synthetic regression confirms source-none stays renderable without physics in both fallback modes; historical failures reproduced.
 
-Claude b166d6c reports Parsons load door now solid; teleport absent,9 models rebuilt with stable IDs. Codex:2 synthetic policy tests reproduce prior load-door swing and verify static collision routing/missing-teleport reporting, with normal hinged control. Guard passes; runtime fix/evidence belongs to Claude.
+Claude b166d6c reports Parsons load door solid; teleport absent,9 models rebuilt with stable IDs. Codex:2 synthetic policy tests cover static collision routing/reporting and normal hinged control; historical swing reproduced. Runtime evidence belongs to Claude; reconcile later load failures against exact artifact hashes.
 
 Door prototype:30 rigs/60 clips read back,42 selected source bodies/62 leaves; offline only, not installed, native moving linkage/activation still unverified. Collision ownership contract:14-byte target/flags/data/BodyID; shared systems select the body's node index, never every body per attachment.
 
