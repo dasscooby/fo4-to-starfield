@@ -58,6 +58,8 @@ class DeploymentRollbackTests(unittest.TestCase):
             data.mkdir(parents=True)
             (staging / deploy.PLUGIN).write_bytes(b"TES4" + bytes(32))
             (staging / "meshes").mkdir()
+            if failure == "unfinished_build":
+                (staging / "build-state.json").write_text(json.dumps({"complete": False, "status": "converting"}))
             if failure == "texture_build":
                 (staging / "textures").mkdir()
             pt = root / "Plugins.txt"
@@ -129,6 +131,9 @@ class DeploymentRollbackTests(unittest.TestCase):
 
     def test_invalid_archive_does_not_touch_installation(self):
         self.run_failure("invalid_archive")
+
+    def test_interrupted_build_cannot_be_deployed(self):
+        self.run_failure("unfinished_build")
 
     def test_final_manifest_failure_restores_plugins_exactly(self):
         self.run_failure("manifest")

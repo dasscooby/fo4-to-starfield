@@ -33,6 +33,52 @@ def generated(staging, stem="chair"):
 
 
 class CheckpointTests(unittest.TestCase):
+    def test_batch_conflict_is_marked_incomplete_without_publishing_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            staging = root / "staging"
+            template = root / "template.nif"
+            template.write_bytes(b"synthetic")
+            source = SimpleNamespace(mesh_names=lambda pattern: ["first.nif", "second.nif"])
+            def convert(name):
+                result, _ = generated(staging, Path(name).stem)
+                if name == "second.nif":
+                    material = staging / "materials/fo4port/test.mat"
+                    content = json.loads(material.read_text())
+                    content["changed"] = True
+                    material.write_text(json.dumps(content))
+                return result
+            converter = SimpleNamespace(convert_nif=convert, stats={}, material_errors={})
+            argv = ["convert_batch.py", "--fo4-data", str(root), "--staging", str(staging),
+                    "--content-resources", str(template), "--texconv", str(template),
+                    "--collision-template", str(template), "--resume"]
+            with patch.object(sys, "argv", argv), \
+                    patch.object(batch.pipeline, "Fo4Archives", return_value=source), \
+                    patch.object(batch.pipeline, "Converter", return_value=converter), \
+                    patch.object(batch.convert_static, "collision_template_from_nif", return_value=b"template"), \
+                    patch("builtins.print"):
+                with self.assertRaisesRegex(RuntimeError, "not deployable"):
+                    batch.main()
+            state = json.loads((staging / "build-state.json").read_text())
+            self.assertFalse(state["complete"])
+            self.assertEqual(state["status"], "dependency_conflict")
+            self.assertFalse((staging / "manifest.json").exists())
+
+    def test_later_shared_material_overwrite_invalidates_completed_batch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            first, _ = generated(tmp, "first")
+            cache = checkpoints.Checkpoints(tmp, {})
+            cache.save("first.nif", first)
+            self.assertEqual(cache.load("first.nif"), first)
+            second, _ = generated(tmp, "second")
+            material = Path(tmp) / "materials/fo4port/test.mat"
+            content = json.loads(material.read_text())
+            content["changed"] = True
+            material.write_text(json.dumps(content))
+            cache.save("second.nif", second)
+            errors = cache.verify_batch()
+            self.assertEqual(errors, [{"source": "first.nif", "output": "materials/fo4port/test.mat"}])
+
     def test_each_missing_or_changed_dependency_invalidates_reuse(self):
         with tempfile.TemporaryDirectory() as tmp:
             result, files = generated(tmp)
@@ -98,6 +144,7 @@ class CheckpointTests(unittest.TestCase):
                     patch("builtins.print"):
                 with self.assertRaises(KeyboardInterrupt):
                     batch.main()
+                self.assertFalse(json.loads((staging / "build-state.json").read_text())["complete"])
                 ids = json.loads((staging / "editorids.json").read_text())
                 interrupted = False
                 calls.clear()
@@ -105,6 +152,7 @@ class CheckpointTests(unittest.TestCase):
                 self.assertEqual(calls, [names[1]])
                 manifest = json.loads((staging / "manifest.json").read_text())
                 self.assertEqual(manifest["stats"]["reused"], 1)
+                self.assertTrue(json.loads((staging / "build-state.json").read_text())["complete"])
                 self.assertEqual(manifest["items"][0]["editor_id"], ids[names[0]])
                 calls.clear()
                 with patch.object(batch.pipeline, "Converter", side_effect=AssertionError("unneeded converter initialized")):

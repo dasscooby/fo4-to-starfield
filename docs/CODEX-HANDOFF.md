@@ -70,6 +70,17 @@ Synthetic interruption/reuse tests pass. Separate real-asset patio-chair staging
 smoke: first run converted, second run reused, 1.1 s versus 0.5 s. No existing
 staging or game deployment was touched. Claude-owned converter modules unchanged.
 
+### Shared-dependency consistency and deployment gate
+
+Resume batches now recheck all recorded output hashes after the last conversion.
+A synthetic reproduction confirms that converting a second model with different
+bytes at a shared material path invalidates the first model. Conflict fails the
+batch before publishing its manifest, rather than accepting an early cache hit.
+`build-state.json` stays incomplete on interruption or conflict, and deploy rejects
+that state. Finished batches retain asset-failure/fidelity reporting separately;
+"complete" here means batch execution finished, not full fidelity or gameplay.
+Tests exercise checkpoint detection, batch rejection and installer refusal.
+
 User authorized both agents to continue and coordinate on 2026-10-07.
 Coordinate file ownership before overlapping edits. This file is a shared handoff;
 writing it does not imply the other agent has read it.

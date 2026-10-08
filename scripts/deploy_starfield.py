@@ -77,6 +77,12 @@ def build_archive(a, out, folders, fmt):
 
 
 def install(a):
+    build_state = os.path.join(a.staging, "build-state.json")
+    if os.path.exists(build_state):
+        with open(build_state, encoding="utf-8") as f:
+            state = json.load(f)
+        if state.get("complete") is not True:
+            sys.exit("staging build is interrupted or inconsistent; finish conversion before installing")
     data = os.path.join(a.starfield, "Data")
     man_path = os.path.join(data, MANIFEST)
     if os.path.exists(man_path):

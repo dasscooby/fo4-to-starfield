@@ -31,6 +31,16 @@ the selected batch; material statistics count conversions performed this run,
 not all materials present in staging. A fully reused run avoids constructing the
 converter or regenerating the neutral material.
 
+Every batch writes `build-state.json` as incomplete before conversion and complete
+only after the final manifest is saved. The installer rejects interrupted or
+inconsistent batches. Resume builds also recheck all checkpointed dependencies
+after conversion finishes: a later model overwriting a shared material/texture
+with different bytes fails the build before publishing a new manifest. This
+detects inconsistent sharing; it does not repair material identity collisions.
+Existing staging without a build-state file remains supported. Ordinary skipped
+or failed assets listed in a finished manifest do not themselves set the build
+state to incomplete; inspect the failure list and fidelity reports separately.
+
 Synthetic regression checks cover interruption after the first of two models,
 identity preservation, full reuse, corrupt checkpoints, changed inputs, deleted
 dependencies, and changed output bytes with unchanged size/mtime. A separate

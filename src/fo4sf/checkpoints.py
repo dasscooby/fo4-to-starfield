@@ -76,6 +76,7 @@ class Checkpoints:
         self.staging = Path(staging)
         self.signature = signature
         self.directory = self.staging / ".checkpoints"
+        self.expected = {}
 
     def path(self, source):
         key = source.replace("\\", "/").lower()
@@ -92,6 +93,7 @@ class Checkpoints:
                     return None
             if not cached["result"]["ok"]:
                 return None
+            self.expected[source] = cached["outputs"]
             return cached["result"]
         except (OSError, ValueError, KeyError, TypeError):
             return None
@@ -100,6 +102,7 @@ class Checkpoints:
         if not result.get("ok") or result.get("fallback_materials") or result.get("door_error"):
             return False  # Retry degraded/failing conversions rather than freezing a placeholder.
         outputs = output_inventory(self.staging, result)
+        self.expected[source] = outputs
         self.directory.mkdir(parents=True, exist_ok=True)
         fd, temporary = tempfile.mkstemp(dir=self.directory, prefix=".pending-")
         try:
@@ -112,3 +115,18 @@ class Checkpoints:
             if os.path.exists(temporary):
                 os.remove(temporary)
         return True
+
+    def verify_batch(self):
+        """Recheck expectations after all writes, including dependencies shared by models."""
+        actual, errors = {}, []
+        for source, outputs in self.expected.items():
+            for relative, expected in outputs.items():
+                path = local_path(self.staging, relative)
+                if path not in actual:
+                    try:
+                        actual[path] = digest(path)
+                    except OSError:
+                        actual[path] = None
+                if actual[path] != expected:
+                    errors.append({"source": source, "output": relative})
+        return errors

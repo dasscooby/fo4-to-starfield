@@ -141,6 +141,9 @@ def main():
     else:
         names = src.mesh_names(a.pattern)
     print(f"{len(names)} candidate meshes; converting up to {a.limit}")
+    os.makedirs(a.staging, exist_ok=True)
+    state_path = os.path.join(a.staging, "build-state.json")
+    write_json_atomic(state_path, {"complete": False, "status": "converting"})
     items, failures, reused = [], [], 0
     for name in names:
         if len(items) >= a.limit:
@@ -173,6 +176,11 @@ def main():
         print(f"  ok  {name} -> {eid} (shapes {r['shapes']}, fallback materials {r['fallback_materials']})")
     for f in failures[:15]:
         print("  FAIL", f["nif"], "-", f["reason"][:110])
+    if cache:
+        inconsistent = cache.verify_batch()
+        if inconsistent:
+            write_json_atomic(state_path, {"complete": False, "status": "dependency_conflict", "errors": inconsistent})
+            raise RuntimeError(f"{len(inconsistent)} generated dependencies changed after model conversion; build not deployable")
     stats = dict(conv.stats) if conv else {"materials_ok": 0, "materials_fallback": 0}
     stats.update(assets=len(items), failed=len(failures), reused=reused)
     manifest = {"items": items, "failures": failures, "material_fallbacks": conv.material_errors if conv else {}, "stats": stats,
@@ -180,6 +188,7 @@ def main():
     os.makedirs(a.staging, exist_ok=True)
     write_json_atomic(os.path.join(a.staging, "editorids.json"), ids)
     write_json_atomic(os.path.join(a.staging, "manifest.json"), manifest)
+    write_json_atomic(state_path, {"complete": True, "status": "finished", "assets": len(items), "failed": len(failures)})
     print(json.dumps({"converted": len(items), **stats, "seconds": manifest["seconds"]}))
 
 
