@@ -365,3 +365,16 @@ In game: the compound / capsule / sphere build starts and loads Vault 111.
   10 of 11 routes passing; the 11th was an OCR misread.
 - New tests: slope limit reached, top and width kept, gentle helpers untouched, plane orientation. Also: `route_eval`
   reads BOM-prefixed route files.
+
+## 2026-10-08: Vault 81 routes; door routes from the leaf
+
+Deployed the full build with stair-helper flattening and ran Vault 81's 16 routes.
+- **Stairs: 11 of 11 readable PASS** (2 more UNREAD from OCR). Hall stairs `VltHallResStairs01` / `VltHallUtilStairs01`
+  rise 1.83 m; catwalk flights `VltCatwalkStairsFront01` / `...FrontBottom01` rise 1.6-2.8 m.
+  ([catwalk](media/route-v81-catwalk-stairs.jpg), [hall](media/route-v81-hall-stairs.jpg))
+- **Doors: the three cave stall doors (`BRStallDoor01`) failed because the route was wrong**, not the door: routes assumed
+  every door faces along local +x (true for the Rexford wooden doors), and these face along y, so the runner started
+  inside rock. Door routes now take the facing from the **closed leaf** (the moving branch's bounds; the leaf spans the
+  opening, so its thinnest horizontal axis is the normal), cross the middle of the opening, and run once from each side
+  (a leaf may swing towards the player). The verified Rexford door still gets its proven route (x 42.75, heading 90).
+- The rerun of the 6 Vault 81 door routes is pending (the user was back).

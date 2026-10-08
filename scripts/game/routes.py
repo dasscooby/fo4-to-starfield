@@ -88,6 +88,27 @@ def ramp_points(f):
     return (helper, "stairhelper") if helper else (sloped, "sloped-collision") if sloped else ([], None)
 
 
+def door_frame(f):
+    """(centre, unit normal) of a door model in its local space (metres): bounds of all render shapes, normal along the
+    thinner horizontal axis. None if it has no geometry."""
+    pts = []
+    hinge = nif.door_hinge(f)                       # the closed leaf spans the opening: use it alone when there is one
+    moving = nif.descendants(f, hinge[0]) if hinge else None
+    for s in nif.fo4_trishapes(f):
+        if moving is not None and s.block not in moving:
+            continue
+        for v in s.positions:
+            pts.append(tuple((sum(s.rotation[3 * r + k] * v[k] for k in range(3)) * s.scale + s.translation[r]) * UNIT
+                             for r in range(3)))
+    if not pts:
+        return None
+    lo = [min(p[i] for p in pts) for i in range(3)]
+    hi = [max(p[i] for p in pts) for i in range(3)]
+    centre = tuple((lo[i] + hi[i]) / 2 for i in range(3))
+    axis = (1.0, 0.0, 0.0) if hi[0] - lo[0] <= hi[1] - lo[1] else (0.0, 1.0, 0.0)
+    return (centre[0], centre[1], lo[2]), axis
+
+
 def ends(points):
     zs = [p[2] for p in points]
     lo_z, hi_z = min(zs), max(zs)
@@ -121,14 +142,26 @@ def main():
         sc = r.get("scale", 1.0) or 1.0
         place = lambda v: tuple(a_ + b_ for a_, b_ in zip(apply(R, tuple(x * sc for x in v)), pos))
         if it.get("door"):
-            n = place((1.0, 0.0, 0.0))
-            n = tuple(x - y for x, y in zip(n, pos))
-            start = tuple(pos[i] - 1.6 * n[i] for i in range(3))
-            routes.append({"cell": cell["cell"], "kind": "door", "ref": r["formkey"], "model": model,
-                           "start": [round(start[0], 2), round(start[1], 2), round(pos[2] + 0.3, 2)],
-                           "heading": round(math.degrees(math.atan2(n[0], n[1])) % 360, 1), "use": True, "walk_ms": 2600,
-                           "expect": {"plane_point": [round(x, 3) for x in pos], "plane_normal": [round(x, 4) for x in n],
-                                      "min_past": 1.0}})
+            # facing from the door's own geometry: the thinnest horizontal axis of its local bounds is the door normal;
+            # the route crosses the middle of the opening, once from each side (a leaf may swing towards the player)
+            if key not in cache:
+                raw = src.mesh(key)
+                cache[key] = door_frame(nif.parse(raw)) if raw else None
+            frame = cache[key]
+            if frame is None:
+                continue
+            centre_l, axis_l = frame
+            centre = place(centre_l)
+            n = tuple(x - y for x, y in zip(place(axis_l), pos))
+            for side in (1, -1):
+                ns = tuple(side * x for x in n)
+                start = tuple(centre[i] - 1.6 * ns[i] for i in range(3))
+                routes.append({"cell": cell["cell"], "kind": "door", "ref": r["formkey"], "model": model, "side": side,
+                               "start": [round(start[0], 2), round(start[1], 2), round(pos[2] + 0.3, 2)],
+                               "heading": round(math.degrees(math.atan2(ns[0], ns[1])) % 360, 1), "use": True,
+                               "walk_ms": 1100,
+                               "expect": {"plane_point": [round(x, 3) for x in centre],
+                                          "plane_normal": [round(x, 4) for x in ns], "min_past": 0.8}})
             continue
         if "stair" not in model.lower():
             continue
