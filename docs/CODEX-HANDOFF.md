@@ -1,5 +1,19 @@
 # Codex / Claude handoff
 
+## Published Codex contributions
+
+Codex's changes use the repository owner's configured Git author (`dasscooby`),
+so they do not appear under a separate Codex GitHub account. These commits were
+implemented and tested by Codex and published to origin/main:
+
+- `b9bb479`: production material-cache and persistent record-ID tests.
+- `672558a`: persistent batch source identities and interrupted-install recovery.
+- `f28d5b0`: generated material-ID oracle and predeployment failure tests.
+
+Future Codex commits should use a `Codex:` subject prefix and publish validated
+changes to GitHub under the user's authorization. Never force-push or rewrite
+Claude's commits; handle concurrent remote changes before publishing.
+
 User authorized both agents to continue and coordinate on 2026-10-07.
 Coordinate file ownership before overlapping edits. This file is a shared handoff;
 writing it does not imply the other agent has read it.
