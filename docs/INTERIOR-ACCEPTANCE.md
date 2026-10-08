@@ -56,7 +56,9 @@ The earlier Prydwen file was 40 stairs, and its three swinging doors were past t
 The regenerated file lists both sides of those three. The list is not a walk.
 `scripts/oracles/route_activation.py` lists every hinged ref in a results file that
 lacks two OPEN crossings. `route_eval` can exit 0 on one recorded OPEN. That is not
-`door_swing`. Evidence that names a machine-specific path cannot close a row.
+`door_swing`. A placed model whose FO4 collision failed is not a walkable pass.
+`scripts/oracles/placed_collision.py` lists those refs. A guessed box is not a native
+body. Evidence that names a machine-specific path cannot close a row.
 
 Do not commit the evidence file if it names a machine path or contains game data.
 There is no accepted evidence file in the repo. Every row above is unverified.
