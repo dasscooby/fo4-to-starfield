@@ -337,11 +337,16 @@ class Converter:
                     base, normal = cm.parse_bgem_textures(raw)
                 except ValueError:
                     base, normal = "", ""
+                cubemap = b"cubemap" in raw.lower()
             else:                                       # textures stored inline in the effect block
                 dds = [x.decode("latin-1") for x in re.findall(rb"[\w\\/ .-]+\.dds", src.blocks[s.shader_ref])]
                 base = dds[0] if dds else ""
                 normal = next((x for x in dds if x.lower().endswith("_n.dds")), "")
-            if re.search(r"glass|window", base, re.I) and not re.search(r"[\\/]effects[\\/]", base, re.I):
+                cubemap = any("cubemap" in x.lower() for x in dds)
+            # glass: named glass/window, or an environment-mapped effect with its own normal map (beakers, test tubes,
+            # bottles: FO4's usual glass setup); never textures from the effects folder (glow, smoke, dust)
+            glassy = re.search(r"glass|window", base, re.I) or (cubemap and normal)
+            if glassy and not re.search(r"[\\/]effects[\\/]", base, re.I):
                 return self.glass_material(base, normal)   # windows, cryo-pod glass: vanilla glass shader model
             return None                                 # other effects (glow, frost, dust, smoke): skipped
         if kind != "BSLightingShaderProperty":

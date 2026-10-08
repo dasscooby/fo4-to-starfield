@@ -207,3 +207,15 @@ in total.
   Vault 95 4,353 / 172, Cambridge Polymer 3,206 / 165.
 - Staged in `C:\Modding\staging\multi` but not deployed. In-game tours and the Parsons door-rotation check run when the PC
   is free.
+
+## 2026-10-08: more glass (offline)
+
+The guard tripped again, so this tick was offline. FO4 lab and household glass (beakers, test tubes, bottles) uses an
+environment-mapped effect shader with its own normal map, and the base texture is not named "glass". Those shapes were
+skipped. Glass detection now also accepts effect shaders with a cubemap and a normal map (never textures from the effects
+folder).
+- Glass materials: 12 -> 33. All are real glass: chemistry set, beakers, test tubes, Nuka bottle, watch and magnifier
+  glass, jukebox front, water-cooler jug, light covers, vertibird canopy.
+- Batch failures: 18 -> 10. Left: wall-stain gradient effects, a strobe flash, an oil puddle, and two plates without static
+  geometry.
+- Staged and not deployed yet.
