@@ -265,9 +265,9 @@ def main():
         run = math.hypot(*d) or 1.0
         ground = neighbour_ground(cell, r, ((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2), run / 2 + 4.0, src, items, tri_cache)
         t, g = emerge(lo, hi, ground)
-        if t >= 0.8:                                      # stair almost entirely under the ground: nothing to climb
-            skipped[model + " (buried)"] = skipped.get(model + " (buried)", 0) + 1
-            continue
+        if t >= 0.8:                # "almost all buried" is more likely an overlapping piece (Prydwen platform stairs
+            t, g = 0.0, None        # passed in game): keep the plain route and flag it rather than drop it
+            skipped[model + " (looks buried, route kept)"] = skipped.get(model + " (looks buried, route kept)", 0) + 1
         if t > 0:                                         # foot buried: start where the ramp comes out of the ground
             lo = tuple(lo[i] + t * (hi[i] - lo[i]) for i in range(2)) + (max(lo[2] + t * (hi[2] - lo[2]), g or -1e9),)
             d = (hi[0] - lo[0], hi[1] - lo[1])

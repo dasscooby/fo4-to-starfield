@@ -518,3 +518,6 @@ game running now is the owner's session. Next: deploy, rerun Parsons/Vault 111/V
 
 `routes.py`: stair routes now start where the ramp comes out of the surrounding ground (sampling the neighbours'
 walkable FO4 collision along the ramp; `buried_fraction` per route). Load doors no longer get door routes.
+- Route files regenerated for all 12 cells against the new build (in the side staging, ready for deploy). Stair routes
+  whose ramp looks almost fully buried (2 Prydwen platform stairs that passed in game before, 1 library stair) keep
+  their plain start and are flagged "looks buried, route kept": more likely an overlapping piece than real burial.
