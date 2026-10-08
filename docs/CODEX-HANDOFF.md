@@ -56,6 +56,20 @@ writer, conversion modules and in-game scripts remain untouched.
 - Also hardened source-ID map import: conflicting case/slash aliases and malformed
   map values fail before conversion instead of silently overwriting an identity.
 
+## Codex per-model resume support
+
+Added opt-in `convert_batch.py --resume` and `src/fo4sf/checkpoints.py`. Completed
+models get atomic checkpoints containing their result, input signature and full
+generated NIF/mesh/material/texture hashes. Missing/changed outputs invalidate
+reuse. Failures, placeholders and failed door conversions are not checkpointed.
+Source editor IDs persist after each model in resume mode. See
+`docs/RESUMING-BUILDS.md` for the metadata-based archive freshness limitation and
+the distinction between current-run material counts and whole-batch asset counts.
+
+Synthetic interruption/reuse tests pass. Separate real-asset patio-chair staging
+smoke: first run converted, second run reused, 1.1 s versus 0.5 s. No existing
+staging or game deployment was touched. Claude-owned converter modules unchanged.
+
 User authorized both agents to continue and coordinate on 2026-10-07.
 Coordinate file ownership before overlapping edits. This file is a shared handoff;
 writing it does not imply the other agent has read it.
