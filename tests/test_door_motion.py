@@ -15,12 +15,26 @@ def fixture():
     for _ in range(2):
         f.add_block("BSTriShape", trishape_block([(0, 0, 0), (70, 0, 0), (0, 70, 0)], [(0, 1, 2)]))
     targets = b"".join(struct.pack("<iiBiiiii", -1, -1, 0, name, -1, -1, -1, -1) for name in (a, b))
-    f.add_block("NiControllerSequence", struct.pack("<iII", op, 2, 0) + targets)
+    timing = struct.pack("<fiIfffiiH", 1, -1, 2, 1, 0, 1, -1, root, 0)
+    f.add_block("NiControllerSequence", struct.pack("<iII", op, 2, 0) + targets + timing)
     f.footer = struct.pack("<II", 1, 0)
     return f
 
 
 class DoorMotionTests(unittest.TestCase):
+    def test_sequence_timing_and_events_preserved(self):
+        f = fixture()
+        seq = 5
+        event_name = f.string_index(b"Sound: DoorOpen")
+        event = f.add_block("NiTextKeyExtraData", struct.pack("<iIfi", -1, 1, .25, event_name))
+        data = bytearray(f.blocks[seq])
+        struct.pack_into("<fiIfffiiH", data, 12 + 29 * 2, .5, event, 2, 2, .1, .9, -1, 0, 0)
+        f.blocks[seq] = bytes(data)
+        timing = door_motion.inspect(f)["sequences"][0]["timing"]
+        self.assertEqual(timing["frequency"], 2)
+        self.assertAlmostEqual(timing["stop"], .9)
+        self.assertEqual(timing["text_events"], [{"time": .25, "text": "Sound: DoorOpen"}])
+
     def test_bind_values_and_source_keys_preserved(self):
         f = fixture()
         keys = struct.pack("<II5fII", 1, 1, 0, 1, 0, 0, 0, 0, 0)

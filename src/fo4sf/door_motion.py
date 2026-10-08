@@ -8,6 +8,33 @@ import base64
 from . import nif, animation_curves
 
 
+def sequence_timing(source, block, count):
+    at = 12 + 29 * count
+    if len(block) < at + 34:
+        raise nif.NifError("truncated door sequence timing")
+    weight, text, cycle, frequency, start, stop, manager, root, notes = struct.unpack_from("<fiIfffiiH", block, at)
+    if len(block) != at + 34 + 4 * notes:
+        raise nif.NifError("invalid door sequence note-array length")
+    events = []
+    if text != -1:
+        if not 0 <= text < len(source.blocks) or source.type_of(text) != "NiTextKeyExtraData":
+            raise nif.NifError("invalid door text-key link")
+        data = source.blocks[text]
+        num = struct.unpack_from("<I", data, 4)[0]
+        if len(data) != 8 + 8 * num:
+            raise nif.NifError("invalid door text-key length")
+        for i in range(num):
+            time, name = struct.unpack_from("<fi", data, 8 + 8 * i)
+            if not 0 <= name < len(source.strings):
+                raise nif.NifError("invalid door event string")
+            events.append({"time": time, "text": source.strings[name].decode("latin-1")})
+    if root != -1 and not 0 <= root < len(source.strings):
+        raise nif.NifError("invalid door accumulation root")
+    return {"weight": weight, "cycle_type": cycle, "frequency": frequency, "start": start, "stop": stop,
+            "manager_block": manager, "accumulation_root": source.strings[root].decode("latin-1") if root != -1 else None,
+            "text_events": events, "animation_note_blocks": list(struct.unpack_from(f"<{notes}i", block, at + 34))}
+
+
 def transform_track(source, index):
     """Retain bind values, raw keys and decoded curves without resampling.
 
@@ -75,7 +102,8 @@ def inspect(source):
                             "transform_track": transform_track(source, interpolator),
                             "pivot_source_units": list(translation), "rotation": list(rotation), "scale": scale,
                             "shape_blocks": sorted(shapes & nif.descendants(source, node))})
-        sequences.append({"block": i, "name": source.strings[name].decode("latin-1"), "targets": targets})
+        sequences.append({"block": i, "name": source.strings[name].decode("latin-1"), "targets": targets,
+                          "timing": sequence_timing(source, block, count)})
     hinge = nif.door_hinge(source)
     selected = shapes & nif.descendants(source, hinge[0]) if hinge else set()
     animated = {shape for seq in sequences if seq["name"] == "Open" for target in seq["targets"] for shape in target["shape_blocks"]}
