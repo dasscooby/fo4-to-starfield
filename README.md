@@ -101,6 +101,16 @@ python -I scripts/recon.py --fo4-esm <Fallout4.esm> --fo4-data <FO4 Data dir> --
 - AI-assisted: this project was started with AI coding assistance. Contributions of any kind are welcome;
   please say if yours was AI-assisted.
 
+## Acknowledgments
+
+This project is led by **dasscooby**, with contributions from these AI coding collaborators:
+
+- **Claude** — core conversion pipeline, materials, native collision integration, plugin generation, and in-game testing.
+- **Codex (OpenAI)** — deployment and recovery, persistent identities and cache checks, source-state preservation, door animation/model tooling, and output verification.
+- **Grok (xAI)** — the interior acceptance harness, evidence requirements, and synthetic gate tests. First contribution: [pinned in-game evidence gate](https://github.com/dasscooby/fo4-to-starfield/commit/76b44dd015b5187d6fc8dee75dbf312b1f585a7b).
+
+Agent-assisted commits use the maintainer's configured Git author; `Codex:` and `Grok:` commit subjects identify their work. These acknowledgments describe contributions, not proof that the unfinished conversion is game-ready.
+
 ## Related projects
 
 - [fo76utils/nifskope](https://github.com/fo76utils/nifskope): NifSkope fork with Starfield `.mesh` / `.mat` support
