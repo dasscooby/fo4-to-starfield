@@ -33,6 +33,19 @@ def generated(staging, stem="chair"):
 
 
 class CheckpointTests(unittest.TestCase):
+    def test_omitted_dependency_cannot_make_incomplete_inventory_reusable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result, files = generated(tmp)
+            cache = checkpoints.Checkpoints(tmp, {})
+            cache.save("chair.nif", result)
+            original = json.loads(cache.path("chair.nif").read_text())
+            for name in original["outputs"]:
+                with self.subTest(output=name):
+                    outputs = dict(original["outputs"])
+                    del outputs[name]
+                    cache.path("chair.nif").write_text(json.dumps({**original, "outputs": outputs}))
+                    self.assertIsNone(cache.load("chair.nif"))
+
     def test_incomplete_result_cannot_resume_into_batch_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
             result, _ = generated(tmp)

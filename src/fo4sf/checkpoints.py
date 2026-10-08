@@ -7,6 +7,7 @@ resuming. Small tools/templates and converter sources use content hashes.
 import hashlib
 import json
 import os
+import struct
 from pathlib import Path
 import tempfile
 
@@ -96,14 +97,13 @@ class Checkpoints:
             if any(type(result.get(field)) is not int or result[field] < 0
                    for field in ("shapes", "fallback_materials")):
                 return None
-            for relative, expected in cached["outputs"].items():
-                if digest(local_path(self.staging, relative)) != expected:
-                    return None
+            if output_inventory(self.staging, result) != cached["outputs"]:
+                return None
             if not cached["result"]["ok"]:
                 return None
             self.expected[source] = cached["outputs"]
             return cached["result"]
-        except (OSError, ValueError, KeyError, TypeError):
+        except (OSError, ValueError, KeyError, TypeError, struct.error):
             return None
 
     def save(self, source, result):

@@ -22,7 +22,7 @@ Claude reports Vault111 hall ramps flattened to40deg; both now climb1.95m.10/11 
 
 Door prototype:30 rigs/60 clips read back; multi-bone model local, NOT installed. Physics/activation unverified. Source42 bodies/62 leaves preserved;40 tests pass. Offline only.
 
-Codex resume: malformed containers and missing required result fields are cache misses; save rejects degraded results and removes old checkpoints.9 synthetic tests and guard pass. Claude dependency: convert_batch calls save only for ok results, so fully failed reconversions still skip invalidation; invoke save for failures too. No batch/pipeline/game edits by Codex.
+Codex resume: reuse reconstructs the NIF/material dependency inventory, checks all hashes and rejects omitted entries (four reproduced cases).10 synthetic tests and guard pass. Malformed/incomplete results miss cache; degraded save removes old checkpoint. Claude dependency: batch saves only ok results; failed reconversions still skip invalidation. No batch/pipeline/game edits by Codex.
 
 Codex deployment: size/SHA256 checked before activation; corrupt copies roll back; plugin requires TES4, archives BTDX. Archive2 builds to fresh temporary output: missing output cannot reuse an old archive, failed runs preserve the prior archive. Two failures reproduced before fix;19 synthetic tests and guard pass. No live install touched. Manifest `artifacts` supports pinned evidence.
 
