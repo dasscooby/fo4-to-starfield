@@ -16,11 +16,11 @@ Keep Starfield native physics/modern capabilities and Fallout 4 gameplay. Preser
 
 ## Last verified evidence / immediate blocker
 
-Claude reports Vault111 routes:8 pass,2 stuck,1 unreadable (#32). Both V111HallStairs01 copies stop at0.26m; steep helper ramp suspected, not established. Slice acceptance, #29/#30 and complex doors remain open.
+Claude reports Vault111 hall ramps flattened to40deg; both now climb1.95m.10/11 routes pass, one unreadable.3,006/3,490 models use source collision (#32). Full slice rerun and complex-door acceptance remain pending; Codex has no independent runtime validation.
 
 Door prototype:30 rigs/60 clips read back; multi-bone model local, NOT installed. Physics/activation unverified. Source42 bodies/62 leaves preserved;40 tests pass. Offline only.
 
-Codex resume: valid JSON with list/string output inventory reproduced crashes. Checkpoint containers now validated before reuse; malformed structures are cache misses.7 synthetic checkpoint tests and guard pass; no pipeline/game changes.
+Codex resume: malformed checkpoint containers are cache misses. Failed/degraded reconversions now invalidate prior successful checkpoints: failure, material fallback and door error each reproduced stale reuse.8 synthetic checkpoint tests and guard pass; no pipeline/game changes.
 
 Codex deployment: size/SHA256 checked before activation; corrupt copies roll back; plugin requires TES4, archives BTDX. Archive2 builds to fresh temporary output: missing output cannot reuse an old archive, failed runs preserve the prior archive. Two failures reproduced before fix;19 synthetic tests and guard pass. No live install touched. Manifest `artifacts` supports pinned evidence.
 

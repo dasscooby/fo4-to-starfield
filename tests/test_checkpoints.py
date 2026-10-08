@@ -33,6 +33,15 @@ def generated(staging, stem="chair"):
 
 
 class CheckpointTests(unittest.TestCase):
+    def test_degraded_reconversion_invalidates_previous_success_checkpoint(self):
+        for failure in ({"ok": False}, {"fallback_materials": 1}, {"door_error": "missing native rig"}):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
+                result, _ = generated(tmp)
+                cache = checkpoints.Checkpoints(tmp, {})
+                self.assertTrue(cache.save("chair.nif", result))
+                self.assertFalse(cache.save("chair.nif", {**result, **failure}))
+                self.assertIsNone(checkpoints.Checkpoints(tmp, {}).load("chair.nif"))
+
     def test_valid_json_with_wrong_checkpoint_structure_is_a_cache_miss(self):
         with tempfile.TemporaryDirectory() as tmp:
             result, _ = generated(tmp)

@@ -102,6 +102,7 @@ class Checkpoints:
 
     def save(self, source, result):
         if not result.get("ok") or result.get("fallback_materials") or result.get("door_error"):
+            self.path(source).unlink(missing_ok=True)
             return False  # Retry degraded/failing conversions rather than freezing a placeholder.
         outputs = output_inventory(self.staging, result)
         self.expected[source] = outputs
