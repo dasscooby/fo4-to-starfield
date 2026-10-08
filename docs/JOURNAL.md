@@ -182,3 +182,15 @@ or emissive maps, which are not converted yet.
 Seen on the way: FO4 double doors (`PaintedWoodDoorDouble01`, Parsons) rest with their moving leaf open
 ([comparison](media/decal-parsons-cmp.jpg)). Their FO4 rest pose is not the closed pose. Next door fix: take the leaf pose
 from the end of the FO4 `Close` sequence.
+
+## 2026-10-08: door rotation fix (offline; not yet verified in game)
+
+The foreground guard tripped (another app was in front and Starfield was not running), so this tick was offline only.
+- The Parsons double doors, which looked like they rested open, are not a rest-pose problem. New
+  `nif.door_closed_rotation` reads the end of the FO4 `Close` sequence (Euler or quaternion keys, tested), and for every
+  door checked the closed pose equals the rest pose.
+- The real suspect is the reference-rotation direction used to shift door origins. Bethesda angles turn clockwise, and the
+  plugin writer rotated counter-clockwise. Doors at 0 and 180 degrees (all the Rexford tests) are the same either way.
+  Parsons' 135, 225 and 315 degree doors get shifted to the wrong spot.
+- `RotateOffset` now uses the clockwise convention. Built in staging only and not deployed. Next in-game check: the Parsons
+  double doors sit closed in their frames.

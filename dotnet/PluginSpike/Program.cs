@@ -86,10 +86,13 @@ foreach (var (editorId, model, source, door) in items)
 }
 Console.WriteLine($"{items.Count - doors} statics, {doors} doors");
 
-// FO4 / Starfield reference rotation: extrinsic X, then Y, then Z (radians). Rotates a door-local offset into the cell.
+// FO4 / Starfield reference rotation (radians): Bethesda angles turn CLOCKWISE seen from the positive axis, so the matrix
+// uses the negated angles; applied X, then Y, then Z. Rotates a door-local offset into the cell. (0 / 180 degree doors are
+// the same either way; the 135 / 225 degree double doors in Parsons looked misplaced with the counter-clockwise version.
+// To verify in game.)
 static P3Float RotateOffset(P3Float v, P3Float r, float scale)
 {
-    double cx = Math.Cos(r.X), sx = Math.Sin(r.X), cy = Math.Cos(r.Y), sy = Math.Sin(r.Y), cz = Math.Cos(r.Z), sz = Math.Sin(r.Z);
+    double cx = Math.Cos(-r.X), sx = Math.Sin(-r.X), cy = Math.Cos(-r.Y), sy = Math.Sin(-r.Y), cz = Math.Cos(-r.Z), sz = Math.Sin(-r.Z);
     double x = v.X * scale, y = v.Y * scale, z = v.Z * scale;
     double y1 = y * cx - z * sx, z1 = y * sx + z * cx;           // about X
     double x2 = x * cy + z1 * sy, z2 = -x * sy + z1 * cy;          // about Y

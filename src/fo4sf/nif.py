@@ -313,6 +313,66 @@ def door_hinge(n: NifFile) -> Optional[Tuple[int, tuple]]:
     return None
 
 
+def _last_rotation_key(d: bytes) -> Optional[tuple]:
+    """Rotation at the last key of an NiTransformData block, as a row-major 3x3 matrix (None without rotation keys).
+    Handles quaternion keys (linear / quadratic / TBC) and XYZ (Euler, per-axis float keys) rotation."""
+    import math
+    num, = struct.unpack_from("<I", d, 0)
+    if num == 0:
+        return None
+    rtype, = struct.unpack_from("<I", d, 4)
+    p = 8
+    if rtype == 4:                                    # XYZ: three float key groups
+        angles = []
+        for _ in range(3):
+            n, = struct.unpack_from("<I", d, p); p += 4
+            if n == 0:
+                angles.append(0.0)
+                continue
+            kt, = struct.unpack_from("<I", d, p); p += 4
+            size = {1: 8, 2: 16, 3: 20}[kt]
+            angles.append(struct.unpack_from("<f", d, p + (n - 1) * size + 4)[0])
+            p += n * size
+        x, y, z = angles
+        cx, sx, cy, sy, cz, sz = math.cos(x), math.sin(x), math.cos(y), math.sin(y), math.cos(z), math.sin(z)
+        rx = (1, 0, 0, 0, cx, -sx, 0, sx, cx)
+        ry = (cy, 0, sy, 0, 1, 0, -sy, 0, cy)
+        rz = (cz, -sz, 0, sz, cz, 0, 0, 0, 1)
+        return _matmul(rz, _matmul(ry, rx))
+    size = 20 + (12 if rtype == 3 else 0)             # time + quaternion (w, x, y, z) [+ TBC]
+    _, w, x, y, z = struct.unpack_from("<5f", d, p + (num - 1) * size)
+    return (1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y),
+            2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x),
+            2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y))
+
+
+def _matmul(a, b):
+    return tuple(sum(a[3 * r + k] * b[3 * k + c] for k in range(3)) for r in range(3) for c in range(3))
+
+
+def door_closed_rotation(n: NifFile, hinge_node: int) -> Optional[tuple]:
+    """Local rotation of an FO4 door's hinge node at the end of its "Close" sequence (the closed pose; a door's rest pose
+    in the NIF can be open). None if there is no usable Close sequence."""
+    name_idx, = struct.unpack_from("<i", n.blocks[hinge_node], 0)
+    for i in range(len(n.blocks)):
+        if n.type_of(i) != "NiControllerSequence":
+            continue
+        blk = n.blocks[i]
+        seq_name, count = struct.unpack_from("<iI", blk, 0)
+        if n.strings[seq_name] != b"Close":
+            continue
+        for k in range(count):
+            base = 12 + 29 * k
+            interp, = struct.unpack_from("<i", blk, base)
+            node, = struct.unpack_from("<i", blk, base + 9)
+            if node != name_idx or not (0 <= interp < len(n.blocks)) or n.type_of(interp) != "NiTransformInterpolator":
+                continue
+            data, = struct.unpack_from("<i", n.blocks[interp], 32)
+            if 0 <= data < len(n.blocks) and n.type_of(data) == "NiTransformData":
+                return _last_rotation_key(n.blocks[data])
+    return None
+
+
 def referenced_paths(n: NifFile) -> List[str]:
     """Texture / material / mesh-like paths mentioned in the string table or block bytes (diagnostic only)."""
     pat = re.compile(rb"[A-Za-z0-9_\\/ .-]{4,160}\.(?:dds|bgsm|bgem|mat|mesh|hkx)", re.I)

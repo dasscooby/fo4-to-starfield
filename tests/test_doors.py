@@ -43,6 +43,20 @@ class DoorNifTests(unittest.TestCase):
         self.assertIn(target, nif.descendants(f, names(f)[sfnif.DOOR_TEMPLATE["hinge"]]))
 
 
+class ClosedPoseTests(unittest.TestCase):
+    def test_xyz_rotation_last_key(self):
+        import math
+        def group(vals):                              # quadratic float keys: time, value, forward, backward
+            return struct.pack("<II", len(vals), 2) + b"".join(struct.pack("<4f", t, v, 0, 0) for t, v in vals)
+        d = struct.pack("<II", 1, 4) + group([(0, 0), (1, 0)]) + group([(0, 0)]) + group([(0, 0), (1, math.pi / 2)])
+        r = nif._last_rotation_key(d)
+        self.assertEqual([round(x, 5) for x in r], [0, -1, 0, 1, 0, 0, 0, 0, 1])   # 90 degrees about Z
+
+    def test_quaternion_last_key(self):
+        d = struct.pack("<II", 2, 1) + struct.pack("<5f", 0, 1, 0, 0, 0) + struct.pack("<5f", 1, 0, 0, 0, 1)   # 180 about Z
+        self.assertEqual([round(x, 5) for x in nif._last_rotation_key(d)], [-1, 0, 0, 0, -1, 0, 0, 0, 1])
+
+
 class KeyframedBodyTests(unittest.TestCase):
     def test_copies_only_listed_fields(self):
         from fo4sf import sfcollision
