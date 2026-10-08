@@ -15,10 +15,9 @@ $inv = [Globalization.CultureInfo]::InvariantCulture
 function Read-Pos {
   # readpos leaves the console closed; if a read fails the console was probably open: close it once and retry
   $p = powershell -NoProfile -ExecutionPolicy Bypass -File $readpos
-  if ($p -eq 'fail') {
-    powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq 'key:grave|wait:900' | Out-Null
-    $p = powershell -NoProfile -ExecutionPolicy Bypass -File $readpos
-  }
+  # no blind console toggle on failure: readpos always leaves the console closed, and an extra toggle desynchronises
+  # it (the next route's typing then goes to the game: "p" opens the Skills menu)
+  if ($p -eq 'fail') { $p = powershell -NoProfile -ExecutionPolicy Bypass -File $readpos }
   # OCR sometimes drops or shifts a column (e.g. "91.43 0.52 91.43"): re-read up to twice when x equals z or a value is missing
   for ($n = 0; $n -lt 2; $n++) {
     $v = "$p".Trim().Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
@@ -34,9 +33,12 @@ for ($k = $First; $k -lt [Math]::Min($list.Count, $First + $Count); $k++) {
   $h = $r.heading.ToString($inv)
   $seq = "key:grave|wait:1000|type:player.setpos x $x|key:enter|wait:350|type:player.setpos y $y|key:enter|wait:350|" +
          "type:player.setpos z $z|key:enter|wait:350|type:player.setangle z $h|key:enter|wait:350|" +
-         "type:player.setangle x $(if ($r.use) { 0 } else { 10 })|key:enter|wait:400|key:grave|wait:1800"
+         "type:player.setangle x 10|key:enter|wait:400|key:grave|wait:1800"   # x 0 points the camera at the floor
   powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq $seq | Out-Null
   if ($LASTEXITCODE -ne 0) { "guard stopped at route $k"; break }
+  # level the first-person camera: setangle x turns the actor, but the camera keeps its own mouse-look pitch (seen
+  # stuck looking at the floor, so E never reached a door). Look fully up (clamps), then down a calibrated amount.
+  powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq 'move:0,-2500|wait:250|move:0,-2500|wait:300|move:0,700|wait:500' | Out-Null
   $p0 = Read-Pos
   if ($r.use) {
     # step closer first: the activation prompt only appears within reach, and placements differ by ~1 m from the plane

@@ -424,3 +424,21 @@ index (2130), and 2 `hknpConvexShape` bodies. Staged only; not yet in game.
   twins are fine; suspect the door origin offset vs this placement. Open.
 - One game exit without a crash record during a door route (the rerun of the same route was fine): watching for repeats.
 - Correction: the "door raised ~1.3 m" reading for stall doors `04BF66` / `04BF9D` is unconfirmed. Follow-up views with pitch 0 looked steeply at the floor, so camera pitch from `setangle x` is not reliable enough to judge door height from one screenshot. These two doors stay open as BLOCKED, cause unknown.
+
+## 2026-10-09: doors are fine, the test runner wasn't (Hotel Rexford 21/26)
+
+Most door "BLOCKED" results today were runner bugs:
+1. **Camera pitch.** `player.setangle x` turns the actor, but the first-person camera keeps its own mouse-look pitch.
+   After some routes it was left looking at the floor, so E never reached the door; the "door raised 1.3 m" impression
+   came from that too. The runner now levels the camera before every route (mouse fully up, which clamps, then down 700
+   counts, calibrated in game).
+2. **Console desync.** On a failed read the runner pressed the console key "in case it was open". If it was closed, the
+   next route's typing went to the game ("p" opened Skills). Removed; `readpos` always leaves the console closed.
+3. A brief `setangle x 0` for door routes made it worse; reverted to `x 10`.
+
+With those fixed, **Hotel Rexford doors: 21 PASS / 4 BLOCKED / 1 UNREAD.** Every one of the 13 doors lets the player
+through from at least one side ([prompt](media/route-rexford-door-prompt.jpg), [open](media/route-rexford-door-open.jpg)).
+The 4 one-sided blocks (refrigerator, `UtilMetalDoor01`, `BldWoodPDoor02`, the entrance load door) are probably the side
+the leaf swings towards. To confirm with the open-screenshot, then rerun all earlier door verdicts (Vault 81, Vault
+114) with the fixed runner.
+Rexford stairs (same session): 8 PASS; `BldWoodBSmRailStairs03L` reached 2.74 of 2.93 m.
