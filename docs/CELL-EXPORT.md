@@ -48,6 +48,17 @@ metadata. Discriminators that are placed references stay references; their numer
 IDs are not used to guess record type. Name text uses the reader's resolved
 language; exporting every localized string is still separate work.
 
+`teleport_dependencies` identifies each source teleport's destination reference,
+the cell actually containing it, its base FormKey, and its transition-interior
+cell. Cell locations include FormKey, optional EditorID and worldspace FormKey
+(null for interiors). This covers temporary and persistent placements, including
+worldspace top cells. Missing destinations remain null and retain their requested
+identities. Use these dependencies to plan neighboring-cell exports; this field
+does not itself export those cells or implement their transitions.
+
+Primitive geometry and bound half-extents also remain in source units in the
+placement JSON. Primitive colors are explicit RGBA integer arrays.
+
 Synthetic checks run with:
 
 ```powershell

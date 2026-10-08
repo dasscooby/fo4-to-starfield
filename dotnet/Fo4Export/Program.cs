@@ -20,6 +20,17 @@ var cache = mod.ToImmutableLinkCache();
 IEnumerable<ICellGetter> InteriorCells() =>
     mod.Cells.Records.SelectMany(b => b.SubBlocks).SelectMany(sb => sb.Cells);
 
+IEnumerable<(ICellGetter Cell, string? Worldspace)> AllCells()
+{
+    foreach (var c in InteriorCells()) yield return (c, null);
+    foreach (var world in mod.Worldspaces)
+    {
+        if (world.TopCell != null) yield return (world.TopCell, world.FormKey.ToString());
+        foreach (var c in world.SubCells.SelectMany(b => b.Items).SelectMany(b => b.Items))
+            yield return (c, world.FormKey.ToString());
+    }
+}
+
 if (args[1] == "list")
 {
     foreach (var c in InteriorCells().Where(c => (c.EditorID ?? "").Contains(args[2], StringComparison.OrdinalIgnoreCase)))
@@ -65,8 +76,9 @@ foreach (var placed in cell.Temporary.Concat(cell.Persistent))
     byType[type] = byType.GetValueOrDefault(type) + 1;
     refs.Add(ReferenceExport.Build(r, type, baseEid, model, persistentKeys.Contains(r.FormKey)));
 }
+var dependencies = TeleportDependencies.Build(cell.Temporary.Concat(cell.Persistent).OfType<IPlacedObjectGetter>(), AllCells());
 File.WriteAllText(args[3], JsonSerializer.Serialize(new { schema_version = 2, cell = cell.EditorID, formkey = cell.FormKey.ToString(), refs,
-    deferred_refs = deferred, referenced_keywords = keywords.Values },
+    deferred_refs = deferred, referenced_keywords = keywords.Values, teleport_dependencies = dependencies },
     new JsonSerializerOptions { WriteIndented = true }));
 Console.WriteLine($"{cell.EditorID}: {refs.Count} references -> {args[3]}");
 Console.WriteLine($"{deferred.Count} deferred placements retained for future translators");
