@@ -132,7 +132,7 @@ def main():
     mesh_template = None
     if a.starfield_data:                          # FO4's own collision meshes, transplanted into a vanilla container
         mesh_template = meshcollision.template_from_nif(ba2.Ba2(os.path.join(a.starfield_data, "Starfield - Meshes01.ba2")).read(
-            meshcollision.TEMPLATE_NIF))
+            meshcollision.UNIVERSAL_TEMPLATE_NIF))
     cache =checkpoints.Checkpoints(a.staging, checkpoint_signature(a)) if a.resume else None
     conv = None
     if a.cell_json:

@@ -354,3 +354,213 @@ def decode_sf_mesh(sf_blob: bytes):
             if i2 != i3:
                 tris.append((vert(i0), vert(i2), vert(i3)))
     return tris
+
+
+# ---- every body, native shapes -----------------------------------------------------------------------------------
+# Template: Bethesda's own collision test file, whose single physics system holds sphere, capsule, box, convex, cylinder,
+# compressed-mesh and compound bodies, so its TYPE section covers every shape we emit (read from the user's install).
+UNIVERSAL_TEMPLATE_NIF = "meshes/test/fbx_export/test_fbx_collision_same_node01.nif"
+
+
+class _Tmpl:
+    def __init__(self, blob: bytes):
+        self.tf = hktagfile.Tagfile(blob)
+        self.blob = blob
+
+    def item_bytes(self, name: str, k: int = 0, count: Optional[int] = None) -> bytes:
+        its = [it for it in self.tf.items[1:] if self.tf.type_name(it.type) == name]
+        it = its[k]
+        n = self.tf.size_of(it.type) * (it.count if count is None else count)
+        return self.blob[self.tf.data_start + it.offset:self.tf.data_start + it.offset + n]
+
+    def type(self, name: str) -> int:
+        return _type(self.tf, name)
+
+    def field(self, type_idx: int, name: str) -> hktagfile.Field:
+        return _field(self.tf, type_idx, name)
+
+    def arr_types(self, owner: int, name: str):
+        ft = self.field(owner, name).type
+        return ft, dict(self.tf.types[ft].params)["tT"]
+
+
+def _hull_links(faces: List[List[int]], nverts: int):
+    """faceLinks (per face edge: the face / edge running the opposite way) and vertexEdges (per vertex: the last edge
+    leaving it), as in vanilla Starfield hulls. Raises if the hull is not closed."""
+    where = {}
+    for f, idx in enumerate(faces):
+        for e in range(len(idx)):
+            where[(idx[e], idx[(e + 1) % len(idx)])] = (f, e)
+    links = []
+    for f, idx in enumerate(faces):
+        for e in range(len(idx)):
+            opp = where.get((idx[(e + 1) % len(idx)], idx[e]))
+            if opp is None:
+                raise hkpackfile.PackfileError("convex hull is not closed (missing opposite edge)")
+            links.append(opp)
+    vedges = [None] * nverts
+    for f, idx in enumerate(faces):
+        for e, v in enumerate(idx):
+            vedges[v] = (f, e)
+    if any(v is None for v in vedges):
+        raise hkpackfile.PackfileError("convex hull has unused vertices")
+    return links, vedges
+
+
+def _emit_convex(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, shape: int) -> int:
+    """FO4 hknpConvexPolytopeShape -> Starfield hknpConvexShape (hull: float3 vertices, planes, faces, indices, links)."""
+    from . import fo4collision as fc
+    va, nv = fc._rel(p, shape + fc.CVX_VERTS)
+    fa, nf = fc._rel(p, shape + fc.CVX_FACES)
+    ia, _ = fc._rel(p, shape + fc.CVX_INDICES)
+    pa, _ = fc._rel(p, shape + 64)                       # planes (count is padded to 4; one plane per face)
+    verts = [p.unpack("<3f", va + 16 * k) for k in range(nv)]
+    face_raw = p.raw(fa, 4 * nf)
+    faces = []
+    for k in range(nf):
+        first, cnt = struct.unpack_from("<HB", face_raw, 4 * k)
+        faces.append(list(p.raw(ia + first, cnt)))
+    nidx = sum(len(f) for f in faces)
+    links, vedges = _hull_links(faces, nv)
+    T_CVX = t.type("hknpConvexShape")
+    body = bytearray(t.item_bytes("hknpConvexShape"))
+    radius, = p.unpack("<f", shape + 20)
+    struct.pack_into("<f", body, t.field(T_CVX, "convexRadius").offset, radius)
+    struct.pack_into("<Q", body, t.field(T_CVX, "properties").offset, 0)             # static: no mass properties
+    hull = t.field(T_CVX, "hull")
+    for fname in ("vertices", "planes", "faces", "indices", "faceLinks", "vertexEdges"):
+        struct.pack_into("<Q", body, hull.offset + t.field(hull.type, fname).offset, 0)
+    i_shape = w.add(T_CVX, 0x10, body, 1)
+    edge = lambda fe: struct.pack("<HBB", fe[0], fe[1], 0)
+    payloads = {
+        "vertices": (b"".join(struct.pack("<3f", *v) for v in verts), nv),
+        "planes": (p.raw(pa, 16 * nf), nf),
+        "faces": (face_raw, nf),
+        "indices": (p.raw(ia, nidx), nidx),
+        "faceLinks": (b"".join(edge(x) for x in links), len(links)),
+        "vertexEdges": (b"".join(edge(x) for x in vedges), nv),
+    }
+    for fname, (raw, n) in payloads.items():
+        rel_t = t.field(hull.type, fname).type                       # hkRelArray<E>
+        elem_t = dict(t.tf.types[rel_t].params)["tT"]
+        i = w.add(elem_t, 0x20, raw, n)
+        w.ptr(rel_t, i_shape, hull.offset + t.field(hull.type, fname).offset, i)
+    return i_shape
+
+
+def _emit_mesh(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, d: int) -> int:
+    """FO4 hknpCompressedMeshShapeData -> Starfield hknpCompressedMeshShape (+ data, trees, SIMD tree)."""
+    from . import fo4collision
+    tf = t.tf
+    T_CMS, T_DATA = t.type("hknpCompressedMeshShape"), t.type("hknpCompressedMeshShapeData")
+    T_TREE, T_SEC = t.type("hknpCompressedMeshShapeTree"), t.type("hkcdStaticMeshTree::Section")
+    tree_off = t.field(T_DATA, "meshTree").offset
+    fo4 = {}
+    for name, off in FO4_ARRAYS.items():
+        at, n = p.array(d + off)
+        fo4[name] = (p.raw(at, ELEM_SIZE[name] * n) if n else b"", n)
+    cms = bytearray(t.item_bytes("hknpCompressedMeshShape"))
+    struct.pack_into("<Q", cms, t.field(T_CMS, "properties").offset, 0)
+    n_keys, bits_per_key, max_key = struct.unpack_from("<iiI", p.raw(d + FO4_TREE + 48, 12))
+    struct.pack_into("<ii", cms, t.field(T_CMS, "numTriangles").offset, 0, 0)
+    cms[t.field(T_CMS, "numShapeKeyBits").offset] = bits_per_key
+    bits = t.field(T_CMS, "triangleIsInterior")
+    words_ptr = t.field(bits.type, "storage").type
+    words_arr = t.field(words_ptr, "words").type
+    n_bits = max_key + 1
+    struct.pack_into("<i", cms, bits.offset + t.field(words_ptr, "numBits").offset, n_bits)
+    for fname in ("data",):
+        struct.pack_into("<Q", cms, t.field(T_CMS, fname).offset, 0)
+    struct.pack_into("<16x", cms, t.field(T_CMS, "externShapes").offset)
+    i_cms = w.add(T_CMS, 0x10, cms, 1)
+    nwords = (n_bits + 31) // 32
+    i_words = w.add(dict(tf.types[words_arr].params)["tT"], 0x20, bytes(4 * nwords), nwords)
+    w.ptr(words_arr, i_cms, bits.offset + t.field(words_ptr, "words").offset, i_words)
+
+    data = bytearray(t.item_bytes("hknpCompressedMeshShapeData"))
+    for f in ("nodes", "sections", "primitives", "sharedVerticesIndex", "packedVertices", "sharedVertices",
+              "primitiveDataRuns"):
+        struct.pack_into("<16x", data, tree_off + t.field(T_TREE, f).offset)
+    data[tree_off + 16:tree_off + 48] = p.raw(d + FO4_TREE + 16, 32)
+    data[tree_off + 48:tree_off + 64] = p.raw(d + FO4_TREE + 48, 16)
+    simd = t.field(T_DATA, "simdTree")
+    data[simd.offset:simd.offset + tf.size_of(simd.type)] = bytes(tf.size_of(simd.type))
+    conn = t.field(T_DATA, "connectivity")
+    data[conn.offset:conn.offset + tf.size_of(conn.type)] = bytes(tf.size_of(conn.type))
+    data[t.field(T_DATA, "hasSimdTree").offset] = 1
+    data[simd.offset + t.field(simd.type, "isCompact").offset] = 1
+    i_data = w.add(T_DATA, 0x10, data, 1)
+    w.ptr(t.field(T_CMS, "data").type, i_cms, t.field(T_CMS, "data").offset, i_data)
+    simd_raw = build_simd_tree(fo4collision.compressed_mesh_keys(p, d))
+    simd_arr_t, simd_elem_t = t.arr_types(simd.type, "nodes")
+    i_simd = w.add(simd_elem_t, 0x20, simd_raw, len(simd_raw) // 128)
+    w.ptr(simd_arr_t, i_data, simd.offset + t.field(simd.type, "nodes").offset, i_simd)
+    for name in ("nodes", "primitives", "sharedVerticesIndex", "packedVertices", "sharedVertices", "primitiveDataRuns"):
+        raw, n = fo4[name]
+        if n:
+            arr_t, elem_t = t.arr_types(T_TREE, name)
+            i = w.add(elem_t, 0x20, raw, n)
+            w.ptr(arr_t, i_data, tree_off + t.field(T_TREE, name).offset, i)
+    sec_raw, nsec = fo4["sections"]
+    sec_arr_t, sec_elem_t = t.arr_types(T_TREE, "sections")
+    i_secs = w.add(sec_elem_t, 0x20, b"".join(_convert_section(sec_raw[96 * k:96 * k + 96]) for k in range(nsec)), nsec)
+    w.ptr(sec_arr_t, i_data, tree_off + t.field(T_TREE, "sections").offset, i_secs)
+    sec_at, _ = p.array(d + FO4_ARRAYS["sections"])
+    node_arr_t, node_elem_t = t.arr_types(T_SEC, "nodes")
+    for k in range(nsec):
+        at, n = p.array(sec_at + 96 * k)
+        if n:
+            i = w.add(node_elem_t, 0x20, p.raw(at, FO4_SECTION_NODES * n), n)
+            w.ptr(node_arr_t, i_secs, 96 * k + t.field(T_SEC, "nodes").offset, i)
+    return i_cms
+
+
+def convert_bodies(fo4_blob: bytes, template_blob: bytes) -> List[bytes]:
+    """One native Starfield single-body physics blob per FO4 body (shape, position and orientation copied: both games
+    use Havok, so the transform needs no conversion). Supported shapes: compressed mesh, convex polytope. Any other
+    shape class raises PackfileError so the caller records an explicit fallback instead of dropping a body."""
+    from . import fo4collision as fc
+    p = hkpackfile.Packfile(fo4_blob)
+    classes = dict(p.objects())
+    systems = [o for o, c in classes.items() if c == "hknpPhysicsSystemData"]
+    if len(systems) != 1:
+        raise hkpackfile.PackfileError("expected one source physics system")
+    at, n = p.array(systems[0] + fc.SYS_BODIES)
+    if n <= 0 or at is None:
+        return []
+    t = _Tmpl(template_blob)
+    T_PSD, T_BODY = t.type("hknpPhysicsSystemData"), t.type("hknpPhysicsSystemData::bodyCinfoWithAttachment")
+    T_MAT = t.type("hknpMaterial")
+    type_sec = next(blob_sec for blob_sec in (template_blob[s - 8:e] for tag, s, e in
+                    hktagfile.sections(template_blob, 8, len(template_blob)) if tag == "TYPE"))
+    sdk = next(template_blob[s:e] for tag, s, e in hktagfile.sections(template_blob, 8, len(template_blob)) if tag == "SDKV")
+    out = []
+    for k in range(n):
+        b = at + fc.BODY_SIZE * k
+        shape = p.pointer(b)
+        cls = classes.get(shape, "?")
+        pos, rot = p.unpack("<4f", b + fc.BODY_POS), p.unpack("<4f", b + fc.BODY_ROT)
+        if not all(math.isfinite(x) for x in pos + rot):
+            raise hkpackfile.PackfileError("non-finite source body transform")
+        w = _Writer()
+        i_psd = w.add(T_PSD, 0x10, t.item_bytes("hknpPhysicsSystemData"), 1)
+        i_mat = w.add(T_MAT, 0x20, t.item_bytes("hknpMaterial", count=1), 1)
+        body = bytearray(t.item_bytes("hknpPhysicsSystemData::bodyCinfoWithAttachment", count=1))
+        struct.pack_into("<H", body, t.field(T_BODY, "materialId").offset, 0)
+        struct.pack_into("<4f", body, t.field(T_BODY, "position").offset, pos[0], pos[1], pos[2], 0.0)
+        struct.pack_into("<4f", body, t.field(T_BODY, "orientation").offset, *rot)
+        i_body = w.add(T_BODY, 0x20, body, 1)
+        w.ptr(t.field(T_PSD, "materials").type, i_psd, t.field(T_PSD, "materials").offset, i_mat)
+        w.ptr(t.field(T_PSD, "bodyCinfos").type, i_psd, t.field(T_PSD, "bodyCinfos").offset, i_body)
+        if cls == "hknpCompressedMeshShape":
+            d = p.pointer(shape + fc.CMS_DATA)
+            if d is None:
+                raise hkpackfile.PackfileError("compressed mesh body has no data")
+            i_shape = _emit_mesh(w, t, p, d)
+        elif cls == "hknpConvexPolytopeShape":
+            i_shape = _emit_convex(w, t, p, shape)
+        else:
+            raise hkpackfile.PackfileError(f"source body {k} uses unsupported shape {cls}")
+        w.ptr(t.field(T_BODY, "shape").type, i_body, t.field(T_BODY, "shape").offset, i_shape)
+        out.append(w.build(sdk, type_sec))
+    return out

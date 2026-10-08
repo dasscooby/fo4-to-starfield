@@ -102,6 +102,38 @@ def collision_template_from_nif(sf_nif: bytes) -> bytes:
     raise nifmod.NifError("template NIF has no bhkPhysicsSystem")
 
 
+def fo4_native_collision(src, universal_template: bytes, report: dict = None):
+    """[Starfield single-body physics blobs], one per FO4 collision body (meshcollision.convert_bodies), or None to fall
+    back. Only collision objects on the root node are handled; others (child nodes with their own transform), unsupported
+    shape classes and malformed data return None and record why (never a partial conversion)."""
+    from . import meshcollision
+    objs = [i for i in range(len(src.blocks)) if src.type_of(i) == "bhkNPCollisionObject"]
+    if not objs:
+        return None
+    blobs = []
+    for i in objs:
+        target, _, data = struct.unpack_from("<iHi", src.blocks[i], 0)
+        if target != 0:
+            if report is not None:
+                report["fo4_collision_error"] = "collision object on a child node (not supported yet)"
+            return None
+        if not (0 <= data < len(src.blocks)) or src.type_of(data) != "bhkPhysicsSystem":
+            if report is not None:
+                report["fo4_collision_error"] = f"collision data is {src.type_of(data) if 0 <= data < len(src.blocks) else 'missing'}"
+            return None
+        n, = struct.unpack_from("<I", src.blocks[data], 0)
+        try:
+            blobs += meshcollision.convert_bodies(src.blocks[data][4:4 + n], universal_template)
+        except Exception as e:                           # noqa: BLE001  (fallback by design, reason recorded)
+            if report is not None:
+                report["fo4_collision_error"] = f"{type(e).__name__}: {e}"
+            return None
+    if report is not None and blobs:
+        report["source"] = "fo4-native"
+        report["bodies"] = len(blobs)
+    return blobs or None
+
+
 def fo4_mesh_collision(src, sf_mesh_template: bytes, report: dict = None):
     """Starfield collision blob made from the FO4 NIF's own mesh collision (on the root node), or None.
     FO4 bhkNPCollisionObject: target node i32, flags u16, data (bhkPhysicsSystem) i32."""
@@ -153,10 +185,11 @@ def convert_static(fo4_nif: bytes, out_name: str, material_path: str = PLACEHOLD
                                                material_paths[i] if material_paths else material_path, sphere, box))
     node_name = out_name.rsplit("/", 1)[-1].encode()
     blob, child_blobs = None, []
+    native = None
     if sf_mesh_template is not None and collision_template is not None:
-        blob = fo4_mesh_collision(src, sf_mesh_template, report)       # FO4's own mesh collision, transplanted
-    if blob is not None:
-        pass
+        native = fo4_native_collision(src, sf_mesh_template, report)   # FO4's own bodies as native Starfield bodies
+    if native:
+        child_blobs = native                         # one body per child node, as vanilla multi-body files do
     elif collision_template is not None and collision_mode == "surfaces":
         for c, h in sfcollision.mesh_boxes(all_pts, all_tris, report=report):
             child_blobs.append(sfcollision.box_blob(collision_template, c, h))
