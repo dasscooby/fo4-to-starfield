@@ -16,6 +16,20 @@ spec.loader.exec_module(batch)
 
 
 class BatchIdentityTests(unittest.TestCase):
+    def test_case_aliases_cannot_silently_overwrite_reserved_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "editorids.json").write_text(json.dumps({
+                "Meshes\\Chair.nif": "Original", "meshes/chair.nif": "Replacement"}))
+            with self.assertRaisesRegex(ValueError, "conflicting"):
+                batch.load_editor_ids(tmp)
+
+    def test_invalid_persistent_map_is_rejected(self):
+        for mapping in [[], {"a.nif": None}, {"a.nif": ""}]:
+            with tempfile.TemporaryDirectory() as tmp:
+                Path(tmp, "editorids.json").write_text(json.dumps(mapping))
+                with self.assertRaises(ValueError):
+                    batch.load_editor_ids(tmp)
+
     def test_batch_failure_does_not_reassign_another_models_name(self):
         with tempfile.TemporaryDirectory() as tmp:
             staging = Path(tmp) / "staging"

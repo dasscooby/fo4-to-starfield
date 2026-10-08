@@ -26,18 +26,27 @@ def source_identity(source):
 def load_editor_ids(staging):
     path = os.path.join(staging, "editorids.json")
     ids = {}
+    def adopt(source, value):
+        if not isinstance(source, str) or not source or not isinstance(value, str) or not value:
+            raise ValueError("source and editor ID must be nonempty strings")
+        key = source_identity(source)
+        if key in ids and ids[key] != value:
+            raise ValueError(f"conflicting editor ID for {key}")
+        ids[key] = value
+
     if os.path.exists(path):
         with open(path, encoding="utf-8") as f:
-            ids = {source_identity(k): v for k, v in json.load(f).items()}
+            mapping = json.load(f)
+        if not isinstance(mapping, dict):
+            raise ValueError("persistent source mapping must be an object")
+        for source, value in mapping.items():
+            adopt(source, value)
     # Adopt existing plugin names rather than renaming deployed records on upgrade.
     manifest = os.path.join(staging, "manifest.json")
     if os.path.exists(manifest):
         with open(manifest, encoding="utf-8") as f:
             for item in json.load(f)["items"]:
-                key, value = source_identity(item["source"]), item["editor_id"]
-                if key in ids and ids[key] != value:
-                    raise ValueError(f"conflicting editor ID for {key}")
-                ids[key] = value
+                adopt(item["source"], item["editor_id"])
     if len({v.lower() for v in ids.values()}) != len(ids):
         raise ValueError("duplicate editor IDs in persistent source mapping")
     return ids
