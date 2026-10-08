@@ -14,6 +14,8 @@ var r = new PlacedObject(Key(0x801), Fallout4Release.Fallout4)
     MajorRecordFlagsRaw = 0x800 | 0x400,
     Position = new P3Float(70, 140, 210), Rotation = new P3Float(0, 0, 1),
     Scale = 2, OpenByDefault = true,
+    BoundHalfExtents = new P3Float(4, 5, 6),
+    Primitive = new PlacedPrimitive { Bounds = new P3Float(70, 140, 210), Color = System.Drawing.Color.FromArgb(40, 10, 20, 30), Unknown = 0.3f, Type = (PlacedPrimitive.TypeEnum)1 },
     EnableParent = new EnableParent { Flags = (EnableParent.Flag)1 },
     TeleportDestination = new TeleportDestination { Position = new P3Float(1, 2, 3), Flags = (TeleportDestination.Flag)1 },
     Ownership = new Ownership { NoCrime = true },
@@ -36,6 +38,10 @@ Require(o.GetProperty("base_formkey").GetString() == Key(0x802).ToString(), "bas
 Require(o.GetProperty("disabled").GetInt32() == 0x800, "disabled compatibility changed");
 Require(o.GetProperty("record_flags").GetInt32() == 0xC00, "raw flags lost");
 Require(o.GetProperty("persistent").GetBoolean(), "persistent placement lost");
+Require(o.GetProperty("bound_half_extents")[2].GetSingle() == 6, "placement bounds lost");
+Require(o.GetProperty("primitive").GetProperty("bounds")[1].GetSingle() == 140, "primitive source dimensions changed");
+Require(o.GetProperty("primitive").GetProperty("color")[3].GetInt32() == 40, "primitive alpha lost");
+Require(o.GetProperty("primitive").GetProperty("type_value").GetInt32() == 1, "primitive type lost");
 Require(o.GetProperty("open_by_default").GetBoolean(), "open state lost");
 Require(o.GetProperty("pos")[0].GetSingle() == 70 && o.GetProperty("scale").GetSingle() == 2, "source units/scale changed");
 Require(o.GetProperty("enable_parent").GetProperty("reference").GetString() == Key(0x803).ToString(), "enable parent lost");
@@ -47,6 +53,7 @@ var empty = new PlacedObject(Key(0x900), Fallout4Release.Fallout4);
 using var absent = JsonDocument.Parse(JsonSerializer.Serialize(ReferenceExport.Build(empty, "?", "", "", false)));
 Require(absent.RootElement.GetProperty("base_formkey").ValueKind == JsonValueKind.Null, "null base invented");
 Require(absent.RootElement.GetProperty("enable_parent").ValueKind == JsonValueKind.Null, "null parent invented");
+Require(absent.RootElement.GetProperty("primitive").ValueKind == JsonValueKind.Null && absent.RootElement.GetProperty("bound_half_extents").ValueKind == JsonValueKind.Null, "absent volume geometry invented");
 Require(absent.RootElement.GetProperty("linked_references").GetArrayLength() == 0, "empty links invented");
 Require(absent.RootElement.GetProperty("scale").GetSingle() == 1, "default scale changed");
 var actor = new PlacedNpc(Key(0xA00), Fallout4Release.Fallout4) { Position = new P3Float(10, 20, 30), MajorRecordFlagsRaw = 0x800 };

@@ -94,6 +94,25 @@ using var specialized = JsonDocument.Parse("""
 var rejected = Relationships.Apply(mod, ids, new[] { specialized.RootElement, two.RootElement });
 Require(rejected.Issues.Any(x => x.Field == "keyword") && !ids.ContainsKey("KYWD:special"), "specialized semantics were silently flattened into a generic keyword");
 var directory = Path.Combine(Path.GetTempPath(), "fo4sf-links-" + Guid.NewGuid().ToString("N"));
+using var volumeChild = JsonDocument.Parse("""
+{"cell":"First","refs":[{"formkey":"child","enable_parent":{"reference":"volume","flags":1}}]}
+""");
+using var volumeSource = JsonDocument.Parse("""
+{"cell":"Second","refs":[{"formkey":"volume","type":"Static","base_editor_id":"LightBox","pos":[0,70,0],"rot":[0,0,1],"primitive":{"bounds":[70,140,210],"color":[10,20,30,40],"unknown":0.3,"type":"Box","type_value":1}}]}
+""");
+var volumeBases = new Dictionary<string, FormKey> { ["LightBox"] = new(starfield, 0x1F7) };
+using var missingVolume = JsonDocument.Parse("""
+{"cell":"Second","refs":[{"formkey":"volume","type":"Static","base_editor_id":"LightBox","pos":[0,70,0],"rot":[0,0,1]}]}
+""");
+var missingVolumeReport = Relationships.Apply(mod, ids, new[] { volumeChild.RootElement, missingVolume.RootElement }, volumeBases);
+Require(missingVolumeReport.Issues.Any(i => i.Field == "primitive") && !ids.ContainsKey("REFR:FO4Port_Second:volume"), "missing volume geometry created a guessed helper");
+var volumeReport = Relationships.Apply(mod, ids, new[] { volumeChild.RootElement, volumeSource.RootElement }, volumeBases);
+Require(volumeReport.CreatedMarkers == 1 && volumeReport.Issues.Count == 0, "LightBox not restored");
+var volumeKey = child.EnableParent!.Reference.FormKey;
+var restoredVolume = second.Temporary.OfType<PlacedObject>().Single(r => r.FormKey == volumeKey);
+Require(restoredVolume.Primitive!.Bounds.Y == 2 && restoredVolume.Primitive.Color.A == 40 && restoredVolume.Rotation.Z == 1, "LightBox geometry/alpha/rotation lost");
+// Restore the prior parent used by the existing binary assertions.
+Relationships.Apply(mod, ids, markerExports, markerBases);
 Directory.CreateDirectory(directory);
 try
 {
@@ -108,6 +127,9 @@ try
     Require(written.LinkedReferences.Count == 2 && written.LinkedReferences.Any(l => l.KeywordOrReference.FormKey == keywordKey), "keyworded linked reference lost in binary output");
     Require(read.Keywords.Single().Color!.Value.G == 8, "keyword metadata lost in binary output");
     Require(read.Keywords.Single().Name!.String == "Synthetic label", "keyword name lost in binary output");
+    var writtenVolume = read.Cells.Records.SelectMany(b => b.SubBlocks).SelectMany(s => s.Cells)
+        .SelectMany(c => c.Temporary).OfType<IPlacedObjectGetter>().Single(r => r.FormKey == volumeKey);
+    Require(writtenVolume.Primitive!.Bounds.Z == 3 && writtenVolume.Primitive.Color.G == 20, "LightBox volume lost in binary output");
 }
 finally { Directory.Delete(directory, true); }
 Console.WriteLine("Relationship translation and binary round-trip synthetic checks passed.");

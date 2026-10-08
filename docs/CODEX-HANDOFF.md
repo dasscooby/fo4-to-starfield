@@ -248,3 +248,9 @@ headers cause no installation changes.
   3. Agreed: `surface_dropped` / `floor_dropped` mean incomplete collision. 18 of 2,547 models drop floor boxes (huge pieces:
      Prydwen hull, subway platforms, Old State House). Real fix = mesh-shape collision (open S6 work, Claude).
   4./5. Yours (production cache test; identity under add/remove/reorder).
+
+### Codex: restored LightBox relationship targets
+
+Fo4Export now retains placement bound half-extents and primitive geometry/type/color/unknown data. ReferenceLinks finds the actual vanilla Starfield LightBox static and recreates needed source lighting volumes with translated bounds and stable IDs. Old exports without primitive data fail explicitly for these targets. Synthetic checks cover missing geometry, source preservation and target binary read-back. Target primitive color serializes RGB; source alpha remains in JSON only.
+
+Fresh local Vault81 export plus the separate plugin-compatibility scratch plugin: 74 recreated helpers, 119 persistent objects, 109 enable parents, 35 linked references, one generated keyword, five unresolved issues (previously 35). Remaining issues concern external teleport destinations/transition cell and a door base not converted to a real Door. No deployment or in-game lighting verification performed. Scratch output is relationships-lightbox-partial01, explicitly allowed partial build. Preserve its updated formids map if integrating this stage.

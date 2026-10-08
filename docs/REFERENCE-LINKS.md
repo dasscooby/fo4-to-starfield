@@ -12,9 +12,17 @@ dotnet run --project dotnet/ReferenceLinks -- <input FO4Port.esm> <formids.json>
 
 Supply every involved cell export together so cross-cell targets can resolve.
 The tool reads Starfield's current vanilla static records to locate EnableMarker,
-XMarker and XMarkerHeading by EditorID. Needed source control markers are recreated
+XMarker, XMarkerHeading and LightBox by EditorID. Needed source control markers are recreated
 with stable IDs, source transforms, disabled state and persistent grouping. It
 does not guess an equivalent record for arbitrary missing objects or actors.
+
+LightBox helpers require a fresh export containing primitive bounds, RGBA color,
+type and the primitive's unknown value. Bounds convert to metres; RGB colors and
+the unknown value are retained. The JSON retains alpha, but the target primitive
+binary color stores RGB, so alpha is not a supported target property.
+Missing geometry or an unrecognized primitive
+type produces an issue instead of creating an empty lighting volume. This has
+binary round-trip coverage; equivalent lighting behavior still needs game testing.
 
 Implemented translation:
 

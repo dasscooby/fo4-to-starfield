@@ -23,7 +23,7 @@ try
     if (data != null && !args.Contains("--no-markers"))
     {
         using var vanilla = StarfieldMod.CreateFromBinaryOverlay(Path.Combine(data, "Starfield.esm"), StarfieldRelease.Starfield);
-        var names = new HashSet<string>(new[] { "EnableMarker", "XMarker", "XMarkerHeading" }, StringComparer.OrdinalIgnoreCase);
+        var names = new HashSet<string>(new[] { "EnableMarker", "XMarker", "XMarkerHeading", "LightBox" }, StringComparer.OrdinalIgnoreCase);
         markerBases = vanilla.Statics.Where(s => s.EditorID != null && names.Contains(s.EditorID))
             .ToDictionary(s => s.EditorID!, s => s.FormKey, StringComparer.OrdinalIgnoreCase);
     }

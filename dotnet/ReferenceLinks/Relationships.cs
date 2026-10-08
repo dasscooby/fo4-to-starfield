@@ -65,6 +65,29 @@ public static class Relationships
                     markerBases.TryGetValue(baseId.GetString() ?? "", out var markerBase) &&
                     reference.GetProperty("type").GetString() == "Static")
                 {
+                    PlacedPrimitive? primitive = null;
+                    if (baseId.GetString()!.Equals("LightBox", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!reference.TryGetProperty("primitive", out var volume) || volume.ValueKind == JsonValueKind.Null)
+                        {
+                            report.Issues.Add(new(source, "primitive", null, "LightBox requires exported volume geometry; re-export the source cell"));
+                            continue;
+                        }
+                        var type = volume.GetProperty("type_value").GetInt32();
+                        if (!Enum.IsDefined(typeof(PlacedPrimitive.TypeEnum), type) ||
+                            ((PlacedPrimitive.TypeEnum)type).ToString() != volume.GetProperty("type").GetString())
+                        {
+                            report.Issues.Add(new(source, "primitive.type", null, "source primitive type has no verified target equivalent"));
+                            continue;
+                        }
+                        var color = volume.GetProperty("color");
+                        primitive = new PlacedPrimitive
+                        {
+                            Bounds = Pos(volume.GetProperty("bounds")),
+                            Color = System.Drawing.Color.FromArgb(color[3].GetInt32(), color[0].GetInt32(), color[1].GetInt32(), color[2].GetInt32()),
+                            Unknown = volume.GetProperty("unknown").GetSingle(), Type = (PlacedPrimitive.TypeEnum)type,
+                        };
+                    }
                     if (!ids.ContainsKey(identity))
                     {
                         if (next >= 0x1000000) throw new InvalidOperationException("full plugin FormID space exhausted");
@@ -74,6 +97,7 @@ public static class Relationships
                     target = new PlacedObject(new FormKey(mod.ModKey, rid), StarfieldRelease.Starfield)
                     {
                         Position = Pos(reference.GetProperty("pos")), Rotation = Rot(reference.GetProperty("rot")),
+                        Primitive = primitive,
                     };
                     target.Base.SetTo(markerBase);
                     if (reference.TryGetProperty("disabled", out var disabled) && disabled.GetInt32() != 0)

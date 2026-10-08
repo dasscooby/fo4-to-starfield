@@ -17,6 +17,14 @@ public static class ReferenceExport
             disabled = r.MajorRecordFlagsRaw & 0x800,
             record_flags = r.MajorRecordFlagsRaw,
             persistent,
+            bound_half_extents = r.BoundHalfExtents is {} bounds ? new[] { bounds.X, bounds.Y, bounds.Z } : null,
+            primitive = r.Primitive == null ? null : new
+            {
+                bounds = new[] { r.Primitive.Bounds.X, r.Primitive.Bounds.Y, r.Primitive.Bounds.Z },
+                color = new[] { (int)r.Primitive.Color.R, (int)r.Primitive.Color.G, (int)r.Primitive.Color.B, (int)r.Primitive.Color.A },
+                unknown = r.Primitive.Unknown,
+                type = r.Primitive.Type.ToString(), type_value = (int)r.Primitive.Type,
+            },
             open_by_default = r.OpenByDefault,
             ownership = r.Ownership == null ? null : new
             {
