@@ -78,6 +78,10 @@ def build_archive(a, out, folders, fmt):
                             "-compression=Default"], cwd=a.staging, capture_output=True, text=True)
         if r.returncode != 0 or not os.path.isfile(fresh):
             sys.exit("Archive2 failed (no successful fresh output):\n" + r.stdout + r.stderr)
+        with open(fresh, "rb") as stream:
+            head = stream.read(4)
+        if os.path.getsize(fresh) < 16 or head != b"BTDX":
+            sys.exit("Archive2 produced an invalid archive; previous build preserved")
         os.replace(fresh, out)
 
 

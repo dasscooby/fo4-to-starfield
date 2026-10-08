@@ -22,7 +22,7 @@ class DeploymentRollbackTests(unittest.TestCase):
             tool.touch()
             out = root / deploy.ARCHIVE
             old = b"BTDX old build"
-            fresh = b"BTDX new build"
+            fresh = b"BTDX new build" + bytes(16)
             out.write_bytes(old)
             args = SimpleNamespace(starfield=str(root), staging=str(root))
 
@@ -30,6 +30,10 @@ class DeploymentRollbackTests(unittest.TestCase):
                 destination = Path(next(arg[len("-create="):] for arg in command if arg.startswith("-create=")))
                 if outcome in ("success", "failure"):
                     destination.write_bytes(fresh)
+                if outcome == "invalid":
+                    destination.write_bytes(b"BAD!" + bytes(32))
+                if outcome == "truncated":
+                    destination.write_bytes(b"BTDX")
                 return SimpleNamespace(returncode=1 if outcome == "failure" else 0, stdout="", stderr="")
 
             with patch.object(deploy.subprocess, "run", side_effect=run):
@@ -49,6 +53,12 @@ class DeploymentRollbackTests(unittest.TestCase):
 
     def test_archive_success_replaces_previous_build(self):
         self.check_archive_build("success")
+
+    def test_invalid_fresh_archive_preserves_previous_build(self):
+        self.check_archive_build("invalid")
+
+    def test_truncated_fresh_archive_preserves_previous_build(self):
+        self.check_archive_build("truncated")
 
     def test_uninstall_disables_plugin_even_when_one_file_is_locked(self):
         with tempfile.TemporaryDirectory() as tmp:

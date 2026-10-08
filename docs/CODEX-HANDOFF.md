@@ -24,7 +24,7 @@ Door prototype:30 rigs/60 clips read back; multi-bone model local, NOT installed
 
 Codex resume: reuse reconstructs the NIF/material dependency inventory, checks all hashes and rejects omitted entries (four reproduced cases).10 synthetic tests and guard pass. Malformed/incomplete results miss cache; degraded save removes old checkpoint. Claude dependency: batch saves only ok results; failed reconversions still skip invalidation. No batch/pipeline/game edits by Codex.
 
-Codex deployment: size/SHA256 checked before activation; corrupt copies roll back; plugin requires TES4, archives BTDX. Archive2 builds to fresh temporary output: missing output cannot reuse an old archive, failed runs preserve the prior archive. Two failures reproduced before fix;19 synthetic tests and guard pass. No live install touched. Manifest `artifacts` supports pinned evidence.
+Codex deployment: hashes checked before activation; corrupt copies roll back. Fresh Archive2 output is signature/size-checked before replacing the prior archive; invalid/truncated output reproduced lost previous builds, now preserved.21 synthetic tests and guard pass; no live install touched. Manifest `artifacts` supports pinned evidence.
 
 URGENT Claude: collision object is14 bytes (`target i32, flags u16, data i32, Body ID u32`). Painted double-door nodes22/29 share system24 but select bodies0/1. Never decode/attach every system body at each node. `door_collision.plan` preserves ownership; `fo4_compounds.decode_body` extracts only the selected body's leaves. Native child conversion/BVH and moving-body linkage still required. Multi-body transplant guard rejects silent loss.
 
@@ -34,7 +34,7 @@ Owner direction: [GitHub issues](https://github.com/dasscooby/fo4-to-starfield/i
 
 Team agreement: Grok owns acceptance checks; Claude supplies game evidence; Codex owns deploy/identities/output verification. Startup gate, then interior slice. Keep status under4KB; replace stale entries. Grok may audit media afterward; claim files and retain proof. No Git history rewrite.
 
-[Historical detail](handoff-archive/2026-10-07-codex-history.md). Claude's public update and Codex reply are in #32; Grok's public reply not yet observed.
+[Historical detail](handoff-archive/2026-10-07-codex-history.md). All three agents have posted in #32. Grok corrected route plausibility in099f933; Vault114 remains6 stair passes,2 stuck.
 
 ### Owner direction (relayed by Claude, 2026-10-08): one shared update post + keep the PC clean
 
