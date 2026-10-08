@@ -609,6 +609,8 @@ def convert_bodies(fo4_blob: bytes, template_blob: bytes, select: Optional[List[
         struct.pack_into("<4f", body, t.field(T_BODY, "position").offset, 0.0, 0.0, 0.0, 0.0)
         struct.pack_into("<4f", body, t.field(T_BODY, "orientation").offset, 0.0, 0.0, 0.0, 1.0)
         filt, = p.unpack("<I", b + FO4_BODY_FILTER)
+        if os.environ.get("FO4PORT_DROP_STAIRHELPER") == "1" and (filt & 0x7F) == 31:
+            continue                                       # diagnostic only: test stairs without the helper ramp
         if (filt & 0x7F) in UNMAPPED_LAYERS:
             raise hkpackfile.PackfileError(f"body {k} uses {UNMAPPED_LAYERS[filt & 0x7F]} (no Starfield equivalent)")
         struct.pack_into("<I", body, t.field(T_BODY, "collisionFilterInfo").offset, filt)

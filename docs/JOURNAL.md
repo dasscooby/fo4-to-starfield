@@ -324,3 +324,17 @@ for 11 cells: about 279 (127 stairs, 102 doors). Red Rocket has none; it is chec
 whose FO4 collision has no ramp are listed per model for a separate check: Vault 111 `V111RPit2StairsRaisedMid02` x4,
 Rexford `BldWoodBSmStairs03TrimL/R`, Vault 114 `VltStairWellCorIn01`/`VltStairWellDoorHalf01`, Cambridge
 `BldWoodPSmStairs02TrimL`. Staged, not deployed; the in-game runs follow when the PC is free.
+
+## 2026-10-08: Vault 111 routes
+
+Ran all 11 Vault 111 routes on the current native build: **8 PASS**, 1 UNREAD (OCR column swap), **2 STUCK**.
+- PASS: the pit stairs (`V111RPit2StairsRaisedMid01`, rise ~1.0 m, five copies), the wall stairs (`V111RPitWallStairs01`,
+  two), and the door `SwitchDoorExSmLatch01` (opens, player 1.41 m past the plane).
+  ([pit stairs](media/route-v111-pit-stairs.jpg), [door](media/route-v111-door.jpg))
+- STUCK: both `V111HallStairs01`, rise 0.26 m of 1.55 m ([stuck](media/route-v111-hallstairs-stuck.jpg)). Its FO4 stair
+  helper is placed correctly (unrotated `rampdummy` node), but it is about 46 degrees: rise 1.93 m over 1.85 m. The
+  passing Prydwen helpers are about 31 degrees. Likely Starfield's character controller does not walk slopes that steep,
+  where FO4's did.
+- Experiment queued (not run; the user came back): rebuild without the helper (`FO4PORT_DROP_STAIRHELPER=1`, diagnostic
+  only) and check whether the 0.30 m treads can be stepped. If not, flatten steep helpers to a walkable angle.
+  **The installed build currently has that diagnostic version of V111HallStairs01.**
