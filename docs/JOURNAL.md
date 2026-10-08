@@ -338,3 +338,17 @@ Ran all 11 Vault 111 routes on the current native build: **8 PASS**, 1 UNREAD (O
 - Experiment queued (not run; the user came back): rebuild without the helper (`FO4PORT_DROP_STAIRHELPER=1`, diagnostic
   only) and check whether the 0.30 m treads can be stepped. If not, flatten steep helpers to a walkable angle.
   **The installed build currently has that diagnostic version of V111HallStairs01.**
+
+## 2026-10-08: compound, capsule and sphere collision (offline)
+
+The user had been active within 10 minutes, so this tick was offline.
+- **Compounds:** `hknpDynamicCompoundShape` bodies are flattened. Each instance becomes its own native Starfield body, with
+  the instance transform baked into the shape: convex children fully, mesh children translation only (a rotated mesh
+  instance is rejected and recorded). Instance layout from Codex's `fo4_compounds.py`, which is cross-checked against
+  PyNifly and real FO4 files.
+- **Capsules:** FO4 capsules carry a full polytope hull plus radius, so they take the convex path.
+- **Spheres:** native `hknpSphereShape` from Bethesda's test-file template (one centre vertex, radius as convex radius).
+- Coverage: **3,006 of 3,490 models native** (up from 2,716), 117 boxes, 367 single box or none. Recorded errors: 9
+  open hulls, 16 junk shared-vertex tables, 2 `hknpConvexShape`.
+- **Not yet verified in game.** Next with a free PC: startup, then a prop-heavy room (compounds are mostly props), then the
+  Vault 111 hall-stair experiment.

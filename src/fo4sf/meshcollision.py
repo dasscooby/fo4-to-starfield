@@ -424,6 +424,30 @@ def _faces_raw(faces, fo4_raw: bytes) -> bytes:
     return out
 
 
+def _emit_sphere(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, shape: int, R, tr) -> int:
+    """FO4 hknpSphereShape (radius @20, centre as the first hull vertex) -> Starfield hknpSphereShape (hull with one
+    float3 vertex, radius in convexRadius), centre moved by the instance transform."""
+    from . import fo4collision as fc
+    va, nv = fc._rel(p, shape + fc.CVX_VERTS)
+    if nv < 1:
+        raise hkpackfile.PackfileError("sphere without a centre vertex")
+    c = p.unpack("<3f", va)
+    centre = tuple(tr[i] + sum(R[3 * i + k] * c[k] for k in range(3)) for i in range(3))
+    radius, = p.unpack("<f", shape + 20)
+    T_SPH = t.type("hknpSphereShape")
+    body = bytearray(t.item_bytes("hknpSphereShape"))
+    struct.pack_into("<f", body, t.field(T_SPH, "convexRadius").offset, radius)
+    struct.pack_into("<Q", body, t.field(T_SPH, "properties").offset, 0)
+    hull = t.field(T_SPH, "hull")
+    for fname in ("vertices", "planes", "faces", "indices", "faceLinks", "vertexEdges"):
+        struct.pack_into("<Q", body, hull.offset + t.field(hull.type, fname).offset, 0)
+    i_shape = w.add(T_SPH, 0x10, body, 1)
+    rel_t = t.field(hull.type, "vertices").type
+    i_v = w.add(dict(t.tf.types[rel_t].params)["tT"], 0x20, struct.pack("<3f", *centre), 1)
+    w.ptr(rel_t, i_shape, hull.offset + t.field(hull.type, "vertices").offset, i_v)
+    return i_shape
+
+
 def _emit_convex(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, shape: int, rot=(0.0, 0.0, 0.0, 1.0),
                  pos=(0.0, 0.0, 0.0)) -> int:
     """FO4 hknpConvexPolytopeShape -> Starfield hknpConvexShape (hull: float3 vertices, planes, faces, indices, links).
@@ -433,7 +457,7 @@ def _emit_convex(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, shape: int, rot
     fa, nf = fc._rel(p, shape + fc.CVX_FACES)
     ia, _ = fc._rel(p, shape + fc.CVX_INDICES)
     pa, _ = fc._rel(p, shape + 64)                       # planes (count is padded to 4; one plane per face)
-    R = _quat_matrix(rot)
+    R = rot if len(rot) == 9 else _quat_matrix(rot)        # 3x3 row-major matrix or (x, y, z, w) quaternion
     xf = lambda v: tuple(R[3 * i] * v[0] + R[3 * i + 1] * v[1] + R[3 * i + 2] * v[2] for i in range(3))
     verts = [tuple(a + b for a, b in zip(xf(p.unpack("<3f", va + 16 * k)), pos)) for k in range(nv)]
     planes = b""
@@ -601,33 +625,78 @@ def convert_bodies(fo4_blob: bytes, template_blob: bytes, select: Optional[List[
             raise hkpackfile.PackfileError("non-finite source body transform")
         if os.environ.get("FO4PORT_SKIP_ROTATED_BODIES") == "1" and any(abs(x) > 1e-4 for x in rot[:3]):
             continue                                      # diagnostic only: isolate rotated bodies in game tests
-        w = _Writer()
-        i_psd = w.add(T_PSD, 0x10, t.item_bytes("hknpPhysicsSystemData"), 1)
-        i_mat = w.add(T_MAT, 0x20, t.item_bytes("hknpMaterial", count=1), 1)
-        body = bytearray(t.item_bytes("hknpPhysicsSystemData::bodyCinfoWithAttachment", count=1))
-        struct.pack_into("<H", body, t.field(T_BODY, "materialId").offset, 0)
-        struct.pack_into("<4f", body, t.field(T_BODY, "position").offset, 0.0, 0.0, 0.0, 0.0)
-        struct.pack_into("<4f", body, t.field(T_BODY, "orientation").offset, 0.0, 0.0, 0.0, 1.0)
         filt, = p.unpack("<I", b + FO4_BODY_FILTER)
         if os.environ.get("FO4PORT_DROP_STAIRHELPER") == "1" and (filt & 0x7F) == 31:
             continue                                       # diagnostic only: test stairs without the helper ramp
         if (filt & 0x7F) in UNMAPPED_LAYERS:
             raise hkpackfile.PackfileError(f"body {k} uses {UNMAPPED_LAYERS[filt & 0x7F]} (no Starfield equivalent)")
-        struct.pack_into("<I", body, t.field(T_BODY, "collisionFilterInfo").offset, filt)
-        i_body = w.add(T_BODY, 0x20, body, 1)
-        w.ptr(t.field(T_PSD, "materials").type, i_psd, t.field(T_PSD, "materials").offset, i_mat)
-        w.ptr(t.field(T_PSD, "bodyCinfos").type, i_psd, t.field(T_PSD, "bodyCinfos").offset, i_body)
-        if cls == "hknpCompressedMeshShape":
-            d = p.pointer(shape + fc.CMS_DATA)
-            if d is None:
-                raise hkpackfile.PackfileError("compressed mesh body has no data")
-            if not fc.compressed_mesh_keys(p, d):         # only degenerate / unused primitives: nothing to collide with
-                continue
-            i_shape = _emit_mesh(w, t, p, d)
-        elif cls == "hknpConvexPolytopeShape":
-            i_shape = _emit_convex(w, t, p, shape)
-        else:
-            raise hkpackfile.PackfileError(f"source body {k} uses unsupported shape {cls}")
-        w.ptr(t.field(T_BODY, "shape").type, i_body, t.field(T_BODY, "shape").offset, i_shape)
-        out.append(w.build(sdk, type_sec))
+        for kind, obj, R, tr in _shape_parts(p, classes, shape, IDENTITY3, (0.0, 0.0, 0.0)):
+            w = _Writer()
+            i_psd = w.add(T_PSD, 0x10, t.item_bytes("hknpPhysicsSystemData"), 1)
+            i_mat = w.add(T_MAT, 0x20, t.item_bytes("hknpMaterial", count=1), 1)
+            body = bytearray(t.item_bytes("hknpPhysicsSystemData::bodyCinfoWithAttachment", count=1))
+            struct.pack_into("<H", body, t.field(T_BODY, "materialId").offset, 0)
+            struct.pack_into("<4f", body, t.field(T_BODY, "position").offset, 0.0, 0.0, 0.0, 0.0)
+            struct.pack_into("<4f", body, t.field(T_BODY, "orientation").offset, 0.0, 0.0, 0.0, 1.0)
+            struct.pack_into("<I", body, t.field(T_BODY, "collisionFilterInfo").offset, filt)
+            i_body = w.add(T_BODY, 0x20, body, 1)
+            w.ptr(t.field(T_PSD, "materials").type, i_psd, t.field(T_PSD, "materials").offset, i_mat)
+            w.ptr(t.field(T_PSD, "bodyCinfos").type, i_psd, t.field(T_PSD, "bodyCinfos").offset, i_body)
+            if kind == "mesh":
+                if not fc.compressed_mesh_keys(p, obj):    # only degenerate / unused primitives: nothing to collide with
+                    continue
+                if any(abs(a - b_) > 1e-4 for a, b_ in zip(R, IDENTITY3)):
+                    raise hkpackfile.PackfileError(f"body {k}: rotated compound mesh instance (not supported yet)")
+                i_shape = _emit_mesh(w, t, p, obj, tr)
+            elif kind == "sphere":
+                i_shape = _emit_sphere(w, t, p, obj, R, tr)
+            else:
+                i_shape = _emit_convex(w, t, p, obj, R, tr)
+            w.ptr(t.field(T_BODY, "shape").type, i_body, t.field(T_BODY, "shape").offset, i_shape)
+            out.append(w.build(sdk, type_sec))
     return out
+
+
+IDENTITY3 = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+# hknpDynamicCompoundShape (FO4 2014; layout as in Codex's fo4_compounds.py, cross-checked with PyNifly): instances
+# hkArray @96, 128 bytes each: rotation as three column vectors @0/16/32, translation @48, scale @64, child shape @80
+COMPOUND_INSTANCES, INSTANCE_SIZE = 96, 128
+
+
+def _shape_parts(p, classes, shape, R, tr, depth=0):
+    """Leaf shapes of an FO4 body shape with their accumulated transform (node space): [(kind, object, R, translation)],
+    kind "mesh" (object = compressed mesh data) or "convex" (object = convex polytope). Compounds are flattened."""
+    from . import fo4collision as fc
+    if depth > 16:
+        raise hkpackfile.PackfileError("compound collision nesting too deep")
+    cls = classes.get(shape, "?")
+    if cls == "hknpCompressedMeshShape":
+        d = p.pointer(shape + fc.CMS_DATA)
+        if d is None:
+            raise hkpackfile.PackfileError("compressed mesh body has no data")
+        return [("mesh", d, R, tr)]
+    if cls in ("hknpConvexPolytopeShape", "hknpCapsuleShape"):   # FO4 capsules carry a full polytope hull + radius
+        return [("convex", shape, R, tr)]
+    if cls == "hknpSphereShape":
+        return [("sphere", shape, R, tr)]
+    if cls == "hknpDynamicCompoundShape":
+        at, n = p.array(shape + COMPOUND_INSTANCES)
+        if n <= 0 or n > 65535 or at is None:
+            raise hkpackfile.PackfileError("invalid compound instance array")
+        parts = []
+        for i in range(n):
+            inst = at + INSTANCE_SIZE * i
+            child = p.pointer(inst + 80)
+            if child is None:
+                raise hkpackfile.PackfileError("compound child shape missing")
+            cols = [p.unpack("<3f", inst + 16 * c) for c in range(3)]
+            Ri = tuple(cols[c][r] for r in range(3) for c in range(3))
+            ti = p.unpack("<3f", inst + 48)
+            scale = p.unpack("<3f", inst + 64)
+            if not all(math.isfinite(x) for x in Ri + ti + scale) or any(abs(s - 1) > 1e-4 for s in scale):
+                raise hkpackfile.PackfileError("scaled or non-finite compound instance (not supported yet)")
+            R2 = tuple(sum(R[3 * r + k] * Ri[3 * k + c] for k in range(3)) for r in range(3) for c in range(3))
+            t2 = tuple(tr[r] + sum(R[3 * r + k] * ti[k] for k in range(3)) for r in range(3))
+            parts += _shape_parts(p, classes, child, R2, t2, depth + 1)
+        return parts
+    raise hkpackfile.PackfileError(f"unsupported shape {cls}")
