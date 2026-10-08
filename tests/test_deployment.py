@@ -79,6 +79,9 @@ class DeploymentRollbackTests(unittest.TestCase):
             original_write_lines = deploy.write_lines
 
             def copy(src, dst):
+                if failure == "corrupt_copy":
+                    Path(dst).write_bytes(b"successful call, incorrect bytes")
+                    return dst
                 if failure in ("copy", "cleanup"):
                     Path(dst).write_bytes(b"partial")
                     raise OSError("injected partial copy")
@@ -125,6 +128,33 @@ class DeploymentRollbackTests(unittest.TestCase):
 
     def test_partial_copy_is_removed(self):
         self.run_failure("copy")
+
+    def test_successful_but_corrupt_copy_rolls_back_before_activation(self):
+        self.run_failure("corrupt_copy")
+
+    def test_success_records_exact_installed_hashes(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            staging, game = root / "staging", root / "game"
+            staging.mkdir()
+            (game / "Data").mkdir(parents=True)
+            plugin = b"TES4" + bytes(32)
+            archive = b"BTDX" + bytes(32)
+            (staging / deploy.PLUGIN).write_bytes(plugin)
+            (staging / "meshes").mkdir()
+            pt = root / "Plugins.txt"
+            def build(a, out, folders, fmt):
+                Path(out).write_bytes(archive)
+            args = SimpleNamespace(staging=str(staging), starfield=str(game), dry_run=False)
+            with patch.object(deploy, "plugins_txt_path", return_value=str(pt)), \
+                    patch.object(deploy, "build_archive", side_effect=build):
+                deploy.install(args)
+            state = json.loads((game / "Data" / deploy.MANIFEST).read_text())
+            self.assertTrue(state["complete"])
+            for name, payload in [(deploy.PLUGIN, plugin), (deploy.ARCHIVE, archive)]:
+                self.assertEqual(state["artifacts"][name],
+                    {"size": len(payload), "sha256": hashlib.sha256(payload).hexdigest()})
 
     def test_texture_build_failure_does_not_touch_installation(self):
         self.run_failure("texture_build")

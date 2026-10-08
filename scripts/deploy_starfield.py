@@ -11,6 +11,7 @@ usage: python deploy_starfield.py install|uninstall --staging <dir> --starfield 
 """
 import argparse
 import base64
+import hashlib
 import json
 import os
 import shutil
@@ -76,6 +77,16 @@ def build_archive(a, out, folders, fmt):
         sys.exit("Archive2 failed:\n" + r.stdout + r.stderr)
 
 
+def artifact_identity(path):
+    digest = hashlib.sha256()
+    size = 0
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+            size += len(chunk)
+    return {"size": size, "sha256": digest.hexdigest()}
+
+
 def install(a):
     build_state = os.path.join(a.staging, "build-state.json")
     if os.path.exists(build_state):
@@ -114,7 +125,9 @@ def install(a):
         if os.path.getsize(b) < 16 or head not in (b"TES4", b"BTDX"):
             sys.exit(f"build output looks invalid, nothing installed: {b}")
     # 2) record intent first, then copy; any failure rolls back what was copied
-    state = {"files": [], "plugins_txt": pt, "plugins_added": pl_add, "complete": False}
+    identities = {os.path.basename(dst): artifact_identity(src) for src, dst in zip(built, targets)}
+    state = {"files": [], "plugins_txt": pt, "plugins_added": pl_add, "complete": False,
+             "artifacts": identities}
     plugins_existed = os.path.exists(pt)
     plugins_original = None
     if plugins_existed:
@@ -128,6 +141,8 @@ def install(a):
             state["files"].append(os.path.basename(dst))
             write_manifest(man_path, state)
             shutil.copy2(src, dst)
+            if artifact_identity(dst) != identities[os.path.basename(dst)]:
+                raise OSError(f"installed artifact differs from validated build: {os.path.basename(dst)}")
         if pl_add:
             state["plugins_restore_pending"] = True
             write_manifest(man_path, state)

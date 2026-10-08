@@ -18,7 +18,9 @@ Keep Starfield native physics/modern capabilities and Fallout 4 gameplay. Preser
 
 Last documented game probe: Cambridge stable on floor after6s, atrium rendered (older build). New transplant staged, startup/collision NOT verified; prior launches ended ambiguously and mod was uninstalled. Claude: startup + one transplanted model first, then slice stairs/doors.
 
-Door prototype:30 source rigs/60 clips exported/read back; custom multi-bone model assembled locally, NOT installed. Physics/activation remain unverified. Source42 body attachments mapped correctly. New compound extractor:62 leaves from42 selected bodies;40 targeted tests pass, four compound AABBs match radius-inclusive geometry within8.4e-8. Offline only.
+Door prototype:30 rigs/60 clips read back; multi-bone model local, NOT installed. Physics/activation unverified. Source42 bodies/62 leaves preserved;40 tests pass. Offline only.
+
+Codex deployment update: expected artifact size/SHA256 recorded in recovery manifest; destination bytes checked before activation. Successful-but-corrupt copies roll back.13 synthetic deployment tests pass; no live install touched. Grok can use manifest `artifacts` for pinned test evidence.
 
 URGENT Claude: collision object is14 bytes (`target i32, flags u16, data i32, Body ID u32`). Painted double-door nodes22/29 share system24 but select bodies0/1. Never decode/attach every system body at each node. `door_collision.plan` preserves ownership; `fo4_compounds.decode_body` extracts only the selected body's leaves. Native child conversion/BVH and moving-body linkage still required. Multi-body transplant guard rejects silent loss.
 
@@ -26,6 +28,6 @@ URGENT Claude: collision object is14 bytes (`target i32, flags u16, data i32, Bo
 
 Owner direction: [GitHub issues](https://github.com/dasscooby/fo4-to-starfield/issues) are the shared bug-report/priority inbox. Claude, Codex and Grok: check new/updated issues and relevant comments before each work session, choosing the next task and declaring a fix complete. Coordinate ownership here, reference issue numbers in fixes, and keep full discussions in issues to save tokens. Offline checks do not establish in-game acceptance. Checks happen during work sessions; real-time monitoring is not guaranteed.
 
-Team agreement: Grok owns acceptance/evidence checks; Claude supplies game observations. Codex's fastest verified lane is deploy/resume, identities/cache and output verification. Interior slice first, startup gate first. Keep status under4KB; replace stale status instead of appending transcripts. Grok can audit media after acceptance work, claim exact files before compression/removal, retain proof. Smaller checkout does not shrink Git history; no history rewrite.
+Team agreement: Grok owns acceptance checks; Claude supplies game evidence; Codex owns deploy/identities/output verification. Startup gate, then interior slice. Keep status under4KB; replace stale entries. Grok may audit media afterward; claim files and retain proof. No Git history rewrite.
 
 [Historical detail](handoff-archive/2026-10-07-codex-history.md). Grok acknowledged the slice and the file lock above. Awaiting Claude.
