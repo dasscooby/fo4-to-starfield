@@ -30,6 +30,9 @@ def judge(route, res):
     if route["kind"] == "stairs":
         low_z = e["low"][2]
         rise = end[2] - low_z
+        top_rise = e["high"][2] - low_z
+        if rise > top_rise + 2.0:                     # higher than the stair goes: a misread, not a climb
+            return "UNREAD", f"implausible rise {rise:.2f} (stair top is {top_rise:.2f})"
         if end[2] < low_z - 0.5:
             return "FALL", f"z {end[2]:.2f} < floor {low_z:.2f}"
         return ("PASS" if rise >= e["min_rise"] else "STUCK"), f"rise {rise:.2f} / need {e['min_rise']:.2f}"

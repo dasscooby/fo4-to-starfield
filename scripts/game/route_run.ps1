@@ -38,7 +38,12 @@ for ($k = $First; $k -lt [Math]::Min($list.Count, $First + $Count); $k++) {
   powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq $seq | Out-Null
   if ($LASTEXITCODE -ne 0) { "guard stopped at route $k"; break }
   $p0 = Read-Pos
-  if ($r.use) { powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq 'key:e|wait:2200' | Out-Null }
+  if ($r.use) {
+    # evidence for doors: what the player sees (activation prompt or not) right before E, and right after the swing
+    powershell -NoProfile -ExecutionPolicy Bypass -File $shot -Out (Join-Path $Out "r${k}_pre.png") | Out-Null
+    powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq 'key:e|wait:2200' | Out-Null
+    powershell -NoProfile -ExecutionPolicy Bypass -File $shot -Out (Join-Path $Out "r${k}_open.png") | Out-Null
+  }
   powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq "hold:w,$($r.walk_ms)|wait:700" | Out-Null
   if ($LASTEXITCODE -ne 0) { "guard stopped at route $k"; break }
   $p1 = Read-Pos
