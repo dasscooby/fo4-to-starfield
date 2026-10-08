@@ -106,3 +106,67 @@ def evaluate_group(group, time, default):
         return [sum(w * v for w, v in zip(weights, values)) for values in
                 zip(left["value"], right["value"], left["backward"], right["forward"])]
     raise NifError("sample interval not found")
+
+def _unit_quaternion(value):
+    if len(value) != 4 or not all(math.isfinite(v) for v in value):
+        raise NifError("invalid rotation quaternion")
+    length = math.hypot(*value)
+    if length < 1e-12:
+        raise NifError("zero rotation quaternion")
+    return [v / length for v in value]
+
+
+def evaluate_rotation(rotation, time, default_wxyz):
+    """Evaluate source local rotation as a unit wxyz quaternion.
+
+    XYZ curves compose Rz*Ry*Rx; absent axes are zero. Quaternion linear
+    keys use shortest-path spherical interpolation. Quadratic/TBC quaternion
+    semantics are deliberately unsupported rather than approximated linearly.
+    No source/target basis or unit conversion occurs here.
+    """
+    if not math.isfinite(time):
+        raise NifError("nonfinite sample time")
+    representation = rotation['representation']
+    if representation == 'euler_xyz_radians':
+        axes = rotation['axes']
+        if len(axes) != 3:
+            raise NifError("XYZ rotation requires three axes")
+        x, y, z = [evaluate_group(axis, time, [0])[0] / 2 for axis in axes]
+        cx, sx, cy, sy, cz, sz = math.cos(x), math.sin(x), math.cos(y), math.sin(y), math.cos(z), math.sin(z)
+        return _unit_quaternion([cx*cy*cz + sx*sy*sz, sx*cy*cz - cx*sy*sz,
+                                 cx*sy*cz + sx*cy*sz, cx*cy*sz - sx*sy*cz])
+    if representation != 'quaternion_wxyz':
+        raise NifError("unsupported rotation representation")
+    keys = rotation['keys']
+    if not keys:
+        return _unit_quaternion(default_wxyz)
+    if rotation['interpolation'] != 1:
+        raise NifError("unsupported sampled quaternion interpolation")
+    previous = -math.inf
+    normalized = []
+    for key in keys:
+        t = key['time']
+        if not math.isfinite(t) or t <= previous:
+            raise NifError("sampled key times must be strictly increasing")
+        normalized.append((t, _unit_quaternion(key['value'])))
+        previous = t
+    if time <= normalized[0][0]:
+        return normalized[0][1]
+    if time >= normalized[-1][0]:
+        return normalized[-1][1]
+    for (start, a), (stop, b) in zip(normalized, normalized[1:]):
+        if time > stop:
+            continue
+        u = (time - start) / (stop - start)
+        dot = sum(x*y for x, y in zip(a, b))
+        if dot < 0:
+            b = [-v for v in b]
+            dot = -dot
+        dot = min(1.0, dot)
+        if dot > .9995:
+            return _unit_quaternion([x + u*(y-x) for x, y in zip(a, b)])
+        theta = math.acos(dot)
+        divisor = math.sin(theta)
+        wa, wb = math.sin((1-u)*theta)/divisor, math.sin(u*theta)/divisor
+        return _unit_quaternion([wa*x + wb*y for x, y in zip(a, b)])
+    raise NifError("sample interval not found")
