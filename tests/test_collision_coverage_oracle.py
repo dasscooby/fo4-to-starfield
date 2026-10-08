@@ -9,6 +9,25 @@ spec.loader.exec_module(oracle)
 
 
 class CollisionCoverageOracleTests(unittest.TestCase):
+    def test_source_collision_failure_remains_unassessed_after_box_fallback(self):
+        result = oracle.audit({"items": [{"source": "stairs", "collision_report": {
+            "boxes": 5, "fo4_collision_error": "unsupported source body"}}]})
+        self.assertEqual(result["unassessed"], ["stairs"])
+        self.assertEqual(len(result["fallbacks"]), 1)
+        self.assertEqual(result["reported_without_drops"], 0)
+
+    def test_empty_collision_and_invalid_resolution_cannot_pass(self):
+        for report in [{"boxes": 0}, {"boxes": 2, "surface_cell": float("nan")},
+                       {"boxes": 2, "fo4_collision_error": True}]:
+            result = oracle.audit({"items": [{"source": "bad", "collision_report": report}]})
+            self.assertEqual(result["reported_without_drops"], 0)
+            self.assertTrue(result["errors"] or result["unassessed"])
+
+    def test_dropped_fallback_is_still_incomplete(self):
+        result = oracle.audit({"items": [{"source": "bad", "collision_report": {
+            "boxes": 2, "floor_dropped": 1, "fo4_collision_error": "failed to decode"}}]})
+        self.assertEqual(len(result["incomplete"]), 1)
+
     def test_missing_report_is_not_a_pass(self):
         result = oracle.audit({"items": [{"source": "unknown", "collision_report": {}}]})
         self.assertEqual(result["unassessed"], ["unknown"])

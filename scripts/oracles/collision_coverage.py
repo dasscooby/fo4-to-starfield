@@ -13,7 +13,7 @@ COUNTS = ("floor_dropped", "surface_dropped", "voxel_dropped")
 
 def audit(manifest):
     result = {"assets": 0, "reported_without_drops": 0, "incomplete": [],
-              "unassessed": [], "coarsened": [], "errors": []}
+              "unassessed": [], "coarsened": [], "fallbacks": [], "errors": []}
     items = manifest.get("items") if isinstance(manifest, dict) else None
     if not isinstance(items, list) or not items:
         result["errors"].append("manifest contains no asset list")
@@ -36,19 +36,28 @@ def audit(manifest):
         if invalid:
             result["errors"].append(f"{source}: invalid counts {invalid}")
             continue
+        failure = report.get("fo4_collision_error")
+        if failure is not None:
+            if not isinstance(failure, str) or not failure.strip():
+                result["errors"].append(f"{source}: invalid source collision error")
+                continue
+            result["fallbacks"].append({"source": source, "reason": failure})
+        cell = report.get("surface_cell", 0.25)
+        if type(cell) not in (int, float) or not math.isfinite(cell) or cell <= 0:
+            result["errors"].append(f"{source}: invalid surface_cell")
+            continue
+        elif cell > 0.25:
+            result["coarsened"].append({"source": source, "surface_cell": cell})
         if "boxes" not in report and not any(key in report for key in COUNTS):
             result["unassessed"].append(source)
             continue
         counts = {key: report.get(key, 0) for key in COUNTS}
         if any(counts.values()):
             result["incomplete"].append({"source": source, **counts})
+        elif failure is not None or report.get("boxes") == 0:
+            result["unassessed"].append(source)
         else:
             result["reported_without_drops"] += 1
-        cell = report.get("surface_cell", 0.25)
-        if type(cell) not in (int, float) or not math.isfinite(cell) or cell <= 0:
-            result["errors"].append(f"{source}: invalid surface_cell")
-        elif cell > 0.25:
-            result["coarsened"].append({"source": source, "surface_cell": cell})
     return result
 
 
