@@ -77,6 +77,19 @@ class HullTests(unittest.TestCase):
             self.assertEqual((self.FACES[g][j], self.FACES[g][(j + 1) % 4]), (b, a))
         self.assertEqual(vedges[0], (5, 2))                                  # vanilla picks the last edge leaving v0
 
+    def test_convex_hull_faces_rebuild_a_closed_outward_cube(self):
+        cube = [(x, y, z) for x in (-1.0, 1.0) for y in (-1.0, 1.0) for z in (-1.0, 1.0)] + [(0.0, 0.0, 0.0)]  # + interior
+        faces = meshcollision.convex_hull_faces(cube)
+        self.assertEqual(sorted(len(f) for f in faces), [4] * 6)
+        self.assertNotIn(8, {v for f in faces for v in f})                    # interior point is not on the hull
+        meshcollision._hull_links(faces, 8)                                    # closed: every edge has an opposite
+        for f in faces:                                                        # counter-clockwise seen from outside
+            a, b, c = (cube[i] for i in f[:3])
+            u = [b[i] - a[i] for i in range(3)]
+            v = [c[i] - a[i] for i in range(3)]
+            n = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+            self.assertGreater(sum(n[i] * a[i] for i in range(3)), 0)
+
     def test_open_hull_and_unused_vertex_rejected(self):
         with self.assertRaises(Exception):
             meshcollision._hull_links(self.FACES[:5], 8)

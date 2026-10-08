@@ -415,6 +415,45 @@ def _quat_matrix(q):
             2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y))
 
 
+def convex_hull_faces(verts, eps=1e-4):
+    """Faces of the convex hull of a small point set, each a polygon wound counter-clockwise seen from outside (as vanilla
+    Starfield hulls). Brute force over vertex triples (FO4 hulls have few vertices); coplanar points form one face."""
+    import math
+    n = len(verts)
+    sub = lambda a, b: (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+    cross = lambda a, b: (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+    dot = lambda a, b: a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+    faces, seen = [], []
+    for i in range(n):
+        for j in range(i + 1, n):
+            for k in range(j + 1, n):
+                nrm = cross(sub(verts[j], verts[i]), sub(verts[k], verts[i]))
+                ln = math.sqrt(dot(nrm, nrm))
+                if ln < 1e-9:
+                    continue
+                nrm = tuple(x / ln for x in nrm)
+                d = dot(nrm, verts[i])
+                side = [dot(nrm, v) - d for v in verts]
+                if all(s <= eps for s in side):
+                    pass
+                elif all(s >= -eps for s in side):
+                    nrm, d = tuple(-x for x in nrm), -d
+                else:
+                    continue
+                if any(abs(dot(nrm, m) - 1) < 1e-6 and abs(d - dd) < eps for m, dd in seen):
+                    continue
+                seen.append((nrm, d))
+                on = [q for q in range(n) if abs(dot(nrm, verts[q]) - d) <= eps]
+                c = tuple(sum(verts[q][a] for q in on) / len(on) for a in range(3))
+                u = sub(verts[on[0]], c)
+                ul = math.sqrt(dot(u, u)) or 1.0
+                u = tuple(x / ul for x in u)
+                v = cross(nrm, u)
+                on.sort(key=lambda q: math.atan2(dot(sub(verts[q], c), v), dot(sub(verts[q], c), u)))
+                faces.append(on)                         # angle increasing around +normal = counter-clockwise outside
+    return faces
+
+
 def _faces_raw(faces, fo4_raw: bytes) -> bytes:
     """Face records (first index u16, count u8, minHalfAngle u8) for the rebuilt, contiguous index list."""
     out, first = b"", 0
@@ -530,6 +569,17 @@ def _emit_convex(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, shape: int, rot
         if moved != verts:
             verts = moved
             planes = _planes_from_faces(verts, faces)
+    try:
+        _hull_links(faces, nv)
+    except hkpackfile.PackfileError:                       # FO4 hull with broken topology: rebuild faces from vertices
+        faces = convex_hull_faces(verts)
+        used = sorted({v for f in faces for v in f})
+        remap = {v: k for k, v in enumerate(used)}
+        verts = [verts[v] for v in used]
+        faces = [[remap[v] for v in f] for f in faces]
+        nv, nf = len(verts), len(faces)
+        face_raw = bytes([0, 0, 0, 127]) * nf               # minHalfAngle 127 as vanilla boxes; rebuilt by _faces_raw
+        planes = _planes_from_faces(verts, faces)
     nidx = sum(len(f) for f in faces)
     links, vedges = _hull_links(faces, nv)
     T_CVX = t.type("hknpConvexShape")

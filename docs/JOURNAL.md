@@ -378,3 +378,12 @@ Deployed the full build with stair-helper flattening and ran Vault 81's 16 route
   opening, so its thinnest horizontal axis is the normal), cross the middle of the opening, and run once from each side
   (a leaf may swing towards the player). The verified Rexford door still gets its proven route (x 42.75, heading 90).
 - The rerun of the 6 Vault 81 door routes is pending (the user was back).
+
+## 2026-10-08: broken FO4 hull topology rebuilt (offline)
+
+The user had been active within 5 minutes, so this tick was offline. Some FO4 convex hulls have faces that don't close
+(an edge without its opposite), so they fell back to boxes. `meshcollision.convex_hull_faces` rebuilds the faces from the
+same vertices (convex hull, coplanar points merged into one polygon, wound counter-clockwise from outside as in vanilla
+Starfield hulls), then planes and links are recomputed. Test: a cube plus an interior point gives 6 closed outward quads.
+Coverage 3,012 native (+6). Left: 3 hulls that are probably flat, 16 merged SCOL meshes with the same junk shared-vertex
+index (2130), and 2 `hknpConvexShape` bodies. Staged only; not yet in game.
