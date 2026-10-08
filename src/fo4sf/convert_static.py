@@ -199,9 +199,15 @@ def convert_static(fo4_nif: bytes, out_name: str, material_path: str = PLACEHOLD
     node_name = out_name.rsplit("/", 1)[-1].encode()
     blob, child_blobs = None, []
     native = None
+    fo4_has_collision = any(src.type_of(i) == "bhkNPCollisionObject" for i in range(len(src.blocks)))
     if sf_mesh_template is not None and collision_template is not None:
         native = fo4_native_collision(src, sf_mesh_template, report)   # FO4's own bodies as native Starfield bodies
-    if native:
+    if sf_mesh_template is not None and collision_template is not None and not fo4_has_collision:
+        # FO4 gives this model no collision (rubble, debris, paper, signs, posters, plants): the player walks through
+        # it there, so it gets none here either. A guessed box would be an invisible wall.
+        if report is not None:
+            report["source"] = "fo4-none"
+    elif native:
         child_blobs = native                         # one body per child node, as vanilla multi-body files do
     elif collision_template is not None and collision_mode == "surfaces":
         for c, h in sfcollision.mesh_boxes(all_pts, all_tris, report=report):

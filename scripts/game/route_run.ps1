@@ -34,11 +34,13 @@ for ($k = $First; $k -lt [Math]::Min($list.Count, $First + $Count); $k++) {
   $h = $r.heading.ToString($inv)
   $seq = "key:grave|wait:1000|type:player.setpos x $x|key:enter|wait:350|type:player.setpos y $y|key:enter|wait:350|" +
          "type:player.setpos z $z|key:enter|wait:350|type:player.setangle z $h|key:enter|wait:350|" +
-         "type:player.setangle x 10|key:enter|wait:400|key:grave|wait:1800"
+         "type:player.setangle x $(if ($r.use) { 0 } else { 10 })|key:enter|wait:400|key:grave|wait:1800"
   powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq $seq | Out-Null
   if ($LASTEXITCODE -ne 0) { "guard stopped at route $k"; break }
   $p0 = Read-Pos
   if ($r.use) {
+    # step closer first: the activation prompt only appears within reach, and placements differ by ~1 m from the plane
+    powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq 'hold:w,350|wait:500' | Out-Null
     # evidence for doors: what the player sees (activation prompt or not) right before E, and right after the swing
     powershell -NoProfile -ExecutionPolicy Bypass -File $shot -Out (Join-Path $Out "r${k}_pre.png") | Out-Null
     powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq 'key:e|wait:2200' | Out-Null

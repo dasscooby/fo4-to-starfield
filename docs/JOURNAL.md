@@ -406,3 +406,20 @@ index (2130), and 2 `hknpConvexShape` bodies. Staged only; not yet in game.
 - Correction: with the rise plausibility check, the Vault 114 "PASS" with a 31 m rise is UNREAD. Vault 114 stairs are
   **6 PASS**, 2 STUCK, 6 UNREAD. Route runner now saves `r<k>_pre.png` (just before E, shows whether the Open prompt is up)
   and `r<k>_open.png` (2.2 s after E) for every door route.
+
+## 2026-10-09: no collision where FO4 has none; Vault 114 doors
+
+- **Invisible walls removed.** 284 converted models have no collision at all in FO4 (rubble, debris, paper, signs,
+  posters, plants, ponds, some vault trim). The converter still gave them a guessed bounding box, or surface boxes for
+  architecture, which made walk-through clutter into invisible walls. Now they get none, as in FO4
+  (`report.source = "fo4-none"`, 243 models in the current batch). Coverage: 3,012 native, 243 none as in FO4, 199
+  single box, 36 surface boxes.
+- **Found by the door test:** a stall door was blocked by the guessed box of a rubble pile in front of it. After the fix,
+  stall door `04BDD2` passes from both sides (2.6 m through). Door results in Vault 114: subway door `SubDoor01Right`
+  passes from both sides; stall doors `04BDDA` and `04BDD2` pass from both sides.
+- **Evidence screenshots** (runner now steps in before pressing E, and looks straight ahead on doors): the passing doors
+  show "DOOR / Open" ([prompt](media/route-v114-stalldoor-prompt.jpg)). Two stall doors placed at 90 degrees
+  (`04BF66`, `04BF9D`) stop 0.45 m short from both sides with no prompt; the door's lower edge is at eye height
+  ([raised](media/route-v114-stalldoor-raised.jpg)), so these instances seem to sit ~1.3 m too high. Their 270-degree
+  twins are fine; suspect the door origin offset vs this placement. Open.
+- One game exit without a crash record during a door route (the rerun of the same route was fine): watching for repeats.
