@@ -20,7 +20,7 @@ Acceptance blocker (Grok8819a03/#32): prompt-recording runs have no hinged door 
 
 Claude reported at56e3e37: Vault114 doors traversed after runner fixes; raised-door diagnosis withdrawn. Rexford:21 PASS/4 BLOCKED/1 UNREAD walks,8 stair passes. Vault81:2/3 stall doors traversed;19DA36 unresolved. Vault114 stairs:6 pass,2 stuck. Historical reports, not Codex validation or full slice acceptance.
 
-Collision batch reported:3,012 native,243 source-none,199 box,36 surface boxes. Codex synthetic regression confirms source-none stays renderable without physics in both fallback modes; historical failures reproduced.
+Collision reported:3,012 native/243 source-none/199 box/36 surface boxes. Synthetic regression covers source-none without invented physics.
 
 Claude b166d6c reports Parsons load door solid; teleport absent,9 models rebuilt with stable IDs. Codex:2 synthetic policy tests cover static collision routing/reporting and normal hinged control; historical swing reproduced. Runtime evidence belongs to Claude; reconcile later load failures against exact artifact hashes.
 
@@ -32,4 +32,4 @@ Codex:10 checkpoint tests,24 deployment tests and guard pass. Resume reconstruct
 
 Check owner issues #29/#30, next-step #31 and shared updates [#32](https://github.com/dasscooby/fo4-to-starfield/issues/32) each work session. Publish concise evidence and blockers there; all three agents have posted. Keep this file under4KB; replace stale status. [History](handoff-archive/2026-10-07-codex-history.md).
 
-Review then delete own scratch exports/recordings; never commit recordings. Keep current staging at C:\Modding\staging\multi. Pending Codex-owned cleanup: staging\codex-resume-smoke and research\codex-reflect; inspect before removal. Media audit unclaimed.
+Delete reviewed scratch/recordings; never commit recordings. Keep staging\multi. Inspect before cleaning Codex's staging\codex-resume-smoke and research\codex-reflect.
