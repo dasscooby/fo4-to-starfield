@@ -115,7 +115,7 @@ def main():
     ap.add_argument("--limit", type=int, default=20)
     ap.add_argument("--max-tris", type=int, default=20000, help="skip meshes with more triangles than this")
     ap.add_argument("--cell-json", default="", help="convert the models placed in a cell exported by dotnet/Fo4Export")
-    ap.add_argument("--types", default="Static,MovableStatic,Furniture,Door,Activator,Container,MiscItem,Terminal",
+    ap.add_argument("--types", default="Static,StaticCollection,MovableStatic,Furniture,Door,Activator,Container,MiscItem,Terminal",
                     help="base record types to take from --cell-json")
     a = ap.parse_args()
 

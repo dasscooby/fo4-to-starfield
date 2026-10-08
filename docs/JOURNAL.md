@@ -219,3 +219,22 @@ folder).
 - Batch failures: 18 -> 10. Left: wall-stain gradient effects, a strobe flash, an oil puddle, and two plates without static
   geometry.
 - Staged and not deployed yet.
+
+## 2026-10-08: four new interiors toured; static collections; door rotation verified
+
+There had been no user input for 18 minutes, so I ran the in-game checks. The guard still checks before every keystroke.
+- **Door rotation fix verified.** The Parsons double doors (135 and 225 degrees) now sit closed in their frames
+  ([screenshot](media/parsons-doubledoors-closed.jpg)). Bethesda reference rotations are clockwise.
+- **Tours of the four new cells:**
+  - [Valentine's](media/tour-valentines.jpg): office, beams, peeling posters as decals.
+  - [Super Duper Mart](media/tour-superdupermart.jpg): Nuka-Cherry sign, posters, carts, Protectron pod. The sales floor
+    is very dark.
+  - [Vault 95](media/tour-vault95.jpg): reads like FO4.
+- **Cambridge Polymer Labs: the player fell through the floor at the spawn.** The floor there is inside a FO4
+  `StaticCollection` (SCOL, merged mesh `meshes\SCOL\Fallout4.esm\CM*.nif`), and SCOLs were never in the batch's
+  `--types`. The 12 cells hold 245 SCOL references (93 meshes), all missing until now.
+  - Fix: `StaticCollection` is now a default type, and `meshes\scol\` gets the architecture surface collision.
+  - All SCOL meshes convert (3,490 models in total).
+  - Cambridge now spawns and stays on the floor (OCR z 3.87, stable after 6 s), and the atrium renders
+    ([screenshot](media/cambridge-atrium.jpg)).
+  - Earlier cells may also have had gaps from missing SCOLs; worth a re-probe.

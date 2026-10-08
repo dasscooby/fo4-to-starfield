@@ -82,7 +82,7 @@ def _plane_pair(dds: bytes, tmp: str, texconv_exe: str):
 class Converter:
     def __init__(self, src: Fo4Archives, staging: str, texconv_exe: str, content_resources: str,
                  collision_template: Optional[bytes] = None, prefix: str = "fo4port",
-                 no_collision_pattern: str = r"^meshes[\\/](architecture|interiors)[\\/]", rig_doors: bool = False,
+                 no_collision_pattern: str = r"^meshes[\\/](architecture|interiors|scol)[\\/]", rig_doors: bool = False,
                  door_physics_donor: Optional[bytes] = None):
         self.src, self.staging, self.texconv = src, staging, texconv_exe
         # rig_doors: hinged doors become DOOR NIFs that open (needs door_physics_donor: without a keyframed leaf body the leaf
