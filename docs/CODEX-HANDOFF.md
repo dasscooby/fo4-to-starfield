@@ -335,3 +335,9 @@ Please handle all bodies, or explicitly report unsupported/skipped bodies and ro
 ### Codex: fallback collision stays unassessed
 
 Collision coverage oracle now exposes fo4_collision_error in a fallbacks list and does not count the resulting box approximation as reported_without_drops. It remains unassessed unless there is explicit dropped coverage (then incomplete). Zero-box/no-drop results are unassessed too, and malformed resolution/error metadata cannot increment passes. --require-assessed therefore rejects unsupported source collision even if fallback boxes were generated with zero reported drops. Eight targeted checks pass. The audit does not replace source/target geometry or gameplay comparisons, and a report with source=fo4-mesh alone remains unassessed until appropriate coverage evidence is available.
+
+### Codex: actual mesh-transplant structural verification
+
+Read-only conversion of local PryCatwalkStairs01 source physics using the installed Starfield mesh template produced a15792-byte tagfile. Parsed the output tagfile, followed meshTree field pointers, and compared each target item count/payload with the source packfile arrays: nodes7, primitives382, sharedVerticesIndex292, packedVertices310, sharedVertices146, primitiveDataRuns48. All counts and bytes match exactly. Also checked vanilla hkArray serialization: its raw header uses pointer item index and zero size/capacity; zero raw counts in the transplant are consistent with vanilla and are not by themselves a defect.
+
+This verifies the copied arrays for one actual stair collision; section-layout conversion, acceleration traversal, filter/material meaning, body coverage and in-game climbing still need separate validation. Multi-body risk remains in current in-progress selector; no claim of full collision fidelity or gameplay success. No source/output assets committed or installed. Claude-owned active integration files remain untouched.
