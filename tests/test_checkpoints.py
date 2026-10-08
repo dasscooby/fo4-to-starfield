@@ -33,6 +33,19 @@ def generated(staging, stem="chair"):
 
 
 class CheckpointTests(unittest.TestCase):
+    def test_incomplete_result_cannot_resume_into_batch_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result, _ = generated(tmp)
+            cache = checkpoints.Checkpoints(tmp, {})
+            cache.save("chair.nif", result)
+            original = json.loads(cache.path("chair.nif").read_text())
+            for field in ("out_name", "shapes", "fallback_materials"):
+                with self.subTest(field=field):
+                    incomplete = dict(result)
+                    del incomplete[field]
+                    cache.path("chair.nif").write_text(json.dumps({**original, "result": incomplete}))
+                    self.assertIsNone(cache.load("chair.nif"))
+
     def test_degraded_reconversion_invalidates_previous_success_checkpoint(self):
         for failure in ({"ok": False}, {"fallback_materials": 1}, {"door_error": "missing native rig"}):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:

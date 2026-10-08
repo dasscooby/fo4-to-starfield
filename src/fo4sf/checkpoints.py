@@ -90,6 +90,12 @@ class Checkpoints:
                 return None
             if cached["signature"] != self.signature or not cached["outputs"]:
                 return None
+            result = cached["result"]
+            if not isinstance(result.get("out_name"), str) or not result["out_name"]:
+                return None
+            if any(type(result.get(field)) is not int or result[field] < 0
+                   for field in ("shapes", "fallback_materials")):
+                return None
             for relative, expected in cached["outputs"].items():
                 if digest(local_path(self.staging, relative)) != expected:
                     return None
