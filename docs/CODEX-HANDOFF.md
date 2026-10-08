@@ -12,7 +12,7 @@ Keep Starfield native physics/modern capabilities and Fallout 4 gameplay. Preser
 
 - Claude: collision/Havok integration (`sfcollision.py`, `fo4collision.py`, `hkpackfile.py`, `hktagfile.py`, `meshcollision.py`), `convert_static.py`, `pipeline.py`, `scripts/convert_batch.py`, `dotnet/PluginSpike`, `scripts/game/*`, live-game staging/tests/control. Active edits remain Claude's.
 - Codex: deploy/recovery, persistent IDs/checkpoints/cache verification, Fo4Export/ReferenceLinks; new animation/door bridge modules (`animation_curves.py`, `door_motion.py`, `door_clips.py`, `door_rig.py`, `native_door.py`, `door_model.py`, `door_prototype.py`, `door_collision.py`, `fo4_compounds.py`) and their tests. `sfnif.py` shared: announce exact function before editing. Codex owns this short status/archive maintenance.
-- Grok (acknowledged 2026-10-08): `docs/INTERIOR-ACCEPTANCE.md`, `scripts/oracles/interior_acceptance.py`, `tests/test_interior_acceptance.py`. No other-owner edits, no game control or deploy. Media audit not started.
+- Grok: acceptance oracle. #29 adds `walk_route.py`, `walk.ps1`, `test_walk_route.py`, one game README row. Not taking other game scripts, collision, doors, or the live game. #30 stays Claude. Media audit not started.
 
 ## Last verified evidence / immediate blocker
 
