@@ -315,3 +315,12 @@ A movement test that FO4 data scores, replacing "press W, read once".
   the passes). 1 harness flake (the console reply was not printed before the screenshot); rerun needed. No STUCK and no
   FALL attributable to collision. ([foot](media/route-prydwen-stair-foot.jpg), [top](media/route-prydwen-stair-top.jpg))
 - Collision decoder: degenerate primitives and invalid shared indices are skipped or rejected (the merged-SCOL IndexErrors).
+
+## 2026-10-08: routes for the whole slice (offline)
+
+The user was in the game, so this tick was offline. Reconverted with the decoder fixes: 2,716 native, 137 boxes, 637 single
+box or none. 7 merged SCOL meshes carry junk shared-vertex tables and are rejected (recorded), not decoded. Routes built
+for 11 cells: about 279 (127 stairs, 102 doors). Red Rocket has none; it is checked with the probe map instead. Stairs
+whose FO4 collision has no ramp are listed per model for a separate check: Vault 111 `V111RPit2StairsRaisedMid02` x4,
+Rexford `BldWoodBSmStairs03TrimL/R`, Vault 114 `VltStairWellCorIn01`/`VltStairWellDoorHalf01`, Cambridge
+`BldWoodPSmStairs02TrimL`. Staged, not deployed; the in-game runs follow when the PC is free.
