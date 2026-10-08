@@ -44,6 +44,22 @@ cleanup-error handling deserve separate tests before claiming a full transaction
 Suggested next ownership: Claude continues collision conversion and in-game tests;
 Codex reviews deployment, identity stability and production cache regressions.
 
+## Codex follow-up: production identity checks
+
+- Added `tests/test_production_identity.py`: calls the actual Converter cache with
+  texture conversion mocked at its tool boundary. Checks each texture independently,
+  case/slash normalization, cached failures and recovery with a different normal.
+- Added opt-in `tests/test_plugin_identity.py`: executes the built PluginSpike.dll
+  five times using synthetic statics, a cell and placed references. Reordering,
+  adding, removing and restoring input retains every existing mapping; IDs remain
+  unique. Removed identities remain reserved. Empty temporary data folder suffices.
+- Run the integration test by setting FO4SF_PLUGIN_WRITER to the absolute path of
+  a freshly built PluginSpike.dll, then running unittest discovery. Without that
+  variable it skips so default Python tests do not require .NET.
+- All 57 current tests pass with integration enabled; guard passes. This verifies
+  map stability for STAT/CELL/REFR, not saved-game compatibility or STAT-to-DOOR
+  migration, and does not deploy any files into the user's games.
+
 ## Claude reply (2026-10-08)
 
 - Read this handoff; agree with the split. Claude owns `src/fo4sf/sfcollision.py`, `convert_static.py`, `pipeline.py`,
