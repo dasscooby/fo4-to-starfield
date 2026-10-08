@@ -74,6 +74,25 @@ var stable = ids["REFR:FO4Port_Second:marker"];
 Require(stable > door.FormKey.ID, "new marker could collide with plugin records omitted from input map");
 Relationships.Apply(mod, ids, markerExports, markerBases);
 Require(ids["REFR:FO4Port_Second:marker"] == stable && second.Persistent.Count == 1, "reapplying changed marker identity or duplicated it");
+using var keywordSource = JsonDocument.Parse("""
+{"cell":"First","formkey":"first-cell","refs":[{"formkey":"child","linked_references":[{"reference":"parent","keyword_or_reference":"keyword-source"}]}],
+ "referenced_keywords":[{"formkey":"keyword-source","editor_id":"SyntheticLink","type":"None","type_value":0,"record_flags":0,"color":[7,8,9],"attraction_rule":null,"name":"Synthetic label","notes":"Link note"}]}
+""");
+var keywordSources = new[] { keywordSource.RootElement, two.RootElement };
+var keywordReport = Relationships.Apply(mod, ids, keywordSources);
+Require(keywordReport.CreatedKeywords == 1 && keywordReport.LinkedReferences == 1 && keywordReport.Issues.Count == 0, "generic linked keyword was not translated");
+var keywordKey = new FormKey(modKey, ids["KYWD:keyword-source"]);
+Require(child.LinkedReferences.Any(l => l.KeywordOrReference.FormKey == keywordKey && l.Reference.FormKey == parent.FormKey), "keyword discriminator identity lost");
+Require(mod.Keywords.Single().Color!.Value.G == 8, "keyword color metadata lost");
+Require(mod.Keywords.Single().Name!.String == "Synthetic label" && mod.Keywords.Single().Notes == "Link note", "keyword label or notes lost");
+Relationships.Apply(mod, ids, keywordSources);
+Require(mod.Keywords.Count == 1 && child.LinkedReferences.Count == 2, "reapplying duplicates keyword or keyworded link");
+using var specialized = JsonDocument.Parse("""
+{"cell":"First","refs":[{"formkey":"child","linked_references":[{"reference":"parent","keyword_or_reference":"special"}]}],
+ "referenced_keywords":[{"formkey":"special","editor_id":"QuestCategory","type":"QuestTarget","type_value":12,"record_flags":0,"color":null,"attraction_rule":null}]}
+""");
+var rejected = Relationships.Apply(mod, ids, new[] { specialized.RootElement, two.RootElement });
+Require(rejected.Issues.Any(x => x.Field == "keyword") && !ids.ContainsKey("KYWD:special"), "specialized semantics were silently flattened into a generic keyword");
 var directory = Path.Combine(Path.GetTempPath(), "fo4sf-links-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(directory);
 try
@@ -86,7 +105,9 @@ try
     var written = cell.Persistent.OfType<IPlacedObjectGetter>().Single();
     Require(written.EnableParent!.Reference.FormKey == markerKey, "enable-parent lost in binary output");
     Require(written.TeleportDestination!.Position.Z == 3 && written.OpenByDefault, "door state lost in binary output");
-    Require(written.LinkedReferences.Count == 1, "linked reference lost in binary output");
+    Require(written.LinkedReferences.Count == 2 && written.LinkedReferences.Any(l => l.KeywordOrReference.FormKey == keywordKey), "keyworded linked reference lost in binary output");
+    Require(read.Keywords.Single().Color!.Value.G == 8, "keyword metadata lost in binary output");
+    Require(read.Keywords.Single().Name!.String == "Synthetic label", "keyword name lost in binary output");
 }
 finally { Directory.Delete(directory, true); }
 Console.WriteLine("Relationship translation and binary round-trip synthetic checks passed.");

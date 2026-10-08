@@ -56,3 +56,9 @@ Require(actorJson.RootElement.GetProperty("base_formkey").GetString() == Key(0xA
 Require(actorJson.RootElement.GetProperty("pos")[1].GetSingle() == 20, "deferred actor position lost");
 Require(actorJson.RootElement.GetProperty("disabled").GetInt32() == 0x800, "deferred actor flags lost");
 Console.WriteLine("Reference export synthetic relationship/state checks passed.");
+var keyword = new Keyword(Key(0xB00), Fallout4Release.Fallout4)
+    { EditorID = "SyntheticLink", Type = Keyword.TypeEnum.None, Color = System.Drawing.Color.FromArgb(10, 20, 30), Name = "Synthetic name" };
+using var keywordJson = JsonDocument.Parse(JsonSerializer.Serialize(KeywordExport.Build(keyword)));
+Require(keywordJson.RootElement.GetProperty("formkey").GetString() == keyword.FormKey.ToString(), "keyword identity lost");
+Require(keywordJson.RootElement.GetProperty("type").GetString() == "None" && keywordJson.RootElement.GetProperty("color")[1].GetInt32() == 20, "keyword metadata changed");
+Require(keywordJson.RootElement.GetProperty("name").GetString() == "Synthetic name", "keyword name lost");

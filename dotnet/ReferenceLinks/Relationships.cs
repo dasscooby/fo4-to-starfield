@@ -12,6 +12,7 @@ public sealed class LinkReport
     public int Teleports { get; set; }
     public int OpenState { get; set; }
     public int CreatedMarkers { get; set; }
+    public int CreatedKeywords { get; set; }
     public int UnplacedSourceReferences { get; set; }
     public List<LinkIssue> Issues { get; } = new();
 }
@@ -94,6 +95,13 @@ public static class Relationships
                 }
             }
         }
+        var usedKeywords = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var export in sources)
+        foreach (var reference in export.GetProperty("refs").EnumerateArray())
+            if (sourceRefs.ContainsKey(reference.GetProperty("formkey").GetString()!) && reference.TryGetProperty("linked_references", out var links))
+                foreach (var link in links.EnumerateArray())
+                    if (link.GetProperty("keyword_or_reference").GetString() is string key) usedKeywords.Add(key);
+        var sourceKeywords = KeywordLinks.Create(mod, ids, sources, usedKeywords, occupied, ref next, report);
         mod.ModHeader.Stats.NextFormID = Math.Max(mod.ModHeader.Stats.NextFormID, next);
         PlacedObject? Resolve(string source, string field, string? key)
         {
@@ -126,16 +134,18 @@ public static class Relationships
                 var resolved = Resolve(source, "linked_references.reference", link.GetProperty("reference").GetString());
                 var discriminator = link.GetProperty("keyword_or_reference").GetString();
                 PlacedObject? discriminatorTarget = null;
-                if (discriminator != null && !sourceRefs.TryGetValue(discriminator, out discriminatorTarget))
+                Keyword? keywordTarget = null;
+                if (discriminator != null && !sourceRefs.TryGetValue(discriminator, out discriminatorTarget) &&
+                    !sourceKeywords.TryGetValue(discriminator, out keywordTarget))
                 {
-                    // The source union can be a keyword. No keyword mapping exists yet; never guess from numeric IDs.
-                    report.Issues.Add(new(source, "linked_references.keyword_or_reference", discriminator, "keyword/reference union mapping is not implemented"));
+                    report.Issues.Add(new(source, "linked_references.keyword_or_reference", discriminator, "keyword/reference union target is not translated"));
                     continue;
                 }
                 if (resolved == null) continue;
                 var translated = new LinkedReferences();
                 translated.Reference.SetTo(resolved.FormKey);
                 if (discriminatorTarget != null) translated.KeywordOrReference.SetTo(discriminatorTarget.FormKey);
+                if (keywordTarget != null) translated.KeywordOrReference.SetTo(keywordTarget.FormKey);
                 if (!target.LinkedReferences.Any(x => x.Reference.FormKey == resolved.FormKey &&
                     x.KeywordOrReference.FormKey == translated.KeywordOrReference.FormKey))
                     target.LinkedReferences.Add(translated);

@@ -32,7 +32,7 @@ try
     var statePath = Path.Combine(args[2], "build-state.json");
     File.WriteAllText(statePath, JsonSerializer.Serialize(new { complete = false, status = "relationship_translation", unresolved = report.Issues.Count }));
     File.WriteAllText(Path.Combine(args[2], "relationships-report.json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
-    Console.WriteLine($"markers={report.CreatedMarkers}, persistent={report.Persistent}, enable parents={report.EnableParents}, linked refs={report.LinkedReferences}, teleports={report.Teleports}, issues={report.Issues.Count}");
+    Console.WriteLine($"markers={report.CreatedMarkers}, keywords={report.CreatedKeywords}, persistent={report.Persistent}, enable parents={report.EnableParents}, linked refs={report.LinkedReferences}, teleports={report.Teleports}, issues={report.Issues.Count}");
     if (report.Issues.Count > 0 && !args.Contains("--allow-unresolved")) { Environment.ExitCode = 2; return; }
     if (args.Contains("--report-only")) return;
     if (data == null) throw new InvalidOperationException("set STARFIELD_DATA");

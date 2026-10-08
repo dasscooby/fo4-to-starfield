@@ -30,10 +30,20 @@ if (args[1] == "list")
 var cell = InteriorCells().First(c => string.Equals(c.EditorID, args[2], StringComparison.OrdinalIgnoreCase));
 var refs = new List<object>();
 var deferred = new List<object>();
+var keywords = new Dictionary<string, object>();
 var byType = new Dictionary<string, int>();
 var persistentKeys = cell.Persistent.Select(r => r.FormKey).ToHashSet();
 foreach (var placed in cell.Temporary.Concat(cell.Persistent))
 {
+    IEnumerable<ILinkedReferencesGetter> linked = placed switch
+    {
+        IPlacedObjectGetter obj => obj.LinkedReferences,
+        IPlacedNpcGetter actor => actor.LinkedReferences,
+        _ => Array.Empty<ILinkedReferencesGetter>(),
+    };
+    foreach (var link in linked)
+        if (link.KeywordOrReference.TryResolve(cache, out var union) && union is IKeywordGetter keyword)
+            keywords.TryAdd(keyword.FormKey.ToString(), KeywordExport.Build(keyword));
     if (placed is IPlacedNpcGetter npc)
     {
         deferred.Add(ReferenceExport.BuildActor(npc, persistentKeys.Contains(npc.FormKey)));
@@ -56,7 +66,7 @@ foreach (var placed in cell.Temporary.Concat(cell.Persistent))
     refs.Add(ReferenceExport.Build(r, type, baseEid, model, persistentKeys.Contains(r.FormKey)));
 }
 File.WriteAllText(args[3], JsonSerializer.Serialize(new { schema_version = 2, cell = cell.EditorID, formkey = cell.FormKey.ToString(), refs,
-    deferred_refs = deferred },
+    deferred_refs = deferred, referenced_keywords = keywords.Values },
     new JsonSerializerOptions { WriteIndented = true }));
 Console.WriteLine($"{cell.EditorID}: {refs.Count} references -> {args[3]}");
 Console.WriteLine($"{deferred.Count} deferred placements retained for future translators");

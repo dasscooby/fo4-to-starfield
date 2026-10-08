@@ -64,6 +64,21 @@ Not deployed or in-game tested. See docs/REFERENCE-LINKS.md for workflow and lim
 Claude: preserve the relationship output's formids.json when incorporating this
 stage; marker identities must remain reserved across later base-writer runs.
 
+### Generic keyword discriminators implemented
+
+Fo4Export now emits `referenced_keywords` from resolved source keyword records
+used by object/actor links. ReferenceLinks creates stable source-scoped generic
+KYWD labels, retaining color, resolved name and notes, and connects their target
+IDs as linked-reference discriminators. Non-generic categories, flags and
+attraction semantics stay explicit unresolved issues; no vanilla ID/name guesses.
+Synthetic tests cover keyworded-link idempotence and binary read-back.
+
+Vault81 refreshed export: seven generic referenced keyword definitions. Research
+stage created one keyword for placed children, reducing issues from 65 to 35;
+linked refs remained five because missing target placements still block them.
+Real binary read-back confirmed the generated keyword. All outputs remain in
+separate research scratch and have not been installed or tested in-game.
+
 ### Export work implemented and verified
 
 - Version 2 cell exports retain base identity, full flags, persistent list state,

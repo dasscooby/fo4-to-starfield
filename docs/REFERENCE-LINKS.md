@@ -28,7 +28,12 @@ Implemented translation:
 - Absolute teleport destinations resolve converted doors and transition cells;
   positions convert from source units to metres and rotations remain radians.
 
-Keywords in the linked-reference union need a separate keyword mapping. Targets
+Generic linked-reference keywords (`None` or an absent category, no flags or
+attraction rule) now become source-scoped target KYWD records with stable
+`KYWD:<source FormKey>` map entries. Color, resolved name and notes are retained.
+EditorIDs include a source-identity digest rather than reusing unrelated vanilla
+keywords with similar names. Specialized keyword categories/flags/attraction
+semantics still need translators. Targets
 outside the supplied exports, skipped actors/objects, unsupported flag bits and
 relative-position teleports are reported as unresolved. Relative teleports need
 additional handling for the converted door pivot. Ownership, locks, actor behavior
@@ -66,3 +71,11 @@ two default-open door states. Binary read-back confirmed these counts. There wer
 65 unresolved issues and no resolved teleports in that one-cell run; missing
 outside-cell destinations and keyword mapping remain open. This partial plugin
 was written only to research scratch, never installed or tested in-game.
+
+A refreshed export retained seven source linked-reference keywords, all generic.
+The subsequent research pass created one keyword needed by currently placed
+children; issues dropped to 35. Linked references stayed at five because missing
+placed targets still block the remaining links. Binary read-back confirmed the
+keyword record. Synthetic tests separately prove that a resolvable keyworded link
+retains both target identities and survives serialization without duplicates.
+Specialized categories are rejected rather than flattened to generic labels.

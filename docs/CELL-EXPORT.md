@@ -41,6 +41,13 @@ persistent state, enable parents, linked references and ownership. Each has a
 types retain at least their reference identity and type. The current plugin
 writer does not consume this list; these entries do not spawn NPCs in Starfield.
 
+`referenced_keywords` resolves linked-reference discriminators that are actual
+source keyword records. It retains FormKey, EditorID, raw flags, type name/value,
+color, attraction-rule link, resolved name text, notes and source display-name
+metadata. Discriminators that are placed references stay references; their numeric
+IDs are not used to guess record type. Name text uses the reader's resolved
+language; exporting every localized string is still separate work.
+
 Synthetic checks run with:
 
 ```powershell
