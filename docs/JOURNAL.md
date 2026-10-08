@@ -442,3 +442,6 @@ The 4 one-sided blocks (refrigerator, `UtilMetalDoor01`, `BldWoodPDoor02`, the e
 the leaf swings towards. To confirm with the open-screenshot, then rerun all earlier door verdicts (Vault 81, Vault
 114) with the fixed runner.
 Rexford stairs (same session): 8 PASS; `BldWoodBSmRailStairs03L` reached 2.74 of 2.93 m.
+- Reruns with the fixed runner: **Vault 114 stall doors `04BF66` / `04BF9D` pass from both sides** (the "raised door" was
+  the camera); every Vault 114 door now passes. **Vault 81:** stall doors `19DA3A` (both sides) and `19DA38` pass;
+  `19DA36` still BLOCKED (one side never moved, so the start is probably inside cave rock). Open.
