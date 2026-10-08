@@ -27,7 +27,8 @@ function Read-Pos {
   return $p
 }
 
-for ($k = $First; $k -lt [Math]::Min($list.Count, $First + $Count); $k++) {
+$prevEnd = $null; $prevFar = $false
+for ($k = $First;$k -lt [Math]::Min($list.Count, $First + $Count); $k++) {
   $r = $list[$k]
   $x, $y, $z = $r.start | ForEach-Object { $_.ToString($inv) }
   $h = $r.heading.ToString($inv)
@@ -40,11 +41,36 @@ for ($k = $First; $k -lt [Math]::Min($list.Count, $First + $Count); $k++) {
   # stuck looking at the floor, so E never reached a door). Look fully up (clamps), then down a calibrated amount.
   powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq 'move:0,-2500|wait:250|move:0,-2500|wait:300|move:0,700|wait:500' | Out-Null
   $p0 = Read-Pos
+  # we just teleported there: a start read far from the target is an OCR misread (Parsons: "-0.00 6.40 0.00"), read again
+  $v0 = "$p0".Trim().Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
+  $far = $true
+  try { $far = [Math]::Abs([double]$v0[0] - $r.start[0]) + [Math]::Abs([double]$v0[1] - $r.start[1]) -gt 3 } catch {}
+  if ($v0.Count -ne 3 -or $far) {
+    $p0 = Read-Pos
+    $v0 = "$p0".Trim().Split(' ', [StringSplitOptions]::RemoveEmptyEntries)
+    $far = $true
+    try { $far = [Math]::Abs([double]$v0[0] - $r.start[0]) + [Math]::Abs([double]$v0[1] - $r.start[1]) -gt 3 } catch {}
+    # still not where we teleported AND exactly where the last route ended: the teleport never ran, the console is out
+    # of step (Parsons: a "p" opened the Skills menu and 12 routes read the same stale position). Stop instead of typing
+    # into whatever menu is open. (Far but different is real: a start under the floor gets moved to a fallback spot.)
+    # two invalid starts in a row both land on the entrance fallback, so only trust "same as last end" after a good route
+    if ($far -and $prevEnd -and -not $prevFar -and "$p0".Trim() -eq "$prevEnd".Trim()) {
+      "start read $p0 equals last end at route ${k}: console out of step, stopping"; break
+    }
+  }
+  $prompt = $null
   if ($r.use) {
     # step closer first: the activation prompt only appears within reach, and placements differ by ~1 m from the plane
     powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq 'hold:w,350|wait:500' | Out-Null
-    # evidence for doors: what the player sees (activation prompt or not) right before E, and right after the swing
-    powershell -NoProfile -ExecutionPolicy Bypass -File $shot -Out (Join-Path $Out "r${k}_pre.png") | Out-Null
+    # the levelled pitch is not reproducible between sessions (Parsons: aimed over the door, no prompt, E did nothing):
+    # tilt down in small steps until the activation prompt is on screen. The last _pre shot is the evidence.
+    $pre = Join-Path $Out "r${k}_pre.png"
+    $prompt = $false
+    for ($t = 0; $t -lt 9; $t++) {
+      powershell -NoProfile -ExecutionPolicy Bypass -File $shot -Out $pre | Out-Null
+      if ((& $env:FO4SF_PYTHON (Join-Path $here 'prompt_visible.py') $pre) -eq 'yes') { $prompt = $true; break }
+      powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq 'move:0,150|wait:450' | Out-Null
+    }
     powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq 'key:e|wait:2200' | Out-Null
     powershell -NoProfile -ExecutionPolicy Bypass -File $shot -Out (Join-Path $Out "r${k}_open.png") | Out-Null
   }
@@ -52,7 +78,8 @@ for ($k = $First; $k -lt [Math]::Min($list.Count, $First + $Count); $k++) {
   if ($LASTEXITCODE -ne 0) { "guard stopped at route $k"; break }
   $p1 = Read-Pos
   powershell -NoProfile -ExecutionPolicy Bypass -File $shot -Out (Join-Path $Out "r$k.png") | Out-Null
-  $line = @{ index = $k; ref = $r.ref; kind = $r.kind; start_read = $p0; end_read = $p1 } | ConvertTo-Json -Compress
+  $line = @{ index = $k; ref = $r.ref; kind = $r.kind; start_read = $p0; end_read = $p1; prompt = $prompt } | ConvertTo-Json -Compress
   Add-Content $res $line
+  $prevEnd = $p1; $prevFar = $far
   "route $k $($r.kind) $($r.ref): $p0 -> $p1"
 }

@@ -177,7 +177,8 @@ def main():
             write_json_atomic(os.path.join(a.staging, "editorids.json"), ids)
         items.append({"editor_id": eid, "model": r["out_name"].replace("/", "\\") + ".nif", "source": name,
                       "shapes": r["shapes"], "fallback_materials": r["fallback_materials"], "form_index": len(items),
-                      "collision_report": r.get("collision_report") or {}, **({"door": r["door"]} if "door" in r else {})})
+                      "collision_report": r.get("collision_report") or {}, **({"door": r["door"]} if "door" in r else {}),
+                      **({"load_door": r["load_door"]} if "load_door" in r else {})})
         print(f"  ok  {name} -> {eid} (shapes {r['shapes']}, fallback materials {r['fallback_materials']})")
     for f in failures[:15]:
         print("  FAIL", f["nif"], "-", f["reason"][:110])

@@ -21,6 +21,10 @@ from . import convert_static, nif, sfcollision, sfnif, textures
 
 DOOR_RE = re.compile(r"[\\/]doors?[\\/]|door[^\\/]*\.nif$", re.I)
 NOT_HINGED_RE = re.compile(r"vault|elevator|garage|gate|hatch|slid", re.I)   # sliding / lifting doors animate differently
+# FO4 load doors never swing open into the next space: activating one teleports. Destinations are not ported yet, so a
+# rigged swing opened onto the void behind the wall (Parsons: walked through the entrance door, fell to z -72). Keep
+# them shut and solid with their native collision; the missing teleport is reported per asset as "load_door".
+LOAD_DOOR_RE = re.compile(r"door[^\\/]*load[^\\/]*\.nif$|load[^\\/]*door[^\\/]*\.nif$", re.I)
 
 
 class Fo4Archives:
@@ -400,10 +404,14 @@ class Converter:
             # vegetation (roots, plants, grass, cobwebs) is walk-through in FO4; a bounding box would be an invisible wall
             soft = bool(re.search(r"[\\/]landscape[\\/](trees|plants|grass)|roots|cobweb|vines|hanging"
                                   r"|[\\/]doors?[\\/]|door[^\\/]*\.nif$", nif_name, re.I))   # doors: no opening yet, keep passable
+            load_door = bool(LOAD_DOOR_RE.search(nif_name))
+            if load_door:
+                soft = False                             # shut and solid, see LOAD_DOOR_RE
+                res["load_door"] = "teleport not ported: door stays shut"
             use_box = self.collision_template is not None and not soft
             coll_report = {}
             files = None
-            if self.rig_doors and self.door_physics_donor is not None and DOOR_RE.search(nif_name) and not NOT_HINGED_RE.search(nif_name) and nif.door_hinge(src):
+            if self.rig_doors and self.door_physics_donor is not None and DOOR_RE.search(nif_name) and not NOT_HINGED_RE.search(nif_name) and not load_door and nif.door_hinge(src):
                 try:                                     # hinged door: rigged like the vanilla template door so it opens
                     files, offset, bounds = convert_static.convert_door(raw, out_name, mats,
                                                                 collision_template=self.collision_template,

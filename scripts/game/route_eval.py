@@ -3,7 +3,8 @@
 usage: python route_eval.py routes.json results.jsonl
 stairs: PASS if the end height is at least low + min_rise and the player did not drop below the start floor;
         STUCK if it rose less; FALL if it ended more than 0.5 m below the ramp's low end.
-door:   PASS if the end point is min_past metres beyond the door plane (dot with the plane normal); BLOCKED otherwise.
+door:   PASS if the end point is min_past metres beyond the door plane (dot with the plane normal); otherwise NOPROMPT
+        if route_run never saw the activation prompt, else BLOCKED.
 Unreadable positions are UNREAD. Prints one line per route and a summary; exit code 1 if anything is not PASS.
 """
 import json
@@ -27,6 +28,10 @@ def judge(route, res):
     # OCR can drop a minus sign or shift columns: reject moves no walk of this length could make
     if start is not None and (abs(end[2] - start[2]) > 6 or abs(end[0] - start[0]) + abs(end[1] - start[1]) > 15):
         return "UNREAD", f"implausible read {res.get('start_read')} -> {res.get('end_read')}"
+    # the teleport target was invalid (e.g. under the floor) and the engine put the player at the cell entrance instead
+    target = route.get("start")
+    if start is not None and target and abs(start[0] - target[0]) + abs(start[1] - target[1]) > 3:
+        return "UNREAD", f"start not reached: read {res.get('start_read')}"
     e = route["expect"]
     if route["kind"] == "stairs":
         low, high = e["low"], e["high"]
@@ -56,7 +61,11 @@ def judge(route, res):
     side = abs((end[0] - e["plane_point"][0]) * uy - (end[1] - e["plane_point"][1]) * ux)
     if past > 12.0 or side > 3.0:
         return "UNREAD", f"implausible door end past {past:.1f} m, {side:.1f} m off the opening"
-    return ("PASS" if past >= e["min_past"] else "BLOCKED"), f"past plane {past:.2f} m"
+    if past >= e["min_past"]:
+        return "PASS", f"past plane {past:.2f} m"
+    if res.get("prompt") is False:                    # never saw "OPEN (E)": activation, not collision, is the problem
+        return "NOPROMPT", f"past plane {past:.2f} m, no activation prompt"
+    return "BLOCKED", f"past plane {past:.2f} m"
 
 
 def main():

@@ -445,3 +445,36 @@ Rexford stairs (same session): 8 PASS; `BldWoodBSmRailStairs03L` reached 2.74 of
 - Reruns with the fixed runner: **Vault 114 stall doors `04BF66` / `04BF9D` pass from both sides** (the "raised door" was
   the camera); every Vault 114 door now passes. **Vault 81:** stall doors `19DA3A` (both sides) and `19DA38` pass;
   `19DA36` still BLOCKED (one side never moved, so the start is probably inside cave rock). Open.
+
+## 2026-10-08 (evening): Parsons State Insane Asylum, prompt-seeking runner, load doors
+
+First Parsons run: 26 of 36 door routes BLOCKED at almost exactly -0.48 m (standing at the closed door). Not the doors:
+the screenshots show no "DOOR / Open" prompt because the levelled camera aimed over the door
+([aim high](media/route-parsons-door-aimhigh.jpg)). Tilting 500 counts lower shows the prompt
+([prompt](media/route-parsons-door-prompt.jpg)), so the fixed "up, then down 700" calibration does not carry between
+sessions.
+
+Runner changes (`scripts/game`):
+- `prompt_visible.py`: detects the prompt's white title bar in a screenshot. `route_run.ps1` tilts down 150 counts at a
+  time (up to 9 tries) until the prompt is on screen, then presses E. Results record `prompt`; `route_eval.py` reports
+  a door that never showed a prompt as **NOPROMPT** instead of BLOCKED.
+- Start reads far from the teleport target are re-read once. The runner stops if the start read equals the last route's
+  end (stale read, console out of step). It happened once tonight: a "p" opened the Skills menu and 12 routes read
+  the same position; closed with Tab, no skill points touched (0 available).
+- `route_eval.py`: a start more than 3 m from the route start is UNREAD ("start not reached"). Starts under the floor
+  (sunken `RWResStairs02` retaining-wall stairs, z -2.2) are moved by the engine to the cell entrance.
+
+**Parsons rerun: every hinged door that was tested opens and lets the player through from at least one side**
+([open](media/route-parsons-door-open.jpg)). Doors 13/14 to 47/48 pass on one side; the other side stops 0.6-1.7 m short
+after the door opened ([swing side](media/route-parsons-door-swingside.jpg)). Same one-sided pattern as Rexford. No
+Starfield door graph opens both ways (all 26 `*openclose*.agx` graphs have a single Open/Close), so the next experiment is
+whether the runner stands inside the leaf's swing arc when it presses E.
+
+**Real bug found: load doors swung open onto the void.** From the entrance the player walked through the entrance
+load door (`BldWoodPDbDoorLoad01`) and fell to z -72. FO4 load doors never swing into the next space: activating one
+teleports, and destinations are not ported yet. Fix in `pipeline.py`: `LOAD_DOOR_RE` load doors are not rigged and keep
+their native collision (solid and shut). Each is reported per asset as `load_door: teleport not ported`, so the
+missing behaviour is listed rather than silently dropped.
+
+Stairs: 7 PASS; `RWResStairs02` STUCK twice (one ends in the dead tree's branches in the atrium); 5 routes start under the
+floor (route generator to fix: needs a floor check).
