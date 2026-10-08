@@ -1,50 +1,31 @@
 # Codex / Claude / Grok status
 
-Owner: dasscooby. Milestone: one verified interior slice; full converter remains unfinished.
+Owner: dasscooby. Goal: finish the verified interior slice before actor implementation.
 
 ## Goal and acceptance
 
-Vault 111, Vault 81, Red Rocket cave, Vault 114, Prydwen, Hotel Rexford, Boston Public Library, Parsons: walkable floors/stairs; clear doorways; correct door swing and selected collision body per node; frame collision; acceptable lighting/materials; recoverable deployment. Acceptance requires in-game evidence on the exact built/deployed revision. Actors, terrain, weapons and Papyrus wait until this slice passes.
+Vault 111, Vault 81, Red Rocket cave, Vault 114, Prydwen, Hotel Rexford, Boston Public Library, Parsons: walkable floors/stairs, clear doorways, correct door swing/body ownership/frame collision, acceptable materials and recoverable deployment. Require in-game evidence tied to exact revision/artifact hashes. Unreadable results are inconclusive. Preserve Fallout 4 gameplay and Starfield native physics/modern capabilities. No game assets in Git; guard before commits; no passwords/payments/outreach/history rewriting.
 
-Keep Starfield native physics/modern capabilities and Fallout 4 gameplay. Preserve openings. No game assets in Git; guard before commits; no passwords/payments/outreach/history rewriting.
+Next: [actor milestone proposal](ACTOR-MILESTONE.md), #31. Planning only until interiors pass; assignments not yet acknowledged.
 
-Next milestone proposal: [one native actor](ACTOR-MILESTONE.md), discussed in #31. Planning now; implementation after interior acceptance. Team assignments proposed, not acknowledged.
+## Owners / locks
 
-## Owners / file locks
+- Claude: collision/Havok (`sfcollision`, `fo4collision`, `hkpackfile`, `hktagfile`, `meshcollision`), `convert_static.py`, `pipeline.py`, `scripts/convert_batch.py`, `dotnet/PluginSpike`, game scripts/staging/live control. Do not overwrite active edits.
+- Codex: deployment/recovery, persistent IDs/checkpoints/cache/output verification, Fo4Export/ReferenceLinks; animation/door bridge modules (`animation_curves`, `door_motion`, `door_clips`, `door_rig`, `native_door`, `door_model`, `door_prototype`, `door_collision`, `fo4_compounds`) and tests. Owns this status/archive. Shared `sfnif.py`: announce exact function before edits.
+- Grok: acceptance oracle and `route_eval.judge` plausibility. No other game scripts/collision/doors/live control without a new claim.
 
-- Claude: collision/Havok integration (`sfcollision.py`, `fo4collision.py`, `hkpackfile.py`, `hktagfile.py`, `meshcollision.py`), `convert_static.py`, `pipeline.py`, `scripts/convert_batch.py`, `dotnet/PluginSpike`, `scripts/game/*`, live-game staging/tests/control. Active edits remain Claude's.
-- Codex: deploy/recovery, persistent IDs/checkpoints/cache verification, Fo4Export/ReferenceLinks; new animation/door bridge modules (`animation_curves.py`, `door_motion.py`, `door_clips.py`, `door_rig.py`, `native_door.py`, `door_model.py`, `door_prototype.py`, `door_collision.py`, `fo4_compounds.py`) and their tests. `sfnif.py` shared: announce exact function before editing. Codex owns this short status/archive maintenance.
-- Grok: acceptance oracle plus `route_eval.judge` plausibility (#32). Not taking `routes.py`, collision, doors, or the live game. Media audit not started.
+## Current evidence / remaining work
 
-## Last verified evidence / immediate blocker
+Claude-reported journal at56e3e37: every Vault114 door now passes after camera/console runner fixes; raised-door diagnosis withdrawn. Rexford:21 PASS/4 BLOCKED/1 UNREAD door walks,13 doors traversed from at least one side;8 stair passes. Vault81:2/3 stall doors pass;19DA36 remains unresolved. Vault114 stairs:6 pass,2 stuck; reruns and remaining cells still required. These are reported results, not independent Codex validation or full slice acceptance. One-sided traversal does not pass both-side acceptance.
 
-Claude reports Vault111 hall ramps flattened to40deg; both now climb1.95m.10/11 routes pass, one unreadable.3,006/3,490 models use source collision (#32). Full slice rerun and complex-door acceptance remain pending; Codex has no independent runtime validation.
+Collision batch reported:3,012 native,243 source-none,199 box,36 surface boxes. Codex synthetic regression confirms source-none stays renderable without physics in both fallback modes; historical failures reproduced.
 
-Door prototype:30 rigs/60 clips read back; multi-bone model local, NOT installed. Physics/activation unverified. Source42 bodies/62 leaves preserved;40 tests pass. Offline only.
+Door prototype:30 rigs/60 clips read back,42 selected source bodies/62 leaves; offline only, not installed, native moving linkage/activation still unverified. Collision ownership contract:14-byte target/flags/data/BodyID; shared systems select the body's node index, never every body per attachment.
 
-Codex output regression: source without collision stays renderable with no physics blocks in native conversion, for box/surfaces fallback modes. Both failed against pre08907cc converter; current synthetic test and guard pass. Claude owns actual fix. Raised-door height remains unconfirmed (8e95b94).
+Codex:10 checkpoint tests,23 deployment tests and guard pass. Resume reconstructs full dependency inventory/hashes; malformed/degraded results rejected. Claude dependency: batch saves only ok results, so failed reconversions skip invalidation. Deploy checks hashes, fresh archives and BOM entries; uninstall preserves modified hashed artifacts with retry manifest. No live install changed by Codex.
 
-Codex resume: reuse reconstructs the NIF/material dependency inventory, checks all hashes and rejects omitted entries (four reproduced cases).10 synthetic tests and guard pass. Malformed/incomplete results miss cache; degraded save removes old checkpoint. Claude dependency: batch saves only ok results; failed reconversions still skip invalidation. No batch/pipeline/game edits by Codex.
+## Coordination / housekeeping
 
-Codex deployment: hashes checked before activation; corrupt copies roll back; fresh archives validated; BOM plugin entries recognized. Uninstall preserves modified artifacts from completed hashed installs, disables installer-added activation and retains retry manifest. Reproduced deletion of replacement bytes;23 synthetic tests and guard pass. Interrupted/legacy cleanup retained; no live install touched.
+Check owner issues #29/#30, next-step #31 and shared updates [#32](https://github.com/dasscooby/fo4-to-starfield/issues/32) each work session. Publish concise evidence and blockers there; all three agents have posted. Keep this file under4KB; replace stale status. [History](handoff-archive/2026-10-07-codex-history.md).
 
-URGENT Claude: collision object is14 bytes (`target i32, flags u16, data i32, Body ID u32`). Painted double-door nodes22/29 share system24 but select bodies0/1. Never decode/attach every system body at each node. `door_collision.plan` preserves ownership; `fo4_compounds.decode_body` extracts only the selected body's leaves. Native child conversion/BVH and moving-body linkage still required. Multi-body transplant guard rejects silent loss.
-
-## Shared GitHub issue workflow
-
-Owner direction: [GitHub issues](https://github.com/dasscooby/fo4-to-starfield/issues) are the shared bug-report/priority inbox. Claude, Codex and Grok: check new/updated issues and relevant comments before each work session, choosing the next task and declaring a fix complete. Coordinate ownership here, reference issue numbers in fixes, and keep full discussions in issues to save tokens. Offline checks do not establish in-game acceptance. Checks happen during work sessions; real-time monitoring is not guaranteed.
-
-Team agreement: Grok owns acceptance checks; Claude supplies game evidence; Codex owns deploy/identities/output verification. Startup gate, then interior slice. Keep status under4KB; replace stale entries. Grok may audit media afterward; claim files and retain proof. No Git history rewrite.
-
-[Historical detail](handoff-archive/2026-10-07-codex-history.md). All three agents have posted in #32. Grok corrected route plausibility in099f933; Vault114 remains6 stair passes,2 stuck.
-
-### Owner direction (relayed by Claude, 2026-10-08): one shared update post + keep the PC clean
-
-1. **Shared update post:** https://github.com/dasscooby/fo4-to-starfield/issues/32. Codex and Grok: add one short comment
-   each (what works **in game**, what's broken, what's next) and keep it current there. The owner reads that issue for
-   status, not this file. Owner issues to read: #29 (movement test too weak, collision "better not great", complex doors
-   broken, no polish yet), #30 (stairs still wrong), #31 (after this goal: the hardest task).
-2. **Keep the owner's PC clean:** delete your scratch exports, smoke builds and recordings once reviewed. Keep one current
-   staging folder (`C:\Modding\staging\multi`). Claude removed 1.9 GB of its own old staging and test screenshots. Still
-   present and not Claude's: `C:\Modding\staging\codex-resume-smoke`, `C:\Modding\research\codex-reflect` (Codex, please
-   remove when done). Screen recordings: review, then delete; never commit them.
+Review then delete own scratch exports/recordings; never commit recordings. Keep current staging at C:\Modding\staging\multi. Pending Codex-owned cleanup: staging\codex-resume-smoke and research\codex-reflect; inspect before removal. Media audit unclaimed.
