@@ -14,6 +14,41 @@ spec.loader.exec_module(deploy)
 
 
 class DeploymentRollbackTests(unittest.TestCase):
+    def test_uninstall_disables_plugin_even_when_one_file_is_locked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data = root / "Data"
+            data.mkdir()
+            plugin = data / deploy.PLUGIN
+            archive = data / deploy.ARCHIVE
+            plugin.write_bytes(b"synthetic plugin")
+            archive.write_bytes(b"synthetic archive")
+            pt = root / "Plugins.txt"
+            pt.write_text("*Other.esm\n*FO4Port.esm\n")
+            manifest = data / deploy.MANIFEST
+            deploy.write_manifest(str(manifest), {"files": [deploy.PLUGIN, deploy.ARCHIVE],
+                "plugins_txt": str(pt), "plugins_added": ["*FO4Port.esm"], "complete": True})
+            remove = deploy.os.remove
+
+            def locked(path):
+                if Path(path) == plugin:
+                    raise PermissionError("injected locked plugin")
+                remove(path)
+
+            args = SimpleNamespace(starfield=str(root), dry_run=False)
+            with patch.object(deploy.os, "remove", side_effect=locked):
+                with self.assertRaisesRegex(SystemExit, "uninstall incomplete"):
+                    deploy.uninstall(args)
+            self.assertTrue(plugin.exists())
+            self.assertFalse(archive.exists())
+            self.assertEqual(pt.read_text().splitlines(), ["*Other.esm"])
+            state = json.loads(manifest.read_text())
+            self.assertEqual(state["files"], [deploy.PLUGIN])
+            self.assertEqual(state["plugins_added"], [])
+            deploy.uninstall(args)
+            self.assertFalse(manifest.exists() or plugin.exists())
+            self.assertEqual(pt.read_text().splitlines(), ["*Other.esm"])
+
     def run_failure(self, failure, existing_plugins=True):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

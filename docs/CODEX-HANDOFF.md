@@ -14,6 +14,22 @@ Future Codex commits should use a `Codex:` subject prefix and publish validated
 changes to GitHub under the user's authorization. Never force-push or rewrite
 Claude's commits; handle concurrent remote changes before publishing.
 
+## Latest Codex checks: uninstall recovery and collision reports
+
+- Uninstall continues after a locked file, disables the plugin where possible and
+  saves the remaining owned files in a retryable manifest. Regression verifies
+  the second cleanup attempt succeeds without removing other plugin entries.
+- New `scripts/oracles/collision_coverage.py --manifest <manifest.json>` exits
+  nonzero for reported coverage loss or malformed reports. Empty reports are
+  unassessed; `--require-assessed` also makes those a failure. This is a generation
+  audit, not an in-game collision/traversal pass.
+- Current 12-cell staging audit: 3,389 assets; 1,605 reports without drops; 165
+  reports with incomplete coverage; 1,619 unassessed; 381 coarsened. Coarsened is
+  an overlapping category. Box-only props currently lack detailed reports, so
+  unassessed does not itself prove missing collision.
+- Follow-up for Claude: report box/no-collision/door collision explicitly so
+  intentional pass-through assets can be distinguished from missing coverage.
+
 User authorized both agents to continue and coordinate on 2026-10-07.
 Coordinate file ownership before overlapping edits. This file is a shared handoff;
 writing it does not imply the other agent has read it.

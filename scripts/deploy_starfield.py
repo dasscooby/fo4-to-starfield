@@ -166,18 +166,33 @@ def uninstall(a):
     print(f"removing {m['files']} and Plugins.txt entries {m['plugins_added']}")
     if a.dry_run:
         return
+    remaining, errors = [], []
     for rel in m["files"]:
         p = os.path.join(data, rel)
-        if os.path.exists(p):
-            os.remove(p)
-    if not m.get("complete", True) and m.get("plugins_restore_pending"):
-        restore_plugins(m)
-    elif m["plugins_added"]:
-        pl = [l for l in read_lines(m["plugins_txt"]) if l not in m["plugins_added"]]
-        if pl:
-            write_lines(m["plugins_txt"], pl)
-        elif os.path.exists(m["plugins_txt"]):
-            os.remove(m["plugins_txt"])
+        try:
+            if os.path.exists(p):
+                os.remove(p)
+        except OSError as e:
+            remaining.append(rel)
+            errors.append(str(e))
+    m["files"] = remaining
+    try:
+        if not m.get("complete", True) and m.get("plugins_restore_pending"):
+            restore_plugins(m)
+        elif m["plugins_added"]:
+            pl = [l for l in read_lines(m["plugins_txt"]) if l not in m["plugins_added"]]
+            if pl:
+                write_lines(m["plugins_txt"], pl)
+            elif os.path.exists(m["plugins_txt"]):
+                os.remove(m["plugins_txt"])
+        m["plugins_added"] = []
+        m["plugins_restore_pending"] = False
+    except OSError as e:
+        errors.append(str(e))
+    if errors:
+        write_manifest(man_path, m)
+        sys.exit(f"uninstall incomplete; recovery manifest retained at {man_path}. "
+                 f"Retry after resolving: {'; '.join(errors)}")
     os.remove(man_path)
     print("uninstalled")
 
