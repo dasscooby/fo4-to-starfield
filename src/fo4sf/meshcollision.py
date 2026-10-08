@@ -15,8 +15,9 @@ The Starfield side is rebuilt around a template tagfile taken from a vanilla Sta
 install at conversion time, never shipped): its TYPE section, physics system, material and body are reused; the shape's
 data arrays, sections and trees come from FO4. Starfield's SIMD tree (a 4-wide AABB tree over triangle shape keys, present in every vanilla mesh) is generated.
 """
-import struct
 import math
+import os
+import struct
 from typing import Dict, List, Optional, Tuple
 
 from . import hkpackfile, hktagfile
@@ -407,14 +408,30 @@ def _hull_links(faces: List[List[int]], nverts: int):
     return links, vedges
 
 
-def _emit_convex(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, shape: int) -> int:
-    """FO4 hknpConvexPolytopeShape -> Starfield hknpConvexShape (hull: float3 vertices, planes, faces, indices, links)."""
+def _quat_matrix(q):
+    x, y, z, w = q
+    return (1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y),
+            2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x),
+            2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y))
+
+
+def _emit_convex(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, shape: int, rot=(0.0, 0.0, 0.0, 1.0),
+                 pos=(0.0, 0.0, 0.0)) -> int:
+    """FO4 hknpConvexPolytopeShape -> Starfield hknpConvexShape (hull: float3 vertices, planes, faces, indices, links).
+    The FO4 body transform (absolute, NIF-root space) is baked into vertices and planes."""
     from . import fo4collision as fc
     va, nv = fc._rel(p, shape + fc.CVX_VERTS)
     fa, nf = fc._rel(p, shape + fc.CVX_FACES)
     ia, _ = fc._rel(p, shape + fc.CVX_INDICES)
     pa, _ = fc._rel(p, shape + 64)                       # planes (count is padded to 4; one plane per face)
-    verts = [p.unpack("<3f", va + 16 * k) for k in range(nv)]
+    R = _quat_matrix(rot)
+    xf = lambda v: tuple(R[3 * i] * v[0] + R[3 * i + 1] * v[1] + R[3 * i + 2] * v[2] for i in range(3))
+    verts = [tuple(a + b for a, b in zip(xf(p.unpack("<3f", va + 16 * k)), pos)) for k in range(nv)]
+    planes = b""
+    for k in range(nf):                                  # plane: n.x + d = 0  ->  n' = R n, d' = d - n'.pos
+        nx, ny, nz, dd = p.unpack("<4f", pa + 16 * k)
+        n2 = xf((nx, ny, nz))
+        planes += struct.pack("<4f", *n2, dd - sum(a * b for a, b in zip(n2, pos)))
     face_raw = p.raw(fa, 4 * nf)
     faces = []
     for k in range(nf):
@@ -434,7 +451,7 @@ def _emit_convex(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, shape: int) -> 
     edge = lambda fe: struct.pack("<HBB", fe[0], fe[1], 0)
     payloads = {
         "vertices": (b"".join(struct.pack("<3f", *v) for v in verts), nv),
-        "planes": (p.raw(pa, 16 * nf), nf),
+        "planes": (planes, nf),
         "faces": (face_raw, nf),
         "indices": (p.raw(ia, nidx), nidx),
         "faceLinks": (b"".join(edge(x) for x in links), len(links)),
@@ -448,8 +465,15 @@ def _emit_convex(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, shape: int) -> 
     return i_shape
 
 
-def _emit_mesh(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, d: int) -> int:
-    """FO4 hknpCompressedMeshShapeData -> Starfield hknpCompressedMeshShape (+ data, trees, SIMD tree)."""
+def _shift_aabb(raw: bytes, pos) -> bytes:
+    lo = struct.unpack_from("<4f", raw, 0)
+    hi = struct.unpack_from("<4f", raw, 16)
+    return struct.pack("<8f", *(lo[i] + pos[i] for i in range(3)), lo[3], *(hi[i] + pos[i] for i in range(3)), hi[3])
+
+
+def _emit_mesh(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, d: int, pos=(0.0, 0.0, 0.0)) -> int:
+    """FO4 hknpCompressedMeshShapeData -> Starfield hknpCompressedMeshShape (+ data, trees, SIMD tree). A body
+    translation is baked in (domain, section domains and codec offsets move; quantised data stay relative)."""
     from . import fo4collision
     tf = t.tf
     T_CMS, T_DATA = t.type("hknpCompressedMeshShape"), t.type("hknpCompressedMeshShapeData")
@@ -481,7 +505,7 @@ def _emit_mesh(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, d: int) -> int:
     for f in ("nodes", "sections", "primitives", "sharedVerticesIndex", "packedVertices", "sharedVertices",
               "primitiveDataRuns"):
         struct.pack_into("<16x", data, tree_off + t.field(T_TREE, f).offset)
-    data[tree_off + 16:tree_off + 48] = p.raw(d + FO4_TREE + 16, 32)
+    data[tree_off + 16:tree_off + 48] = _shift_aabb(p.raw(d + FO4_TREE + 16, 32), pos)
     data[tree_off + 48:tree_off + 64] = p.raw(d + FO4_TREE + 48, 16)
     simd = t.field(T_DATA, "simdTree")
     data[simd.offset:simd.offset + tf.size_of(simd.type)] = bytes(tf.size_of(simd.type))
@@ -491,7 +515,9 @@ def _emit_mesh(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, d: int) -> int:
     data[simd.offset + t.field(simd.type, "isCompact").offset] = 1
     i_data = w.add(T_DATA, 0x10, data, 1)
     w.ptr(t.field(T_CMS, "data").type, i_cms, t.field(T_CMS, "data").offset, i_data)
-    simd_raw = build_simd_tree(fo4collision.compressed_mesh_keys(p, d))
+    keys = [(k, (tuple(a + b for a, b in zip(lo, pos)), tuple(a + b for a, b in zip(hi, pos))))
+            for k, (lo, hi) in fo4collision.compressed_mesh_keys(p, d)]
+    simd_raw = build_simd_tree(keys)
     simd_arr_t, simd_elem_t = t.arr_types(simd.type, "nodes")
     i_simd = w.add(simd_elem_t, 0x20, simd_raw, len(simd_raw) // 128)
     w.ptr(simd_arr_t, i_data, simd.offset + t.field(simd.type, "nodes").offset, i_simd)
@@ -503,7 +529,13 @@ def _emit_mesh(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, d: int) -> int:
             w.ptr(arr_t, i_data, tree_off + t.field(T_TREE, name).offset, i)
     sec_raw, nsec = fo4["sections"]
     sec_arr_t, sec_elem_t = t.arr_types(T_TREE, "sections")
-    i_secs = w.add(sec_elem_t, 0x20, b"".join(_convert_section(sec_raw[96 * k:96 * k + 96]) for k in range(nsec)), nsec)
+    secs = []
+    for k in range(nsec):
+        s = _convert_section(sec_raw[96 * k:96 * k + 96])
+        s[16:48] = _shift_aabb(bytes(s[16:48]), pos)
+        struct.pack_into("<3f", s, 48, *(a + b for a, b in zip(struct.unpack_from("<3f", s, 48), pos)))   # codec offset
+        secs.append(bytes(s))
+    i_secs = w.add(sec_elem_t, 0x20, b"".join(secs), nsec)
     w.ptr(sec_arr_t, i_data, tree_off + t.field(T_TREE, "sections").offset, i_secs)
     sec_at, _ = p.array(d + FO4_ARRAYS["sections"])
     node_arr_t, node_elem_t = t.arr_types(T_SEC, "nodes")
@@ -515,10 +547,18 @@ def _emit_mesh(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, d: int) -> int:
     return i_cms
 
 
-def convert_bodies(fo4_blob: bytes, template_blob: bytes) -> List[bytes]:
-    """One native Starfield single-body physics blob per FO4 body (shape, position and orientation copied: both games
-    use Havok, so the transform needs no conversion). Supported shapes: compressed mesh, convex polytope. Any other
-    shape class raises PackfileError so the caller records an explicit fallback instead of dropping a body."""
+# FO4 and Starfield collision layers share indices 0-36 and 38-42, 44-56 (COLL records); 37 and 43 differ.
+FO4_BODY_FILTER = 20                                  # FO4 hknpBodyCinfo collisionFilterInfo (layer in the low 7 bits)
+UNMAPPED_LAYERS = {37: "L_DOORDETECTION", 43: "L_CUSTOMPICK1"}
+
+
+def convert_bodies(fo4_blob: bytes, template_blob: bytes, select: Optional[List[int]] = None) -> List[bytes]:
+    """One native Starfield single-body physics blob per selected FO4 body (all bodies when select is None).
+    FO4 shapes live in the space of the NIF node that owns the collision object; the body cinfo transform is not a
+    placement (a crate whose shape already matches its render mesh carries a 0.29 m body position; a stair helper's
+    body rotation duplicates its node's). So the Starfield body is identity, as in vanilla files, and the caller puts the
+    blob on a node with the FO4 node's transform. The FO4 collision layer is kept (stair helpers stay stair helpers).
+    Unsupported shapes or layers raise PackfileError (explicit fallback)."""
     from . import fo4collision as fc
     p = hkpackfile.Packfile(fo4_blob)
     classes = dict(p.objects())
@@ -535,20 +575,28 @@ def convert_bodies(fo4_blob: bytes, template_blob: bytes) -> List[bytes]:
                     hktagfile.sections(template_blob, 8, len(template_blob)) if tag == "TYPE"))
     sdk = next(template_blob[s:e] for tag, s, e in hktagfile.sections(template_blob, 8, len(template_blob)) if tag == "SDKV")
     out = []
-    for k in range(n):
+    for k in (range(n) if select is None else select):
+        if not 0 <= k < n:
+            raise hkpackfile.PackfileError(f"collision object selects missing body {k} of {n}")
         b = at + fc.BODY_SIZE * k
         shape = p.pointer(b)
         cls = classes.get(shape, "?")
         pos, rot = p.unpack("<4f", b + fc.BODY_POS), p.unpack("<4f", b + fc.BODY_ROT)
         if not all(math.isfinite(x) for x in pos + rot):
             raise hkpackfile.PackfileError("non-finite source body transform")
+        if os.environ.get("FO4PORT_SKIP_ROTATED_BODIES") == "1" and any(abs(x) > 1e-4 for x in rot[:3]):
+            continue                                      # diagnostic only: isolate rotated bodies in game tests
         w = _Writer()
         i_psd = w.add(T_PSD, 0x10, t.item_bytes("hknpPhysicsSystemData"), 1)
         i_mat = w.add(T_MAT, 0x20, t.item_bytes("hknpMaterial", count=1), 1)
         body = bytearray(t.item_bytes("hknpPhysicsSystemData::bodyCinfoWithAttachment", count=1))
         struct.pack_into("<H", body, t.field(T_BODY, "materialId").offset, 0)
-        struct.pack_into("<4f", body, t.field(T_BODY, "position").offset, pos[0], pos[1], pos[2], 0.0)
-        struct.pack_into("<4f", body, t.field(T_BODY, "orientation").offset, *rot)
+        struct.pack_into("<4f", body, t.field(T_BODY, "position").offset, 0.0, 0.0, 0.0, 0.0)
+        struct.pack_into("<4f", body, t.field(T_BODY, "orientation").offset, 0.0, 0.0, 0.0, 1.0)
+        filt, = p.unpack("<I", b + FO4_BODY_FILTER)
+        if (filt & 0x7F) in UNMAPPED_LAYERS:
+            raise hkpackfile.PackfileError(f"body {k} uses {UNMAPPED_LAYERS[filt & 0x7F]} (no Starfield equivalent)")
+        struct.pack_into("<I", body, t.field(T_BODY, "collisionFilterInfo").offset, filt)
         i_body = w.add(T_BODY, 0x20, body, 1)
         w.ptr(t.field(T_PSD, "materials").type, i_psd, t.field(T_PSD, "materials").offset, i_mat)
         w.ptr(t.field(T_PSD, "bodyCinfos").type, i_psd, t.field(T_PSD, "bodyCinfos").offset, i_body)

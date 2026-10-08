@@ -111,19 +111,32 @@ def fo4_native_collision(src, universal_template: bytes, report: dict = None):
     if not objs:
         return None
     blobs = []
+    world = nifmod.world_transforms(src)
     for i in objs:
         target, _, data = struct.unpack_from("<iHi", src.blocks[i], 0)
-        if target != 0:
+        if not (0 <= target < len(src.blocks)):
             if report is not None:
-                report["fo4_collision_error"] = "collision object on a child node (not supported yet)"
+                report["fo4_collision_error"] = "collision object has no target node"
             return None
+        # FO4 bhkNPCollisionObject: target, flags, data, body index. Several objects can share one system and each
+        # owns one body. Shapes are in the target node's space: the body goes on a child node with that transform.
+        body, = struct.unpack_from("<I", src.blocks[i], 10) if len(src.blocks[i]) >= 14 else (0,)
+        tr, rot, scale = world(target)
+        if abs(scale - 1.0) > 1e-3:
+            if report is not None:
+                report["fo4_collision_error"] = f"collision node scaled {scale:.3f} (not supported yet)"
+            return None
+        place = None if target == 0 else (tuple(x * UNIT_SCALE for x in tr), tuple(rot))
+        shared = sum(1 for j in objs if struct.unpack_from("<iHi", src.blocks[j], 0)[2] == data)
         if not (0 <= data < len(src.blocks)) or src.type_of(data) != "bhkPhysicsSystem":
             if report is not None:
                 report["fo4_collision_error"] = f"collision data is {src.type_of(data) if 0 <= data < len(src.blocks) else 'missing'}"
             return None
         n, = struct.unpack_from("<I", src.blocks[data], 0)
         try:
-            blobs += meshcollision.convert_bodies(src.blocks[data][4:4 + n], universal_template)
+            new = meshcollision.convert_bodies(src.blocks[data][4:4 + n], universal_template,
+                                               select=[body] if shared > 1 else None)
+            blobs += new if place is None else [(b, place[0], place[1]) for b in new]
         except Exception as e:                           # noqa: BLE001  (fallback by design, reason recorded)
             if report is not None:
                 report["fo4_collision_error"] = f"{type(e).__name__}: {e}"

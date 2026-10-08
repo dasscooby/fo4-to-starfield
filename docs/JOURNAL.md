@@ -274,3 +274,23 @@ The user was active, so this was offline only. Compared the transplant with 246 
   difference 0.0 m. New tests cover the section mapping, the SIMD tree and the varints.
 Reconverted and staged; not deployed. Next: in-game check (startup, a single transplanted model in the test cell, then
 stairs and doorways).
+
+## 2026-10-08: native FO4 collision verified in game (Prydwen stairs)
+
+First in-game run of the native collision build (the user freed the PC). The game starts, the Prydwen loads, and the
+player stands on native floors.
+- **Stair climb (2 flights, PryCatwalkStairs01 + PryCatwalkStairsEnt01):** OCR positions go from z -10.97 at the bottom
+  to z -7.31 on the upper deck (3.66 m), then along the deck to y 42.3, where the player is stopped by a crate stack (solid,
+  as in FO4). ([stairs](media/prydwen-stairs-native.jpg), [deck](media/prydwen-upper-deck-crates.jpg))
+- **What it took** (each found from a failed climb):
+  1. Several FO4 collision objects can share one physics system. Each owns one body, given by the body index stored in
+     the object, so each object now gets only its own body.
+  2. FO4 shapes live in the space of the object's node. The body cinfo transform is not a placement (a vault crate's
+     shape already matches its render mesh but carries a 0.29 m body offset). So bodies go on child nodes with the FO4
+     node transform, and the Starfield body is identity, as in vanilla.
+  3. Collision layers are kept. FO4 and Starfield share layer indices except 37 and 43, which are rejected explicitly.
+     The stair's `C_Ramp` body is `L_STAIRHELPER` (31); copied as static, it acted as a wall at the foot of the stairs.
+  4. The template is Bethesda's own multi-shape test file (`test_fbx_collision_same_node01.nif`), whose type table covers
+     every shape.
+- Coverage across 3,490 models: 2,648 native, 154 boxes, 688 single box or none. Recorded fallbacks:
+  hknpDynamicCompoundShape 266 (Codex's compounds work), hull topology 60, sphere 9, and an IndexError in 44 (to fix).

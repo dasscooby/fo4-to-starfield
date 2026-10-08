@@ -144,9 +144,13 @@ def build_static_nif(node_name: bytes, shapes: List[StaticShape], bs_version: in
         f.add_block("NiIntegerExtraData", struct.pack("<iI", s_matid, material_id(s.material_path)))
         f.add_block("BSLightingShaderProperty",
                     struct.pack("<iIi", f.string_index(s.material_path.encode("latin-1")), 0, -1))
-    for j, blob in enumerate(extra):              # one collision body per child node (identity transform)
+    for j, entry in enumerate(extra):             # one collision body per child node
+        # entry: blob (identity node) or (blob, translation xyz, rotation row-major 3x3) for bodies that FO4 attaches
+        # to a transformed child node
+        blob, xform = (entry, ident) if isinstance(entry, (bytes, bytearray)) else \
+            (entry[0], struct.pack("<3f9ff", *entry[1], *entry[2], 1.0))
         node = extra_start + 3 * j
-        f.add_block("NiNode", struct.pack("<iIiI", f.string_index(b"Collision%d" % j), 0, -1, 0xE) + ident
+        f.add_block("NiNode", struct.pack("<iIiI", f.string_index(b"Collision%d" % j), 0, -1, 0xE) + xform
                     + struct.pack("<iI", node + 1, 0))
         f.add_block("bhkNPCollisionObject", struct.pack("<iHiI", node, 0x80, node + 2, 0))
         f.add_block("bhkPhysicsSystem", struct.pack("<I", len(blob)) + blob)
