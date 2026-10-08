@@ -403,3 +403,6 @@ index (2130), and 2 `hknpConvexShape` bodies. Staged only; not yet in game.
   - Doors: stall doors and `SubDoor01Right` BLOCKED from both sides ([blocked](media/route-v114-stalldoor-blocked.jpg)).
 - Next: why these doors block, from the converted files (leaf swing, frame collision covering the opening), and the
   two stuck staircases.
+- Correction: with the rise plausibility check, the Vault 114 "PASS" with a 31 m rise is UNREAD. Vault 114 stairs are
+  **6 PASS**, 2 STUCK, 6 UNREAD. Route runner now saves `r<k>_pre.png` (just before E, shows whether the Open prompt is up)
+  and `r<k>_open.png` (2.2 s after E) for every door route.
