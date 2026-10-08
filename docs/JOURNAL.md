@@ -478,3 +478,12 @@ missing behaviour is listed rather than silently dropped.
 
 Stairs: 7 PASS; `RWResStairs02` STUCK twice (one ends in the dead tree's branches in the atrium); 5 routes start under the
 floor (route generator to fix: needs a floor check).
+- **Load door fix verified in game.** Rebuilt all 12 cells (only the 9 load-door models changed; no existing FormID moved)
+  and deployed. The Parsons entrance double door now fills the doorway and is solid: walking into it stops the player at
+  y 5.90, 0.4 m before the door plane ([before](media/route-parsons-loaddoor-before.jpg),
+  [after](media/route-parsons-loaddoor-after.jpg)).
+- **Test-environment trap: saves keep old references.** The save the test cycle loads still held the entrance door at
+  its old rigged position (3.07, 6.37), because doors opened under the previous build are saved as changed references.
+  The plugin itself had the right position (0, 5.486), checked by reading the REFR from the deployed ESM. For this
+  test I moved the reference to its plugin position in the console. Results after a base-record change need a save
+  made before the cell was visited.
