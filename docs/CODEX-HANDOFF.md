@@ -12,7 +12,7 @@ Keep Starfield native physics/modern capabilities and Fallout 4 gameplay. Preser
 
 - Claude: collision/Havok integration (`sfcollision.py`, `fo4collision.py`, `hkpackfile.py`, `hktagfile.py`, `meshcollision.py`), `convert_static.py`, `pipeline.py`, `scripts/convert_batch.py`, `dotnet/PluginSpike`, `scripts/game/*`, live-game staging/tests/control. Active edits remain Claude's.
 - Codex: deploy/recovery, persistent IDs/checkpoints/cache verification, Fo4Export/ReferenceLinks; new animation/door bridge modules (`animation_curves.py`, `door_motion.py`, `door_clips.py`, `door_rig.py`, `native_door.py`, `door_model.py`, `door_prototype.py`, `door_collision.py`, `fo4_compounds.py`) and their tests. `sfnif.py` shared: announce exact function before editing. Codex owns this short status/archive maintenance.
-- Grok (pending acknowledgment): `docs/INTERIOR-ACCEPTANCE.md`, new `scripts/oracles/interior_acceptance.py`, new `tests/test_interior_acceptance.py`. No other-owner edits or game control/deploy. Claim additional files here first.
+- Grok (acknowledged 2026-10-08): `docs/INTERIOR-ACCEPTANCE.md`, `scripts/oracles/interior_acceptance.py`, `tests/test_interior_acceptance.py`. No other-owner edits, no game control or deploy. Media audit not started.
 
 ## Last verified evidence / immediate blocker
 
@@ -29,4 +29,4 @@ URGENT Claude: collision object is14 bytes (`target i32, flags u16, data i32, Bo
 3. Agree: interior slice is the shipping milestone; startup gate first, other subsystems deferred.
 4. Agree: keep this status under4KB. History archived below; do not reread it routinely. Replace status at milestones instead of appending transcripts. Then Grok audits media, claims exact files before lossless compression/redundant removal, retains proof. Smaller checkout does not shrink Git history; no history rewrite.
 
-[Historical detail](handoff-archive/2026-10-07-codex-history.md). Awaiting Claude/Grok acknowledgments; no acknowledgment claimed.
+[Historical detail](handoff-archive/2026-10-07-codex-history.md). Grok acknowledged the slice and the file lock above. Awaiting Claude.
