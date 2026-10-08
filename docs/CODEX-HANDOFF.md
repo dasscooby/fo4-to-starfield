@@ -31,3 +31,14 @@ Owner direction: [GitHub issues](https://github.com/dasscooby/fo4-to-starfield/i
 Team agreement: Grok owns acceptance checks; Claude supplies game evidence; Codex owns deploy/identities/output verification. Startup gate, then interior slice. Keep status under4KB; replace stale entries. Grok may audit media afterward; claim files and retain proof. No Git history rewrite.
 
 [Historical detail](handoff-archive/2026-10-07-codex-history.md). Grok acknowledged the slice and the file lock above. Awaiting Claude.
+
+### Owner direction (relayed by Claude, 2026-10-08): one shared update post + keep the PC clean
+
+1. **Shared update post:** https://github.com/dasscooby/fo4-to-starfield/issues/32. Codex and Grok: add one short comment
+   each (what works **in game**, what's broken, what's next) and keep it current there. The owner reads that issue for
+   status, not this file. Owner issues to read: #29 (movement test too weak, collision "better not great", complex doors
+   broken, no polish yet), #30 (stairs still wrong), #31 (after this goal: the hardest task).
+2. **Keep the owner's PC clean:** delete your scratch exports, smoke builds and recordings once reviewed. Keep one current
+   staging folder (`C:\Modding\staging\multi`). Claude removed 1.9 GB of its own old staging and test screenshots. Still
+   present and not Claude's: `C:\Modding\staging\codex-resume-smoke`, `C:\Modding\research\codex-reflect` (Codex, please
+   remove when done). Screen recordings: review, then delete; never commit them.

@@ -64,6 +64,31 @@ class SimdTreeTests(unittest.TestCase):
         self.assertEqual((lo_x, hi_x), (0.0, 57.0))
 
 
+class HullTests(unittest.TestCase):
+    # unit cube, faces as in the vanilla Starfield box (outward winding)
+    FACES = [[4, 2, 0, 1], [3, 5, 7, 6], [7, 4, 1, 6], [0, 2, 5, 3], [2, 4, 7, 5], [6, 1, 0, 3]]
+
+    def test_face_links_point_to_the_opposite_edge(self):
+        links, vedges = meshcollision._hull_links(self.FACES, 8)
+        self.assertEqual(len(links), 24)
+        flat = [(f, e) for f, idx in enumerate(self.FACES) for e in range(len(idx))]
+        for (f, e), (g, j) in zip(flat, links):
+            a, b = self.FACES[f][e], self.FACES[f][(e + 1) % 4]
+            self.assertEqual((self.FACES[g][j], self.FACES[g][(j + 1) % 4]), (b, a))
+        self.assertEqual(vedges[0], (5, 2))                                  # vanilla picks the last edge leaving v0
+
+    def test_open_hull_and_unused_vertex_rejected(self):
+        with self.assertRaises(Exception):
+            meshcollision._hull_links(self.FACES[:5], 8)
+        with self.assertRaises(Exception):
+            meshcollision._hull_links(self.FACES, 9)
+
+    def test_faces_rebuilt_contiguously(self):
+        raw = bytes([0, 0, 4, 127]) * 2
+        out = meshcollision._faces_raw([[0, 1, 2], [2, 1, 3, 4]], raw)
+        self.assertEqual(struct.unpack("<HBBHBB", out), (0, 3, 127, 3, 4, 127))
+
+
 class VarintTests(unittest.TestCase):
     def test_lengths(self):
         self.assertEqual(hktagfile._varint(bytes([0x05]), 0), (5, 1))

@@ -415,6 +415,15 @@ def _quat_matrix(q):
             2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y))
 
 
+def _faces_raw(faces, fo4_raw: bytes) -> bytes:
+    """Face records (first index u16, count u8, minHalfAngle u8) for the rebuilt, contiguous index list."""
+    out, first = b"", 0
+    for k, f in enumerate(faces):
+        out += struct.pack("<HBB", first, len(f), fo4_raw[4 * k + 3])
+        first += len(f)
+    return out
+
+
 def _emit_convex(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, shape: int, rot=(0.0, 0.0, 0.0, 1.0),
                  pos=(0.0, 0.0, 0.0)) -> int:
     """FO4 hknpConvexPolytopeShape -> Starfield hknpConvexShape (hull: float3 vertices, planes, faces, indices, links).
@@ -437,6 +446,12 @@ def _emit_convex(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, shape: int, rot
     for k in range(nf):
         first, cnt = struct.unpack_from("<HB", face_raw, 4 * k)
         faces.append(list(p.raw(ia + first, cnt)))
+    used = sorted({v for f in faces for v in f})          # FO4 hulls can carry unreferenced vertices: compact them
+    if len(used) != nv:
+        remap = {v: k for k, v in enumerate(used)}
+        verts = [verts[v] for v in used]
+        faces = [[remap[v] for v in f] for f in faces]
+        nv = len(verts)
     nidx = sum(len(f) for f in faces)
     links, vedges = _hull_links(faces, nv)
     T_CVX = t.type("hknpConvexShape")
@@ -452,8 +467,8 @@ def _emit_convex(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, shape: int, rot
     payloads = {
         "vertices": (b"".join(struct.pack("<3f", *v) for v in verts), nv),
         "planes": (planes, nf),
-        "faces": (face_raw, nf),
-        "indices": (p.raw(ia, nidx), nidx),
+        "faces": (_faces_raw(faces, face_raw), nf),
+        "indices": (bytes(v for f in faces for v in f), nidx),
         "faceLinks": (b"".join(edge(x) for x in links), len(links)),
         "vertexEdges": (b"".join(edge(x) for x in vedges), nv),
     }

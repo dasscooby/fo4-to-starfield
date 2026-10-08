@@ -64,8 +64,11 @@ def _compressed_mesh(p: hkpackfile.Packfile, data_obj: int) -> Tuple[List[Vec], 
                 points.append(shared[j])
             return cache[i]
         pstart, pcount = prim_d >> 8, prim_d & 0xFF
+        limit = npacked + p.unpack("<B", so + 89)[0]      # packed + shared vertex slots of this section
         for k in range(pcount):
             a, b, c, d = p.raw(prim_at + 4 * (pstart + k), 4)
+            if max(a, b, c, d) >= limit:                 # unused slot (Havok fills them with 0xDEAD): no triangle
+                continue
             tris.append((vertex(a), vertex(b), vertex(c)))
             if c != d:                                   # quad
                 tris.append((vertex(a), vertex(c), vertex(d)))
@@ -174,8 +177,12 @@ def compressed_mesh_keys(p: hkpackfile.Packfile, data_obj: int):
     for s in range(nsec):
         prim_d, = p.unpack("<I", sec_at + SECTION_SIZE * s + 80)
         pstart, pcount = prim_d >> 8, prim_d & 0xFF
+        so = sec_at + SECTION_SIZE * s
+        limit = p.unpack("<B", so + 88)[0] + p.unpack("<B", so + 89)[0]
         for j in range(pcount):
             a, b, c, d = p.raw(prim_at + 4 * (pstart + j), 4)
+            if max(a, b, c, d) >= limit:                 # unused (0xDEAD) slot: no triangle, key not used
+                continue
             for t in ((0,) if c == d else (0, 1)):
                 tri = tris[k]
                 k += 1
