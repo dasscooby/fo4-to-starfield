@@ -4,7 +4,36 @@ This describes source motion branches; it does not generate animation graphs or
 claim that independent leaves can share the vanilla single-hinge animation.
 """
 import struct
+import base64
 from . import nif
+
+
+def transform_track(source, index):
+    """Retain bind values and opaque source keys without guessing interpolation.
+
+    NiTransformData bytes still require a dedicated curve decoder/target emitter.
+    Local generated reports contain source animation data and must not be published.
+    """
+    if index == -1:
+        return None
+    if not 0 <= index < len(source.blocks):
+        raise nif.NifError("invalid door interpolator link")
+    kind = source.type_of(index)
+    if kind != "NiTransformInterpolator":
+        return {"type": kind, "status": "unsupported_interpolator"}
+    block = source.blocks[index]
+    if len(block) < 36:
+        raise nif.NifError("truncated door transform interpolator")
+    values = struct.unpack_from("<8f", block)
+    data = struct.unpack_from("<i", block, 32)[0]
+    result = {"type": kind, "translation": list(values[:3]), "quaternion_wxyz": list(values[3:7]),
+              "scale": values[7], "data_block": data, "source_keys": None}
+    if data != -1:
+        if not 0 <= data < len(source.blocks) or source.type_of(data) != "NiTransformData":
+            raise nif.NifError("invalid door transform-data link")
+        result["source_keys"] = {"type": "NiTransformData", "encoding": "base64",
+                                 "data": base64.b64encode(source.blocks[data]).decode("ascii")}
+    return result
 
 
 def inspect(source):
@@ -42,6 +71,7 @@ def inspect(source):
             translation, rotation, scale = world(node)
             targets.append({"node": node, "name": source.strings[target_name].decode("latin-1"),
                             "interpolator": interpolator, "controller": controller,
+                            "transform_track": transform_track(source, interpolator),
                             "pivot_source_units": list(translation), "rotation": list(rotation), "scale": scale,
                             "shape_blocks": sorted(shapes & nif.descendants(source, node))})
         sequences.append({"block": i, "name": source.strings[name].decode("latin-1"), "targets": targets})

@@ -1,4 +1,5 @@
 import struct
+import base64
 import unittest
 from test_review_fixes import av_fields, trishape_block
 from fo4sf import door_motion, nif
@@ -20,6 +21,19 @@ def fixture():
 
 
 class DoorMotionTests(unittest.TestCase):
+    def test_bind_values_and_source_keys_preserved(self):
+        f = fixture()
+        keys = struct.pack("<II5f", 1, 1, 0, 1, 0, 0, 0)
+        data = f.add_block("NiTransformData", keys)
+        interp = f.add_block("NiTransformInterpolator", struct.pack("<8fi", 1, 2, 3, 1, 0, 0, 0, 2, data))
+        result = door_motion.transform_track(f, interp)
+        self.assertEqual(result["translation"], [1, 2, 3])
+        self.assertEqual(result["quaternion_wxyz"], [1, 0, 0, 0])
+        self.assertEqual(result["scale"], 2)
+        self.assertEqual(base64.b64decode(result["source_keys"]["data"]), keys)
+        with self.assertRaises(nif.NifError):
+            door_motion.transform_track(f, 999)
+
     def test_independent_leaf_and_world_pivots_preserved(self):
         report = door_motion.inspect(fixture())
         self.assertEqual(report["single_hinge_shape_blocks"], [3])
