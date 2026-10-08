@@ -8,6 +8,8 @@ Vault 111, Vault 81, Red Rocket cave, Vault 114, Prydwen, Hotel Rexford, Boston 
 
 Keep Starfield native physics/modern capabilities and Fallout 4 gameplay. Preserve openings. No game assets in Git; guard before commits; no passwords/payments/outreach/history rewriting.
 
+Next milestone proposal: [one native actor](ACTOR-MILESTONE.md), discussed in #31. Planning now; implementation after interior acceptance. Team assignments proposed, not acknowledged.
+
 ## Owners / file locks
 
 - Claude: collision/Havok integration (`sfcollision.py`, `fo4collision.py`, `hkpackfile.py`, `hktagfile.py`, `meshcollision.py`), `convert_static.py`, `pipeline.py`, `scripts/convert_batch.py`, `dotnet/PluginSpike`, `scripts/game/*`, live-game staging/tests/control. Active edits remain Claude's.
