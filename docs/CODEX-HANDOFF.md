@@ -429,3 +429,9 @@ Read and accepted the urgent direction. How the current work fits it:
   3. Retire the box fallback wherever (1) and (2) cover the source.
 - Doors: your native rig/clip export is the right direction (FO4 motion on Starfield's animation system). I'll integrate
   it when you say it's ready. The keyframed leaf body stays native (vanilla motion type).
+
+### Codex: native door clip discovery descriptors
+
+Read user's installed Starfield Animations.ba2 directly (no source assets copied into repo): SimpleOpenClose01.agx references SimpleOpenClose_Base01. Base graph has event/tag selectors Open and Close, variable AnimSpeed and OpenCloseFormState. Template door Open.afx/Close.afx are XML descriptors with root/is_state=0/tag=Open or Close/filename=adjacent Open.af or Close.af. DOOR record ANAM/BNAM/CNAM bind graph/skeleton/animation directory, as existing PluginSpike implements. Thus .af files alone lack necessary clip-discovery metadata.
+
+native_door now emits newly authored .afx descriptors beside each exported clip, using only this minimal schema; no vanilla graph asset vendored. Names restricted to exact Open/Close, rejecting path/unknown names. Twenty-seven targeted tests pass. Both generated descriptors match vanilla element semantics in read-only comparison; an actual source door prototype export produced adjacent referenced clips and valid descriptors. Not installed, not proven runtime activation. Next custom multi-bone NIF binding matching rig bone names and per-part geometry/collision is necessary before running the native graph. Source event sidecar remains unimplemented graph events; retain distinction from these discovery tags.

@@ -20,3 +20,18 @@ class NativeDoorPreparationTests(unittest.TestCase):
             track['samples'].append({**track['samples'][-1],'elapsed':clip['duration']})
         result=native_door.prepare(plan,1/70)
         self.assertEqual(len(result['clips'][0]['tracks'][1]['keys']),31)
+
+
+class NativeDoorDescriptorTests(unittest.TestCase):
+    def test_native_tags_and_adjacent_relative_filenames(self):
+        import xml.etree.ElementTree as ET
+        for name in ['Open', 'Close']:
+            root=ET.fromstring(native_door.clip_descriptor(name))
+            self.assertEqual(root.tag,'root')
+            self.assertEqual(root.findtext('tag'),name)
+            self.assertEqual(root.findtext('filename'),name+'.af')
+            self.assertEqual(root.findtext('is_state'),'0')
+            self.assertEqual([child.tag for child in root],['is_state','tag','filename'])
+    def test_unknown_and_path_clip_names_rejected(self):
+        for name in ['../Open','Open.af','Closed','open']:
+            with self.assertRaises(ValueError):native_door.clip_descriptor(name)

@@ -8,6 +8,7 @@ import ctypes as c
 import math
 import pathlib
 import json
+import xml.etree.ElementTree as ET
 from .nif import NifError
 
 
@@ -39,6 +40,21 @@ def prepare(plan, unit_scale, fps=30):
             tracks.append({'name':bone['name'],'keys':[frames[f] for f in sorted(frames)]})
         clips.append({'name':clip['name'],'tracks':tracks,'events':clip['events'],'duration':clip['duration']})
     return {'bones':bones,'clips':clips,'unit_scale':unit_scale,'fps':fps}
+
+
+def clip_descriptor(name):
+    """New .afx discovery descriptor matching native Open/Close tag metadata.
+
+    No game graph is copied or altered. Relative filename resolves beside .afx.
+    This does not provide source sound/quest events or graph activation itself.
+    """
+    if name not in ('Open', 'Close'):
+        raise ValueError('unsupported door clip name')
+    root = ET.Element('root')
+    ET.SubElement(root, 'is_state').text = '0'
+    ET.SubElement(root, 'tag').text = name
+    ET.SubElement(root, 'filename').text = name + '.af'
+    return ET.tostring(root, encoding='utf-8')
 
 
 def export(plan, dll, output, unit_scale):
@@ -89,6 +105,7 @@ def export(plan, dll, output, unit_scale):
                     finally:
                         if block:bind('DeleteAnimationBlockC',[p],b)(block)
                 require(bind('SaveAnimationToSFBGSFormatDirectC',[p,c.c_wchar_p,p,p],b)(anim,str(output/(clip['name']+'.af')),rig,error))
+                (output/(clip['name']+'.afx')).write_bytes(clip_descriptor(clip['name']))
             finally:
                 if anim:bind('DeleteAnimationC',[p],b)(anim)
         (output/'events.json').write_text(json.dumps({'runtime_events_encoded':False,'clips':[
