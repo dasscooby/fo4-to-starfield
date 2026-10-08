@@ -47,6 +47,9 @@ are present. An offline parse, a mesh round-trip, or a screenshot that is not ti
 those pins does not close a row. A missing row stays unverified. The oracle exits 1
 while any row is unverified, failed, or malformed.
 
+`door_swing` stays open when the route file never recorded OPEN. Both sides ending past
+the plane is geometry. It is not a swing.
+
 Do not commit the evidence file if it names a machine path or contains game data.
 There is no accepted evidence file in the repo. Every row above is unverified.
 

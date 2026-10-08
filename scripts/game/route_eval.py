@@ -10,7 +10,7 @@ door:   PASS if the end point is min_past metres beyond the door plane (dot with
 A start more than 3 m off in X/Y, or more than 2 m off in Z, is UNREAD: the route was not begun.
 A drop of more than 6 m after a matched start is FALL, including a door that opens onto the void.
 Any other move no walk of this length could make is UNREAD.
-Prints one line per route, a summary, and a both-sides door count.
+Prints one line per route, a summary, and a door tally: both OPEN, one side, geometry, load failures.
 Exit code 1 unless the file records results, every one is PASS, and no load door was passed, walked through, or fallen through.
 """
 import json
@@ -89,9 +89,26 @@ def judge(route, res):
     return "BLOCKED", f"past plane {past:.2f} m"
 
 
-def door_rows(routes, results):
-    """Swing doors count only when two routes for the same ref are PASS.
+def _opened(res):
+    """True when this result recorded an activation, not only a crossing.
 
+    Prompt True with no verb is the runner that pressed E whenever the prompt bar was visible.
+    A later run records the verb and only counts OPEN. A file that never stored either is geometry.
+    """
+    if res.get("prompt") is True:
+        verb = res.get("verb")
+        if isinstance(verb, str) and verb.strip() and "OPEN" not in verb.upper():
+            return False
+        return True
+    verb = res.get("verb")
+    return isinstance(verb, str) and "OPEN" in verb.upper()
+
+
+def door_rows(routes, results):
+    """`both` is two different routes for one ref that each recorded an OPEN.
+
+    Two crossings with no prompt stored are `geometry`: both sides ended past the plane,
+    and the file cannot show that either side opened. One recorded OPEN is `one`.
     A walk through an already-open leaf is UNOPENED and does not make a pair.
     Load doors (the model name contains "load") are not swing rows. Passing one, walking
     through it, or falling at it is a load failure: those doors stay shut.
@@ -108,17 +125,25 @@ def door_rows(routes, results):
                 load_fail.add(route.get("ref"))
             continue
         # one line per route index: a repeated index is a rerun, not the other side
-        by_ref.setdefault(route.get("ref"), {})[res["index"]] = verdict
-    both = one = none = 0
+        by_ref.setdefault(route.get("ref"), {})[res["index"]] = (verdict, res)
+    both = one = none = geometry = 0
     for verdicts in by_ref.values():
-        passes = sum(verdict == "PASS" for verdict in verdicts.values())
-        if passes >= 2:
+        passes = activated = 0
+        for verdict, res in verdicts.values():
+            if verdict != "PASS":
+                continue
+            passes += 1
+            if _opened(res):
+                activated += 1
+        if activated >= 2:
             both += 1
-        elif passes == 1:
+        elif passes >= 2 and activated == 0:
+            geometry += 1
+        elif passes >= 1:
             one += 1
         else:
             none += 1
-    return {"both": both, "one": one, "none": none, "load_fail": len(load_fail)}
+    return {"both": both, "one": one, "none": none, "geometry": geometry, "load_fail": len(load_fail)}
 
 
 def finished(counts, rows, result_count):

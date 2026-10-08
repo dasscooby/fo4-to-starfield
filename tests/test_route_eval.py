@@ -105,9 +105,18 @@ class RouteEvalTests(unittest.TestCase):
         walked = {"start_read": "0 0 0", "end_read": "3 0 0", "prompt": False}
         held = {"start_read": "0 0 0", "end_read": "-0.4 0 0", "prompt": True, "verb": "OPEN"}
         shut = evaluator.door_rows(routes, [dict(opened, index=0), dict(opened_back, index=1), dict(held, index=2)])
-        self.assertEqual(shut, {"both": 1, "one": 0, "none": 0, "load_fail": 0})
+        self.assertEqual(shut, {"both": 1, "one": 0, "none": 0, "geometry": 0, "load_fail": 0})
         leaked = evaluator.door_rows(routes, [dict(opened, index=0), dict(walked_back, index=1), dict(walked, index=2)])
-        self.assertEqual(leaked, {"both": 0, "one": 1, "none": 0, "load_fail": 1})
+        self.assertEqual(leaked, {"both": 0, "one": 1, "none": 0, "geometry": 0, "load_fail": 1})
+        # both sides crossed, and the file never stored a prompt: not a confirmed swing
+        bare = {"start_read": "0 0 0", "end_read": "3 0 0"}
+        bare_back = {"start_read": "0 0 0", "end_read": "-3 0 0"}
+        old = evaluator.door_rows(routes, [dict(bare, index=0), dict(bare_back, index=1), dict(held, index=2)])
+        self.assertEqual(old, {"both": 0, "one": 0, "none": 0, "geometry": 1, "load_fail": 0})
+        mixed = evaluator.door_rows(routes, [dict(opened, index=0), dict(bare_back, index=1), dict(held, index=2)])
+        self.assertEqual(mixed["both"], 0)
+        self.assertEqual(mixed["geometry"], 0)
+        self.assertEqual(mixed["one"], 1)
         # the same route twice is one side, not a pair
         twice = evaluator.door_rows(routes, [dict(opened, index=0), dict(opened, index=0), dict(held, index=2)])
         self.assertEqual(twice["both"], 0)
