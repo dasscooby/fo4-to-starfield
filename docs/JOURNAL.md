@@ -423,3 +423,4 @@ index (2130), and 2 `hknpConvexShape` bodies. Staged only; not yet in game.
   ([raised](media/route-v114-stalldoor-raised.jpg)), so these instances seem to sit ~1.3 m too high. Their 270-degree
   twins are fine; suspect the door origin offset vs this placement. Open.
 - One game exit without a crash record during a door route (the rerun of the same route was fine): watching for repeats.
+- Correction: the "door raised ~1.3 m" reading for stall doors `04BF66` / `04BF9D` is unconfirmed. Follow-up views with pitch 0 looked steeply at the floor, so camera pitch from `setangle x` is not reliable enough to judge door height from one screenshot. These two doors stay open as BLOCKED, cause unknown.
