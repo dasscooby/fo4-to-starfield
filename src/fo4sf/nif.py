@@ -6,7 +6,7 @@ back byte-identically. Block *contents* are interpreted only where a converter n
 import re
 import struct
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 MAGIC = b"Gamebryo File Format, Version 20.2.0.7\n"
 VERSION = 0x14020007
@@ -163,6 +163,7 @@ class Fo4Shape:
     colors: list             # (r, g, b, a) bytes
     triangles: list          # (a, b, c)
     skinned: bool
+    block: int = -1          # source block index
 
 
 def _av_transform(blk: bytes):
@@ -273,8 +274,43 @@ def fo4_trishapes(n: NifFile) -> List[Fo4Shape]:
         name = n.strings[name_idx] if 0 <= name_idx < len(n.strings) else b""
         tr, rot, scale = world(i)
         shapes.append(Fo4Shape(name, tr, rot, scale, shader, alpha, skin, pos, uv, nor, tan, col, tris,
-                               bool(attrs & VF_SKIN)))
+                               bool(attrs & VF_SKIN), i))
     return shapes
+
+
+def descendants(n: NifFile, i: int) -> set:
+    """Block indices of node i and everything below it (children of NiNodes, recursively)."""
+    out, todo = set(), [i]
+    while todo:
+        j = todo.pop()
+        if j in out or not (0 <= j < len(n.blocks)):
+            continue
+        out.add(j)
+        if n.type_of(j).endswith("Node"):
+            todo += node_children(n, j)
+    return out
+
+
+def door_hinge(n: NifFile) -> Optional[Tuple[int, tuple]]:
+    """(node index, world pivot) of the node an FO4 door's "Open" NiControllerSequence animates first, or None.
+    Sequence layout: name, num controlled blocks, array grow by, then per block: interpolator, controller, priority (byte),
+    node name (string index), property type, controller type, controller id, interpolator id."""
+    for i in range(len(n.blocks)):
+        if n.type_of(i) != "NiControllerSequence":
+            continue
+        blk = n.blocks[i]
+        name_idx, count = struct.unpack_from("<iI", blk, 0)
+        if count == 0 or n.strings[name_idx] != b"Open":
+            continue
+        target, = struct.unpack_from("<i", blk, 12 + 9)
+        if not (0 <= target < len(n.strings)):
+            return None
+        world = world_transforms(n)
+        for j in range(len(n.blocks)):
+            if n.type_of(j) == "NiNode" and struct.unpack_from("<i", n.blocks[j], 0)[0] == target:
+                return j, tuple(world(j)[0])     # only the pivot matters: the swing axis is vertical either way
+        return None
+    return None
 
 
 def referenced_paths(n: NifFile) -> List[str]:

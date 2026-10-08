@@ -17,7 +17,10 @@ from typing import Dict, List, Optional
 
 from . import ba2 as ba2mod
 from . import convert_material as cm
-from . import convert_static, nif, sfcollision, textures
+from . import convert_static, nif, sfcollision, sfnif, textures
+
+DOOR_RE = re.compile(r"[\\/]doors?[\\/]|door[^\\/]*\.nif$", re.I)
+NOT_HINGED_RE = re.compile(r"vault|elevator|garage|gate|hatch|slid", re.I)   # sliding / lifting doors animate differently
 
 
 class Fo4Archives:
@@ -79,8 +82,11 @@ def _plane_pair(dds: bytes, tmp: str, texconv_exe: str):
 class Converter:
     def __init__(self, src: Fo4Archives, staging: str, texconv_exe: str, content_resources: str,
                  collision_template: Optional[bytes] = None, prefix: str = "fo4port",
-                 no_collision_pattern: str = r"^meshes[\\/](architecture|interiors)[\\/]"):
+                 no_collision_pattern: str = r"^meshes[\\/](architecture|interiors)[\\/]", rig_doors: bool = False):
         self.src, self.staging, self.texconv = src, staging, texconv_exe
+        # rig_doors: experimental. Hinged doors become activatable DOOR NIFs, but the leaf does not swing yet and blocks the
+        # doorway (docs/spikes/WP-doors-research.md), so by default doors stay static and walk-through.
+        self.rig_doors = rig_doors
         self.template_mat = cm.read_template(content_resources)
         self.collision_template = collision_template
         self.prefix = prefix
@@ -353,9 +359,21 @@ class Converter:
                                   r"|[\\/]doors?[\\/]|door[^\\/]*\.nif$", nif_name, re.I))   # doors: no opening yet, keep passable
             use_box = self.collision_template is not None and not soft
             coll_report = {}
-            files = convert_static.convert_static(raw, out_name, material_paths=mats, collision_mode=mode, include_skinned=True,
-                                                  report=coll_report,
-                                                  collision_template=self.collision_template if use_box else None)
+            files = None
+            if self.rig_doors and DOOR_RE.search(nif_name) and not NOT_HINGED_RE.search(nif_name) and nif.door_hinge(src):
+                try:                                     # hinged door: rigged like the vanilla template door so it opens
+                    files, offset, bounds = convert_static.convert_door(raw, out_name, mats,
+                                                                collision_template=self.collision_template)
+                    t = sfnif.DOOR_TEMPLATE
+                    res["door"] = {"origin_offset": [round(x, 5) for x in offset], "anim_graph": t["anim_graph"],
+                                   "bounds": [[round(x, 4) for x in b] for b in bounds],
+                                   "skeleton": t["skeleton"], "animations": t["animations"]}
+                except Exception as e:                   # noqa: BLE001  (falls back to a static door)
+                    res["door_error"] = f"{type(e).__name__}: {e}"
+            if files is None:
+                files = convert_static.convert_static(raw, out_name, material_paths=mats, collision_mode=mode,
+                                                      include_skinned=True, report=coll_report,
+                                                      collision_template=self.collision_template if use_box else None)
             for relp, data in files.items():
                 p = os.path.join(self.staging, *relp.split("/"))
                 os.makedirs(os.path.dirname(p), exist_ok=True)

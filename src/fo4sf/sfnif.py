@@ -152,3 +152,84 @@ def build_static_nif(node_name: bytes, shapes: List[StaticShape], bs_version: in
         f.add_block("bhkPhysicsSystem", struct.pack("<I", len(blob)) + blob)
     f.footer = struct.pack("<II", 1, 0)
     return f
+
+
+# Vanilla hinged door used as the animation template (DOOR 0AA24A AK_Ext_Bld_WallA_DoorA_01_Alt02). Its skeleton.rig stores
+# the bind pose of these nodes, so a converted door must use the same node names and the same hinge position.
+DOOR_TEMPLATE = {
+    "anim_graph": "AnimTextData\\Tables\\Graphs\\SimpleOpenClose01.agx",
+    "skeleton": "architecture\\city\\akila\\animated\\doors\\ak_ext_bld_walla_doora_01\\characterassets\\skeleton.rig",
+    "animations": "architecture\\city\\akila\\animated\\doors\\ak_ext_bld_walla_doora_01\\animations",
+    "anim_root": b"AK_Door_Anim_02_Root",
+    "hinge": b"Hinge01_Point",
+    "hinge_pos": (-0.823, 1.698, 0.0),                       # metres, from skeleton.rig (and the vanilla NIF)
+    "leaf": None,                                             # (b"door" tested: no movement) rig: AK_Door_Anim_02_Root > Hinge01_Point > door > attach nodes
+    "hinge_children": {b"REF_ATTACH_NODE": (1.123, 0.009, 1.069), b"LookAtNode": (1.117, -0.001, 1.024)},
+}
+
+
+def build_door_nif(node_name: bytes, static_shapes: List[StaticShape], moving_shapes: List[StaticShape],
+                   template: dict = DOOR_TEMPLATE, bs_version: int = 173,
+                   leaf_collision: Optional[bytes] = None) -> nifmod.NifFile:
+    """Door NIF laid out like the template door: root -> [frame node at the hinge position -> static shapes]
+    and root -> anim root -> hinge (at the template's hinge position) -> moving shapes + attach nodes. All shape geometry is
+    expected relative to the FO4 pivot, so both groups sit at the hinge position. Animated nodes carry NiStringExtraData
+    "sgoKeep" like vanilla so they survive optimisation. leaf_collision (a bhkPhysicsSystem blob, hinge-local) goes on the
+    node holding the moving shapes: activation ("Open") needs a body to hit."""
+    f = nifmod.NifFile(endian=1, user_version=12, bs_version=bs_version, author=b"\x00", unknown_int=0,
+                       export_script=b"\x00", sf_data=b"\x7a\x00")
+    s_matid = f.string_index(b"MaterialID")
+    s_keep = f.string_index(b"sgoKeep")
+    rot_scale = struct.pack("<9ff", 1, 0, 0, 0, 1, 0, 0, 0, 1, 1.0)
+
+    def node(name: bytes, pos, keep: bool, coll: Optional[bytes] = None) -> int:
+        i = f.add_block("NiNode", b"")                     # filled in by finish()
+        extra = [f.add_block("NiStringExtraData", struct.pack("<ii", s_keep, s_keep))] if keep else []
+        c = -1
+        if coll is not None:
+            c = f.add_block("bhkNPCollisionObject", struct.pack("<iHiI", i, 0x80, len(f.blocks) + 1, 0))
+            f.add_block("bhkPhysicsSystem", struct.pack("<I", len(coll)) + coll)
+        pending[i] = (f.string_index(name), extra, pos, [], c)
+        return i
+
+    def finish(i):
+        name, extra, pos, kids, coll = pending[i]
+        f.blocks[i] = (struct.pack("<iI", name, len(extra)) + struct.pack(f"<{len(extra)}i", *extra)
+                       + struct.pack("<iI", -1, 0xE) + struct.pack("<3f", *pos) + rot_scale
+                       + struct.pack("<iI", coll, len(kids)) + struct.pack(f"<{len(kids)}i", *kids))
+
+    def shape(s: StaticShape) -> int:
+        base = len(f.blocks)
+        g = BSGeometry(name_idx=f.string_index(s.name), extra_refs=[base + 1], sphere=s.sphere, box=s.box, shader=base + 2,
+                       meshes=[MeshRef(s.indices_size, s.num_verts, 0x40, s.mesh_path), None, None, None])
+        f.add_block("BSGeometry", build_bsgeometry(g))
+        f.add_block("NiIntegerExtraData", struct.pack("<iI", s_matid, material_id(s.material_path)))
+        f.add_block("BSLightingShaderProperty", struct.pack("<iIi", f.string_index(s.material_path.encode("latin-1")), 0, -1))
+        return base
+
+    pending = {}
+    root = f.add_block("NiNode", b"")
+    bsx = f.add_block("BSXFlags", struct.pack("<iI", f.string_index(b"BSX"), 0x0A if leaf_collision else 0))   # havok + complex, as vanilla doors (0x2A)
+    pending[root] = (f.string_index(node_name), [bsx], (0.0, 0.0, 0.0), [], -1)
+    hp = template["hinge_pos"]
+    anim = node(template["anim_root"], (0.0, 0.0, 0.0), True)       # same order and nesting as the vanilla door
+    pending[root][3].append(anim)
+    if template.get("leaf"):
+        hinge = node(template["hinge"], hp, True)
+        pending[anim][3].append(hinge)
+        leaf = node(template["leaf"], (0.0, 0.0, 0.0), True, leaf_collision)   # the bone the open/close animation rotates
+        pending[hinge][3].append(leaf)
+    else:                                         # geometry, collision and attach nodes directly on the hinge node
+        hinge = leaf = node(template["hinge"], hp, True, leaf_collision)
+        pending[anim][3].append(hinge)
+    pending[leaf][3].extend(shape(s) for s in moving_shapes)
+    for name, pos in template["hinge_children"].items():
+        pending[leaf][3].append(node(name, pos, True))
+    if static_shapes:
+        frame = node(b"Frame", hp, False)
+        pending[root][3].append(frame)
+        pending[frame][3].extend(shape(s) for s in static_shapes)
+    for i in pending:
+        finish(i)
+    f.footer = struct.pack("<II", 1, 0)
+    return f

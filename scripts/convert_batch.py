@@ -63,7 +63,7 @@ def main():
         used.add(eid)
         items.append({"editor_id": eid, "model": r["out_name"].replace("/", "\\") + ".nif", "source": name,
                       "shapes": r["shapes"], "fallback_materials": r["fallback_materials"], "form_index": len(items),
-                      "collision_report": r.get("collision_report") or {}})
+                      "collision_report": r.get("collision_report") or {}, **({"door": r["door"]} if "door" in r else {})})
         print(f"  ok  {name} -> {eid} (shapes {r['shapes']}, fallback materials {r['fallback_materials']})")
     for f in failures[:15]:
         print("  FAIL", f["nif"], "-", f["reason"][:110])

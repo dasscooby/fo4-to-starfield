@@ -146,3 +146,12 @@ the same result.
 Vault 111 [before](media/metal-v111-before.jpg) / [after](media/metal-v111-after.jpg), [tour frame](media/metal-v111-tour.jpg):
 cream walls, blue pipes and orange fittings now read like Fallout 4. [Hotel Rexford](media/rexford-lit.jpg) is readable but
 greyer than the warm original (next: image-space LUT / colour check).
+
+## 2026-10-08: doors (experimental, off by default)
+
+Hinged FO4 doors can be rebuilt on the vanilla Akila door rig. In game they sit in their frames, show "DOOR / Open (E)",
+toggle Open/Close and block the player, but the leaf does not swing yet. Because a door that blocks the doorway is worse than a
+walk-through one, rigging is off by default (`Converter(rig_doors=True)` to test). Details, clues and next steps are in
+[WP-doors-research](spikes/WP-doors-research.md). New: `nif.door_hinge` / `descendants`, `sfnif.build_door_nif`,
+`convert_static.convert_door`, DOOR records in the plugin writer (with origin offset and bounds), `tests/test_doors.py`,
+`SfInspect doorprops`.

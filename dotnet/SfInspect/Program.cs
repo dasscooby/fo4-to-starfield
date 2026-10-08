@@ -68,6 +68,9 @@ switch (args[1])
                 Console.WriteLine($"   {p.Name} = {s}");
             }
         break;
+    case "doorprops":
+        foreach (var p in typeof(Mutagen.Bethesda.Starfield.Door).GetProperties()) Console.WriteLine($"{p.PropertyType} {p.Name}");
+        break;
     case "imgs":
         {
             var useCount = cells.Where(c => !c.ImageSpace.IsNull).GroupBy(c => c.ImageSpace.FormKey).ToDictionary(g => g.Key, g => g.Count());

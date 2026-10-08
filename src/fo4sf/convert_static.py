@@ -8,7 +8,8 @@ convention, Z-up in both. Collision, materials and skinning are not converted ye
 """
 import hashlib
 import struct
-from typing import Dict
+from dataclasses import replace
+from typing import Dict, Tuple
 
 from . import nif as nifmod
 from . import sfcollision, sfmesh, sfnif
@@ -138,3 +139,53 @@ def convert_static(fo4_nif: bytes, out_name: str, material_path: str = PLACEHOLD
     out = sfnif.build_static_nif(node_name, static_shapes, collision_blob=blob, child_collision_blobs=child_blobs)
     files[f"meshes/{out_name}.nif"] = nifmod.serialize(out)
     return files
+
+
+def convert_door(fo4_nif: bytes, out_name: str, material_paths: list, unit_scale: float = UNIT_SCALE,
+                 template: dict = None, collision_template: bytes = None) -> Tuple[Dict[str, bytes], tuple, tuple]:
+    """FO4 hinged door -> Starfield door NIF rigged like the vanilla template door (see sfnif.DOOR_TEMPLATE).
+    Shapes under the node the FO4 "Open" sequence animates become the moving leaf; everything else is the static frame.
+    Geometry is re-centred on the FO4 pivot and hung under the template's hinge position, so the NIF origin moves:
+    returns (files, origin_offset, bounds) where origin_offset (metres, door-local) must be added (rotated and scaled) to the
+    reference position to keep the door where FO4 drew it. bounds = (min xyz, max xyz) in NIF space (for the record's OBND)."""
+    template = template or sfnif.DOOR_TEMPLATE
+    src = nifmod.parse(fo4_nif)
+    hinge = nifmod.door_hinge(src)
+    if hinge is None:
+        raise nifmod.NifError("no Open sequence / hinge node")
+    moving_blocks = nifmod.descendants(src, hinge[0])
+    pivot = hinge[1]
+    shapes = [s for s in nifmod.fo4_trishapes(src) if s.positions and s.triangles]
+    files, static_shapes, moving_shapes, moving_pts, all_pts = {}, [], [], [], []
+    for i, s in enumerate(shapes):
+        if material_paths[i] is None:
+            continue
+        s = replace(s, translation=tuple(s.translation[a] - pivot[a] for a in range(3)))
+        m = shape_to_mesh(s, unit_scale)
+        data = sfmesh.serialize(m)
+        d, f = mesh_file_path(data)
+        files[f"geometries/{d}/{f}.mesh"] = data
+        pts = [sfmesh.decode_position(p, m.scale) for p in m.positions]
+        sphere, box = sfnif.bounds_from_points(pts)
+        st = sfnif.StaticShape(s.name or f"Shape{i}".encode(), f"{d}\\{f}".encode(), len(m.triangles) * 3, len(m.positions),
+                               material_paths[i], sphere, box)
+        all_pts += pts
+        if s.block in moving_blocks:
+            moving_shapes.append(st)
+            moving_pts += pts
+        else:
+            static_shapes.append(st)
+    if not moving_shapes:
+        raise nifmod.NifError("door has no moving geometry")
+    blob = None
+    if collision_template is not None:          # box around the leaf (hinge-local): the body the player activates
+        lo = [min(p[a] for p in moving_pts) for a in range(3)]
+        hi = [max(p[a] for p in moving_pts) for a in range(3)]
+        blob = sfcollision.box_blob(collision_template, tuple((lo[a] + hi[a]) / 2 for a in range(3)),
+                                    tuple(max(0.02, (hi[a] - lo[a]) / 2) for a in range(3)))
+    out = sfnif.build_door_nif(out_name.rsplit("/", 1)[-1].encode(), static_shapes, moving_shapes, template,
+                               leaf_collision=blob)
+    files[f"meshes/{out_name}.nif"] = nifmod.serialize(out)
+    hp = template["hinge_pos"]
+    bounds = ([min(p[a] for p in all_pts) + hp[a] for a in range(3)], [max(p[a] for p in all_pts) + hp[a] for a in range(3)])
+    return files, tuple(pivot[a] * unit_scale - hp[a] for a in range(3)), bounds

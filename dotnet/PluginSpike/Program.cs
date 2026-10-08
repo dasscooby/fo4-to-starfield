@@ -39,19 +39,63 @@ FormKey Id(string key)
 }
 
 // ---- statics ----------------------------------------------------------------------------------------------------------
-var items = new List<(string editorId, string model, string source)>();
-using (var doc = JsonDocument.Parse(File.ReadAllText(args[1])))
-    foreach (var it in doc.RootElement.GetProperty("items").EnumerateArray())
-        items.Add((it.GetProperty("editor_id").GetString()!, it.GetProperty("model").GetString()!, it.GetProperty("source").GetString()!));
+var items = new List<(string editorId, string model, string source, JsonElement? door)>();
+using var manifestDoc = JsonDocument.Parse(File.ReadAllText(args[1]));
+foreach (var it in manifestDoc.RootElement.GetProperty("items").EnumerateArray())
+    items.Add((it.GetProperty("editor_id").GetString()!, it.GetProperty("model").GetString()!, it.GetProperty("source").GetString()!,
+               it.TryGetProperty("door", out var dj) ? dj : null));
 
-var bySource = new Dictionary<string, Static>(StringComparer.OrdinalIgnoreCase);
-foreach (var (editorId, model, source) in items)
+// source FO4 model -> (base record, origin offset in metres). Hinged doors become DOOR records animated by a vanilla door's
+// graph / skeleton / animations; their NIF origin sits at a different point, so references are shifted by origin_offset.
+var bySource = new Dictionary<string, (FormKey key, P3Float offset)>(StringComparer.OrdinalIgnoreCase);
+int doors = 0;
+foreach (var (editorId, model, source, door) in items)
 {
+    if (door is JsonElement d)
+    {
+        var rec = new Door(Id("DOOR:" + editorId), release)
+        {
+            // FO4PORT_DOOR_MODEL (test hook): use this model for every door, e.g. the vanilla template door's own NIF
+            EditorID = editorId, Model = new Model { File = Environment.GetEnvironmentVariable("FO4PORT_DOOR_MODEL") ?? model },
+            Name = "Door",
+            SoundLevel = SoundLevel.Normal,                                     // DEVT 1, as vanilla doors
+            FacingAxisOverride = Door.FacingAxisOverrideEnum.BasedOnBounds,     // trailing ANAM, as vanilla doors
+        };
+        if (d.TryGetProperty("bounds", out var bj))                            // vanilla doors have real bounds
+            rec.ObjectBounds = new ObjectBounds
+            {
+                First = new P3Float(bj[0][0].GetSingle(), bj[0][1].GetSingle(), bj[0][2].GetSingle()),
+                Second = new P3Float(bj[1][0].GetSingle(), bj[1][1].GetSingle(), bj[1][2].GetSingle()),
+            };
+        rec.Components.Add(new AnimationGraphComponent
+        {
+            ANAM = d.GetProperty("anim_graph").GetString(), BNAM = d.GetProperty("skeleton").GetString(),
+            CNAM = d.GetProperty("animations").GetString(),
+        });
+        mod.Doors.Add(rec);
+        var o = d.GetProperty("origin_offset");
+        bySource[source.Replace('/', '\\')] = (rec.FormKey, new P3Float(o[0].GetSingle(), o[1].GetSingle(), o[2].GetSingle()));
+        if (Environment.GetEnvironmentVariable("FO4PORT_DOOR_BASE") is string vb)   // test hook: place a vanilla DOOR instead
+            bySource[source.Replace('/', '\\')] = (new FormKey(sfEsm, Convert.ToUInt32(vb, 16)), new P3Float(0, 0, 0));
+        doors++;
+        continue;
+    }
     var stat = new Static(Id("STAT:" + editorId), release) { EditorID = editorId, Model = new Model { File = model } };
     mod.Statics.Add(stat);
-    bySource[source.Replace('/', '\\')] = stat;
+    bySource[source.Replace('/', '\\')] = (stat.FormKey, new P3Float(0, 0, 0));
 }
-Console.WriteLine($"{items.Count} statics");
+Console.WriteLine($"{items.Count - doors} statics, {doors} doors");
+
+// FO4 / Starfield reference rotation: extrinsic X, then Y, then Z (radians). Rotates a door-local offset into the cell.
+static P3Float RotateOffset(P3Float v, P3Float r, float scale)
+{
+    double cx = Math.Cos(r.X), sx = Math.Sin(r.X), cy = Math.Cos(r.Y), sy = Math.Sin(r.Y), cz = Math.Cos(r.Z), sz = Math.Sin(r.Z);
+    double x = v.X * scale, y = v.Y * scale, z = v.Z * scale;
+    double y1 = y * cx - z * sx, z1 = y * sx + z * cx;           // about X
+    double x2 = x * cy + z1 * sy, z2 = -x * sy + z1 * cy;          // about Y
+    double x3 = x2 * cz - y1 * sz, y3 = x2 * sz + y1 * cz;         // about Z
+    return new P3Float((float)x3, (float)y3, (float)z2);
+}
 
 // Optional per-cell lighting overrides: <output dir>/lighting.json = { "<cell>": { "LIGHTING_TEMPLATE": "06BCF8", ... },
 // "*": { ...defaults for every cell... } }. Keys: LIGHTING_TEMPLATE, IMAGE_SPACE, OMNI_LIGHT, LIGHT_MERGE_M.
@@ -108,14 +152,17 @@ foreach (var cellPath in args.Skip(2))
         }
         else
         {
-            if (model.Length == 0 || !bySource.TryGetValue("meshes\\" + model.TrimStart('\\'), out var stat)) { skipped++; continue; }
+            if (model.Length == 0 || !bySource.TryGetValue("meshes\\" + model.TrimStart('\\'), out var bas)) { skipped++; continue; }
+            var scale = r.GetProperty("scale").GetSingle();
+            var rot = Rot(r.GetProperty("rot"));
+            var pos = Pos(r.GetProperty("pos"));
+            var off = RotateOffset(bas.offset, rot, scale);
             obj = new PlacedObject(Id($"REFR:{cellName}:{src}"), release)
             {
-                Base = new FormLinkNullable<IPlaceableObjectGetter>(stat.FormKey),
-                Position = Pos(r.GetProperty("pos")),
-                Rotation = Rot(r.GetProperty("rot")),
+                Base = new FormLinkNullable<IPlaceableObjectGetter>(bas.key),
+                Position = new P3Float(pos.X + off.X, pos.Y + off.Y, pos.Z + off.Z),
+                Rotation = rot,
             };
-            var scale = r.GetProperty("scale").GetSingle();
             if (Math.Abs(scale - 1f) > 1e-4) obj.Scale = scale;
             placed++;
         }
