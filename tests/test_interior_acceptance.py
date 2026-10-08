@@ -90,6 +90,12 @@ class InteriorAcceptanceTests(unittest.TestCase):
             evidence="both sides opened; see C:\\Users\\<user>\\shot.png")
         result = oracle.audit(doc)
         self.assertIn("Parsons: door_swing", result["passed"])
+        # a placeholder earlier in the note does not hide a later real path
+        doc["cells"]["Parsons"]["door_swing"] = observation(
+            evidence="see C:\\Users\\<user>\\shot.png and " + win)
+        result = oracle.audit(doc)
+        self.assertIn("Parsons: door_swing", result["unverified"])
+        self.assertNotIn("Parsons: door_swing", result["passed"])
 
     def test_failure_is_not_counted_as_verified(self):
         doc = pinned()

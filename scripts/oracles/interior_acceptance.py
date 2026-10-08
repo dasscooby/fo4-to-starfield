@@ -81,8 +81,9 @@ def _observation(label, obs, errors, failures, unverified, passed, pins_ok):
     if not isinstance(evidence, str) or not evidence.strip():
         errors.append(f"{label}: evidence text required")
         return
-    match = LOCAL_PATH.search(evidence)
-    if match and not any(word in match.group(0) for word in ALLOWED_PATH_WORDS):
+    for match in LOCAL_PATH.finditer(evidence):
+        if any(word in match.group(0) for word in ALLOWED_PATH_WORDS):
+            continue
         errors.append(f"{label}: evidence names a machine path")
         unverified.append(label)
         return
