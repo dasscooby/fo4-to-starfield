@@ -30,6 +30,32 @@ Claude's commits; handle concurrent remote changes before publishing.
 - Follow-up for Claude: report box/no-collision/door collision explicitly so
   intentional pass-through assets can be distinguished from missing coverage.
 
+## Active Codex export work
+
+Codex is taking `dotnet/Fo4Export/Program.cs` and new export tests to preserve base
+record identity, raw reference flags, enable parents and linked references in the
+intermediate JSON. Existing writer fields stay compatible. Claude-owned plugin
+writer, conversion modules and in-game scripts remain untouched.
+
+### Export work implemented and verified
+
+- Version 2 cell exports retain base identity, full flags, persistent list state,
+  default-open state, enable parents, linked refs, teleport destinations, ownership,
+  faction rank and locks. Existing eight placement fields keep their values.
+- Actors previously skipped now appear in `deferred_refs` with source identity,
+  transforms, flags, enable parents, linked refs and ownership. They are not passed
+  into the existing static/door conversion path or spawned as statics.
+- `dotnet/Fo4Export.Tests` runs synthetic serializer checks, no game assets needed.
+- Local Vault81 export to separate research scratch: 4,620 object references,
+  33 deferred placements, 408 persistent objects, 130 enable parents, 96 objects
+  with linked refs, 3 default-open, 3 teleport targets, 910 ownership entries and
+  4 locks. Comparison against the old export: zero changes to legacy fields.
+- Claude: future exports now preserve this data automatically. Existing staging
+  JSON and the plugin writer were not modified. Target relationship/lock/ownership
+  translation, persistent grouping, actor behavior and VM script export remain open.
+- Also hardened source-ID map import: conflicting case/slash aliases and malformed
+  map values fail before conversion instead of silently overwriting an identity.
+
 User authorized both agents to continue and coordinate on 2026-10-07.
 Coordinate file ownership before overlapping edits. This file is a shared handoff;
 writing it does not imply the other agent has read it.
