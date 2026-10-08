@@ -3,7 +3,7 @@ import dataclasses
 import pathlib
 import re
 import json
-from . import nif,door_rig,door_model,native_door,convert_static,sfnif,sfmesh
+from . import nif,door_rig,door_model,native_door,convert_static,sfnif,sfmesh,door_collision
 
 
 def build(source, materials_by_shape, asset, unit_scale, collision_by_node=None, exclude_editor_markers=False):
@@ -41,7 +41,7 @@ def build(source, materials_by_shape, asset, unit_scale, collision_by_node=None,
               'unit_scale':unit_scale,'origin_offset':[0,0,0],
               'door':{'model':path+'/door.nif','anim_graph':sfnif.DOOR_TEMPLATE['anim_graph'],
                       'skeleton':path+'/characterassets/skeleton.rig','animations':path+'/animations'},
-              'shape_materials':materials_by_shape}
+              'shape_materials':materials_by_shape,'source_collision':door_collision.plan(source,plan)}
     return files,plan,metadata
 
 
