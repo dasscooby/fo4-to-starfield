@@ -60,6 +60,8 @@ def _compressed_mesh(p: hkpackfile.Packfile, data_obj: int) -> Tuple[List[Vec], 
                 return local[i]
             if i not in cache:
                 j, = p.unpack("<H", sidx_at + 2 * (sh_start + i - npacked))
+                if j >= len(shared):
+                    raise hkpackfile.PackfileError(f"shared vertex index {j} out of range ({len(shared)})")
                 cache[i] = len(points)
                 points.append(shared[j])
             return cache[i]
@@ -67,7 +69,7 @@ def _compressed_mesh(p: hkpackfile.Packfile, data_obj: int) -> Tuple[List[Vec], 
         limit = npacked + p.unpack("<B", so + 89)[0]      # packed + shared vertex slots of this section
         for k in range(pcount):
             a, b, c, d = p.raw(prim_at + 4 * (pstart + k), 4)
-            if max(a, b, c, d) >= limit:                 # unused slot (Havok fills them with 0xDEAD): no triangle
+            if max(a, b, c, d) >= limit or a == b == c == d:   # unused (0xDEAD) slot or degenerate point: no triangle
                 continue
             tris.append((vertex(a), vertex(b), vertex(c)))
             if c != d:                                   # quad
@@ -181,7 +183,7 @@ def compressed_mesh_keys(p: hkpackfile.Packfile, data_obj: int):
         limit = p.unpack("<B", so + 88)[0] + p.unpack("<B", so + 89)[0]
         for j in range(pcount):
             a, b, c, d = p.raw(prim_at + 4 * (pstart + j), 4)
-            if max(a, b, c, d) >= limit:                 # unused (0xDEAD) slot: no triangle, key not used
+            if max(a, b, c, d) >= limit or a == b == c == d:   # unused (0xDEAD) slot / degenerate: no key
                 continue
             for t in ((0,) if c == d else (0, 1)):
                 tri = tris[k]

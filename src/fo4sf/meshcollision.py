@@ -619,6 +619,8 @@ def convert_bodies(fo4_blob: bytes, template_blob: bytes, select: Optional[List[
             d = p.pointer(shape + fc.CMS_DATA)
             if d is None:
                 raise hkpackfile.PackfileError("compressed mesh body has no data")
+            if not fc.compressed_mesh_keys(p, d):         # only degenerate / unused primitives: nothing to collide with
+                continue
             i_shape = _emit_mesh(w, t, p, d)
         elif cls == "hknpConvexPolytopeShape":
             i_shape = _emit_convex(w, t, p, shape)
