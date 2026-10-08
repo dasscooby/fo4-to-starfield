@@ -10,7 +10,8 @@ door:   PASS if the end point is min_past metres beyond the door plane (dot with
 A start more than 3 m off in X/Y, or more than 2 m off in Z, is UNREAD: the route was not begun.
 A drop of more than 6 m after a matched start is FALL, including a door that opens onto the void.
 Any other move no walk of this length could make is UNREAD.
-Prints one line per route and a summary; exit code 1 if anything is not PASS.
+Prints one line per route, a summary, and a both-sides door count.
+Exit code 1 unless every route is PASS and no load door was passed, walked through, or fallen through.
 """
 import json
 import math
@@ -88,6 +89,38 @@ def judge(route, res):
     return "BLOCKED", f"past plane {past:.2f} m"
 
 
+def door_rows(routes, results):
+    """Swing doors count only when two routes for the same ref are PASS.
+
+    A walk through an already-open leaf is UNOPENED and does not make a pair.
+    Load doors (the model name contains "load") are not swing rows. Passing one, walking
+    through it, or falling at it is a load failure: those doors stay shut.
+    """
+    by_ref = {}
+    load_fail = set()
+    for res in results:
+        route = routes[res["index"]]
+        if route.get("kind") != "door":
+            continue
+        verdict, _why = judge(route, res)
+        if "load" in route.get("model", "").lower():
+            if verdict in ("PASS", "UNOPENED", "FALL"):
+                load_fail.add(route.get("ref"))
+            continue
+        # one line per route index: a repeated index is a rerun, not the other side
+        by_ref.setdefault(route.get("ref"), {})[res["index"]] = verdict
+    both = one = none = 0
+    for verdicts in by_ref.values():
+        passes = sum(verdict == "PASS" for verdict in verdicts.values())
+        if passes >= 2:
+            both += 1
+        elif passes == 1:
+            one += 1
+        else:
+            none += 1
+    return {"both": both, "one": one, "none": none, "load_fail": len(load_fail)}
+
+
 def main():
     routes = json.load(open(sys.argv[1], encoding="utf-8-sig"))["routes"]
     results = [json.loads(l) for l in open(sys.argv[2], encoding="utf-8-sig") if l.strip()]
@@ -96,9 +129,12 @@ def main():
         r = routes[res["index"]]
         verdict, why = judge(r, res)
         counts[verdict] = counts.get(verdict, 0) + 1
-        print(f"{res['index']:3d} {verdict:7s} {r['kind']:6s} {r['ref']} {r['model'].split(chr(92))[-1]:40s} {why}")
+        print(f"{res['index']:3d} {verdict:8s} {r['kind']:6s} {r['ref']} {r['model'].split(chr(92))[-1]:40s} {why}")
     print("summary:", counts)
-    sys.exit(0 if set(counts) <= {"PASS"} else 1)
+    rows = door_rows(routes, results)
+    print("doors:", rows)
+    # A load door that passes on geometry is not a swing pass, and it must not exit 0.
+    sys.exit(0 if set(counts) <= {"PASS"} and rows["load_fail"] == 0 else 1)
 
 
 if __name__ == "__main__":

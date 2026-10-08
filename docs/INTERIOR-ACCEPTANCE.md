@@ -17,8 +17,8 @@ Library, Parsons.
 | Check | Pass means |
 |---|---|
 | `walkable` | Floors and stairs hold the player. No fall-through. |
-| `doorways` | A closed door blocks. An open door can be walked through. |
-| `door_swing` | The hinged leaf swings on the in-game control and rests in the frame. |
+| `doorways` | A closed door blocks. An open hinged door can be walked through. A load door stays solid; falling through it fails the cell. |
+| `door_swing` | Both sides of each hinged door open on OPEN, and the leaf rests in the frame. Walking through a leaf the other side already opened does not count. Load doors stay shut; teleport is not this check. |
 | `selected_body` | Each attachment uses its own selected Havok body. A shared system does not put every body on every node. |
 | `frame_collision` | The frame blocks. Only the opening changes when the leaf moves. |
 | `lighting` | The room is neither washed out nor fully metallic. |

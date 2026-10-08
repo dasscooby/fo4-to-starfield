@@ -91,3 +91,24 @@ class RouteEvalTests(unittest.TestCase):
                    "expect": {"low": [0, 0, 0], "high": [2, 0, 2], "min_rise": 1.6}}
         self.assertEqual(evaluator.judge(
             climbed, {"start_read": "0 0 0.3", "end_read": "1 0 20"})[0], "UNREAD")
+
+    def test_both_sides_are_required_and_load_doors_are_not_swings(self):
+        wood = {"kind": "door", "ref": "hinge", "model": "PaintedWoodDoor01.nif", "start": [0, 0, 0],
+                "expect": {"plane_point": [0, 0, 0], "plane_normal": [1, 0, 0], "min_past": 0.8}}
+        other = dict(wood, expect={"plane_point": [0, 0, 0], "plane_normal": [-1, 0, 0], "min_past": 0.8})
+        load = {"kind": "door", "ref": "entrance", "model": "BldWoodPDbDoorLoad01.nif", "start": [0, 0, 0],
+                "expect": {"plane_point": [0, 0, 0], "plane_normal": [1, 0, 0], "min_past": 0.8}}
+        routes = [wood, other, load]
+        opened = {"start_read": "0 0 0", "end_read": "3 0 0", "prompt": True, "verb": "OPEN"}
+        opened_back = {"start_read": "0 0 0", "end_read": "-3 0 0", "prompt": True, "verb": "OPEN"}
+        walked_back = {"start_read": "0 0 0", "end_read": "-3 0 0", "prompt": False}
+        walked = {"start_read": "0 0 0", "end_read": "3 0 0", "prompt": False}
+        held = {"start_read": "0 0 0", "end_read": "-0.4 0 0", "prompt": True, "verb": "OPEN"}
+        shut = evaluator.door_rows(routes, [dict(opened, index=0), dict(opened_back, index=1), dict(held, index=2)])
+        self.assertEqual(shut, {"both": 1, "one": 0, "none": 0, "load_fail": 0})
+        leaked = evaluator.door_rows(routes, [dict(opened, index=0), dict(walked_back, index=1), dict(walked, index=2)])
+        self.assertEqual(leaked, {"both": 0, "one": 1, "none": 0, "load_fail": 1})
+        # the same route twice is one side, not a pair
+        twice = evaluator.door_rows(routes, [dict(opened, index=0), dict(opened, index=0), dict(held, index=2)])
+        self.assertEqual(twice["both"], 0)
+        self.assertEqual(twice["one"], 1)
