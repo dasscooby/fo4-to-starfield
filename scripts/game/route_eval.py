@@ -11,7 +11,8 @@ A start more than 3 m off in X/Y, or more than 2 m off in Z, is UNREAD: the rout
 A drop of more than 6 m after a matched start is FALL, including a door that opens onto the void.
 Any other move no walk of this length could make is UNREAD.
 Prints one line per route, a summary, and a door tally: both OPEN, one side, geometry, load failures.
-Exit code 1 unless the file records results, every one is PASS, and no load door was passed, walked through, or fallen through.
+Exit code 1 unless the file records results, every one is PASS, no load door was passed,
+walked through, or fallen through, and no hinged pair is geometry (crossed with no recorded OPEN).
 """
 import json
 import math
@@ -147,12 +148,16 @@ def door_rows(routes, results):
 
 
 def finished(counts, rows, result_count):
-    """True only when every recorded route passed and no load door was crossed or fallen through.
+    """True only when every recorded route passed, no load door was crossed or fallen through,
+    and no hinged pair is geometry.
 
+    Geometry is two crossings with no recorded OPEN. That is not both sides opening.
     An empty file is not a pass: Red Rocket has no stair or door routes, and a run that
-    writes nothing must not exit 0.
+    writes nothing must not exit 0. A partial file with one recorded OPEN can still pass
+    this check; the door tally shows that the other side was not in the file.
     """
-    return result_count > 0 and set(counts) <= {"PASS"} and rows["load_fail"] == 0
+    return (result_count > 0 and set(counts) <= {"PASS"} and rows["load_fail"] == 0
+            and rows.get("geometry", 0) == 0)
 
 
 def main():

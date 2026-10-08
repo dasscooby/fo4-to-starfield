@@ -125,3 +125,4 @@ class RouteEvalTests(unittest.TestCase):
         self.assertTrue(evaluator.finished({"PASS": 2}, {"load_fail": 0}, 2))
         self.assertFalse(evaluator.finished({"PASS": 1}, {"load_fail": 1}, 1))
         self.assertFalse(evaluator.finished({"PASS": 1, "BLOCKED": 1}, {"load_fail": 0}, 2))
+        self.assertFalse(evaluator.finished({"PASS": 2}, {"load_fail": 0, "geometry": 1}, 2))
