@@ -415,6 +415,74 @@ def _quat_matrix(q):
             2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y))
 
 
+def convex_hull_triangles(verts, grid=1e-4):
+    """Incremental 3D convex hull: triangles wound counter-clockwise seen from outside, always closed. Used when the
+    polygon rebuild (convex_hull_faces) cannot close, e.g. a lampshade of 60 nearly coplanar points where tolerance-merged
+    polygons overlap. Runs on points snapped to a 0.1 mm integer grid with exact integer orientation tests: float
+    tolerances on near-coplanar points gave inconsistent hulls (165 faces for 58 points). Returns indices into `verts`
+    (the first of any points that snap together)."""
+    first, idx, q = {}, [], []
+    for i, v in enumerate(verts):
+        k = tuple(int(round(c / grid)) for c in v)
+        if k not in first:
+            first[k] = len(q)
+            idx.append(i)
+            q.append(k)
+    n = len(q)
+    sub = lambda a, b: (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+    cross = lambda a, b: (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+    dot = lambda a, b: a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+    if n < 4:
+        raise hkpackfile.PackfileError("degenerate hull (fewer than 4 distinct points)")
+    i0 = 0
+    i1 = max(range(n), key=lambda i: dot(sub(q[i], q[i0]), sub(q[i], q[i0])))
+    d01 = sub(q[i1], q[i0])
+    i2 = max(range(n), key=lambda i: dot(c := cross(d01, sub(q[i], q[i0])), c))
+    nrm = cross(d01, sub(q[i2], q[i0]))
+    i3 = max(range(n), key=lambda i: abs(dot(nrm, sub(q[i], q[i0]))))
+    side = dot(nrm, sub(q[i3], q[i0]))
+    if side == 0:
+        raise hkpackfile.PackfileError("degenerate (flat) hull")
+    if side > 0:                                         # make (i0, i1, i2) face away from i3
+        i1, i2 = i2, i1
+    faces = [(i0, i1, i2), (i0, i3, i1), (i1, i3, i2), (i2, i3, i0)]
+    above = lambda f, p: dot(cross(sub(q[f[1]], q[f[0]]), sub(q[f[2]], q[f[0]])), sub(p, q[f[0]])) > 0
+    for k in range(n):
+        if k in (i0, i1, i2, i3):
+            continue
+        visible = [f for f in faces if above(f, q[k])]
+        if not visible:
+            continue
+        edges = set()
+        for f in visible:
+            edges.update(((f[0], f[1]), (f[1], f[2]), (f[2], f[0])))
+        horizon = [e for e in edges if (e[1], e[0]) not in edges]
+        vis = set(visible)
+        faces = [f for f in faces if f not in vis] + [(a, b, k) for a, b in horizon]
+    return [[idx[x] for x in f] for f in faces]
+
+def thicken_if_flat(verts, half=0.005, eps=1e-4):
+    """A planar point set (FO4 has a few flat "hulls", e.g. SubLight02Hanging's plate) has no closed hull: return it as
+    two copies offset +-half metres along its normal (a 1 cm slab). Non-planar sets are returned unchanged."""
+    import math
+    n = None
+    for i in range(1, len(verts)):
+        for j in range(i + 1, len(verts)):
+            u = [verts[i][k] - verts[0][k] for k in range(3)]
+            v = [verts[j][k] - verts[0][k] for k in range(3)]
+            c = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+            ln = math.sqrt(sum(x * x for x in c))
+            if ln > 1e-9:
+                n = tuple(x / ln for x in c)
+                break
+        if n:
+            break
+    if n is None or any(abs(sum(n[k] * (p[k] - verts[0][k]) for k in range(3))) > eps for p in verts):
+        return verts
+    return ([tuple(p[k] + half * n[k] for k in range(3)) for p in verts] +
+            [tuple(p[k] - half * n[k] for k in range(3)) for p in verts])
+
+
 def convex_hull_faces(verts, eps=1e-4):
     """Faces of the convex hull of a small point set, each a polygon wound counter-clockwise seen from outside (as vanilla
     Starfield hulls). Brute force over vertex triples (FO4 hulls have few vertices); coplanar points form one face."""
@@ -572,7 +640,12 @@ def _emit_convex(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, shape: int, rot
     try:
         _hull_links(faces, nv)
     except hkpackfile.PackfileError:                       # FO4 hull with broken topology: rebuild faces from vertices
+        verts = thicken_if_flat(verts)
         faces = convex_hull_faces(verts)
+        try:
+            _hull_links(faces, len(verts))
+        except hkpackfile.PackfileError:                   # overlapping near-coplanar polygons: triangulated hull
+            faces = convex_hull_triangles(verts)
         used = sorted({v for f in faces for v in f})
         remap = {v: k for k, v in enumerate(used)}
         verts = [verts[v] for v in used]

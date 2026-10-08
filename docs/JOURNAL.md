@@ -521,3 +521,9 @@ walkable FO4 collision along the ramp; `buried_fraction` per route). Load doors 
 - Route files regenerated for all 12 cells against the new build (in the side staging, ready for deploy). Stair routes
   whose ramp looks almost fully buried (2 Prydwen platform stairs that passed in game before, 1 library stair) keep
   their plain start and are flagged "looks buried, route kept": more likely an overlapping piece than real burial.
+- **Broken FO4 hulls: exact rebuild.** `SubLight02Hanging` (a lampshade hull of 60 nearly coplanar points) failed:
+  the polygon rebuild made overlapping near-coplanar faces, and a float incremental hull gave 165 faces for 58 points.
+  New `meshcollision.convex_hull_triangles` snaps to a 0.1 mm integer grid and uses exact integer orientation tests:
+  112 faces (2n - 4, closed). It is only used when the polygon rebuild can't close. Flat point sets become a 1 cm slab
+  (`thicken_if_flat`). Side build now: 3,139 models with FO4-native collision (was 3,021 live), 284 with none as in FO4,
+  8 passable doors; FormIDs unchanged. Still waiting to deploy (the running game is not mine to restart).

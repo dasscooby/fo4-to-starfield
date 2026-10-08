@@ -90,6 +90,33 @@ class HullTests(unittest.TestCase):
             n = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
             self.assertGreater(sum(n[i] * a[i] for i in range(3)), 0)
 
+    def test_flat_point_set_becomes_a_closed_slab(self):
+        square = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.0), (0.0, 1.0, 0.0)]
+        slab = meshcollision.thicken_if_flat(square)
+        self.assertEqual(sorted({round(p[2], 4) for p in slab}), [-0.005, 0.005])
+        faces = meshcollision.convex_hull_faces(slab)
+        self.assertEqual(len(faces), 6)
+        meshcollision._hull_links(faces, 8)                                    # closed
+        cube = [(x, y, z) for x in (-1.0, 1.0) for y in (-1.0, 1.0) for z in (-1.0, 1.0)]
+        self.assertEqual(meshcollision.thicken_if_flat(cube), cube)            # solid input unchanged
+
+    def test_triangle_hull_of_a_shallow_cone_is_closed_and_outward(self):
+        import math
+        pts = [(math.cos(a) * r, math.sin(a) * r, z) for r, z in ((0.33, -0.82), (0.28, -0.69))
+               for a in [i * math.pi / 8 for i in range(16)]] + [(0.0, 0.0, -0.6), (0.0, 0.0, -0.75)]   # + interior
+        faces = meshcollision.convex_hull_triangles(pts)
+        used = sorted({v for f in faces for v in f})
+        self.assertNotIn(33, used)                                             # interior point not on the hull
+        remap = {v: k for k, v in enumerate(used)}
+        meshcollision._hull_links([[remap[v] for v in f] for f in faces], len(used))   # closed
+        c = [sum(p[k] for p in pts) / len(pts) for k in range(3)]
+        for f in faces:                                                        # outward
+            a, b, d = (pts[i] for i in f)
+            u = [b[k] - a[k] for k in range(3)]
+            v = [d[k] - a[k] for k in range(3)]
+            n = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+            self.assertGreater(sum(n[k] * (a[k] - c[k]) for k in range(3)), 0)
+
     def test_open_hull_and_unused_vertex_rejected(self):
         with self.assertRaises(Exception):
             meshcollision._hull_links(self.FACES[:5], 8)
