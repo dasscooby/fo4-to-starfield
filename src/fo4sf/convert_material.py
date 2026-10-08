@@ -101,6 +101,13 @@ def _new_id(old: str, salt: str) -> str:
     return f"res:{zlib.crc32((salt + old).encode()) & 0xFFFFFFFF:08X}:{b}:{c}"
 
 
+METALNESS_SLOT = 4      # MRTextureFile / TextureReplacement index: 0 albedo, 1 normal, 2 opacity, 3 roughness, 4 metalness, 5 AO
+
+
+def _num(v: float) -> str:
+    return f"{v:g}"
+
+
 def build_mat(template: dict, name: str, albedo: str, normal: str, rough: str,
               tint=(1.0, 1.0, 1.0, 0.0), metalness: float = 0.0, opacity: str = None, alpha_threshold: float = 0.5) -> dict:
     """tint: x, y, z = colour, w = how strongly the tint replaces the albedo texture (1.0 = flat colour, texture
@@ -133,6 +140,11 @@ def build_mat(template: dict, name: str, albedo: str, normal: str, rough: str,
                     and "Edges" in o and any(cc.get("Type") == "BSMaterial::TextureSetID" for cc in o["Components"]):
                 d = c["Data"]["Value"]["Data"]
                 d["x"], d["y"], d["z"], d["w"] = (str(tint[0]), str(tint[1]), str(tint[2]), str(tint[3]))
+            # texture slot 4 = metalness; the iron template enables a constant 1.0 there (fully metal), which the engine uses
+            # regardless of the Summary block below
+            if c.get("Type") == "BSMaterial::TextureReplacement" and c.get("Index") == METALNESS_SLOT:
+                d = c["Data"]["Color"]["Data"]["Value"]["Data"]
+                d["x"] = d["y"] = d["z"] = _num(metalness)
     if opacity:                                    # alpha-tested cutout: opacity texture in slot 2 + alpha settings on the root
         for o in mat["Objects"]:
             comps = o.get("Components", [])

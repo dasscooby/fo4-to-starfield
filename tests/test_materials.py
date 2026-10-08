@@ -72,6 +72,15 @@ class MatTests(unittest.TestCase):
         self.assertEqual(m["Objects"][1]["Components"][1]["Data"]["Value"]["Data"]["x"], "1")
         self.assertEqual(t["Objects"][1]["ID"], "res:AAAAAAAA:00000001:BBBBBBBB")      # template not mutated
 
+    def test_metalness_component_overrides_template(self):
+        t = mini_template()
+        t["Objects"][1]["Components"].append(
+            {"Type": "BSMaterial::TextureReplacement", "Index": 4, "Data": {"Enabled": "true",
+             "Color": {"Data": {"Value": {"Data": {"x": "1", "y": "1", "z": "1", "w": "1"}}}}}})
+        m = cm.build_mat(t, "X", "a", "b", "c")
+        v = m["Objects"][1]["Components"][-1]["Data"]["Color"]["Data"]["Value"]["Data"]
+        self.assertEqual((v["x"], v["y"], v["z"]), ("0", "0", "0"))
+
     def test_ids_are_deterministic_and_name_dependent(self):
         a = cm.build_mat(mini_template(), "A", "a", "b", "c")
         b = cm.build_mat(mini_template(), "A", "a", "b", "c")

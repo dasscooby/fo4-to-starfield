@@ -134,3 +134,15 @@ environment variable, built-in default.
 rejected.
 Open: Vault 111 metal still reads as chrome (likely FO4 spec/gloss -> roughness or metalness, to check next). The tour script
 can walk off the edge of a cell into the void.
+
+## 2026-10-08: every material was fully metallic
+
+The "chrome" look on all converted surfaces (and part of the "weird textures" report) came from the template material
+`MetalIronCast01.mat`. Its texture set enables a constant metalness of 1.0 (`BSMaterial::TextureReplacement` index 4).
+`build_mat` only rewrote the `Summary` block, which is informational: the engine reads the component. `build_mat` now writes the
+metalness value into the component (slot map: 0 albedo, 1 normal, 2 opacity, 3 roughness, 4 metalness, 5 AO), with a test.
+1,002 staged materials were patched in place. The script is `C:\Modding\research\s3\zero_metal.py`; a full reconversion gives
+the same result.
+Vault 111 [before](media/metal-v111-before.jpg) / [after](media/metal-v111-after.jpg), [tour frame](media/metal-v111-tour.jpg):
+cream walls, blue pipes and orange fittings now read like Fallout 4. [Hotel Rexford](media/rexford-lit.jpg) is readable but
+greyer than the warm original (next: image-space LUT / colour check).
