@@ -527,3 +527,8 @@ walkable FO4 collision along the ramp; `buried_fraction` per route). Load doors 
   112 faces (2n - 4, closed). It is only used when the polygon rebuild can't close. Flat point sets become a 1 cm slab
   (`thicken_if_flat`). Side build now: 3,139 models with FO4-native collision (was 3,021 live), 284 with none as in FO4,
   8 passable doors; FormIDs unchanged. Still waiting to deploy (the running game is not mine to restart).
+- **Three more interiors converted (item 3, offline):** Vault 75 (6,456 references + 353 lights), Fort Hagen 01
+  (3,277 + 165), Museum of Witchcraft (1,176 + 74). 518 new models: 479 with FO4-native collision, 26 none as in FO4,
+  2 passable doors (open animation not ported). Existing 3,490 models byte-for-byte unchanged in the manifest; all
+  38,314 existing FormIDs unchanged (50,339 total). New routes: Vault 75 48, Fort Hagen 61, Museum 12. Build waits in
+  the side staging with the collision fixes; deploying needs a game restart the owner has to OK.
