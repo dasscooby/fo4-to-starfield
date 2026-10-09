@@ -46,6 +46,16 @@ class RouteActivationTests(unittest.TestCase):
                 {"index": 1, "start_read": "0 0 0", "end_read": "-3 0 0"}]
         self.assertEqual(evaluator.unproven(routes, bare)["unproven"], ["near"])
 
+    def test_two_opens_on_the_same_side_stay_unproven(self):
+        routes = [dict(hinge("near", [1, 0, 0]), side=1), dict(hinge("near", [1, 0, 0]), side=1)]
+        report = evaluator.unproven(routes, [opened(0, "3 0 0"), opened(1, "3 0 0")])
+        self.assertEqual(report["unproven"], ["near"])
+
+    def test_opposite_recorded_sides_prove_that_ref(self):
+        routes = [dict(hinge("near", [1, 0, 0]), side=1), dict(hinge("near", [-1, 0, 0]), side=-1)]
+        report = evaluator.unproven(routes, [opened(0, "3 0 0"), opened(1, "-3 0 0")])
+        self.assertEqual(report, {"unproven": [], "load_fail": []})
+
     def test_the_same_route_twice_is_one_side(self):
         routes = [hinge("near", [1, 0, 0]), hinge("near", [-1, 0, 0])]
         report = evaluator.unproven(routes, [opened(0, "3 0 0"), opened(0, "3 0 0")])

@@ -121,6 +121,14 @@ class RouteEvalTests(unittest.TestCase):
         twice = evaluator.door_rows(routes, [dict(opened, index=0), dict(opened, index=0), dict(held, index=2)])
         self.assertEqual(twice["both"], 0)
         self.assertEqual(twice["one"], 1)
+        # two OPEN crossings on side 1 are still one side
+        same = [dict(wood, side=1), dict(wood, side=1), load]
+        sided = evaluator.door_rows(same, [dict(opened, index=0), dict(opened, index=1), dict(held, index=2)])
+        self.assertEqual(sided["both"], 0)
+        self.assertEqual(sided["one"], 1)
+        opposite = [dict(wood, side=1), dict(other, side=-1), load]
+        paired = evaluator.door_rows(opposite, [dict(opened, index=0), dict(opened_back, index=1), dict(held, index=2)])
+        self.assertEqual(paired["both"], 1)
         self.assertFalse(evaluator.finished({}, {"load_fail": 0}, 0))
         self.assertTrue(evaluator.finished({"PASS": 2}, {"load_fail": 0}, 2))
         self.assertFalse(evaluator.finished({"PASS": 1}, {"load_fail": 1}, 1))

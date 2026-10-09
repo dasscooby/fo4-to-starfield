@@ -1,7 +1,8 @@
 """List hinged doors a results file does not show opening from both sides.
 
-Two different routes must each pass and record OPEN. A crossing with no OPEN, one side
-only, or a route the file never ran stays unproven. Load doors that were passed, walked
+Two different routes must each pass and record OPEN. When those routes record `side`,
+the sides must be 1 and -1. A crossing with no OPEN, one side only, the same side twice,
+or a route the file never ran stays unproven. Load doors that were passed, walked
 through, or fallen through are listed separately. Exit 1 when either list is non-empty.
 A route file with no hinged doors exits 0. Doors that file never listed are not this
 check; `route_coverage.py` lists those. That exit is not cell acceptance, and it does

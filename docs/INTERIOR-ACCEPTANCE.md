@@ -55,8 +55,11 @@ A generation that keeps only the first routes can drop doors that sit later in t
 The earlier Prydwen file was 40 stairs, and its three swinging doors were past that cut.
 The regenerated file lists both sides of those three. The list is not a walk.
 `scripts/oracles/route_activation.py` lists every hinged ref in a results file that
-lacks two OPEN crossings. `route_eval` can exit 0 on one recorded OPEN. That is not
-`door_swing`. A placed model whose FO4 collision failed is not a walkable pass.
+lacks two OPEN crossings. When a route records `side`, those crossings count only if
+the sides are 1 and -1. Two OPEN crossings on the same side are still one side.
+A partial file can show that pair for some refs and leave the rest unproven. That
+count does not close `door_swing`. `route_eval` can exit 0 on one recorded OPEN.
+That is not `door_swing`. A placed model whose FO4 collision failed is not a walkable pass.
 `scripts/oracles/placed_collision.py` lists those refs, and refs whose mesh the build
 rejected. A guessed box is not a native body. A skipped-part note with a box fallback
 is still a guessed box. A native body that also skipped a part is partial, not clean.

@@ -106,14 +106,32 @@ def _opened(res):
     return isinstance(verb, str) and "OPEN" in verb.upper()
 
 
+def _opposite_opens(entries):
+    """True when two different routes passed and recorded OPEN.
+
+    `entries` are `(verdict, result, side)`. When any of those routes recorded `side`,
+    the OPEN crossings must include side 1 and side -1. Two OPEN crossings on the same
+    side are still one side. Routes that never stored `side` still count two visits.
+    """
+    sides = []
+    for verdict, res, side in entries:
+        if verdict == "PASS" and _opened(res):
+            sides.append(side)
+    if len(sides) < 2:
+        return False
+    present = [side for side in sides if side is not None]
+    return not present or set(present) == {1, -1}
+
+
 def door_rows(routes, results):
     """`both` is two different routes for one ref that each recorded an OPEN.
 
-    Two crossings with no prompt stored are `geometry`: both sides ended past the plane,
-    and the file cannot show that either side opened. One recorded OPEN is `one`.
-    A walk through an already-open leaf is UNOPENED and does not make a pair.
-    Load doors (the model name contains "load") are not swing rows. Passing one, walking
-    through it, or falling at it is a load failure: those doors stay shut.
+    When those routes record `side`, the sides must be 1 and -1. Two OPEN crossings on
+    the same side are `one`. Two crossings with no prompt stored are `geometry`: both
+    sides ended past the plane, and the file cannot show that either side opened. One
+    recorded OPEN is `one`. A walk through an already-open leaf is UNOPENED and does not
+    make a pair. Load doors (the model name contains "load") are not swing rows. Passing
+    one, walking through it, or falling at it is a load failure: those doors stay shut.
     """
     by_ref = {}
     load_fail = set()
@@ -127,17 +145,17 @@ def door_rows(routes, results):
                 load_fail.add(route.get("ref"))
             continue
         # one line per route index: a repeated index is a rerun, not the other side
-        by_ref.setdefault(route.get("ref"), {})[res["index"]] = (verdict, res)
+        by_ref.setdefault(route.get("ref"), {})[res["index"]] = (verdict, res, route.get("side"))
     both = one = none = geometry = 0
     for verdicts in by_ref.values():
         passes = activated = 0
-        for verdict, res in verdicts.values():
+        for verdict, res, _side in verdicts.values():
             if verdict != "PASS":
                 continue
             passes += 1
             if _opened(res):
                 activated += 1
-        if activated >= 2:
+        if _opposite_opens(verdicts.values()):
             both += 1
         elif passes >= 2 and activated == 0:
             geometry += 1
@@ -153,7 +171,8 @@ def unproven(routes, results):
 
     `door_rows` counts only the refs that appear in the results. A file can be all PASS, exit 0,
     and still leave every other door untested. This lists those refs too. One recorded OPEN does
-    not prove the other side. Two crossings with no OPEN stay unproven.
+    not prove the other side. Two OPEN crossings on the same recorded side stay unproven.
+    Two crossings with no OPEN stay unproven.
     """
     by_ref = {}
     order = []
@@ -187,14 +206,10 @@ def unproven(routes, results):
         if ref not in by_ref:
             order.append(ref)
             by_ref[ref] = {}
-        by_ref[ref][index] = (verdict, res)
+        by_ref[ref][index] = (verdict, res, route.get("side"))
     missing = []
     for ref in order:
-        activated = 0
-        for verdict, res in by_ref[ref].values():
-            if verdict == "PASS" and _opened(res):
-                activated += 1
-        if activated < 2:
+        if not _opposite_opens(by_ref[ref].values()):
             missing.append(ref)
     return {"unproven": missing, "load_fail": load_fail}
 
