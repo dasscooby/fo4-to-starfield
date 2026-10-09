@@ -211,6 +211,26 @@ class DeploymentRollbackTests(unittest.TestCase):
             deploy.uninstall(args)
             self.assertEqual(pt.read_bytes(), original)
 
+    def test_inactive_plugin_entry_is_activated_then_restored_on_uninstall(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            staging, game = root / "staging", root / "game"
+            staging.mkdir()
+            (game / "Data").mkdir(parents=True)
+            (staging / deploy.PLUGIN).write_bytes(b"TES4" + bytes(32))
+            (staging / "meshes").mkdir()
+            pt = root / "Plugins.txt"
+            pt.write_text("FO4Port.esm\n*Other.esm\n")
+            args = SimpleNamespace(staging=str(staging), starfield=str(game), dry_run=False)
+            def build(a, out, folders, fmt):
+                Path(out).write_bytes(b"BTDX" + bytes(32))
+            with patch.object(deploy, "plugins_txt_path", return_value=str(pt)), \
+                    patch.object(deploy, "build_archive", side_effect=build):
+                deploy.install(args)
+            self.assertEqual(pt.read_text().splitlines(), ["*FO4Port.esm", "*Other.esm"])
+            deploy.uninstall(args)
+            self.assertEqual(pt.read_text().splitlines(), ["FO4Port.esm", "*Other.esm"])
+
     def test_uninstall_removes_case_only_edit_to_added_plugin_line(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

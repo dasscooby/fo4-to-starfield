@@ -42,6 +42,21 @@ def plugin_name(line):
     return value[1:] if value.startswith("*") else value
 
 
+def plan_plugin_activation(lines):
+    """Return the activated list plus the exact plugin lines this install owns."""
+    for line in lines:
+        if line.strip().startswith("*") and plugin_name(line).casefold() == PLUGIN.casefold():
+            return list(lines), [], []
+    for index, line in enumerate(lines):
+        if plugin_name(line).casefold() == PLUGIN.casefold():
+            active = f"*{plugin_name(line)}"
+            updated = list(lines)
+            updated[index] = active
+            return updated, [active], [{"active": active, "original": line}]
+    active = f"*{PLUGIN}"
+    return [*lines, active], [active], []
+
+
 def write_manifest(p, state):
     fd, temporary = tempfile.mkstemp(prefix=".fo4port-deploy-", dir=os.path.dirname(p))
     try:
@@ -155,8 +170,8 @@ def install(a):
         sys.exit("refusing to overwrite existing files:\n  " + "\n  ".join(clash))
     pt = plugins_txt_path()
     pl = read_lines(pt)
-    pl_add = [] if any(plugin_name(line).casefold() == PLUGIN.casefold() for line in pl) else [f"*{PLUGIN}"]
-    print(f"install: {[os.path.basename(x) for x in targets]} -> {data}\nPlugins.txt ({pt}): add {pl_add or 'nothing'}")
+    _, pl_add, _ = plan_plugin_activation(pl)
+    print(f"install: {[os.path.basename(x) for x in targets]} -> {data}\nPlugins.txt ({pt}): activate {pl_add or 'nothing'}")
     if a.dry_run:
         return
     # 1) build and validate EVERYTHING before touching the game folder
@@ -173,7 +188,7 @@ def install(a):
             sys.exit(f"build output looks invalid, nothing installed: {b}")
     # 2) record intent first, then copy; any failure rolls back what was copied
     identities = {os.path.basename(dst): artifact_identity(src) for src, dst in zip(built, targets)}
-    state = {"files": [], "plugins_txt": pt, "plugins_added": pl_add, "complete": False,
+    state = {"files": [], "plugins_txt": pt, "plugins_added": pl_add, "plugins_replaced": [], "complete": False,
              "artifacts": identities}
     plugins_existed = os.path.exists(pt)
     plugins_original = None
@@ -183,8 +198,9 @@ def install(a):
     # Archive builds can be long; merge activation into the current list,
     # not the preflight snapshot from before the build.
     pl = plugins_original.decode("utf-8-sig").splitlines() if plugins_original is not None else []
-    pl_add = [] if any(plugin_name(line).casefold() == PLUGIN.casefold() for line in pl) else [f"*{PLUGIN}"]
+    activated, pl_add, pl_replaced = plan_plugin_activation(pl)
     state["plugins_added"] = pl_add
+    state["plugins_replaced"] = pl_replaced
     state["plugins_original"] = base64.b64encode(plugins_original).decode("ascii") if plugins_existed else None
     state["plugins_restore_pending"] = False
     write_manifest(man_path, state)
@@ -207,7 +223,7 @@ def install(a):
                 raise OSError("Plugins.txt changed during install; activation aborted to preserve user edits")
             state["plugins_restore_pending"] = True
             write_manifest(man_path, state)
-            write_lines(pt, pl + pl_add)
+            write_lines(pt, activated)
         state["complete"] = True
         write_manifest(man_path, state)
     except Exception as e:                                   # noqa: BLE001 (roll back, then report)
@@ -277,12 +293,23 @@ def uninstall(a):
             restore_plugins(m)
         elif m["plugins_added"]:
             added = {line.casefold() for line in m["plugins_added"]}
-            pl = [l for l in read_lines(m["plugins_txt"]) if l.casefold() not in added]
+            replaced = {item["active"].casefold(): item["original"]
+                        for item in m.get("plugins_replaced", [])}
+            restored = set()
+            pl = []
+            for line in read_lines(m["plugins_txt"]):
+                key = line.casefold()
+                if key in replaced and key not in restored:
+                    pl.append(replaced[key])
+                    restored.add(key)
+                elif key not in added:
+                    pl.append(line)
             if pl:
                 write_lines(m["plugins_txt"], pl)
             elif os.path.exists(m["plugins_txt"]):
                 os.remove(m["plugins_txt"])
         m["plugins_added"] = []
+        m["plugins_replaced"] = []
         m["plugins_restore_pending"] = False
     except OSError as e:
         errors.append(str(e))
