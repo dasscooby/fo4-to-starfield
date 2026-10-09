@@ -21,8 +21,9 @@ Rules every agent follows: [AGENTS.md](../../AGENTS.md).
 
 ## Start
 
-1. LM Studio: server on (`lms server start` or the app), load the chosen model with a 16K context:
-   `lms load <model-id> --context-length 16384 --gpu max`. Put that id in `config.json` -> `agents` (all four).
+1. LM Studio server on (`lms server start` or the app), Starfield closed. Load the model:
+   `python tools\ai-team\load_model.py` (qwen3-14b, 32K context, q8 KV cache, all on GPU, no memory mapping).
+   Don't use `lms load`: it memory-maps the file and holds ~10 GB of system RAM, which makes the guardian block.
 2. `powershell -File tools\ai-team\start-team.ps1`: starts the guardian proxy, checks LM Studio, prints status.
 3. In the repository (or an agent worktree): `opencode`. The Lead is the default agent. One OpenCode session at a time.
 
@@ -78,7 +79,27 @@ also reads #32 and docs/CODEX-HANDOFF.md.
 Choosing/downloading/loading the model; starting LM Studio; starting OpenCode; approving PR creation, merges and
 pushes; any game deployment or live testing (Claude's lane); installing anything as a service (not done).
 
-## Tests
+## Validation (2026-10-09, Qwen3-14B Q4_K_M, 32K context)
 
+| # | Test | Result |
+|---|---|---|
+| 1 | LM Studio API responds | pass |
+| 2 | OpenCode connects to the model (via the guardian) | pass |
+| 3 | Model performs a real tool call (`file_size` with correct args) | pass, 10.4 s, 174/147 tokens |
+| 4 | Lead invokes a specialist (`task` -> fo4-research) | pass |
+| 5 | Research reads project files (exact first heading of docs/PLAN.md) | pass, whole run 231 s |
+| 6 | Implementation works in an isolated test branch (`ai/test-validation`, own worktree) | pass |
+| 7 | QA reviews without modifying (its edit attempt was refused by permissions) | pass, whole run 522 s |
+| 8 | `gh` reads repository issues | pass |
+| 9 | Resource monitoring returns valid JSON | pass |
+| 10 | Thresholds trigger the expected scheduling (4 unit tests + live) | pass |
+| 11 | Overloaded system queues new work (game running; RAM 88-90%; 1 running >= max 1) | pass |
+| 12 | Logs record the activity (26 requests with API token counts, 8 throttling decisions) | pass |
+| 13 | Shutdown leaves no orphaned jobs or processes | pass |
+
+Observed: each Lead step takes ~40-135 s; Qwen3 writes long `<think>` reasoning first (next optimization
+candidate: measure with thinking off). The Lead once mis-formatted a task call and corrected itself.
+
+## Tests
 `python -m unittest tests.test_ai_guardian` (admission policy on synthetic snapshots); validation results of the
 initial setup are in docs/ai/decisions.md and the setup report.
