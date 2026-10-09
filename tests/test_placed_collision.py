@@ -27,7 +27,7 @@ class PlacedCollisionTests(unittest.TestCase):
             {"formkey": "hinge", "model": "Doors\\Hinge.nif"},
         ]
         self.assertEqual(oracle.placed(cell(*refs), items),
-                         {"no_collision": [], "guessed": [], "unbuilt": []})
+                         {"no_collision": [], "guessed": [], "partial": [], "unbuilt": []})
 
     def test_a_failed_native_body_and_a_guessed_box_are_listed(self):
         items = {
@@ -53,7 +53,7 @@ class PlacedCollisionTests(unittest.TestCase):
     def test_a_failure_that_is_not_placed_is_ignored(self):
         items = {"meshes\\pre\\cm.nif": {"collision_report": {"source": "fo4-native-failed"}}}
         self.assertEqual(oracle.placed(cell({"formkey": "other", "model": "Walls\\Floor.nif"}), items),
-                         {"no_collision": [], "guessed": [], "unbuilt": []})
+                         {"no_collision": [], "guessed": [], "partial": [], "unbuilt": []})
 
     def test_a_rejected_mesh_is_listed_and_an_unattempted_model_is_not(self):
         failures = [{"nif": "meshes/Lights/StrobeLight01Flash.nif",
@@ -69,3 +69,21 @@ class PlacedCollisionTests(unittest.TestCase):
             "reason": "ValueError: only effect-shader shapes (glass/glow), skipped"}])
         absent = oracle.placed(cell({"formkey": "other", "model": "Lights\\StrobeLight01Flash.nif"}), {})
         self.assertEqual(absent["unbuilt"], [])
+
+    def test_a_skipped_part_with_a_box_fallback_is_still_guessed(self):
+        items = {
+            "meshes\\pre\\cm.nif": {"collision_report": {
+                "skipped_parts": ["body 0: shared vertex index 2130 out of range (22)"],
+                "boxes": 38}},
+            "meshes\\pre\\kept.nif": {"collision_report": {
+                "source": "fo4-native", "bodies": 1,
+                "skipped_parts": ["body 0: shared vertex index 2130 out of range (8)"]}},
+        }
+        report = oracle.placed(cell(
+            {"formkey": "cm", "model": "Pre\\cm.nif"},
+            {"formkey": "kept", "model": "Pre\\kept.nif"},
+        ), items)
+        self.assertEqual(report["guessed"][0]["ref"], "cm")
+        self.assertIn("2130", report["guessed"][0]["reason"])
+        self.assertEqual([row["ref"] for row in report["partial"]], ["kept"])
+        self.assertEqual(report["no_collision"], [])

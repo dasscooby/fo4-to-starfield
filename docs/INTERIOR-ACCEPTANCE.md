@@ -58,7 +58,9 @@ The regenerated file lists both sides of those three. The list is not a walk.
 lacks two OPEN crossings. `route_eval` can exit 0 on one recorded OPEN. That is not
 `door_swing`. A placed model whose FO4 collision failed is not a walkable pass.
 `scripts/oracles/placed_collision.py` lists those refs, and refs whose mesh the build
-rejected. A guessed box is not a native body. Evidence that names a machine-specific
+rejected. A guessed box is not a native body. A skipped-part note with a box fallback
+is still a guessed box. A native body that also skipped a part is partial, not clean.
+Evidence that names a machine-specific
 path cannot close a row.
 
 Do not commit the evidence file if it names a machine path or contains game data.
