@@ -72,6 +72,15 @@ for ($k = $First;$k -lt [Math]::Min($list.Count, $First + $Count); $k++) {
     }
   }
   $prompt = $null; $verb = $null
+  if ($far) {
+    # the engine moved the player elsewhere (start under the floor -> cell entrance): nothing to test here, and pressing
+    # E or walking from there hits whatever is in front (Parsons: E started a dialogue with the companion). Skip.
+    $line = @{ index = $k; ref = $r.ref; kind = $r.kind; start_read = $p0; end_read = $p0; skipped = 'start not reached' } | ConvertTo-Json -Compress
+    Add-Content $res $line
+    "route $k $($r.kind) $($r.ref): start not reached ($p0), skipped"
+    $prevEnd = $p0; $prevFar = $true
+    continue
+  }
   if ($r.use) {
     # step closer first: the activation prompt only appears within reach, and placements differ by ~1 m from the plane
     if ($StepIn -gt 0) { powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq "hold:w,$StepIn|wait:500" | Out-Null }
