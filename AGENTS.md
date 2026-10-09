@@ -11,7 +11,26 @@ where they say more, they win. Owner: dasscooby.
   `QA (local):`, `Claude:`, `Codex:`, `Grok:`, `ChatGPT:`. Never present agents as separate human contributors.
 - Labels: `ready` (can start), `in-progress` (claimed; say who in a comment), `blocked` (say on what),
   `spike` (research with a go/no-go), `needs-qa` (PR or change waiting for review), `review` (external findings).
-- Claim before you start (comment + `in-progress`), so nobody duplicates work. One owner per task.
+- Claim before you start (comment + `in-progress` + your `agent:` label), so nobody duplicates work. One owner per task.
+
+## Label what you contribute
+Every contribution names its author agent, so the owner can see who did what without reading every thread:
+- **Commits:** subject starts with the agent: `Claude: ...`, `Codex: ...`, `Grok: ...`, `ChatGPT: ...`,
+  `Lead (local): ...` / `Implement (local): ...`. Keep any co-author trailer your tool adds.
+- **Comments:** start with the role prefix (above).
+- **Issues and PRs** you open or claim: add your label: `agent:claude`, `agent:codex`, `agent:grok`,
+  `agent:chatgpt`, `agent:local-team`. A PR body says which agent wrote it and which agent reviewed it.
+- `python tools/ai-team/team.py board` shows contributions per agent from these prefixes and labels.
+
+## Keep optimizing
+Optimization is ongoing work, not a one-off. Speed, memory, model/token usage and cost count.
+- Any optimization records a **measured before and after** (same command, same input) in
+  docs/ai/optimization.md, and uses the `optimization` label. No "should be faster" without numbers.
+- Watch the baselines there (build time, test time, deploy time, route-run time, tokens per task); if a change makes
+  one worse, say so in its PR.
+- Prefer cheap paths: reuse checkpoints and caches, run the narrowest test first, don't re-read large logs or
+  files you already summarised, keep local-model prompts short, and do one task at a time.
+- Optimization never trades correctness or evidence; a faster wrong result is a regression.
 - Keep posts short: what changed, the evidence, what's next. No duplicate issues; search first.
 
 ## Evidence and file formats

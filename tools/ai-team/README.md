@@ -17,7 +17,7 @@ Rules every agent follows: [AGENTS.md](../../AGENTS.md).
 | Remote usage (Codex, Claude Code, Grok logs; GitHub activity) | `tools/ai-team/remote_usage.py` |
 | Board + combined status | `tools/ai-team/team.py` |
 | Runtime state, history DB, logs (not in Git) | `tools/ai-team/state/` (`guardian.db`, `proxy.log`) |
-| Project knowledge | `docs/ai/` |
+| Project knowledge, optimization log | `docs/ai/` (`optimization.md`: baselines + before/after entries) |
 
 ## Start
 

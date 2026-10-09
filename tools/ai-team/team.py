@@ -39,8 +39,31 @@ def board():
            "pending_review": [short(i) for i in issues if "needs-qa" in lab(i)]
                              + [{"pr": p["number"], "title": p["title"], "branch": p["headRefName"]} for p in prs],
            "owner_inbox": [short(i) for i in issues if not lab(i)],
-           "recently_completed": [{"number": i["number"], "title": i["title"], "closed": i["closedAt"]} for i in closed]}
+           "recently_completed": [{"number": i["number"], "title": i["title"], "closed": i["closedAt"]} for i in closed],
+           "contributions_7d": contributions(issues, prs)}
     print(json.dumps(out, indent=1))
+
+
+ROLES = ("Lead (local)", "Implement (local)", "Research (local)", "QA (local)", "ChatGPT", "Claude", "Codex", "Grok")
+
+
+def contributions(issues, prs):
+    """Commits on origin/main in the last 7 days by subject prefix, plus open issues/PRs by agent: label."""
+    root = os.path.dirname(os.path.dirname(HERE))
+    log = subprocess.run(["git", "-C", root, "log", "origin/main", "--since=7.days", "--format=%s"],
+                         capture_output=True, text=True, timeout=60).stdout.splitlines()
+    commits = {}
+    for s in log:
+        role = next((r for r in ROLES if s.lower().startswith(r.lower())), "untagged")
+        commits[role] = commits.get(role, 0) + 1
+    labelled = {}
+    for i in list(issues) + list(prs):
+        for l in i.get("labels", []):
+            if l["name"].startswith("agent:"):
+                labelled[l["name"]] = labelled.get(l["name"], 0) + 1
+    return {"source": "live (git log origin/main, gh labels)", "commits_by_prefix": commits,
+            "open_items_by_agent_label": labelled,
+            "note": "untagged = no role prefix; see AGENTS.md 'Label what you contribute'"}
 
 
 def _py(script, *args):
