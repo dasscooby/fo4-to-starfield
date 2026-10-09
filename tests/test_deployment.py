@@ -140,6 +140,49 @@ class DeploymentRollbackTests(unittest.TestCase):
             deploy.uninstall(args)
             self.assertEqual(pt.read_bytes(), original)
 
+    def test_case_variant_plugin_line_is_not_duplicated_or_removed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            staging, game = root / "staging", root / "game"
+            staging.mkdir()
+            (game / "Data").mkdir(parents=True)
+            (staging / deploy.PLUGIN).write_bytes(b"TES4" + bytes(32))
+            (staging / "meshes").mkdir()
+            pt = root / "Plugins.txt"
+            original = b"*fo4port.esm\r\n*Other.esm\r\n"
+            pt.write_bytes(original)
+            args = SimpleNamespace(staging=str(staging), starfield=str(game), dry_run=False)
+            def build(a, out, folders, fmt):
+                Path(out).write_bytes(b"BTDX" + bytes(32))
+            with patch.object(deploy, "plugins_txt_path", return_value=str(pt)), \
+                    patch.object(deploy, "build_archive", side_effect=build):
+                deploy.install(args)
+            state = json.loads((game / "Data" / deploy.MANIFEST).read_text())
+            self.assertEqual(state["plugins_added"], [])
+            self.assertEqual(pt.read_bytes(), original)
+            deploy.uninstall(args)
+            self.assertEqual(pt.read_bytes(), original)
+
+    def test_uninstall_removes_case_only_edit_to_added_plugin_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            staging, game = root / "staging", root / "game"
+            staging.mkdir()
+            (game / "Data").mkdir(parents=True)
+            (staging / deploy.PLUGIN).write_bytes(b"TES4" + bytes(32))
+            (staging / "meshes").mkdir()
+            pt = root / "Plugins.txt"
+            pt.write_text("*Other.esm\n")
+            args = SimpleNamespace(staging=str(staging), starfield=str(game), dry_run=False)
+            def build(a, out, folders, fmt):
+                Path(out).write_bytes(b"BTDX" + bytes(32))
+            with patch.object(deploy, "plugins_txt_path", return_value=str(pt)), \
+                    patch.object(deploy, "build_archive", side_effect=build):
+                deploy.install(args)
+            pt.write_text("*Other.esm\n*fo4port.esm\n")
+            deploy.uninstall(args)
+            self.assertEqual(pt.read_text().splitlines(), ["*Other.esm"])
+
     def check_archive_build(self, outcome):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

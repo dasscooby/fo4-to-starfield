@@ -37,6 +37,11 @@ def read_lines(p):
         return f.read().splitlines()
 
 
+def plugin_name(line):
+    value = line.strip()
+    return value[1:] if value.startswith("*") else value
+
+
 def write_manifest(p, state):
     fd, temporary = tempfile.mkstemp(prefix=".fo4port-deploy-", dir=os.path.dirname(p))
     try:
@@ -117,7 +122,7 @@ def install(a):
         sys.exit("refusing to overwrite existing files:\n  " + "\n  ".join(clash))
     pt = plugins_txt_path()
     pl = read_lines(pt)
-    pl_add = [] if f"*{PLUGIN}" in pl or PLUGIN in pl else [f"*{PLUGIN}"]
+    pl_add = [] if any(plugin_name(line).casefold() == PLUGIN.casefold() for line in pl) else [f"*{PLUGIN}"]
     print(f"install: {[os.path.basename(x) for x in targets]} -> {data}\nPlugins.txt ({pt}): add {pl_add or 'nothing'}")
     if a.dry_run:
         return
@@ -145,7 +150,7 @@ def install(a):
     # Archive builds can be long; merge activation into the current list,
     # not the preflight snapshot from before the build.
     pl = plugins_original.decode("utf-8-sig").splitlines() if plugins_original is not None else []
-    pl_add = [] if f"*{PLUGIN}" in pl or PLUGIN in pl else [f"*{PLUGIN}"]
+    pl_add = [] if any(plugin_name(line).casefold() == PLUGIN.casefold() for line in pl) else [f"*{PLUGIN}"]
     state["plugins_added"] = pl_add
     state["plugins_original"] = base64.b64encode(plugins_original).decode("ascii") if plugins_existed else None
     state["plugins_restore_pending"] = False
@@ -230,7 +235,8 @@ def uninstall(a):
         if not m.get("complete", True) and m.get("plugins_restore_pending"):
             restore_plugins(m)
         elif m["plugins_added"]:
-            pl = [l for l in read_lines(m["plugins_txt"]) if l not in m["plugins_added"]]
+            added = {line.casefold() for line in m["plugins_added"]}
+            pl = [l for l in read_lines(m["plugins_txt"]) if l.casefold() not in added]
             if pl:
                 write_lines(m["plugins_txt"], pl)
             elif os.path.exists(m["plugins_txt"]):
