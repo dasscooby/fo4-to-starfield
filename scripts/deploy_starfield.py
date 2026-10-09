@@ -24,6 +24,7 @@ ARCHIVE = "FO4Port - Main.ba2"
 TEX_ARCHIVE = "FO4Port - Textures.ba2"
 MANIFEST = "FO4Port.deploy.json"
 MAIN_DIRS = ("meshes", "geometries", "materials")
+DEPLOYED_FILES = frozenset((PLUGIN, ARCHIVE, TEX_ARCHIVE))
 
 
 def plugins_txt_path():
@@ -282,6 +283,10 @@ def uninstall(a):
     published = m.get("published_files", [])
     published = {item for item in published if isinstance(item, str)} if isinstance(published, list) else set()
     for rel in m["files"]:
+        if not isinstance(rel, str) or rel not in DEPLOYED_FILES:
+            remaining.append(rel)
+            errors.append(f"unexpected deployment path; preserved: {rel!r}")
+            continue
         p = os.path.join(data, rel)
         try:
             if os.path.exists(p):

@@ -1,6 +1,7 @@
 """Deployment failure injection: synthetic files, no game installation required."""
 import importlib.util
 import json
+import os
 import stat
 from pathlib import Path
 import tempfile
@@ -15,6 +16,28 @@ spec.loader.exec_module(deploy)
 
 
 class DeploymentRollbackTests(unittest.TestCase):
+    def test_uninstall_rejects_manifest_paths_outside_deployment_targets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data = root / "Data"
+            data.mkdir()
+            victim = root / "unrelated.bin"
+            victim.write_bytes(b"user data")
+            plugins = root / "Plugins.txt"
+            plugins.write_text("*Other.esm\n")
+            manifest = data / deploy.MANIFEST
+            args = SimpleNamespace(starfield=str(root), dry_run=False)
+            for unsafe in (os.path.relpath(victim, data), str(victim)):
+                with self.subTest(path=unsafe):
+                    victim.write_bytes(b"user data")
+                    deploy.write_manifest(str(manifest), {"files": [unsafe],
+                        "plugins_txt": str(plugins), "plugins_added": [], "complete": True,
+                        "artifacts": {unsafe: deploy.artifact_identity(victim)}})
+                    with self.assertRaisesRegex(SystemExit, "uninstall incomplete"):
+                        deploy.uninstall(args)
+                    self.assertEqual(victim.read_bytes(), b"user data")
+                    self.assertTrue(manifest.exists())
+
     def test_atomic_publish_handles_read_only_source_and_cleans_temporary(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
