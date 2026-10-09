@@ -87,8 +87,16 @@ for ($k = $First;$k -lt [Math]::Min($list.Count, $First + $Count); $k++) {
     # only open a closed door: a door left open by an earlier route shows CLOSE (or no prompt through the opening), and
     # E would shut it in the player's face. The verb is recorded with the result.
     $verb = ''
-    if ($prompt) { $verb = ((powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $here 'ocr.ps1') -Image $pre -X 940 -Y 198 -W 100 -H 30 -Scale 3) -join ' ').Trim() }
-    if ($verb -match 'OPEN') { powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq 'key:e|wait:2200' | Out-Null }
+    if ($prompt) {
+      # crop + threshold + enlarge first: the raw crop missed "OPEN" on bright backgrounds (37/37 read after prep)
+      $vp = Join-Path $env:TEMP 'fo4sf_verb_prep.png'
+      & $env:FO4SF_PYTHON (Join-Path $here 'prompt_verb_prep.py') $pre $vp
+      $verb = ((powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $here 'ocr.ps1') -Image $vp -Scale 1) -join ' ').Trim()
+      # unreadable verb right after this route closed its own door (setopenstate 0): the door is closed, so open it,
+      # but record it as unread rather than as a confirmed OPEN
+      if ($verb -notmatch 'OPEN|CLOSE' -and $close) { $verb = 'unread-after-reset' }
+    }
+    if ($verb -match 'OPEN|unread-after-reset') { powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq 'key:e|wait:2200' | Out-Null }
     powershell -NoProfile -ExecutionPolicy Bypass -File $shot -Out (Join-Path $Out "r${k}_open.png") | Out-Null
     if ($BackOff -gt 0) { powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq "hold:s,$BackOff|wait:400" | Out-Null }
   }
