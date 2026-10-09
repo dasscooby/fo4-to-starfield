@@ -94,3 +94,31 @@ Known limits:
 - The static frame part (`Frame` node) has no collision.
 - Open/close sounds are not set.
 - Sliding vault doors and elevators are excluded (`NOT_HINGED_RE`). They need a sliding template.
+## Sliding doors (2026-10-08, offline research)
+
+**Which vanilla graph do sliding doors use?** `SfInspect graphs` groups every Starfield `DOOR` by its
+`AnimationGraphComponent`. 215 doors use `SimpleOpenClose01.agx`. That includes the hinged Akila door
+*and* the sliding ship interior doors (`ShpGenIntPerSmWallMid_ExSm_Door01`, rig `ships\gen\interiors\animated\doors\...`).
+The graph only sequences Open/Close; the motion comes from each door's own `skeleton.rig` + `animations\*.af`. So a sliding
+FO4 door can be rigged exactly like the hinged ones: hang each FO4 moving part under the vanilla template node that moves the
+same way, and reuse the template's ANAM/BNAM/CNAM.
+
+**What the 8 passable FO4 doors do** (their FO4 `Open` sequence, end-pose keys, metres):
+
+| FO4 model | moving nodes | motion |
+|---|---|---|
+| `VltDoorRes01A/B/C` (vault rooms) | `VaultDoorUpper`, `VaultDoorLower` (+ switches rotate) | upper +2.12 m up, lower -0.98 m down |
+| `VltElevatorDoor02` | `Door01L`, `Door02R` | -0.80 / +0.80 m sideways |
+| `VltElevatorDoorCarInt02` | `Door01L001`, `Door02R` | +0.91 / -0.91 m sideways |
+| `UtilMetalElevatorOut01` | `Door` | rotation keys: actually hinged, try the hinged path |
+
+**Template candidates (vanilla):**
+- horizontal split: `ElvGen_ExSm_DoorFull01` (elevator, `SimpleOpenClose03_Load`) and `GenIntRmSmWallMid_DoorA00*`
+  (generic interior, separate `panel01` / `panel02` NIFs).
+- vertical split: Starfield ship interior doors (`ShpGenIntPerSmWallMid_*_Door01`), still to check which split vertically.
+
+**Blocker:** the motion of each template node (direction, distance) is in the `.af` files, which aren't decoded. Either decode
+`.af` (the FO4 side is already known exactly), or watch each template door open in game once (`FO4PORT_DOORTEST`-style test
+cell) and read which node moves where. Distances will be the template's, not FO4's; a template whose panels open less than
+the FO4 door would leave the doorway partly blocked, so measure the clear opening in game before accepting it.
+Until then these doors stay passable and are listed as `door_not_opening` in the manifest.

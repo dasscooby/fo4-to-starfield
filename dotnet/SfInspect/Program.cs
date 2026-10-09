@@ -68,6 +68,15 @@ switch (args[1])
                 Console.WriteLine($"   {p.Name} = {s}");
             }
         break;
+    case "graphs":   // every DOOR grouped by animation graph (ANAM) + skeleton: which vanilla doors slide, swing, lift
+        foreach (var g in mod.Doors.Select(d => (d, agc: d.Components.OfType<IAnimationGraphComponentGetter>().FirstOrDefault()))
+                     .Where(x => x.agc != null).GroupBy(x => x.agc!.ANAM ?? "").OrderByDescending(g => g.Count()))
+        {
+            Console.WriteLine($"{g.Count(),5}  {g.Key}");
+            foreach (var x in g.Take(4))
+                Console.WriteLine($"         {x.d.EditorID}  {x.d.FormKey}  {x.d.Model?.File}  rig={x.agc!.BNAM}");
+        }
+        break;
     case "doorprops":
         foreach (var p in typeof(Mutagen.Bethesda.Starfield.Door).GetProperties()) Console.WriteLine($"{p.PropertyType} {p.Name}");
         break;
