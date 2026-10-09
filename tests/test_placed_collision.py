@@ -26,7 +26,8 @@ class PlacedCollisionTests(unittest.TestCase):
             {"formkey": "slide", "model": "Doors\\Slide.nif"},
             {"formkey": "hinge", "model": "Doors\\Hinge.nif"},
         ]
-        self.assertEqual(oracle.placed(cell(*refs), items), {"no_collision": [], "guessed": []})
+        self.assertEqual(oracle.placed(cell(*refs), items),
+                         {"no_collision": [], "guessed": [], "unbuilt": []})
 
     def test_a_failed_native_body_and_a_guessed_box_are_listed(self):
         items = {
@@ -52,4 +53,19 @@ class PlacedCollisionTests(unittest.TestCase):
     def test_a_failure_that_is_not_placed_is_ignored(self):
         items = {"meshes\\pre\\cm.nif": {"collision_report": {"source": "fo4-native-failed"}}}
         self.assertEqual(oracle.placed(cell({"formkey": "other", "model": "Walls\\Floor.nif"}), items),
-                         {"no_collision": [], "guessed": []})
+                         {"no_collision": [], "guessed": [], "unbuilt": []})
+
+    def test_a_rejected_mesh_is_listed_and_an_unattempted_model_is_not(self):
+        failures = [{"nif": "meshes/Lights/StrobeLight01Flash.nif",
+                     "reason": "ValueError: only effect-shader shapes (glass/glow), skipped"}]
+        report = oracle.placed(cell(
+            {"formkey": "flash", "model": "Lights\\StrobeLight01Flash.nif"},
+            {"formkey": "actor", "model": "Actors\\Somebody.nif"},
+        ), {}, failures)
+        self.assertEqual(report["no_collision"], [])
+        self.assertEqual(report["guessed"], [])
+        self.assertEqual(report["unbuilt"], [{
+            "ref": "flash", "model": "Lights\\StrobeLight01Flash.nif",
+            "reason": "ValueError: only effect-shader shapes (glass/glow), skipped"}])
+        absent = oracle.placed(cell({"formkey": "other", "model": "Lights\\StrobeLight01Flash.nif"}), {})
+        self.assertEqual(absent["unbuilt"], [])

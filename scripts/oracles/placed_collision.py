@@ -1,9 +1,11 @@
 """List placed refs whose FO4 collision did not become a native body.
 
 `no_collision` means the conversion failed and no box was written. `guessed` means
-it failed and a box fallback was written instead. A model FO4 shipped with no
-collision, a passable door, and a rigged door (an empty report plus a door record)
-are not this list. Exit 1 when either list is non-empty. This does not score a walk.
+it failed and a box fallback was written instead. `unbuilt` means the build rejected
+that mesh, so the ref has nothing to place. A model FO4 shipped with no collision,
+a passable door, and a rigged door (an empty report plus a door record) are not
+this list. A model that was never part of the build is not this list either.
+Exit 1 when any list is non-empty. This does not score a walk.
 
 usage: python scripts/oracles/placed_collision.py --cell cell.json --manifest manifest.json
 """
@@ -14,8 +16,15 @@ import json
 _OK = {"fo4-native", "fo4-none", "fo4-mesh", "passable-door"}
 
 
+def _key(path):
+    text = (path or "").replace("/", "\\").lstrip("\\").lower()
+    if text.startswith("meshes\\"):
+        return text
+    return "meshes\\" + text
+
+
 def _items(manifest):
-    return {item.get("source", "").lower(): item for item in manifest.get("items", [])}
+    return {_key(item.get("source", "")): item for item in manifest.get("items", [])}
 
 
 def failure_kind(item):
@@ -34,15 +43,25 @@ def failure_kind(item):
     return None
 
 
-def placed(cell, items):
-    """Refs in the cell whose manifest item failed native collision."""
+def placed(cell, items, failures=None):
+    """Refs whose manifest item failed native collision, or whose mesh the build rejected."""
+    rejected = {}
+    for row in failures or []:
+        nif = row.get("nif") if isinstance(row, dict) else None
+        if nif:
+            rejected[_key(nif)] = row.get("reason") or "build failed"
     no_collision = []
     guessed = []
+    unbuilt = []
     for ref in cell.get("refs", []):
         model = ref.get("model") or ""
         if not model:
             continue
-        key = "meshes\\" + model.lstrip("\\").lower()
+        key = _key(model)
+        form = ref.get("formkey") or ref.get("ref")
+        if key in rejected:
+            unbuilt.append({"ref": form, "model": model, "reason": rejected[key]})
+            continue
         item = items.get(key)
         if not item:
             continue
@@ -50,10 +69,10 @@ def placed(cell, items):
         if kind is None:
             continue
         report = item.get("collision_report") or {}
-        row = {"ref": ref.get("formkey") or ref.get("ref"), "model": model,
+        row = {"ref": form, "model": model,
                "reason": report.get("source") or report.get("fo4_collision_error") or "empty report"}
         (no_collision if kind == "no_collision" else guessed).append(row)
-    return {"no_collision": no_collision, "guessed": guessed}
+    return {"no_collision": no_collision, "guessed": guessed, "unbuilt": unbuilt}
 
 
 def main(argv=None):
@@ -64,10 +83,10 @@ def main(argv=None):
     with open(args.cell, encoding="utf-8-sig") as handle:
         cell = json.load(handle)
     with open(args.manifest, encoding="utf-8-sig") as handle:
-        items = _items(json.load(handle))
-    report = placed(cell, items)
+        manifest = json.load(handle)
+    report = placed(cell, _items(manifest), manifest.get("failures"))
     print(json.dumps(report, indent=2))
-    return 1 if report["no_collision"] or report["guessed"] else 0
+    return 1 if report["no_collision"] or report["guessed"] or report["unbuilt"] else 0
 
 
 if __name__ == "__main__":
