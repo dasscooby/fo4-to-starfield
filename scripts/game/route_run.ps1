@@ -2,7 +2,8 @@
 # usage: route_run.ps1 -Routes routes.json -Out <dir> [-First 0] [-Count 999]
 # Requires: Starfield in front, in the route's cell, console CLOSED. Every keystroke goes through input.ps1's foreground
 # guard (stops if anything else is in front). Results: <Out>\results.jsonl (one line per route), <Out>\r<k>.png.
-param([string]$Routes, [string]$Out, [int]$First = 0, [int]$Count = 999, [int]$BackOff = 0, [string]$Only = '', [int]$StepIn = 350)
+param([string]$Routes, [string]$Out, [int]$First = 0, [int]$Count = 999, [int]$BackOff = 0, [string]$Only = '', [int]$StepIn = 0,[string]$PluginIndex = '02')
+# -PluginIndex: FO4Port.esm's load-order prefix in the console (refs show as 02xxxxxx in this setup)
 # -StepIn <ms>: walk towards a door before looking for the prompt (0 = press E from the route start, outside the swing arc)
 # -BackOff <ms>: after E, walk backwards this long before crossing (gets out of the leaf's swing arc; one-sided blocks test)
 # -Only 13,15: run just these route indices
@@ -39,7 +40,11 @@ for ($k = $First;$k -lt [Math]::Min($list.Count, $First + $Count); $k++) {
   $h = $r.heading.ToString($inv)
   powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $here 'console_open.ps1') | Out-Null
   if ($LASTEXITCODE -ne 0) { "console not confirmed open at route $k (code $LASTEXITCODE): stopping"; break }
-  $seq = "type:player.setpos x $x|key:enter|wait:350|type:player.setpos y $y|key:enter|wait:350|" +
+  # both-side activation: an earlier route leaves the door open (then this side sees no OPEN prompt and only walks through
+  # an open door). Close this route's door first by its Starfield ref id (plugin load index + local FormID from routes.py).
+  $close = ''
+  if ($r.use -and $r.sf_ref_local) { $close = "type:prid $PluginIndex$($r.sf_ref_local)|key:enter|wait:300|type:setopenstate 0|key:enter|wait:300|" }
+  $seq = $close + "type:player.setpos x $x|key:enter|wait:350|type:player.setpos y $y|key:enter|wait:350|" +
          "type:player.setpos z $z|key:enter|wait:350|type:player.setangle z $h|key:enter|wait:350|" +
          "type:player.setangle x 10|key:enter|wait:400|key:grave|wait:1800"   # x 0 points the camera at the floor
   powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq $seq | Out-Null

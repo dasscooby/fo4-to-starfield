@@ -213,7 +213,10 @@ def main():
     ap.add_argument("--manifest", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--max", type=int, default=40)
+    ap.add_argument("--formids", default="", help="plugin formids.json: door routes get the door's Starfield ref id "
+                    "(local FormID) so the runner can close it before each crossing")
     a = ap.parse_args()
+    formids = json.load(open(a.formids, encoding="utf-8-sig")) if a.formids else {}
     src = pipeline.Fo4Archives(a.fo4_data)
     cell = json.load(open(a.cell_json, encoding="utf-8-sig"))
     man = json.load(open(a.manifest))
@@ -241,10 +244,12 @@ def main():
             centre_l, axis_l = frame
             centre = place(centre_l)
             n = tuple(x - y for x, y in zip(place(axis_l), pos))
+            local = formids.get(f"REFR:FO4Port_{cell['cell']}:{r['formkey']}")
             for side in (1, -1):
                 ns = tuple(side * x for x in n)
                 start = tuple(centre[i] - 1.6 * ns[i] for i in range(3))
                 routes.append({"cell": cell["cell"], "kind": "door", "ref": r["formkey"], "model": model, "side": side,
+                               **({"sf_ref_local": f"{local:06X}"} if local is not None else {}),
                                "start": [round(start[0], 2), round(start[1], 2), round(pos[2] + 0.3, 2)],
                                "heading": round(math.degrees(math.atan2(ns[0], ns[1])) % 360, 1), "use": True,
                                "walk_ms": 1100,

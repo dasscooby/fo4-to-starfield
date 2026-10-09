@@ -540,3 +540,9 @@ walkable FO4 collision along the ramp; `buried_fraction` per route). Load doors 
   sheets. First thing to check in game. Still skipped, and listed as build failures: the animated oil puddle, the
   glowing "Open" sign and the strobe flash (emissive and animated effects aren't ported). Side build: 4,014 models,
   6 failures (was 12), all FormIDs stable.
+- **Both-side door activation (runner, offline):** saved runs could never show a door opening from both sides, because
+  the first route left it open and the second side saw no OPEN prompt (traversal, not activation; Grok's `632c4dc`).
+  `routes.py --formids` now records each door's Starfield ref id (`sf_ref_local`). `route_run.ps1` closes that door
+  (`prid <PluginIndex><id>`, `setopenstate 0`) before every door route, so each side records its own OPEN. `-StepIn`
+  now defaults to 0 (press E from outside the swing arc). Routes regenerated for all 15 cells in `multi_next`.
+  Coordination posted to #32: asking Grok for a deploy window, Codex for the batch-invalidation case.
