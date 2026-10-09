@@ -563,3 +563,18 @@ walkable FO4 collision along the ramp; `buried_fraction` per route). Load doors 
   encoding is wrong too: of 412 four-vertex groups across the 36 models, many are not thin (`CM00163A1B` has groups
   ~3 m in every axis; median middle extent 0.66 m). So these parts must not be dropped as harmless; they stay
   reported (`skipped_parts`) with guessed boxes until the encoding is decoded. The grouping by 4 is itself unconfirmed.
+
+## 2026-10-09 (evening): Parsons doors open from both sides (pinned build)
+
+Pinned build: `multi_next` deployed with plugin `AC379C53...`, Main.ba2 `B8080348...`, code `1d3d5bf`
+(`staging\multi_next\deployed_hashes.txt`). Runner: per-route door reset (`setopenstate 0`), E pressed from the route
+start, OPEN read from the prompt (`94d6dcb`), idle-camera wake (`76488be`).
+
+- First full run (45 routes): 3 hinged doors passed both sides with a recorded OPEN, 8 one side, 5 none; stairs 7 PASS,
+  1 STUCK, 5 starts not reached (sunken `RWResStairs02`). 9 of the 12 door blocks had the prompt on screen but OCR read
+  no verb, so E was never pressed: a runner bug, fixed in `94d6dcb` (crop + enlarge + threshold; 37/37 saved shots read).
+- Door re-run (same build, routes 4-35; stopped by the foreground guard at 36 when another window came up):
+  **11 hinged doors pass both sides with OPEN recorded on each side** (22 of 25 door routes; all 24 verbs read "OPEN",
+  none from the unread fallback) ([side A](media/route-parsons-door-bothsides-a.jpg),
+  [side B](media/route-parsons-door-bothsides-b.jpg)). Left: `06CF29` double door stops 0.30 m past the plane (needs 0.8),
+  `IndMetalDoor02` blocked on one side, its other start not reached. Routes 36-44 still to run.
