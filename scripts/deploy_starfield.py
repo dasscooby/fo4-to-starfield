@@ -100,6 +100,21 @@ def artifact_identity(path):
     return {"size": size, "sha256": digest.hexdigest()}
 
 
+def copy_new_artifact(src, dst):
+    """Publish a fully copied file atomically without replacing an existing target."""
+    fd, temporary = tempfile.mkstemp(prefix=".fo4port-install-", dir=os.path.dirname(dst))
+    os.close(fd)
+    try:
+        shutil.copyfile(src, temporary)
+        if artifact_identity(temporary) != artifact_identity(src):
+            raise OSError(f"temporary copy differs from source: {os.path.basename(dst)}")
+        # Same-directory hard-link creation is atomic and fails if dst exists.
+        os.link(temporary, dst)
+    finally:
+        if os.path.exists(temporary):
+            os.remove(temporary)
+
+
 def install(a):
     build_state = os.path.join(a.staging, "build-state.json")
     if os.path.exists(build_state):
@@ -155,13 +170,16 @@ def install(a):
     state["plugins_original"] = base64.b64encode(plugins_original).decode("ascii") if plugins_existed else None
     state["plugins_restore_pending"] = False
     write_manifest(man_path, state)
+    installed_files = set()
     try:
         for src, dst in zip(built, targets):
-            state["files"].append(os.path.basename(dst))
+            rel = os.path.basename(dst)
+            state["files"].append(rel)
             write_manifest(man_path, state)
-            shutil.copy2(src, dst)
-            if artifact_identity(dst) != identities[os.path.basename(dst)]:
-                raise OSError(f"installed artifact differs from validated build: {os.path.basename(dst)}")
+            copy_new_artifact(src, dst)
+            installed_files.add(rel)
+            if artifact_identity(dst) != identities[rel]:
+                raise OSError(f"installed artifact differs from validated build: {rel}")
         if pl_add:
             current_plugins = None
             if os.path.exists(pt):
@@ -188,16 +206,21 @@ def install(a):
             p = os.path.join(data, rel)
             try:
                 if os.path.exists(p):
+                    if rel not in installed_files:
+                        raise OSError(f"destination appeared during install; preserved: {rel}")
+                    if artifact_identity(p) != identities[rel]:
+                        raise OSError(f"installed artifact changed during rollback; preserved: {rel}")
                     os.remove(p)
             except OSError as cleanup_error:
                 remaining.append(rel)
                 errors.append(str(cleanup_error))
-                try:
-                    # Record exactly what remains so a later retry can remove
-                    # this partial copy but preserve edits made after failure.
-                    state["artifacts"][rel] = artifact_identity(p)
-                except OSError as identity_error:
-                    errors.append(str(identity_error))
+                if rel in installed_files:
+                    try:
+                        # Record exactly what remains so a later retry can remove
+                        # this owned copy but preserve edits made after failure.
+                        state["artifacts"][rel] = artifact_identity(p)
+                    except OSError as identity_error:
+                        errors.append(str(identity_error))
         state["files"] = remaining
         if errors:
             write_manifest(man_path, state)

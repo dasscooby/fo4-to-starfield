@@ -1,6 +1,7 @@
 """Deployment failure injection: synthetic files, no game installation required."""
 import importlib.util
 import json
+import stat
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -14,6 +15,16 @@ spec.loader.exec_module(deploy)
 
 
 class DeploymentRollbackTests(unittest.TestCase):
+    def test_atomic_publish_handles_read_only_source_and_cleans_temporary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source, target = root / "source.esm", root / "target.esm"
+            source.write_bytes(b"synthetic read-only plugin")
+            source.chmod(stat.S_IREAD)
+            deploy.copy_new_artifact(str(source), str(target))
+            self.assertEqual(target.read_bytes(), source.read_bytes())
+            self.assertEqual({p.name for p in root.iterdir()}, {"source.esm", "target.esm"})
+
     def test_plugin_list_edit_during_copy_aborts_without_clobbering_it(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -30,15 +41,15 @@ class DeploymentRollbackTests(unittest.TestCase):
             args = SimpleNamespace(staging=str(staging), starfield=str(game), dry_run=False)
             def build(a, out, folders, fmt):
                 Path(out).write_bytes(b"BTDX" + bytes(32))
-            real_copy = deploy.shutil.copy2
-            def copy(src, dst):
-                result = real_copy(src, dst)
+            real_publish = deploy.copy_new_artifact
+            def publish(src, dst):
+                result = real_publish(src, dst)
                 if Path(dst).name == deploy.ARCHIVE:
                     pt.write_bytes(edited)
                 return result
             with patch.object(deploy, "plugins_txt_path", return_value=str(pt)), \
                     patch.object(deploy, "build_archive", side_effect=build), \
-                    patch.object(deploy.shutil, "copy2", side_effect=copy):
+                    patch.object(deploy, "copy_new_artifact", side_effect=publish):
                 with self.assertRaisesRegex(SystemExit, "rolled back"):
                     deploy.install(args)
             self.assertEqual(pt.read_bytes(), edited)
@@ -66,6 +77,33 @@ class DeploymentRollbackTests(unittest.TestCase):
                              ["*Other.esm", "*AddedDuringBuild.esm", "*FO4Port.esm"])
             deploy.uninstall(args)
             self.assertEqual(pt.read_text().splitlines(), ["*Other.esm", "*AddedDuringBuild.esm"])
+
+    def test_target_created_during_archive_build_is_never_overwritten(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            staging, game = root / "staging", root / "game"
+            staging.mkdir()
+            data = game / "Data"
+            data.mkdir(parents=True)
+            (staging / deploy.PLUGIN).write_bytes(b"TES4" + bytes(32))
+            (staging / "meshes").mkdir()
+            target = data / deploy.PLUGIN
+            external = b"created by another process during archive build"
+            args = SimpleNamespace(staging=str(staging), starfield=str(game), dry_run=False)
+
+            def build(a, out, folders, fmt):
+                Path(out).write_bytes(b"BTDX" + bytes(32))
+                target.write_bytes(external)
+
+            with patch.object(deploy, "plugins_txt_path", return_value=str(root / "Plugins.txt")), \
+                    patch.object(deploy, "build_archive", side_effect=build):
+                with self.assertRaisesRegex(SystemExit, "recovery manifest retained"):
+                    deploy.install(args)
+            self.assertEqual(target.read_bytes(), external)
+            self.assertTrue((data / deploy.MANIFEST).exists())
+            with self.assertRaisesRegex(SystemExit, "uninstall incomplete"):
+                deploy.uninstall(args)
+            self.assertEqual(target.read_bytes(), external)
 
     def test_uninstall_preserves_artifact_changed_after_successful_install(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -295,7 +333,7 @@ class DeploymentRollbackTests(unittest.TestCase):
                     head = b"TES4"
                 Path(out).write_bytes(head + bytes(32))
 
-            original_copy = deploy.shutil.copy2
+            original_copy = deploy.shutil.copyfile
             original_dump = deploy.json.dump
             original_remove = deploy.os.remove
             original_write_lines = deploy.write_lines
@@ -304,7 +342,7 @@ class DeploymentRollbackTests(unittest.TestCase):
                 if failure == "corrupt_copy":
                     Path(dst).write_bytes(b"successful call, incorrect bytes")
                     return dst
-                if failure in ("copy", "cleanup"):
+                if failure == "copy":
                     Path(dst).write_bytes(b"partial")
                     raise OSError("injected partial copy")
                 return original_copy(src, dst)
@@ -323,10 +361,12 @@ class DeploymentRollbackTests(unittest.TestCase):
                 original_write_lines(path, lines)
                 if failure == "interrupt":
                     raise KeyboardInterrupt("injected interruption after activation")
+                if failure == "cleanup":
+                    raise OSError("injected failure after activation")
 
             with patch.object(deploy, "plugins_txt_path", return_value=str(pt)), \
                     patch.object(deploy, "build_archive", side_effect=build), \
-                    patch.object(deploy.shutil, "copy2", side_effect=copy), \
+                    patch.object(deploy.shutil, "copyfile", side_effect=copy), \
                     patch.object(deploy.json, "dump", side_effect=dump), \
                     patch.object(deploy.os, "remove", side_effect=remove), \
                     patch.object(deploy, "write_lines", side_effect=write_lines):
