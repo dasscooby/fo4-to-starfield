@@ -143,3 +143,20 @@ Read paired `open.af` / `close.af` entries directly from `Starfield - Animations
 | Ship large interior `shpgenintpersmwallmid_exlg_door01` | 2580 / 2512 | 5, 49, 91, 2 |
 
 All four `.afx` companions identify the `Open` tag and filename only; they do not expose track or bone mappings. In particular, Open and Close length can differ within one rig, so a decoder must parse per-file structure and bounds rather than assume paired files are byte-for-byte layouts or equal-sized. The meaning of the four u16 fields and the apparent Akila rotation channel remain unverified. Next useful evidence: map channel counts and value ranges against each corresponding `.rig` bone table, then validate a decoded pose against an in-game panel displacement before generating clips. Do not implement the decoder from the Akila sample alone.
+
+### Header fields vs rig bone tables (Claude, 2026-10-09, offline)
+
+Checked against each family's `characterassets\skeleton.rig` (name table at the end of the rig):
+
+| Family | rig u32[0] | rig node names | `open.af` u16s at 0x28 |
+|---|---:|---:|---|
+| Akila hinged | 5 | 6 | 5, **6**, 31, 2 |
+| Generic `genintrmsmwallmid_doora00a` | 5 | 21 | 5, **21**, 61, 2 |
+| Ship `..._exsm_door01` | 5 | 24 | 5, **24**, 81, 2 |
+| Ship `..._exlg_door01` | 5 | 49 | 5, **49**, 91, 2 |
+
+So in all four: field 1 = 5 matches the rig's leading u32 (likely format version); **field 2 = the rig's bone count**;
+field 3 is a frame count (31/61/81/91; 30 fps is assumed, not confirmed); field 4 = 2 in all four (meaning unknown). Template hints from the
+rig names: the small ship door has `DoorUpper01` / `DoorUpperMesh01` (candidate for FO4's vertically split vault doors),
+the generic door has `DoorPanel01_Point` / `DoorPanel02_Point` (candidate for the sideways elevator doors). Still needed
+before a decoder: which bytes hold per-bone channel masks, then one decoded pose checked against an in-game panel position.
