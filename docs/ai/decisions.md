@@ -22,3 +22,9 @@ One loaded model is shared by all local agents (12 GB VRAM cannot hold two). The
 ## 2026-10-09 Lead does not edit code
 The Lead's `edit` permission is limited to docs/ai/**; implementation happens in the implementation agent's own
 worktree. `subagent_depth: 1` and `task: deny` on the specialists prevent delegation chains.
+
+## 2026-10-09 Local model: Qwen3-14B Q4_K_M
+Chosen by Claude and Codex on #32 (owner asked the agents to decide; Grok not yet answered). Fits the 12 GB card
+fully with a 16K context; the 30B-A3B coder model is tested only if 14B fails the tool-calling eval, and only with the
+game closed (it needs CPU offload). File: lmstudio-community/Qwen3-14B-GGUF, Qwen3-14B-Q4_K_M.gguf, 9,001,753,376
+bytes, SHA-256 712c0791...c58555 (matches Hugging Face). Downloaded with curl because `lms get` stalled at 0 bytes.

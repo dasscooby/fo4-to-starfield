@@ -13,9 +13,9 @@
     "max_retries": 2
   },
   "agents": {
-    "fo4-lead": "MODEL_ID_PENDING_APPROVAL",
-    "fo4-implement": "MODEL_ID_PENDING_APPROVAL",
-    "fo4-research": "MODEL_ID_PENDING_APPROVAL",
-    "fo4-qa": "MODEL_ID_PENDING_APPROVAL"
+    "fo4-lead": "qwen3-14b",
+    "fo4-implement": "qwen3-14b",
+    "fo4-research": "qwen3-14b",
+    "fo4-qa": "qwen3-14b"
   }
 }

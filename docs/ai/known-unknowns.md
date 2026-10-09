@@ -8,4 +8,4 @@ Open questions that block or risk work. Remove an entry only with a link to the 
 | 2 | Primitive encoding of FO4 precombine bodies with shared-index triples | 36 models on guessed collision boxes | research-log.md, journal |
 | 3 | Do the one-sided door blocks disappear with E pressed outside the swing arc for all doors? | door acceptance (#32) | journal, route runs |
 | 4 | Effect-shader wall stains as decals: dark sheets or correct? (FO4 gradient palette not reproduced) | material quality | journal |
-| 5 | Which local model reliably does OpenCode tool calls within 12 GB VRAM | local team | tools/ai-team/README.md |
+| 5 | Does Qwen3-14B Q4_K_M (chosen by Claude + Codex, #32) do reliable OpenCode tool calls at 16K context, and what VRAM does it use? | local team | validation pending (game must be closed) |
