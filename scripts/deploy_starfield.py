@@ -258,13 +258,6 @@ def install(a):
             except OSError as cleanup_error:
                 remaining.append(rel)
                 errors.append(str(cleanup_error))
-                if rel in installed_files:
-                    try:
-                        # Record exactly what remains so a later retry can remove
-                        # this owned copy but preserve edits made after failure.
-                        state["artifacts"][rel] = artifact_identity(p)
-                    except OSError as identity_error:
-                        errors.append(str(identity_error))
         state["files"] = remaining
         if errors:
             write_manifest(man_path, state)

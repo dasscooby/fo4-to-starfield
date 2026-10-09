@@ -143,6 +143,50 @@ class DeploymentRollbackTests(unittest.TestCase):
                 deploy.uninstall(args)
             self.assertEqual(target.read_bytes(), plugin_bytes)
 
+    def test_rollback_retry_preserves_artifact_changed_before_later_copy_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            staging, game = root / "staging", root / "game"
+            staging.mkdir()
+            data = game / "Data"
+            data.mkdir(parents=True)
+            (staging / deploy.PLUGIN).write_bytes(b"TES4" + bytes(32))
+            (staging / "meshes").mkdir()
+            target = data / deploy.PLUGIN
+            pt = root / "Plugins.txt"
+            pt.write_text("*Other.esm\n")
+            args = SimpleNamespace(staging=str(staging), starfield=str(game), dry_run=False)
+            external = b"replacement written after plugin publication"
+            original_identity = deploy.artifact_identity(staging / deploy.PLUGIN)
+            def build(a, out, folders, fmt):
+                Path(out).write_bytes(b"BTDX" + bytes(32))
+            real_publish = deploy.copy_new_artifact
+            real_manifest = deploy.write_manifest
+            changed = False
+            def write_manifest(path, state):
+                nonlocal changed
+                real_manifest(path, state)
+                if deploy.PLUGIN in state.get("published_files", []) and not changed:
+                    changed = True
+                    target.write_bytes(external)
+            def publish(src, dst):
+                if Path(dst).name == deploy.ARCHIVE:
+                    raise OSError("injected later artifact failure")
+                real_publish(src, dst)
+            with patch.object(deploy, "plugins_txt_path", return_value=str(pt)), \
+                    patch.object(deploy, "build_archive", side_effect=build), \
+                    patch.object(deploy, "write_manifest", side_effect=write_manifest), \
+                    patch.object(deploy, "copy_new_artifact", side_effect=publish):
+                with self.assertRaisesRegex(SystemExit, "recovery manifest retained"):
+                    deploy.install(args)
+            self.assertEqual(target.read_bytes(), external)
+            recovery = json.loads((data / deploy.MANIFEST).read_text())
+            self.assertEqual(recovery["published_files"], [deploy.PLUGIN])
+            self.assertEqual(recovery["artifacts"][deploy.PLUGIN], original_identity)
+            with self.assertRaisesRegex(SystemExit, "uninstall incomplete"):
+                deploy.uninstall(args)
+            self.assertEqual(target.read_bytes(), external)
+
     def test_uninstall_preserves_artifact_changed_after_successful_install(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
