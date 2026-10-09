@@ -92,6 +92,31 @@ class DeploymentRollbackTests(unittest.TestCase):
             deploy.uninstall(args)
             self.assertFalse(plugin.exists() or manifest.exists())
 
+    def test_uninstall_preserves_artifact_changed_after_interrupted_install(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data = root / "Data"
+            data.mkdir()
+            plugin = data / deploy.PLUGIN
+            plugin.write_bytes(b"installed before interruption")
+            expected = deploy.artifact_identity(plugin)
+            plugin.write_bytes(b"user replacement after interruption")
+            pt = root / "Plugins.txt"
+            pt.write_text("*Other.esm\n*FO4Port.esm\n")
+            manifest = data / deploy.MANIFEST
+            deploy.write_manifest(str(manifest), {"files": [deploy.PLUGIN],
+                "plugins_txt": str(pt), "plugins_added": ["*FO4Port.esm"], "complete": False,
+                "artifacts": {deploy.PLUGIN: expected}})
+            args = SimpleNamespace(starfield=str(root), dry_run=False)
+            with self.assertRaisesRegex(SystemExit, "uninstall incomplete"):
+                deploy.uninstall(args)
+            self.assertEqual(plugin.read_bytes(), b"user replacement after interruption")
+            self.assertEqual(pt.read_text().splitlines(), ["*Other.esm"])
+            self.assertEqual(json.loads(manifest.read_text())["files"], [deploy.PLUGIN])
+            plugin.write_bytes(b"installed before interruption")
+            deploy.uninstall(args)
+            self.assertFalse(plugin.exists() or manifest.exists())
+
     def test_bom_prefixed_active_plugin_is_not_duplicated_or_removed(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

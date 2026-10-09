@@ -187,6 +187,12 @@ def install(a):
             except OSError as cleanup_error:
                 remaining.append(rel)
                 errors.append(str(cleanup_error))
+                try:
+                    # Record exactly what remains so a later retry can remove
+                    # this partial copy but preserve edits made after failure.
+                    state["artifacts"][rel] = artifact_identity(p)
+                except OSError as identity_error:
+                    errors.append(str(identity_error))
         state["files"] = remaining
         if errors:
             write_manifest(man_path, state)
@@ -213,7 +219,7 @@ def uninstall(a):
         try:
             if os.path.exists(p):
                 expected = m.get("artifacts", {}).get(rel)
-                if m.get("complete", True) and expected is not None and artifact_identity(p) != expected:
+                if expected is not None and artifact_identity(p) != expected:
                     raise OSError(f"artifact changed since installation; preserved: {rel}")
                 os.remove(p)
         except OSError as e:
