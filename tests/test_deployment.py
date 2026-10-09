@@ -16,6 +16,10 @@ spec.loader.exec_module(deploy)
 
 
 class DeploymentRollbackTests(unittest.TestCase):
+    def uninstall_at(self, args, plugins_path):
+        with patch.object(deploy, "plugins_txt_path", return_value=str(plugins_path)):
+            deploy.uninstall(args)
+
     def test_uninstall_rejects_manifest_paths_outside_deployment_targets(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -34,9 +38,25 @@ class DeploymentRollbackTests(unittest.TestCase):
                         "plugins_txt": str(plugins), "plugins_added": [], "complete": True,
                         "artifacts": {unsafe: deploy.artifact_identity(victim)}})
                     with self.assertRaisesRegex(SystemExit, "uninstall incomplete"):
-                        deploy.uninstall(args)
+                        self.uninstall_at(args, plugins)
                     self.assertEqual(victim.read_bytes(), b"user data")
                     self.assertTrue(manifest.exists())
+
+    def test_uninstall_rejects_unexpected_plugins_txt_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data = root / "Data"
+            data.mkdir()
+            victim = root / "Plugins.txt"
+            original = b"*Other.esm\n*FO4Port.esm\n"
+            victim.write_bytes(original)
+            manifest = data / deploy.MANIFEST
+            deploy.write_manifest(str(manifest), {"files": [],
+                "plugins_txt": str(victim), "plugins_added": ["*FO4Port.esm"], "complete": True})
+            args = SimpleNamespace(starfield=str(root), dry_run=False)
+            with self.assertRaisesRegex(SystemExit, "Plugins.txt path.*does not match"):
+                deploy.uninstall(args)
+            self.assertEqual(victim.read_bytes(), original)
 
     def test_atomic_publish_handles_read_only_source_and_cleans_temporary(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -108,7 +128,7 @@ class DeploymentRollbackTests(unittest.TestCase):
                 deploy.install(args)
             self.assertEqual(pt.read_text().splitlines(),
                              ["*Other.esm", "*AddedDuringBuild.esm", "*FO4Port.esm"])
-            deploy.uninstall(args)
+            self.uninstall_at(args, pt)
             self.assertEqual(pt.read_text().splitlines(), ["*Other.esm", "*AddedDuringBuild.esm"])
 
     def test_target_created_during_archive_build_is_never_overwritten(self):
@@ -135,7 +155,7 @@ class DeploymentRollbackTests(unittest.TestCase):
             self.assertEqual(target.read_bytes(), external)
             self.assertTrue((data / deploy.MANIFEST).exists())
             with self.assertRaisesRegex(SystemExit, "uninstall incomplete"):
-                deploy.uninstall(args)
+                self.uninstall_at(args, root / "Plugins.txt")
             self.assertEqual(target.read_bytes(), external)
 
     def test_uninstall_preserves_identical_external_target_created_during_build(self):
@@ -163,7 +183,7 @@ class DeploymentRollbackTests(unittest.TestCase):
                     deploy.install(args)
             self.assertEqual(target.read_bytes(), plugin_bytes)
             with self.assertRaisesRegex(SystemExit, "uninstall incomplete"):
-                deploy.uninstall(args)
+                self.uninstall_at(args, pt)
             self.assertEqual(target.read_bytes(), plugin_bytes)
 
     def test_rollback_retry_preserves_artifact_changed_before_later_copy_failure(self):
@@ -207,7 +227,7 @@ class DeploymentRollbackTests(unittest.TestCase):
             self.assertEqual(recovery["published_files"], [deploy.PLUGIN])
             self.assertEqual(recovery["artifacts"][deploy.PLUGIN], original_identity)
             with self.assertRaisesRegex(SystemExit, "uninstall incomplete"):
-                deploy.uninstall(args)
+                self.uninstall_at(args, pt)
             self.assertEqual(target.read_bytes(), external)
 
     def test_uninstall_preserves_artifact_changed_after_successful_install(self):
@@ -227,12 +247,12 @@ class DeploymentRollbackTests(unittest.TestCase):
                 "artifacts": {deploy.PLUGIN: expected}})
             args = SimpleNamespace(starfield=str(root), dry_run=False)
             with self.assertRaisesRegex(SystemExit, "uninstall incomplete"):
-                deploy.uninstall(args)
+                self.uninstall_at(args, pt)
             self.assertEqual(plugin.read_bytes(), b"replacement bytes to preserve")
             self.assertEqual(pt.read_text().splitlines(), ["*Other.esm"])
             self.assertEqual(json.loads(manifest.read_text())["files"], [deploy.PLUGIN])
             plugin.write_bytes(b"original installed bytes")
-            deploy.uninstall(args)
+            self.uninstall_at(args, pt)
             self.assertFalse(plugin.exists() or manifest.exists())
 
     def test_uninstall_preserves_artifact_changed_after_interrupted_install(self):
@@ -253,12 +273,12 @@ class DeploymentRollbackTests(unittest.TestCase):
                 "artifacts": {deploy.PLUGIN: expected}})
             args = SimpleNamespace(starfield=str(root), dry_run=False)
             with self.assertRaisesRegex(SystemExit, "uninstall incomplete"):
-                deploy.uninstall(args)
+                self.uninstall_at(args, pt)
             self.assertEqual(plugin.read_bytes(), b"user replacement after interruption")
             self.assertEqual(pt.read_text().splitlines(), ["*Other.esm"])
             self.assertEqual(json.loads(manifest.read_text())["files"], [deploy.PLUGIN])
             plugin.write_bytes(b"installed before interruption")
-            deploy.uninstall(args)
+            self.uninstall_at(args, pt)
             self.assertFalse(plugin.exists() or manifest.exists())
 
     def test_bom_prefixed_active_plugin_is_not_duplicated_or_removed(self):
@@ -281,7 +301,7 @@ class DeploymentRollbackTests(unittest.TestCase):
             manifest = json.loads((game / "Data" / deploy.MANIFEST).read_text())
             self.assertEqual(manifest["plugins_added"], [])
             self.assertEqual(pt.read_bytes(), original)
-            deploy.uninstall(args)
+            self.uninstall_at(args, pt)
             self.assertEqual(pt.read_bytes(), original)
 
     def test_case_variant_plugin_line_is_not_duplicated_or_removed(self):
@@ -304,7 +324,7 @@ class DeploymentRollbackTests(unittest.TestCase):
             state = json.loads((game / "Data" / deploy.MANIFEST).read_text())
             self.assertEqual(state["plugins_added"], [])
             self.assertEqual(pt.read_bytes(), original)
-            deploy.uninstall(args)
+            self.uninstall_at(args, pt)
             self.assertEqual(pt.read_bytes(), original)
 
     def test_inactive_plugin_entry_is_activated_then_restored_on_uninstall(self):
@@ -324,7 +344,7 @@ class DeploymentRollbackTests(unittest.TestCase):
                     patch.object(deploy, "build_archive", side_effect=build):
                 deploy.install(args)
             self.assertEqual(pt.read_text().splitlines(), ["*FO4Port.esm", "*Other.esm"])
-            deploy.uninstall(args)
+            self.uninstall_at(args, pt)
             self.assertEqual(pt.read_text().splitlines(), ["FO4Port.esm", "*Other.esm"])
 
     def test_uninstall_preserves_duplicate_plugin_entry_added_after_install(self):
@@ -345,7 +365,7 @@ class DeploymentRollbackTests(unittest.TestCase):
                 deploy.install(args)
             with pt.open("a") as plugins:
                 plugins.write("\n*fo4port.esm\n")
-            deploy.uninstall(args)
+            self.uninstall_at(args, pt)
             self.assertEqual(pt.read_text().splitlines(), ["*Other.esm", "", "*fo4port.esm"])
 
     def test_inactive_plugin_activation_preserves_bom_and_line_endings(self):
@@ -366,7 +386,7 @@ class DeploymentRollbackTests(unittest.TestCase):
                     patch.object(deploy, "build_archive", side_effect=build):
                 deploy.install(args)
             self.assertEqual(pt.read_bytes(), b"\xef\xbb\xbf*FO4Port.esm\n*Other.esm\n")
-            deploy.uninstall(args)
+            self.uninstall_at(args, pt)
             self.assertEqual(pt.read_bytes(), original)
 
     def test_uninstall_preserves_preexisting_empty_plugins_file(self):
@@ -385,7 +405,7 @@ class DeploymentRollbackTests(unittest.TestCase):
             with patch.object(deploy, "plugins_txt_path", return_value=str(pt)), \
                     patch.object(deploy, "build_archive", side_effect=build):
                 deploy.install(args)
-            deploy.uninstall(args)
+            self.uninstall_at(args, pt)
             self.assertTrue(pt.exists())
             self.assertEqual(pt.read_bytes(), b"")
 
@@ -406,7 +426,7 @@ class DeploymentRollbackTests(unittest.TestCase):
                     patch.object(deploy, "build_archive", side_effect=build):
                 deploy.install(args)
             pt.write_text("*Other.esm\n*fo4port.esm\n")
-            deploy.uninstall(args)
+            self.uninstall_at(args, pt)
             self.assertEqual(pt.read_text().splitlines(), ["*Other.esm"])
 
     def check_archive_build(self, outcome):
@@ -479,14 +499,14 @@ class DeploymentRollbackTests(unittest.TestCase):
             args = SimpleNamespace(starfield=str(root), dry_run=False)
             with patch.object(deploy.os, "remove", side_effect=locked):
                 with self.assertRaisesRegex(SystemExit, "uninstall incomplete"):
-                    deploy.uninstall(args)
+                    self.uninstall_at(args, pt)
             self.assertTrue(plugin.exists())
             self.assertFalse(archive.exists())
             self.assertEqual(pt.read_text().splitlines(), ["*Other.esm"])
             state = json.loads(manifest.read_text())
             self.assertEqual(state["files"], [deploy.PLUGIN])
             self.assertEqual(state["plugins_added"], [])
-            deploy.uninstall(args)
+            self.uninstall_at(args, pt)
             self.assertFalse(manifest.exists() or plugin.exists())
             self.assertEqual(pt.read_text().splitlines(), ["*Other.esm"])
 
@@ -564,12 +584,12 @@ class DeploymentRollbackTests(unittest.TestCase):
                 state = json.loads((data / deploy.MANIFEST).read_text())
                 self.assertEqual(state["files"], [deploy.PLUGIN])
                 self.assertFalse(state["complete"])
-                deploy.uninstall(args)
+                self.uninstall_at(args, pt)
             if failure == "interrupt":
                 state = json.loads((data / deploy.MANIFEST).read_text())
                 self.assertTrue(state["plugins_restore_pending"])
                 self.assertFalse(state["complete"])
-                deploy.uninstall(args)
+                self.uninstall_at(args, pt)
             self.assertEqual(list(data.iterdir()), [])
             if existing_plugins:
                 self.assertEqual(pt.read_bytes(), original)

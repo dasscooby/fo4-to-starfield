@@ -276,6 +276,12 @@ def uninstall(a):
         sys.exit("nothing to uninstall (no manifest)")
     with open(man_path) as f:
         m = json.load(f)
+    expected_plugins = plugins_txt_path()
+    recorded_plugins = m.get("plugins_txt") if isinstance(m, dict) else None
+    if (not isinstance(recorded_plugins, str) or
+            os.path.normcase(os.path.abspath(recorded_plugins)) !=
+            os.path.normcase(os.path.abspath(expected_plugins))):
+        sys.exit("Plugins.txt path in manifest does not match the current user path; refusing cleanup")
     print(f"removing {m['files']} and Plugins.txt entries {m['plugins_added']}")
     if a.dry_run:
         return
