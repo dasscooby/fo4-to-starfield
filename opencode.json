@@ -10,10 +10,10 @@
       "name": "LM Studio via Resource Guardian (local)",
       "options": { "baseURL": "http://127.0.0.1:1235/v1" },
       "models": {
-        "fo4-lead":      { "name": "Lead (local)",           "tool_call": true, "limit": { "context": 16384, "output": 4096 } },
-        "fo4-implement": { "name": "Implementation (local)", "tool_call": true, "limit": { "context": 16384, "output": 4096 } },
-        "fo4-research":  { "name": "Research (local)",       "tool_call": true, "limit": { "context": 16384, "output": 4096 } },
-        "fo4-qa":        { "name": "QA (local)",             "tool_call": true, "limit": { "context": 16384, "output": 4096 } }
+        "fo4-lead":      { "name": "Lead (local)",           "tool_call": true, "limit": { "context": 32768, "output": 4096 } },
+        "fo4-implement": { "name": "Implementation (local)", "tool_call": true, "limit": { "context": 32768, "output": 4096 } },
+        "fo4-research":  { "name": "Research (local)",       "tool_call": true, "limit": { "context": 32768, "output": 4096 } },
+        "fo4-qa":        { "name": "QA (local)",             "tool_call": true, "limit": { "context": 32768, "output": 4096 } }
       }
     }
   },

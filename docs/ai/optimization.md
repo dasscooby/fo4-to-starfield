@@ -25,4 +25,13 @@ same input), and the commit. Use the `optimization` label on the issue or PR.
   Long single sessions dominate. Shorter sessions with handoff notes may cut cached-context cost; measure first.
 
 ## Entries
-(none yet)
+
+### 2026-10-09 Claude: model load without memory mapping (local team)
+Before: `lms load qwen3-14b --gpu max` -> LM Studio held 10.5 GB of system RAM for a model fully in VRAM; RAM 88.2%,
+the guardian held every request (restrict/block). After: `tools/ai-team/load_model.py` (tryMmap=false,
+keepModelInMemory=false) -> LM Studio 5.4 GB, RAM 71.4%, VRAM unchanged (10,890 -> 10,930 MiB). Requests admitted.
+
+### 2026-10-09 Claude: 32K context at the cost of 16K (local team)
+OpenCode's own system prompt + tools is ~12K tokens; at 16K context it compacted and re-continued in a loop.
+Before: 16K, f16 KV cache, VRAM 10,952 MiB. After: 32K, q8_0 K/V cache + flash attention, VRAM 11,061 MiB (90.1%,
+below the 92% restrict level with a resident model). Twice the context for +109 MiB.
