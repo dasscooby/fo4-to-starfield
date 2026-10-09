@@ -196,8 +196,8 @@ def install(a):
             sys.exit(f"build output looks invalid, nothing installed: {b}")
     # 2) record intent first, then copy; any failure rolls back what was copied
     identities = {os.path.basename(dst): artifact_identity(src) for src, dst in zip(built, targets)}
-    state = {"files": [], "plugins_txt": pt, "plugins_added": pl_add, "plugins_replaced": [], "complete": False,
-             "artifacts": identities}
+    state = {"files": [], "published_files": [], "plugins_txt": pt, "plugins_added": pl_add,
+             "plugins_replaced": [], "complete": False, "artifacts": identities}
     plugins_existed = os.path.exists(pt)
     plugins_original = None
     if plugins_existed:
@@ -222,6 +222,8 @@ def install(a):
             installed_files.add(rel)
             if artifact_identity(dst) != identities[rel]:
                 raise OSError(f"installed artifact differs from validated build: {rel}")
+            state["published_files"].append(rel)
+            write_manifest(man_path, state)
         if pl_add:
             current_plugins = None
             if os.path.exists(pt):
@@ -284,10 +286,14 @@ def uninstall(a):
     if a.dry_run:
         return
     remaining, errors = [], []
+    published = m.get("published_files", [])
+    published = {item for item in published if isinstance(item, str)} if isinstance(published, list) else set()
     for rel in m["files"]:
         p = os.path.join(data, rel)
         try:
             if os.path.exists(p):
+                if not m.get("complete", True) and rel not in published:
+                    raise OSError(f"destination was not confirmed as published; preserved: {rel}")
                 expected = m.get("artifacts", {}).get(rel)
                 if expected is not None and artifact_identity(p) != expected:
                     raise OSError(f"artifact changed since installation; preserved: {rel}")
@@ -296,6 +302,8 @@ def uninstall(a):
             remaining.append(rel)
             errors.append(str(e))
     m["files"] = remaining
+    if isinstance(m.get("published_files"), list):
+        m["published_files"] = [rel for rel in m["published_files"] if rel in remaining]
     try:
         if not m.get("complete", True) and m.get("plugins_restore_pending"):
             restore_plugins(m)

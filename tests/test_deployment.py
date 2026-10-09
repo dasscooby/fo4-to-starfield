@@ -115,6 +115,34 @@ class DeploymentRollbackTests(unittest.TestCase):
                 deploy.uninstall(args)
             self.assertEqual(target.read_bytes(), external)
 
+    def test_uninstall_preserves_identical_external_target_created_during_build(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            staging, game = root / "staging", root / "game"
+            staging.mkdir()
+            data = game / "Data"
+            data.mkdir(parents=True)
+            plugin_bytes = b"TES4" + bytes(32)
+            (staging / deploy.PLUGIN).write_bytes(plugin_bytes)
+            (staging / "meshes").mkdir()
+            target = data / deploy.PLUGIN
+            pt = root / "Plugins.txt"
+            pt.write_text("*Other.esm\n")
+            args = SimpleNamespace(staging=str(staging), starfield=str(game), dry_run=False)
+
+            def build(a, out, folders, fmt):
+                Path(out).write_bytes(b"BTDX" + bytes(32))
+                target.write_bytes(plugin_bytes)
+
+            with patch.object(deploy, "plugins_txt_path", return_value=str(pt)), \
+                    patch.object(deploy, "build_archive", side_effect=build):
+                with self.assertRaisesRegex(SystemExit, "recovery manifest retained"):
+                    deploy.install(args)
+            self.assertEqual(target.read_bytes(), plugin_bytes)
+            with self.assertRaisesRegex(SystemExit, "uninstall incomplete"):
+                deploy.uninstall(args)
+            self.assertEqual(target.read_bytes(), plugin_bytes)
+
     def test_uninstall_preserves_artifact_changed_after_successful_install(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -154,6 +182,7 @@ class DeploymentRollbackTests(unittest.TestCase):
             manifest = data / deploy.MANIFEST
             deploy.write_manifest(str(manifest), {"files": [deploy.PLUGIN],
                 "plugins_txt": str(pt), "plugins_added": ["*FO4Port.esm"], "complete": False,
+                "published_files": [deploy.PLUGIN],
                 "artifacts": {deploy.PLUGIN: expected}})
             args = SimpleNamespace(starfield=str(root), dry_run=False)
             with self.assertRaisesRegex(SystemExit, "uninstall incomplete"):
