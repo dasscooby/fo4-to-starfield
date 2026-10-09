@@ -71,6 +71,19 @@ def write_manifest(p, state):
             os.remove(temporary)
 
 
+def atomic_write_bytes(p, content, prefix):
+    fd, temporary = tempfile.mkstemp(prefix=prefix, dir=os.path.dirname(p))
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary, p)
+    finally:
+        if os.path.exists(temporary):
+            os.remove(temporary)
+
+
 def restore_plugins(state):
     p = state["plugins_txt"]
     original = state["plugins_original"]
@@ -78,8 +91,7 @@ def restore_plugins(state):
         if os.path.exists(p):
             os.remove(p)
     else:
-        with open(p, "wb") as f:
-            f.write(base64.b64decode(original))
+        atomic_write_bytes(p, base64.b64decode(original), ".fo4port-plugins-")
 
 
 def write_lines(p, lines, original=None):
@@ -92,8 +104,7 @@ def write_lines(p, lines, original=None):
         newline = "\r\n" if b"\r\n" in content else "\n" if b"\n" in content else "\r" if b"\r" in content else "\r\n"
         trailing = content.endswith((b"\r", b"\n"))
     text = newline.join(lines) + (newline if lines and trailing else "")
-    with open(p, "wb") as f:
-        f.write(bom + text.encode("utf-8"))
+    atomic_write_bytes(p, bom + text.encode("utf-8"), ".fo4port-plugins-")
 
 
 def build_archive(a, out, folders, fmt):

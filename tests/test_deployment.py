@@ -429,6 +429,17 @@ class DeploymentRollbackTests(unittest.TestCase):
             self.uninstall_at(args, pt)
             self.assertEqual(pt.read_text().splitlines(), ["*Other.esm"])
 
+    def test_plugins_write_is_atomic_when_replace_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plugins = Path(tmp) / "Plugins.txt"
+            original = b"\xef\xbb\xbf*Other.esm\r\n*FO4Port.esm\r\n"
+            plugins.write_bytes(original)
+            with patch.object(deploy.os, "replace", side_effect=OSError("injected replace failure")):
+                with self.assertRaisesRegex(OSError, "injected replace failure"):
+                    deploy.write_lines(str(plugins), ["*Other.esm"], original)
+            self.assertEqual(plugins.read_bytes(), original)
+            self.assertEqual({path.name for path in plugins.parent.iterdir()}, {"Plugins.txt"})
+
     def check_archive_build(self, outcome):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
