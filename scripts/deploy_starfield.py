@@ -81,10 +81,18 @@ def restore_plugins(state):
             f.write(base64.b64decode(original))
 
 
-def write_lines(p, lines):
+def write_lines(p, lines, original=None):
     os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p, "w", encoding="utf-8", newline="\r\n") as f:
-        f.write("\n".join(lines) + ("\n" if lines else ""))
+    if original is None:
+        bom, newline, trailing = b"", "\r\n", True
+    else:
+        bom = b"\xef\xbb\xbf" if original.startswith(b"\xef\xbb\xbf") else b""
+        content = original[len(bom):]
+        newline = "\r\n" if b"\r\n" in content else "\n" if b"\n" in content else "\r" if b"\r" in content else "\r\n"
+        trailing = content.endswith((b"\r", b"\n"))
+    text = newline.join(lines) + (newline if lines and trailing else "")
+    with open(p, "wb") as f:
+        f.write(bom + text.encode("utf-8"))
 
 
 def build_archive(a, out, folders, fmt):
@@ -223,7 +231,7 @@ def install(a):
                 raise OSError("Plugins.txt changed during install; activation aborted to preserve user edits")
             state["plugins_restore_pending"] = True
             write_manifest(man_path, state)
-            write_lines(pt, activated)
+            write_lines(pt, activated, plugins_original)
         state["complete"] = True
         write_manifest(man_path, state)
     except Exception as e:                                   # noqa: BLE001 (roll back, then report)
@@ -297,20 +305,30 @@ def uninstall(a):
                         for item in m.get("plugins_replaced", [])}
             restored = set()
             removed = set()
-            pl = []
-            for line in read_lines(m["plugins_txt"]):
+            plugins_path = m["plugins_txt"]
+            plugins_original = None
+            if os.path.exists(plugins_path):
+                with open(plugins_path, "rb") as f:
+                    plugins_original = f.read()
+            pl = (plugins_original.decode("utf-8-sig").splitlines()
+                  if plugins_original is not None else [])
+            updated = []
+            for line in pl:
                 key = line.casefold()
                 if key in replaced and key not in restored:
-                    pl.append(replaced[key])
+                    updated.append(replaced[key])
                     restored.add(key)
                 elif key in added and key not in removed:
                     removed.add(key)
                 else:
-                    pl.append(line)
-            if pl:
-                write_lines(m["plugins_txt"], pl)
+                    updated.append(line)
+            if updated:
+                write_lines(plugins_path, updated, plugins_original)
             elif os.path.exists(m["plugins_txt"]):
-                os.remove(m["plugins_txt"])
+                if m.get("plugins_original") is None:
+                    os.remove(m["plugins_txt"])
+                else:
+                    write_lines(plugins_path, [], plugins_original)
         m["plugins_added"] = []
         m["plugins_replaced"] = []
         m["plugins_restore_pending"] = False

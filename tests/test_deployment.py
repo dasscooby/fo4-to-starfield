@@ -252,6 +252,47 @@ class DeploymentRollbackTests(unittest.TestCase):
             deploy.uninstall(args)
             self.assertEqual(pt.read_text().splitlines(), ["*Other.esm", "", "*fo4port.esm"])
 
+    def test_inactive_plugin_activation_preserves_bom_and_line_endings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            staging, game = root / "staging", root / "game"
+            staging.mkdir()
+            (game / "Data").mkdir(parents=True)
+            (staging / deploy.PLUGIN).write_bytes(b"TES4" + bytes(32))
+            (staging / "meshes").mkdir()
+            pt = root / "Plugins.txt"
+            original = b"\xef\xbb\xbfFO4Port.esm\n*Other.esm\n"
+            pt.write_bytes(original)
+            args = SimpleNamespace(staging=str(staging), starfield=str(game), dry_run=False)
+            def build(a, out, folders, fmt):
+                Path(out).write_bytes(b"BTDX" + bytes(32))
+            with patch.object(deploy, "plugins_txt_path", return_value=str(pt)), \
+                    patch.object(deploy, "build_archive", side_effect=build):
+                deploy.install(args)
+            self.assertEqual(pt.read_bytes(), b"\xef\xbb\xbf*FO4Port.esm\n*Other.esm\n")
+            deploy.uninstall(args)
+            self.assertEqual(pt.read_bytes(), original)
+
+    def test_uninstall_preserves_preexisting_empty_plugins_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            staging, game = root / "staging", root / "game"
+            staging.mkdir()
+            (game / "Data").mkdir(parents=True)
+            (staging / deploy.PLUGIN).write_bytes(b"TES4" + bytes(32))
+            (staging / "meshes").mkdir()
+            pt = root / "Plugins.txt"
+            pt.write_bytes(b"")
+            args = SimpleNamespace(staging=str(staging), starfield=str(game), dry_run=False)
+            def build(a, out, folders, fmt):
+                Path(out).write_bytes(b"BTDX" + bytes(32))
+            with patch.object(deploy, "plugins_txt_path", return_value=str(pt)), \
+                    patch.object(deploy, "build_archive", side_effect=build):
+                deploy.install(args)
+            deploy.uninstall(args)
+            self.assertTrue(pt.exists())
+            self.assertEqual(pt.read_bytes(), b"")
+
     def test_uninstall_removes_case_only_edit_to_added_plugin_line(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -408,8 +449,8 @@ class DeploymentRollbackTests(unittest.TestCase):
                     raise PermissionError("injected locked destination")
                 return original_remove(path)
 
-            def write_lines(path, lines):
-                original_write_lines(path, lines)
+            def write_lines(path, lines, original=None):
+                original_write_lines(path, lines, original)
                 if failure == "interrupt":
                     raise KeyboardInterrupt("injected interruption after activation")
                 if failure == "cleanup":
