@@ -53,6 +53,9 @@ Enforced by code (proxy): max 1 concurrent local inference request; resource che
 (RAM 70/85/90%, VRAM 95% block, 92% restrict with a resident model, game running = block, LM Studio down =
 block); queue with a bounded wait (600 s) then HTTP 503; bounded upstream retries (2, backoff 2 s / 4 s) only
 before any output was sent; request timeout 900 s; pause / stop switch; every decision logged.
+Resources are sampled fresh at every admission attempt (`proxy.py`, `_wait_for_admission`), not taken from an
+earlier status call; a queued job re-checks every 2 s. A job that is already running is not interrupted if the game
+starts or memory rises afterwards: only new admissions are held.
 Enforced by OpenCode config: agent permissions (no push/merge/destructive commands, Lead edits only docs/ai,
 QA edits nothing, Research edits only its two docs), Lead may delegate only to the three specialists,
 specialists cannot delegate (`task: deny`, `subagent_depth: 1`).
