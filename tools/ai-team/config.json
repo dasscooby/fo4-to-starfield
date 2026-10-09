@@ -1,0 +1,21 @@
+{
+  "guardian": {
+    "max_concurrent_local": 1,
+    "caution_pct": 70,
+    "restrict_pct": 85,
+    "vram_block_pct": 95,
+    "ram_block_pct": 90,
+    "vram_restrict_with_model_pct": 92,
+    "game_blocks_inference": true,
+    "game_process_prefixes": ["starfield", "fallout4"],
+    "queue_wait_s": 600,
+    "request_timeout_s": 900,
+    "max_retries": 2
+  },
+  "agents": {
+    "fo4-lead": "MODEL_ID_PENDING_APPROVAL",
+    "fo4-implement": "MODEL_ID_PENDING_APPROVAL",
+    "fo4-research": "MODEL_ID_PENDING_APPROVAL",
+    "fo4-qa": "MODEL_ID_PENDING_APPROVAL"
+  }
+}
