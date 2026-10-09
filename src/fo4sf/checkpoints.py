@@ -99,7 +99,7 @@ class Checkpoints:
                 return None
             if output_inventory(self.staging, result) != cached["outputs"]:
                 return None
-            if not cached["result"]["ok"]:
+            if result.get("ok") is not True:
                 return None
             self.expected[source] = cached["outputs"]
             return cached["result"]
@@ -107,7 +107,7 @@ class Checkpoints:
             return None
 
     def save(self, source, result):
-        if not result.get("ok") or result.get("fallback_materials") or result.get("door_error"):
+        if result.get("ok") is not True or result.get("fallback_materials") or result.get("door_error"):
             self.path(source).unlink(missing_ok=True)
             return False  # Retry degraded/failing conversions rather than freezing a placeholder.
         outputs = output_inventory(self.staging, result)

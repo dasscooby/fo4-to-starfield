@@ -114,6 +114,19 @@ class CheckpointTests(unittest.TestCase):
                     cache.path("chair.nif").write_text(json.dumps(value))
                     self.assertIsNone(cache.load("chair.nif"))
 
+    def test_non_boolean_success_flag_cannot_be_saved_or_reused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result, _ = generated(tmp)
+            cache = checkpoints.Checkpoints(tmp, {})
+            malformed = {**result, "ok": "false"}
+            self.assertFalse(cache.save("chair.nif", malformed))
+            self.assertFalse(cache.path("chair.nif").exists())
+            self.assertTrue(cache.save("chair.nif", result))
+            saved = json.loads(cache.path("chair.nif").read_text())
+            saved["result"]["ok"] = "false"
+            cache.path("chair.nif").write_text(json.dumps(saved))
+            self.assertIsNone(cache.load("chair.nif"))
+
     def test_batch_conflict_is_marked_incomplete_without_publishing_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
