@@ -106,32 +106,69 @@ def _opened(res):
     return isinstance(verb, str) and "OPEN" in verb.upper()
 
 
-def _opposite_opens(entries):
-    """True when two different routes passed and recorded OPEN.
+def _unit_normal(route):
+    """Unit door normal, or None when the route has no usable plane."""
+    expect = route.get("expect") if isinstance(route, dict) else None
+    normal = expect.get("plane_normal") if isinstance(expect, dict) else None
+    if not isinstance(normal, (list, tuple)) or len(normal) != 3:
+        return None
+    try:
+        length = math.hypot(normal[0], normal[1], normal[2])
+    except TypeError:
+        return None
+    if length < 1e-6:
+        return None
+    return (normal[0] / length, normal[1] / length, normal[2] / length)
 
-    `entries` are `(verdict, result, side)`. When any of those routes recorded `side`,
-    the OPEN crossings must include side 1 and side -1. Two OPEN crossings on the same
-    side are still one side. Routes that never stored `side` still count two visits.
+
+def _dot(a, b):
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def _opposite_opens(entries):
+    """True when two different routes passed, recorded OPEN, and faced opposite ways.
+
+    `entries` are `(verdict, result, side, route)`. When any of those routes recorded
+    `side`, the OPEN crossings must include side 1 and side -1. Two OPEN crossings on
+    the same side are still one side. Their plane normals must also point opposite
+    ways: labels 1 and -1 on two walks in the same direction are still one side.
+    Routes that never stored `side` still count two visits only when those normals
+    point opposite ways. A route with no normal cannot contradict that.
     """
-    sides = []
-    for verdict, res, side in entries:
+    chosen = []
+    for verdict, res, side, route in entries:
         if verdict == "PASS" and _opened(res):
-            sides.append(side)
-    if len(sides) < 2:
+            chosen.append((side, _unit_normal(route)))
+    if len(chosen) < 2:
         return False
-    present = [side for side in sides if side is not None]
-    return not present or set(present) == {1, -1}
+    present = [side for side, _normal in chosen if side is not None]
+    if present and set(present) != {1, -1}:
+        return False
+    normals = [(side, normal) for side, normal in chosen if normal is not None]
+    if len(normals) < 2:
+        return True
+    if present:
+        forward = [normal for side, normal in normals if side == 1]
+        back = [normal for side, normal in normals if side == -1]
+        return any(_dot(a, b) < 0 for a in forward for b in back)
+    for i, (_side, a) in enumerate(normals):
+        for _other, b in normals[i + 1:]:
+            if _dot(a, b) < 0:
+                return True
+    return False
 
 
 def door_rows(routes, results):
     """`both` is two different routes for one ref that each recorded an OPEN.
 
-    When those routes record `side`, the sides must be 1 and -1. Two OPEN crossings on
-    the same side are `one`. Two crossings with no prompt stored are `geometry`: both
-    sides ended past the plane, and the file cannot show that either side opened. One
-    recorded OPEN is `one`. A walk through an already-open leaf is UNOPENED and does not
-    make a pair. Load doors (the model name contains "load") are not swing rows. Passing
-    one, walking through it, or falling at it is a load failure: those doors stay shut.
+    When those routes record `side`, the sides must be 1 and -1, and the two OPEN
+    crossings must face opposite directions. Two OPEN crossings on the same side, or
+    on labels 1 and -1 with the same plane normal, are `one`. Two crossings with no
+    prompt stored are `geometry`: both sides ended past the plane, and the file cannot
+    show that either side opened. One recorded OPEN is `one`. A walk through an
+    already-open leaf is UNOPENED and does not make a pair. Load doors (the model name
+    contains "load") are not swing rows. Passing one, walking through it, or falling
+    at it is a load failure: those doors stay shut.
     """
     by_ref = {}
     load_fail = set()
@@ -145,11 +182,11 @@ def door_rows(routes, results):
                 load_fail.add(route.get("ref"))
             continue
         # one line per route index: a repeated index is a rerun, not the other side
-        by_ref.setdefault(route.get("ref"), {})[res["index"]] = (verdict, res, route.get("side"))
+        by_ref.setdefault(route.get("ref"), {})[res["index"]] = (verdict, res, route.get("side"), route)
     both = one = none = geometry = 0
     for verdicts in by_ref.values():
         passes = activated = 0
-        for verdict, res, _side in verdicts.values():
+        for verdict, res, _side, _route in verdicts.values():
             if verdict != "PASS":
                 continue
             passes += 1
@@ -172,7 +209,8 @@ def unproven(routes, results):
     `door_rows` counts only the refs that appear in the results. A file can be all PASS, exit 0,
     and still leave every other door untested. This lists those refs too. One recorded OPEN does
     not prove the other side. Two OPEN crossings on the same recorded side stay unproven.
-    Two crossings with no OPEN stay unproven.
+    Two OPEN crossings whose plane normals point the same way stay unproven, even when
+    the routes are labeled side 1 and side -1. Two crossings with no OPEN stay unproven.
     """
     by_ref = {}
     order = []
@@ -206,7 +244,7 @@ def unproven(routes, results):
         if ref not in by_ref:
             order.append(ref)
             by_ref[ref] = {}
-        by_ref[ref][index] = (verdict, res, route.get("side"))
+        by_ref[ref][index] = (verdict, res, route.get("side"), route)
     missing = []
     for ref in order:
         if not _opposite_opens(by_ref[ref].values()):

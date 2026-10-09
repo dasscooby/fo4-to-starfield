@@ -56,7 +56,10 @@ The earlier Prydwen file was 40 stairs, and its three swinging doors were past t
 The regenerated file lists both sides of those three. The list is not a walk.
 `scripts/oracles/route_activation.py` lists every hinged ref in a results file that
 lacks two OPEN crossings. When a route records `side`, those crossings count only if
-the sides are 1 and -1. Two OPEN crossings on the same side are still one side.
+the sides are 1 and -1 and their plane normals point opposite ways. Two OPEN crossings
+on the same side are still one side. Two OPEN crossings in the same direction are still
+one side, even when the routes are labeled 1 and -1. A file that never stored `side`
+still counts two visits only when those normals point opposite ways.
 A partial file can show that pair for some refs and leave the rest unproven. That
 count does not close `door_swing`. `route_eval` can exit 0 on one recorded OPEN.
 That is not `door_swing`. A placed model whose FO4 collision failed is not a walkable pass.

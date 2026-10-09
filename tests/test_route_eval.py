@@ -129,6 +129,15 @@ class RouteEvalTests(unittest.TestCase):
         opposite = [dict(wood, side=1), dict(other, side=-1), load]
         paired = evaluator.door_rows(opposite, [dict(opened, index=0), dict(opened_back, index=1), dict(held, index=2)])
         self.assertEqual(paired["both"], 1)
+        # labels 1 and -1, but both walks use the same plane normal
+        parallel = [dict(wood, side=1), dict(wood, side=-1), load]
+        same_way = evaluator.door_rows(parallel, [dict(opened, index=0), dict(opened, index=1), dict(held, index=2)])
+        self.assertEqual(same_way["both"], 0)
+        self.assertEqual(same_way["one"], 1)
+        unlabeled = [wood, dict(wood), load]
+        same_plain = evaluator.door_rows(unlabeled, [dict(opened, index=0), dict(opened, index=1), dict(held, index=2)])
+        self.assertEqual(same_plain["both"], 0)
+        self.assertEqual(same_plain["one"], 1)
         self.assertFalse(evaluator.finished({}, {"load_fail": 0}, 0))
         self.assertTrue(evaluator.finished({"PASS": 2}, {"load_fail": 0}, 2))
         self.assertFalse(evaluator.finished({"PASS": 1}, {"load_fail": 1}, 1))
