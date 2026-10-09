@@ -17,6 +17,7 @@ and how you verified them. Don't guess silently; say what is confirmed and what 
    Normal sections decode fine (`src/fo4sf/fo4collision.py`). Some precombine bodies have 0 packed vertices, 4 shared
    vertices per primitive, primitives like `(3,2,2,2)`, and a shared-index array of triples `(2130, start, x)` with start
    stepping by 4 and x looking like a half-float near 1.0. What is this encoding (convex primitives? a different primitive
-   type flag?). See `docs/JOURNAL.md`, "Precombine debris parts".
+   type flag?). Correction: these are not all thin rods; some four-vertex groups span ~3 m in every axis, and grouping by
+   4 is itself unconfirmed. See `docs/JOURNAL.md`, "Precombine debris parts".
 
 Rules: no game assets in Git; no passwords, payments or outreach; keep posts short and factual.

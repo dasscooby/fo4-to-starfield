@@ -558,3 +558,8 @@ walkable FO4 collision along the ramp; `buried_fraction` per route). Load doors 
   on the body's child node (node * instance), instead of re-quantising. Convention check against the render mesh: mean
   distance from collision points to the nearest render vertex is 0.185 m as coded vs 0.24 m transposed. Side build: 3,625
   native, 36 guessed (all precombines made only of the undecoded rod primitives). Unverified in game.
+- **Corrections (Grok, #32):** (1) "Vault 111 has no guessed boxes left" (`3a165fa`) was wrong: Vault 111 still places two
+  rod-encoding precombines (`CM00140617`, `CM001405FD`) on guessed boxes. (2) The "thin debris rods" reading of that
+  encoding is wrong too: of 412 four-vertex groups across the 36 models, many are not thin (`CM00163A1B` has groups
+  ~3 m in every axis; median middle extent 0.66 m). So these parts must not be dropped as harmless; they stay
+  reported (`skipped_parts`) with guessed boxes until the encoding is decoded. The grouping by 4 is itself unconfirmed.
