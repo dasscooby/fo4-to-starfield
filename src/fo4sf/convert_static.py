@@ -138,7 +138,16 @@ def fo4_native_collision(src, universal_template: bytes, report: dict = None):
             new = meshcollision.convert_bodies(src.blocks[data][4:4 + n], universal_template,
                                                select=[body] if shared > 1 else None, node_rot=tuple(rot),
                                                skipped=skipped)
-            blobs += new if place is None else [(b, place[0], place[1]) for b in new]
+            node = place or ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
+            for b in new:
+                if isinstance(b, tuple):                 # rotated compound instance: node transform * instance
+                    blob, ti, Ri = b
+                    Rn, tn = node[1], node[0]
+                    R2 = tuple(sum(Rn[3 * r + k] * Ri[3 * k + c] for k in range(3)) for r in range(3) for c in range(3))
+                    t2 = tuple(tn[r] + sum(Rn[3 * r + k] * ti[k] for k in range(3)) for r in range(3))
+                    blobs.append((blob, t2, R2))
+                else:
+                    blobs.append(b if place is None else (b, place[0], place[1]))
         except Exception as e:                           # noqa: BLE001  (fallback by design, reason recorded)
             if report is not None:
                 report["fo4_collision_error"] = f"{type(e).__name__}: {e}"

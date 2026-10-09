@@ -605,14 +605,20 @@ def _planes_from_faces(verts, faces) -> bytes:
 
 
 def _emit_convex(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, shape: int, rot=(0.0, 0.0, 0.0, 1.0),
-                 pos=(0.0, 0.0, 0.0), flatten_node_rot=None) -> int:
+                 pos=(0.0, 0.0, 0.0), flatten_node_rot=None, vertex_only: bool = False) -> int:
     """FO4 hknpConvexPolytopeShape -> Starfield hknpConvexShape (hull: float3 vertices, planes, faces, indices, links).
-    The FO4 body transform (absolute, NIF-root space) is baked into vertices and planes."""
+    The FO4 body transform (absolute, NIF-root space) is baked into vertices and planes.
+    vertex_only: FO4 plain hknpConvexShape (e.g. V111Glass01's panes) stores only vertices; faces come from the hull
+    rebuild (a flat pane becomes a 1 cm slab)."""
     from . import fo4collision as fc
     va, nv = fc._rel(p, shape + fc.CVX_VERTS)
-    fa, nf = fc._rel(p, shape + fc.CVX_FACES)
-    ia, _ = fc._rel(p, shape + fc.CVX_INDICES)
-    pa, _ = fc._rel(p, shape + 64)                       # planes (count is padded to 4; one plane per face)
+    if vertex_only:
+        fa = ia = pa = 0
+        nf = 0
+    else:
+        fa, nf = fc._rel(p, shape + fc.CVX_FACES)
+        ia, _ = fc._rel(p, shape + fc.CVX_INDICES)
+        pa, _ = fc._rel(p, shape + 64)                   # planes (count is padded to 4; one plane per face)
     R = rot if len(rot) == 9 else _quat_matrix(rot)        # 3x3 row-major matrix or (x, y, z, w) quaternion
     xf = lambda v: tuple(R[3 * i] * v[0] + R[3 * i + 1] * v[1] + R[3 * i + 2] * v[2] for i in range(3))
     verts = [tuple(a + b for a, b in zip(xf(p.unpack("<3f", va + 16 * k)), pos)) for k in range(nv)]
@@ -621,18 +627,18 @@ def _emit_convex(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, shape: int, rot
         nx, ny, nz, dd = p.unpack("<4f", pa + 16 * k)
         n2 = xf((nx, ny, nz))
         planes += struct.pack("<4f", *n2, dd - sum(a * b for a, b in zip(n2, pos)))
-    face_raw = p.raw(fa, 4 * nf)
+    face_raw = p.raw(fa, 4 * nf) if nf else b""
     faces = []
     for k in range(nf):
         first, cnt = struct.unpack_from("<HB", face_raw, 4 * k)
         faces.append(list(p.raw(ia + first, cnt)))
     used = sorted({v for f in faces for v in f})          # FO4 hulls can carry unreferenced vertices: compact them
-    if len(used) != nv:
+    if faces and len(used) != nv:
         remap = {v: k for k, v in enumerate(used)}
         verts = [verts[v] for v in used]
         faces = [[remap[v] for v in f] for f in faces]
         nv = len(verts)
-    if flatten_node_rot is not None:                       # steep stair helper: stretch to a walkable slope
+    if flatten_node_rot is not None and faces:                       # steep stair helper: stretch to a walkable slope
         moved = _flatten_helper(verts, faces, flatten_node_rot)
         if moved != verts:
             verts = moved
@@ -769,13 +775,15 @@ UNMAPPED_LAYERS = {37: "L_DOORDETECTION", 43: "L_CUSTOMPICK1"}
 
 
 def convert_bodies(fo4_blob: bytes, template_blob: bytes, select: Optional[List[int]] = None,
-                   node_rot=None, skipped: Optional[list] = None) -> List[bytes]:
+                   node_rot=None, skipped: Optional[list] = None) -> list:
     """One native Starfield single-body physics blob per selected FO4 body (all bodies when select is None).
     FO4 shapes live in the space of the NIF node that owns the collision object; the body cinfo transform is not a
     placement (a crate whose shape already matches its render mesh carries a 0.29 m body position; a stair helper's
     body rotation duplicates its node's). So the Starfield body is identity, as in vanilla files, and the caller puts the
     blob on a node with the FO4 node's transform. The FO4 collision layer is kept (stair helpers stay stair helpers).
-    Unsupported shapes or layers raise PackfileError (explicit fallback)."""
+    Unsupported shapes or layers raise PackfileError (explicit fallback).
+    Items are blobs, or (blob, translation, rotation 3x3 row-major) for a rotated compound mesh instance: that body is
+    in its own space and goes on a child node with this transform (relative to the FO4 collision node)."""
     from . import fo4collision as fc
     p = hkpackfile.Packfile(fo4_blob)
     classes = dict(p.objects())
@@ -834,14 +842,20 @@ def convert_bodies(fo4_blob: bytes, template_blob: bytes, select: Optional[List[
                 if not keys:                               # only degenerate / unused primitives: nothing to collide with
                     continue
                 if any(abs(a - b_) > 1e-4 for a, b_ in zip(R, IDENTITY3)):
-                    raise hkpackfile.PackfileError(f"body {k}: rotated compound mesh instance (not supported yet)")
+                    # rotated compound instance: keep the mesh in its own space and return the instance transform for
+                    # the caller's child node (re-quantising the compressed mesh would change FO4's geometry)
+                    i_shape = _emit_mesh(w, t, p, obj, (0.0, 0.0, 0.0))
+                    w.ptr(t.field(T_BODY, "shape").type, i_body, t.field(T_BODY, "shape").offset, i_shape)
+                    out.append((w.build(sdk, type_sec), tuple(tr), tuple(R)))
+                    continue
                 i_shape = _emit_mesh(w, t, p, obj, tr)
             elif kind == "sphere":
                 i_shape = _emit_sphere(w, t, p, obj, R, tr)
             else:
                 helper = (filt & 0x7F) == 31
                 i_shape = _emit_convex(w, t, p, obj, R, tr,
-                                       flatten_node_rot=(node_rot or IDENTITY3) if helper else None)
+                                       flatten_node_rot=(node_rot or IDENTITY3) if helper else None,
+                                       vertex_only=(kind == "convex-verts"))
             w.ptr(t.field(T_BODY, "shape").type, i_body, t.field(T_BODY, "shape").offset, i_shape)
             out.append(w.build(sdk, type_sec))
     return out
@@ -867,6 +881,8 @@ def _shape_parts(p, classes, shape, R, tr, depth=0):
         return [("mesh", d, R, tr)]
     if cls in ("hknpConvexPolytopeShape", "hknpCapsuleShape"):   # FO4 capsules carry a full polytope hull + radius
         return [("convex", shape, R, tr)]
+    if cls == "hknpConvexShape":                                  # vertices only (glass panes): hull rebuilt
+        return [("convex-verts", shape, R, tr)]
     if cls == "hknpSphereShape":
         return [("sphere", shape, R, tr)]
     if cls == "hknpDynamicCompoundShape":

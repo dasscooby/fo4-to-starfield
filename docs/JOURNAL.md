@@ -552,3 +552,9 @@ walkable FO4 collision along the ramp; `buried_fraction` per route). Load doors 
   Such a part is now skipped and reported (`skipped_parts`), and the rest of the model keeps native bodies. Gain is small:
   2 models move from guessed boxes to native (`CM00075A6C` had 182 boxes). 38 guessed remain, mostly precombines made only
   of these rods. Next: decode the encoding (each primitive as the convex hull of its 4 shared vertices is the working guess).
+- **Vault 111 guessed boxes cleared (offline):** `V111Glass01` uses FO4's plain `hknpConvexShape` (vertices only, a flat
+  pane 3.56 x 0.87 m): it's now converted with the hull rebuild, the flat pane as a 1 cm slab. `V111Generator02OnBroken`
+  has compound mesh instances with a rotation: the compressed mesh stays in its own space and the instance transform goes
+  on the body's child node (node * instance), instead of re-quantising. Convention check against the render mesh: mean
+  distance from collision points to the nearest render vertex is 0.185 m as coded vs 0.24 m transposed. Side build: 3,625
+  native, 36 guessed (all precombines made only of the undecoded rod primitives). Unverified in game.
