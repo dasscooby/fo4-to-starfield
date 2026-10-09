@@ -130,3 +130,16 @@ Until then these doors stay passable and are listed as `door_not_opening` in the
 rotation channel on `Hinge01_Point` (the hinge swing), the other channels constant. Sizes: elevator `open.af` is 848
 bytes (more moving bones). Not decoded further. Watching each template open in game is cheaper and gives the clear
 opening directly; decode only if many templates are needed. `.afx` is XML: `<tag>Open</tag><filename>Open.af</filename>`.
+
+### Follow-up byte comparison (local Starfield archive; 2026-10-09)
+
+Read paired `open.af` / `close.af` entries directly from `Starfield - Animations.ba2` with the repository BA2 reader; no game files were copied to the repo. These observations invalidate treating the Akila size/layout as a general record template:
+
+| Door family | Open / close bytes | u16 values at 0x28 (open) |
+|---|---:|---|
+| Akila exterior hinged `ak_ext_bld_walla_doora_01` | 218 / 218 | 5, 6, 31, 2 |
+| Generic interior `genintrmsmwallmid_doora00a` | 1140 / 952 | 5, 21, 61, 2 |
+| Ship interior `shpgenintpersmwallmid_exsm_door01` | 882 / 874 | 5, 24, 81, 2 |
+| Ship large interior `shpgenintpersmwallmid_exlg_door01` | 2580 / 2512 | 5, 49, 91, 2 |
+
+All four `.afx` companions identify the `Open` tag and filename only; they do not expose track or bone mappings. In particular, Open and Close length can differ within one rig, so a decoder must parse per-file structure and bounds rather than assume paired files are byte-for-byte layouts or equal-sized. The meaning of the four u16 fields and the apparent Akila rotation channel remain unverified. Next useful evidence: map channel counts and value ranges against each corresponding `.rig` bone table, then validate a decoded pose against an in-game panel displacement before generating clips. Do not implement the decoder from the Akila sample alone.
