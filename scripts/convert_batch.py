@@ -163,7 +163,7 @@ def main():
                                           rig_doors=donor is not None, door_physics_donor=donor,
                                           sf_mesh_template=mesh_template)
             r = conv.convert_nif(name)
-            if cache and r["ok"]:
+            if cache:
                 try:
                     cache.save(name, r)
                 except (OSError, ValueError) as e:

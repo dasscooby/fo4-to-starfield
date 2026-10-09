@@ -33,6 +33,39 @@ def generated(staging, stem="chair"):
 
 
 class CheckpointTests(unittest.TestCase):
+    def test_batch_failed_conversion_invalidates_previously_successful_checkpoint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            staging = root / "staging"
+            tools = root / "tool.bin"
+            tools.write_bytes(b"synthetic tool")
+            source = SimpleNamespace(mesh_names=lambda pattern: ["meshes/chair.nif"])
+            failed = False
+            def convert(name):
+                if failed:
+                    return {"ok": False, "reason": "injected conversion failure"}
+                result, _ = generated(staging, Path(name).stem)
+                return result
+            converter = SimpleNamespace(convert_nif=convert, stats={}, material_errors={})
+            argv = ["convert_batch.py", "--fo4-data", str(root), "--staging", str(staging),
+                    "--content-resources", str(tools), "--texconv", str(tools),
+                    "--collision-template", str(tools), "--resume"]
+            with patch.object(sys, "argv", argv), \
+                    patch.object(batch.pipeline, "Fo4Archives", return_value=source), \
+                    patch.object(batch.pipeline, "Converter", return_value=converter), \
+                    patch.object(batch.convert_static, "collision_template_from_nif", return_value=b"template"), \
+                    patch("builtins.print"):
+                batch.main()
+                checkpoints_before = list((staging / ".checkpoints").glob("*.json"))
+                self.assertEqual(len(checkpoints_before), 1)
+                model = staging / "meshes/fo4port/chair.nif"
+                model.write_bytes(model.read_bytes() + b"modified to force conversion")
+                failed = True
+                batch.main()
+            self.assertFalse(list((staging / ".checkpoints").glob("*.json")))
+            manifest = json.loads((staging / "manifest.json").read_text())
+            self.assertEqual(manifest["failures"][0]["reason"], "injected conversion failure")
+
     def test_omitted_dependency_cannot_make_incomplete_inventory_reusable(self):
         with tempfile.TemporaryDirectory() as tmp:
             result, files = generated(tmp)
