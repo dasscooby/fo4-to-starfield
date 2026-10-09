@@ -25,6 +25,16 @@ class DeploymentRollbackTests(unittest.TestCase):
             self.assertEqual(target.read_bytes(), source.read_bytes())
             self.assertEqual({p.name for p in root.iterdir()}, {"source.esm", "target.esm"})
 
+    def test_publish_falls_back_to_exclusive_copy_without_hard_link_support(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source, target = root / "source.ba2", root / "target.ba2"
+            source.write_bytes(b"synthetic archive")
+            with patch.object(deploy.os, "link", side_effect=OSError("hard links unavailable")):
+                deploy.copy_new_artifact(str(source), str(target))
+            self.assertEqual(target.read_bytes(), source.read_bytes())
+            self.assertEqual({p.name for p in root.iterdir()}, {"source.ba2", "target.ba2"})
+
     def test_plugin_list_edit_during_copy_aborts_without_clobbering_it(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

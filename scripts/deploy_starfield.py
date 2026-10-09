@@ -101,7 +101,7 @@ def artifact_identity(path):
 
 
 def copy_new_artifact(src, dst):
-    """Publish a fully copied file atomically without replacing an existing target."""
+    """Publish without replacing a target, preferring an atomic same-directory link."""
     fd, temporary = tempfile.mkstemp(prefix=".fo4port-install-", dir=os.path.dirname(dst))
     os.close(fd)
     try:
@@ -109,7 +109,25 @@ def copy_new_artifact(src, dst):
         if artifact_identity(temporary) != artifact_identity(src):
             raise OSError(f"temporary copy differs from source: {os.path.basename(dst)}")
         # Same-directory hard-link creation is atomic and fails if dst exists.
-        os.link(temporary, dst)
+        try:
+            os.link(temporary, dst)
+        except FileExistsError:
+            raise
+        except OSError:
+            # Some filesystems do not support hard links. Exclusive creation
+            # retains no-overwrite behavior there, though the copy is not atomic.
+            created = False
+            try:
+                with open(dst, "xb") as output, open(temporary, "rb") as source:
+                    created = True
+                    shutil.copyfileobj(source, output)
+            except BaseException:
+                if created:
+                    try:
+                        os.remove(dst)
+                    except OSError:
+                        pass
+                raise
     finally:
         if os.path.exists(temporary):
             os.remove(temporary)
