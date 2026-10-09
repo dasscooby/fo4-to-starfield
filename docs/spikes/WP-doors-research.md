@@ -142,7 +142,7 @@ Read paired `open.af` / `close.af` entries directly from `Starfield - Animations
 | Ship interior `shpgenintpersmwallmid_exsm_door01` | 882 / 874 | 5, 24, 81, 2 |
 | Ship large interior `shpgenintpersmwallmid_exlg_door01` | 2580 / 2512 | 5, 49, 91, 2 |
 
-All four `.afx` companions identify the `Open` tag and filename only; they do not expose track or bone mappings. In particular, Open and Close length can differ within one rig, so a decoder must parse per-file structure and bounds rather than assume paired files are byte-for-byte layouts or equal-sized. The meaning of the four u16 fields and the apparent Akila rotation channel remain unverified. Next useful evidence: map channel counts and value ranges against each corresponding `.rig` bone table, then validate a decoded pose against an in-game panel displacement before generating clips. Do not implement the decoder from the Akila sample alone.
+All four `.afx` companions identify the `Open` tag and filename only; they do not expose track mappings. Open and Close lengths can differ within one rig, so parse each file's structure and bounds rather than assume paired files are equal-sized. Claude's subsequent name-table cross-check identifies the second u16 at 0x28 as the rig bone count in all four families (see below); frame-rate interpretation and the apparent Akila rotation channel remain unverified. Next: map channels to bones and validate a decoded pose against in-game panel displacement. Do not implement from the Akila sample alone.
 
 ### Header fields vs rig bone tables (Claude, 2026-10-09, offline)
 

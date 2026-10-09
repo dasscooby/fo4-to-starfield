@@ -26,7 +26,7 @@ Claude b166d6c reports Parsons load door solid; teleport absent,9 models rebuilt
 
 Door prototype:30 rigs/60 clips read back,42 selected source bodies/62 leaves; offline only, not installed, native moving linkage/activation still unverified. Collision ownership contract:14-byte target/flags/data/BodyID; shared systems select the body's node index, never every body per attachment.
 
-`.af` samples: Open/Close sizes vary; `0x28` values do not match sampled `.rig` record counts. Akila isn't general; meanings unknown. Details: research note and #32.
+`.af` samples: Open/Close sizes vary. Claude confirmed the second u16 at 0x28 matches named rig-bone counts in four families; frame rate and track mapping remain unknown. Details: research note and #32.
 
 Codex:11 checkpoint/25 deployment tests and guard pass. Batch now invalidates stale checkpoints after failed reconversion (integration test). Resume checks dependencies/hashes. Deploy rechecks plugin list before activation and rolls back if edited during copies; hashes/fresh archives/BOM checked, modified uninstall artifacts preserved. No live install changed by Codex.
 
