@@ -532,3 +532,11 @@ walkable FO4 collision along the ramp; `buried_fraction` per route). Load doors 
   2 passable doors (open animation not ported). Existing 3,490 models byte-for-byte unchanged in the manifest; all
   38,314 existing FormIDs unchanged (50,339 total). New routes: Vault 75 48, Fort Hagen 61, Museum 12. Build waits in
   the side staging with the collision fixes; deploying needs a game restart the owner has to OK.
+- **Wall stains as decals (item 4, offline, unverified):** FO4 draws its wall streaks (`DecoStain*`, 6 models, 244
+  placements) with effect shaders, so they were skipped. Effect shaders whose base texture is grime
+  (stain/streak/grime/leak/blood/decal, not from `textures\Effects`) now become Starfield decal materials
+  (`effect_decal_material`; flat normal when the effect has none). Caveat: FO4 also maps these through a gradient
+  palette (`BldStreakGrad01`) that isn't reproduced; the texture is dark and mostly opaque, so they may render as dark
+  sheets. First thing to check in game. Still skipped, and listed as build failures: the animated oil puddle, the
+  glowing "Open" sign and the strobe flash (emissive and animated effects aren't ported). Side build: 4,014 models,
+  6 failures (was 12), all FormIDs stable.

@@ -189,6 +189,23 @@ class Converter:
                 self.material_errors[key] = f"{type(e).__name__}: {e}"
         return self._materials[key]
 
+    def effect_decal_material(self, base: str, normal: str) -> Optional[str]:
+        """FO4 effect-shader grime (wall stains, oil puddles: alpha-blended overlays drawn with BSEffectShaderProperty) ->
+        Starfield decal material from the effect's base texture (its alpha is the opacity). None if it cannot convert."""
+        ident = "|".join(x.replace("\\", "/").lower() for x in (base, normal))
+        stem = ("fxdecals/" + os.path.splitext(re.sub(r"^textures[\\/]", "", base.replace("\\", "/"), flags=re.I))[0].lower()
+                + "_" + hashlib.sha1(ident.encode()).hexdigest()[:8])
+        key = "fxdecal:" + stem
+        if key not in self._materials:
+            try:
+                self._materials[key] = self._convert_texture_set(stem, base, normal, "", decal=True)
+                self.stats["materials_ok"] += 1
+            except Exception as e:                        # noqa: BLE001
+                self._materials[key] = None
+                self.stats["materials_fallback"] += 1
+                self.material_errors[key] = f"{type(e).__name__}: {e}"
+        return self._materials[key]
+
     def texture_set_material(self, diffuse: str, normal: str, spec: str) -> Optional[str]:
         """Material for a shape that names its textures directly (BSShaderTextureSet, no .bgsm). Cached by diffuse path."""
         stem = "texsets/" + re.sub(r"^textures[\\/]", "", diffuse.replace("\\", "/"), flags=re.I).lower()
@@ -213,9 +230,9 @@ class Converter:
         vanilla decal template (cm.DECAL_TEMPLATE_MAT) so it blends over the surface behind it."""
         import numpy as np
         tex_rel = f"textures/{self.prefix}/{stem}"
-        d, n = self.src.texture(diffuse), self.src.texture(normal)
+        d, n = self.src.texture(diffuse), (self.src.texture(normal) if normal else None)
         s = self.src.texture(spec) if spec else None
-        if d is None or n is None:
+        if d is None or (n is None and not decal):         # decals (effect grime) may have no normal map: flat normal
             raise FileNotFoundError("diffuse or normal texture missing from archives")
         out = {}
         with tempfile.TemporaryDirectory() as tmp:
@@ -233,7 +250,11 @@ class Converter:
                     textures.texconv(self.texconv, os.path.join(tmp, "o_in.dds"), tmp, "BC4_UNORM")
                     opacity = "o_in.dds"
             textures.texconv(self.texconv, os.path.join(tmp, "d.dds"), tmp, "BC1_UNORM_SRGB", ("-srgbi",))
-            nr, ng = _plane_pair(n, tmp, self.texconv)
+            if n is not None:
+                nr, ng = _plane_pair(n, tmp, self.texconv)
+            else:                                          # flat: x = y = 0 in signed form
+                nr = np.zeros((4, 4), dtype=np.int8)
+                ng = np.zeros((4, 4), dtype=np.int8)
             textures.write_rg8_snorm(os.path.join(tmp, "n_in.dds"), nr, ng)
             textures.texconv(self.texconv, os.path.join(tmp, "n_in.dds"), tmp, "BC5_SNORM")
             if s is not None:
@@ -354,7 +375,10 @@ class Converter:
             glassy = re.search(r"glass|window", base, re.I) or (cubemap and normal)
             if glassy and not re.search(r"[\\/]effects[\\/]", base, re.I):
                 return self.glass_material(base, normal)   # windows, cryo-pod glass: vanilla glass shader model
-            return None                                 # other effects (glow, frost, dust, smoke): skipped
+            if base and re.search(r"stain|streak|grime|leak|blood|decal", base, re.I) \
+                    and not re.search(r"[\\/]effects[\\/]", base, re.I):
+                return self.effect_decal_material(base, normal)   # alpha-blended grime: decal; None = skip as before
+            return None                                 # other effects (glow, frost, dust, smoke, signs): skipped
         if kind != "BSLightingShaderProperty":
             return self.neutral
         blk = src.blocks[s.shader_ref]
