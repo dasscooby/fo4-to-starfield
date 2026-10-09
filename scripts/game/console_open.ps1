@@ -10,7 +10,13 @@ $py = $(if ($env:FO4SF_PYTHON) { $env:FO4SF_PYTHON } else { 'python' })
 $img = Join-Path $Work 'hud_check.png'
 function Hud { powershell -NoProfile -ExecutionPolicy Bypass -File $shot -Out $img | Out-Null; (& $py (Join-Path $PSScriptRoot 'hud_visible.py') $img) -eq 'yes' }
 $ok = $false
-for ($t = 0; $t -lt 4; $t++) { if (Hud) { $ok = $true; break }; Start-Sleep -Milliseconds 700 }   # menus fade out slowly
+for ($t = 0; $t -lt 4; $t++) {
+  if (Hud) { $ok = $true; break }
+  # Starfield's idle camera (third person, HUD hidden) starts after a while without input: a 1-pixel mouse nudge
+  # ends it. Harmless in menus too (no key is sent).
+  if ($t -eq 1) { powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq 'move:1,0|wait:300|move:-1,0|wait:1500' | Out-Null }
+  Start-Sleep -Milliseconds 700
+}
 if (-not $ok) { "hud not visible: menu or console already open"; exit 3 }
 powershell -NoProfile -ExecutionPolicy Bypass -File $i -Seq 'key:grave|wait:900' | Out-Null
 if ($LASTEXITCODE -ne 0) { "input guard"; exit 2 }
