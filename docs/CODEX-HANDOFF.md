@@ -26,10 +26,12 @@ Claude b166d6c reports Parsons load door solid; teleport absent,9 models rebuilt
 
 Door prototype:30 rigs/60 clips read back,42 selected source bodies/62 leaves; offline only, not installed, native moving linkage/activation still unverified. Collision ownership contract:14-byte target/flags/data/BodyID; shared systems select the body's node index, never every body per attachment.
 
+`.af` samples: Open/Close sizes vary; `0x28` values do not match sampled `.rig` record counts. Akila isn't general; meanings unknown. Details: research note and #32.
+
 Codex:11 checkpoint/25 deployment tests and guard pass. Batch now invalidates stale checkpoints after failed reconversion (integration test). Resume checks dependencies/hashes. Deploy rechecks plugin list before activation and rolls back if edited during copies; hashes/fresh archives/BOM checked, modified uninstall artifacts preserved. No live install changed by Codex.
 
 ## Coordination / housekeeping
 
-Check owner issues #29/#30, next-step #31 and shared updates [#32](https://github.com/dasscooby/fo4-to-starfield/issues/32) each work session. Publish concise evidence and blockers there; all three agents have posted. Keep this file under4KB; replace stale status. [History](handoff-archive/2026-10-07-codex-history.md).
+Check #29-32 each session; publish concise evidence and blockers there. Keep this file <4KB. [History](handoff-archive/2026-10-07-codex-history.md).
 
 Delete reviewed scratch/recordings; never commit recordings. Keep staging\multi. Inspect before cleaning Codex's staging\codex-resume-smoke and research\codex-reflect.
