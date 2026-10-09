@@ -122,3 +122,11 @@ same way, and reuse the template's ANAM/BNAM/CNAM.
 cell) and read which node moves where. Distances will be the template's, not FO4's; a template whose panels open less than
 the FO4 door would leave the doorway partly blocked, so measure the clear opening in game before accepting it.
 Until then these doors stay passable and are listed as `door_not_opening` in the manifest.
+
+**`.af` first look (Akila `open.af`, 218 bytes; `close.af` same size):** float 1.0 at 0x08; at 0x28 u16s 5, 6, 31, 2
+(6 = bones in the rig, 31 = frames); at 0x48-0x5D a 16-entry keyframe-time table (frames 0,1,2,3,5,7,9,12,19,22,24,26,
+27,28,29,30); 3-byte packed values from 0x60; from 0x90 one u32 per key whose low u16 runs smoothly
+(0xC100, 0xC07F ... 0xC042, 0xC141, 0xC140). `close.af` has the same run reversed. It looks like a single quantized
+rotation channel on `Hinge01_Point` (the hinge swing), the other channels constant. Sizes: elevator `open.af` is 848
+bytes (more moving bones). Not decoded further. Watching each template open in game is cheaper and gives the clear
+opening directly; decode only if many templates are needed. `.afx` is XML: `<tag>Open</tag><filename>Open.af</filename>`.
