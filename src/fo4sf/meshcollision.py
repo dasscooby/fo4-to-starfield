@@ -769,7 +769,7 @@ UNMAPPED_LAYERS = {37: "L_DOORDETECTION", 43: "L_CUSTOMPICK1"}
 
 
 def convert_bodies(fo4_blob: bytes, template_blob: bytes, select: Optional[List[int]] = None,
-                   node_rot=None) -> List[bytes]:
+                   node_rot=None, skipped: Optional[list] = None) -> List[bytes]:
     """One native Starfield single-body physics blob per selected FO4 body (all bodies when select is None).
     FO4 shapes live in the space of the NIF node that owns the collision object; the body cinfo transform is not a
     placement (a crate whose shape already matches its render mesh carries a 0.29 m body position; a stair helper's
@@ -821,7 +821,17 @@ def convert_bodies(fo4_blob: bytes, template_blob: bytes, select: Optional[List[
             w.ptr(t.field(T_PSD, "materials").type, i_psd, t.field(T_PSD, "materials").offset, i_mat)
             w.ptr(t.field(T_PSD, "bodyCinfos").type, i_psd, t.field(T_PSD, "bodyCinfos").offset, i_body)
             if kind == "mesh":
-                if not fc.compressed_mesh_keys(p, obj):    # only degenerate / unused primitives: nothing to collide with
+                try:
+                    keys = fc.compressed_mesh_keys(p, obj)
+                except hkpackfile.PackfileError as e:
+                    # FO4 precombines (CM*.NIF) carry extra small bodies whose primitives use another encoding (packed 0,
+                    # 4 shared vertices per primitive, index triples): thin debris rods ~1 cm thick. Not decoded yet.
+                    # Skip that part only and report it, instead of losing the whole model's collision to guessed boxes.
+                    if skipped is None or "shared vertex index" not in str(e):
+                        raise
+                    skipped.append(f"body {k}: {e}")
+                    continue
+                if not keys:                               # only degenerate / unused primitives: nothing to collide with
                     continue
                 if any(abs(a - b_) > 1e-4 for a, b_ in zip(R, IDENTITY3)):
                     raise hkpackfile.PackfileError(f"body {k}: rotated compound mesh instance (not supported yet)")

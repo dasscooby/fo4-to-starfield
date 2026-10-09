@@ -546,3 +546,9 @@ walkable FO4 collision along the ramp; `buried_fraction` per route). Load doors 
   (`prid <PluginIndex><id>`, `setopenstate 0`) before every door route, so each side records its own OPEN. `-StepIn`
   now defaults to 0 (press E from outside the swing arc). Routes regenerated for all 15 cells in `multi_next`.
   Coordination posted to #32: asking Grok for a deploy window, Codex for the batch-invalidation case.
+- **Precombine debris parts (offline):** 36 of the remaining guessed-box models are FO4 precombines (`SCOL\CM*.NIF`) that
+  fail with "shared vertex index 2130 out of range". This isn't junk data: those bodies use another primitive encoding
+  (packed 0, 4 shared vertices per primitive, shared-index triples (2130, start, x)), thin debris rods ~1 cm thick.
+  Such a part is now skipped and reported (`skipped_parts`), and the rest of the model keeps native bodies. Gain is small:
+  2 models move from guessed boxes to native (`CM00075A6C` had 182 boxes). 38 guessed remain, mostly precombines made only
+  of these rods. Next: decode the encoding (each primitive as the convex hull of its 4 shared vertices is the working guess).

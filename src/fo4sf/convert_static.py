@@ -104,13 +104,14 @@ def collision_template_from_nif(sf_nif: bytes) -> bytes:
 
 def fo4_native_collision(src, universal_template: bytes, report: dict = None):
     """[Starfield single-body physics blobs], one per FO4 collision body (meshcollision.convert_bodies), or None to fall
-    back. Only collision objects on the root node are handled; others (child nodes with their own transform), unsupported
-    shape classes and malformed data return None and record why (never a partial conversion)."""
+    back. Unsupported shape classes and malformed data return None and record why. One exception, reported as
+    report["skipped_parts"]: precombine debris parts in the undecoded primitive encoding (see convert_bodies) are left
+    out and the rest of the model keeps its native bodies."""
     from . import meshcollision
     objs = [i for i in range(len(src.blocks)) if src.type_of(i) == "bhkNPCollisionObject"]
     if not objs:
         return None
-    blobs = []
+    blobs, skipped = [], []
     world = nifmod.world_transforms(src)
     for i in objs:
         target, _, data = struct.unpack_from("<iHi", src.blocks[i], 0)
@@ -135,12 +136,15 @@ def fo4_native_collision(src, universal_template: bytes, report: dict = None):
         n, = struct.unpack_from("<I", src.blocks[data], 0)
         try:
             new = meshcollision.convert_bodies(src.blocks[data][4:4 + n], universal_template,
-                                               select=[body] if shared > 1 else None, node_rot=tuple(rot))
+                                               select=[body] if shared > 1 else None, node_rot=tuple(rot),
+                                               skipped=skipped)
             blobs += new if place is None else [(b, place[0], place[1]) for b in new]
         except Exception as e:                           # noqa: BLE001  (fallback by design, reason recorded)
             if report is not None:
                 report["fo4_collision_error"] = f"{type(e).__name__}: {e}"
             return None
+    if report is not None and skipped:
+        report["skipped_parts"] = skipped
     if report is not None and blobs:
         report["source"] = "fo4-native"
         report["bodies"] = len(blobs)
