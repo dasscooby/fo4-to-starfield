@@ -296,13 +296,16 @@ def uninstall(a):
             replaced = {item["active"].casefold(): item["original"]
                         for item in m.get("plugins_replaced", [])}
             restored = set()
+            removed = set()
             pl = []
             for line in read_lines(m["plugins_txt"]):
                 key = line.casefold()
                 if key in replaced and key not in restored:
                     pl.append(replaced[key])
                     restored.add(key)
-                elif key not in added:
+                elif key in added and key not in removed:
+                    removed.add(key)
+                else:
                     pl.append(line)
             if pl:
                 write_lines(m["plugins_txt"], pl)
