@@ -158,6 +158,12 @@ def install(a):
             if artifact_identity(dst) != identities[os.path.basename(dst)]:
                 raise OSError(f"installed artifact differs from validated build: {os.path.basename(dst)}")
         if pl_add:
+            current_plugins = None
+            if os.path.exists(pt):
+                with open(pt, "rb") as f:
+                    current_plugins = f.read()
+            if current_plugins != plugins_original:
+                raise OSError("Plugins.txt changed during install; activation aborted to preserve user edits")
             state["plugins_restore_pending"] = True
             write_manifest(man_path, state)
             write_lines(pt, pl + pl_add)

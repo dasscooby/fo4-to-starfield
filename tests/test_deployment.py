@@ -14,6 +14,37 @@ spec.loader.exec_module(deploy)
 
 
 class DeploymentRollbackTests(unittest.TestCase):
+    def test_plugin_list_edit_during_copy_aborts_without_clobbering_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            staging, game = root / "staging", root / "game"
+            staging.mkdir()
+            data = game / "Data"
+            data.mkdir(parents=True)
+            (staging / deploy.PLUGIN).write_bytes(b"TES4" + bytes(32))
+            (staging / "meshes").mkdir()
+            pt = root / "Plugins.txt"
+            original = b"*Other.esm\r\n"
+            edited = b"*Other.esm\r\n*UserAdded.esm\r\n"
+            pt.write_bytes(original)
+            args = SimpleNamespace(staging=str(staging), starfield=str(game), dry_run=False)
+            def build(a, out, folders, fmt):
+                Path(out).write_bytes(b"BTDX" + bytes(32))
+            real_copy = deploy.shutil.copy2
+            def copy(src, dst):
+                result = real_copy(src, dst)
+                if Path(dst).name == deploy.ARCHIVE:
+                    pt.write_bytes(edited)
+                return result
+            with patch.object(deploy, "plugins_txt_path", return_value=str(pt)), \
+                    patch.object(deploy, "build_archive", side_effect=build), \
+                    patch.object(deploy.shutil, "copy2", side_effect=copy):
+                with self.assertRaisesRegex(SystemExit, "rolled back"):
+                    deploy.install(args)
+            self.assertEqual(pt.read_bytes(), edited)
+            self.assertFalse(any((data / name).exists() for name in (deploy.PLUGIN, deploy.ARCHIVE)))
+            self.assertFalse((data / deploy.MANIFEST).exists())
+
     def test_plugin_list_changes_during_archive_build_are_preserved(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
