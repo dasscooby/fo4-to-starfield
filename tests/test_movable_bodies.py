@@ -142,6 +142,99 @@ def fo4_nif_with_collision():
     return nif.serialize(f)
 
 
+def two_bone_nif(shared=True, same_body=False):
+    """root -> two bone nodes (70 units along x / y, the second turned 90 degrees about z), each with a collision object
+    that owns one body of a physics system (one shared system, or one each)."""
+    f = nif.NifFile(bs_version=130, author=b"t\x00", process_script=b"\x00", export_script=b"\x00", max_filepath=b"\x00")
+    f.string_index(b"Bone")
+    ident = (1, 0, 0, 0, 1, 0, 0, 0, 1)
+    f.add_block("NiNode", av_fields(0, (0, 0, 0), ident, 1.0) + struct.pack("<Iii", 2, 1, 2))
+    f.add_block("NiNode", av_fields(0, (70, 0, 0), ident, 1.0) + struct.pack("<I", 0))
+    f.add_block("NiNode", av_fields(0, (0, 70, 0), ROT_Z90, 1.0) + struct.pack("<I", 0))
+    f.add_block("bhkNPCollisionObject", struct.pack("<iHiI", 1, 0x80, 5, 0))
+    f.add_block("bhkNPCollisionObject", struct.pack("<iHiI", 2, 0x80, 5 if shared else 6, 0 if same_body else 1))
+    f.add_block("bhkPhysicsSystem", struct.pack("<I", 4) + b"sys0")
+    f.add_block("bhkPhysicsSystem", struct.pack("<I", 4) + b"sys1")
+    f.footer = struct.pack("<II", 1, 0)
+    return nif.parse(nif.serialize(f))
+
+
+class RigidRagdollTests(unittest.TestCase):
+    def run_rigid(self, src):
+        seen = {}
+
+        def fake(blob, template, placements, motion):
+            seen.update(blob=blob, placements=placements)
+            motion["dynamic"], motion["rigid_bodies"] = 15.0, len(placements)
+            return b"RIGID"
+        objs = [i for i in range(len(src.blocks)) if src.type_of(i) == "bhkNPCollisionObject"]
+        with patch.object(meshcollision, "rigid_dynamic_body", side_effect=fake):
+            out = convert_static._rigid_ragdoll(src, objs, nif.world_transforms(src), b"dyn", {})
+        return out, seen
+
+    def test_bones_sharing_one_system_are_placed_in_root_space(self):
+        out, seen = self.run_rigid(two_bone_nif())
+        self.assertEqual(out, b"RIGID")
+        self.assertEqual(seen["blob"], b"sys0")
+        self.assertEqual(sorted(seen["placements"]), [0, 1])
+        rot0, t0 = seen["placements"][0]
+        rot1, t1 = seen["placements"][1]
+        self.assertEqual([round(x, 6) for x in t0], [1.0, 0.0, 0.0])               # 70 units = 1 m
+        self.assertEqual([round(x, 6) for x in t1], [0.0, 1.0, 0.0])
+        self.assertEqual([round(x, 6) for x in rot1], list(ROT_Z90))
+
+    def test_separate_systems_or_shared_body_are_not_merged(self):
+        self.assertIsNone(self.run_rigid(two_bone_nif(shared=False))[0])
+        self.assertIsNone(self.run_rigid(two_bone_nif(same_body=True))[0])
+
+    def test_part_transforms_compose_bone_then_part(self):
+        captured = {}
+
+        class P:
+            def objects(self):
+                return [(1, "hknpPhysicsSystemData")]
+
+            def array(self, at):
+                return (100, 2)
+
+            def pointer(self, at):
+                return 7
+
+        def dyn(template, p, parts, filt, mass):
+            captured.update(parts=parts, filt=filt, mass=mass)
+            return b"BLOB"
+        motion = {}
+        placements = {0: ((1, 0, 0, 0, 1, 0, 0, 0, 1), (0.0, 0.0, 0.0)), 1: (ROT_Z90, (2.0, 0.0, 0.0))}
+        with patch.object(meshcollision.hkpackfile, "Packfile", return_value=P()), \
+                patch.object(fc, "body_mass", return_value=10.0), \
+                patch.object(meshcollision, "_shape_parts",
+                             return_value=[("convex", 7, meshcollision.IDENTITY3, (0.5, 0.0, 0.0))]), \
+                patch.object(meshcollision, "_dynamic_body", side_effect=dyn):
+            out = meshcollision.rigid_dynamic_body(b"x", b"dyn", placements, motion)
+        self.assertEqual(out, b"BLOB")
+        self.assertEqual(captured["mass"], 20.0)
+        self.assertEqual(captured["filt"], meshcollision.RIGID_RAGDOLL_LAYER)
+        self.assertEqual(motion["rigid_bodies"], 2)
+        (_, _, R0, t0), (_, _, R1, t1) = captured["parts"]
+        self.assertEqual(t0, (0.5, 0.0, 0.0))
+        self.assertEqual(tuple(round(x, 6) for x in t1), (2.0, 0.5, 0.0))           # bone turns the part's offset
+        self.assertEqual(tuple(round(x, 6) for x in R1), tuple(float(x) for x in ROT_Z90))
+
+    def test_anchored_body_keeps_the_system_static(self):
+        class P:
+            def objects(self):
+                return [(1, "hknpPhysicsSystemData")]
+
+            def array(self, at):
+                return (100, 2)
+        motion = {}
+        placements = {0: ((1, 0, 0, 0, 1, 0, 0, 0, 1), (0.0, 0.0, 0.0)), 1: ((1, 0, 0, 0, 1, 0, 0, 0, 1), (0.0, 0.0, 0.0))}
+        with patch.object(meshcollision.hkpackfile, "Packfile", return_value=P()), \
+                patch.object(fc, "body_mass", side_effect=[None, 10.0]):
+            self.assertIsNone(meshcollision.rigid_dynamic_body(b"x", b"dyn", placements, motion))
+        self.assertIn("not dynamic", motion["kept_static"][0])
+
+
 class RoutingTests(unittest.TestCase):
     def convert(self, dynamic):
         def fake_native(src, tmpl, report, dynamic_template=None, motion=None):

@@ -103,15 +103,41 @@ def collision_template_from_nif(sf_nif: bytes) -> bytes:
     raise nifmod.NifError("template NIF has no bhkPhysicsSystem")
 
 
+def _rigid_ragdoll(src, objs, world, dynamic_template: bytes, motion: dict):
+    """Blob of meshcollision.rigid_dynamic_body when every collision object shares ONE FO4 physics system, owns a
+    different body and sits on an unscaled node; else None (the per-body path then runs, reasons in motion)."""
+    from . import meshcollision
+    placements, data = {}, None
+    for i in objs:
+        target, _, d = struct.unpack_from("<iHi", src.blocks[i], 0)
+        body, = struct.unpack_from("<I", src.blocks[i], 10) if len(src.blocks[i]) >= 14 else (0,)
+        if data not in (None, d) or not (0 <= target < len(src.blocks)) or body in placements:
+            return None
+        data = d
+        tr, rot, scale = world(target)
+        if abs(scale - 1.0) > 1e-3:
+            return None
+        placements[body] = (tuple(rot), tuple(x * UNIT_SCALE for x in tr))
+    if not (0 <= data < len(src.blocks)) or src.type_of(data) != "bhkPhysicsSystem":
+        return None
+    n, = struct.unpack_from("<I", src.blocks[data], 0)
+    try:
+        return meshcollision.rigid_dynamic_body(src.blocks[data][4:4 + n], dynamic_template, placements, motion)
+    except Exception as e:                               # noqa: BLE001  (falls back to the per-body path, reason kept)
+        motion.setdefault("kept_static", []).append(f"rigid merge failed: {type(e).__name__}: {e}")
+        return None
+
+
 def fo4_native_collision(src, universal_template: bytes, report: dict = None, dynamic_template: bytes = None,
                          motion: dict = None):
     """[Starfield single-body physics blobs], one per FO4 collision body (meshcollision.convert_bodies), or None to fall
     back. Unsupported shape classes and malformed data return None and record why. One exception, reported as
     report["skipped_parts"]: precombine debris parts in the undecoded primitive encoding (see convert_bodies) are left
     out and the rest of the model keeps its native bodies.
-    dynamic_template (a vanilla dynamic convex body): a model whose only collision object sits on the root node and holds
-    one dynamic FO4 body becomes movable (motion["dynamic"] = kg, the single blob is that body); dynamic bodies that
-    can't be converted are listed in motion["kept_static"]."""
+    dynamic_template (a vanilla dynamic body): a model whose only collision object sits on the root node and holds
+    one dynamic FO4 body becomes movable (motion["dynamic"] = kg, the single blob is that body); so does a model whose
+    collision objects share one all-dynamic system (ragdoll skeleton), merged into ONE rigid body (_rigid_ragdoll,
+    report["motion_note"]); dynamic bodies that can't be converted are listed in motion["kept_static"]."""
     from . import meshcollision
     objs = [i for i in range(len(src.blocks)) if src.type_of(i) == "bhkNPCollisionObject"]
     if not objs:
@@ -119,6 +145,13 @@ def fo4_native_collision(src, universal_template: bytes, report: dict = None, dy
     motion = {} if motion is None else motion
     blobs, skipped = [], []
     world = nifmod.world_transforms(src)
+    rigid = _rigid_ragdoll(src, objs, world, dynamic_template, motion) if dynamic_template is not None and len(objs) > 1 else None
+    if rigid is not None:                            # phase A ragdoll: one rigid movable body on the root node
+        if report is not None:
+            report.update(source="fo4-native", bodies=1, motion="dynamic", mass_kg=round(motion["dynamic"], 4),
+                          motion_note=f"{motion['rigid_bodies']} FO4 bodies merged into one rigid movable body: "
+                                      "joints (constraints) and skinning not converted yet")
+        return [rigid]
     for i in objs:
         target, _, data = struct.unpack_from("<iHi", src.blocks[i], 0)
         if not (0 <= target < len(src.blocks)):

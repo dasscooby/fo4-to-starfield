@@ -467,7 +467,8 @@ class Converter:
                                                       allow_guess=not no_guess,
                                                       dynamic_template=self.dynamic_template if use_box else None)
                 if coll_report.get("motion") == "dynamic":
-                    res["movable"] = {"mass_kg": coll_report["mass_kg"]}
+                    res["movable"] = {"mass_kg": coll_report["mass_kg"],
+                                      **({"note": coll_report["motion_note"]} if "motion_note" in coll_report else {})}
                 if "door_not_opening" in res:
                     coll_report["source"] = "passable-door"   # deliberately none (see above), not a failed conversion
             for relp, data in files.items():

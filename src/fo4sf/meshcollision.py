@@ -1070,6 +1070,48 @@ def _emit_dynamic_compound(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, parts
     return i_cs, lo, hi
 
 
+RIGID_RAGDOLL_LAYER = 4   # CLUTTER: every body of vanilla Starfield's movable skeleton (humanbones/skeleton_body.nif)
+
+
+def rigid_dynamic_body(fo4_blob: bytes, dynamic_template: bytes, placements: dict, motion: dict) -> Optional[bytes]:
+    """FO4 multi-body dynamic system (ragdoll skeleton, hose-and-tank) as ONE rigid movable body: every body's convex
+    parts are moved into the root space of the model by its collision node's transform (placements: body index ->
+    (rotation 3x3 row-major, translation in metres)) and become one dynamic compound with the system's total FO4 mass, on
+    layer CLUTTER as Starfield's own movable skeleton. Phase A of ragdolls: pushable, but joints (constraints) and
+    skinning are not converted; motion["rigid_bodies"] says so. None (and motion["kept_static"]) when a body is not
+    dynamic (e.g. a hinged gate's fixed anchor) or not made of convex parts."""
+    from . import fo4collision as fc
+    p = hkpackfile.Packfile(fo4_blob)
+    classes = dict(p.objects())
+    systems = [o for o, c in classes.items() if c == "hknpPhysicsSystemData"]
+    if len(systems) != 1:
+        return None
+    at, n = p.array(systems[0] + fc.SYS_BODIES)
+    if at is None or n < 2 or sorted(placements) != list(range(n)):
+        motion.setdefault("kept_static", []).append(f"{n}-body system: collision objects don't cover every body once")
+        return None
+    parts, total = [], 0.0
+    for k in range(n):
+        mass = fc.body_mass(p, systems[0], k)
+        if mass is None:
+            motion.setdefault("kept_static", []).append(f"{n}-body system: body {k} is not dynamic (anchored / keyframed)")
+            return None
+        total += mass
+        Rn, tn = placements[k]
+        for kind, obj, R, tr in _shape_parts(p, classes, p.pointer(at + fc.BODY_SIZE * k), IDENTITY3, (0.0, 0.0, 0.0)):
+            if kind not in ("convex", "convex-verts"):
+                motion.setdefault("kept_static", []).append(f"{n}-body system: body {k} has a {kind} part")
+                return None
+            R2 = tuple(sum(Rn[3 * r + j] * R[3 * j + c] for j in range(3)) for r in range(3) for c in range(3))
+            t2 = tuple(tn[r] + sum(Rn[3 * r + j] * tr[j] for j in range(3)) for r in range(3))
+            parts.append((kind, obj, R2, t2))
+    blob = _dynamic_body(dynamic_template, p, parts, RIGID_RAGDOLL_LAYER, total)
+    motion["dynamic"] = total
+    motion["rigid_bodies"] = n
+    motion["compound_parts"] = len(parts)
+    return blob
+
+
 def _dynamic_body(template_blob: bytes, p: hkpackfile.Packfile, parts, filt: int, mass: float) -> bytes:
     """One dynamic body on the vanilla dynamic template: its system, material, body cinfo (motion type, flags, user data
     as vanilla) and motion properties; FO4's convex part(s) (several: one compound shape), collision layer and mass; a
