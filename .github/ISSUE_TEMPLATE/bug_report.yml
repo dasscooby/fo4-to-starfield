@@ -1,0 +1,41 @@
+name: Bug report
+description: Report a reproducible tool or conversion problem
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: "Do not upload game files, extracted assets, converted outputs, secrets, or personal file paths."
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the result and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Use synthetic input or describe the command without sharing game data.
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Tool and game versions
+      description: Include only versions; do not include license keys or account details.
+  - type: dropdown
+    id: evidence
+    attributes:
+      label: Evidence level
+      options:
+        - Offline test
+        - In-game verified
+        - Hypothesis / not yet verified
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized output
+      description: Remove local paths, usernames, tokens, and game-derived content.

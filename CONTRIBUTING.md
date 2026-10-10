@@ -20,7 +20,7 @@ one in a sitting.
 
 ## Hard rules
 
-- **No game data in commits.** Run `python scripts/guard.py` before every commit. A GitHub Actions template that runs it lives in `ci/` (not enabled yet; see WP-18).
+- **No game data in commits.** Run `python scripts/guard.py` before every commit. GitHub Actions runs the guard and synthetic test suite on pull requests and pushes to `main`.
 - Don't commit your `config.toml` or any path from your machine.
 - Offline / single-player only.
 - Python tools that read game data run with `python -I` so they don't import from the data folder.
@@ -35,6 +35,10 @@ as the shared inbox for bug reports and priorities. Follow the active milestone 
 Reference issue numbers in fixes and keep evidence concise. Offline checks do not establish in-game
 acceptance. Keep full discussions in issues instead of copying them into the handoff. Add appropriate
 synthetic tests, run the guard, and note AI assistance in the PR.
+
+In the PR, label evidence as **in-game verified**, **offline tested**, or **unverified hypothesis**. Link
+in-game claims to the tested build and results. Do not attach game files, extracted assets, or converted
+outputs. Review [SECURITY.md](SECURITY.md) before reporting a vulnerability.
 
 ## Style
 

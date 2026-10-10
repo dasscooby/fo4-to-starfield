@@ -1,7 +1,7 @@
 # Plan: bringing Fallout 4 into Creation Engine 2
 
-Status: **planning + measurements complete; no converter exists yet.** This document is the long-term
-method. [WORK-PACKAGES.md](WORK-PACKAGES.md) breaks it into independent tasks and
+Status: **research, measurements, and experimental converters exist; a complete conversion is not yet validated.**
+This document is the long-term method. [WORK-PACKAGES.md](WORK-PACKAGES.md) breaks it into independent tasks and
 [RISKS.md](RISKS.md) lists what could stop it and how to find out cheaply.
 
 ## 1. What "Fallout 4 in Starfield's engine" means
@@ -76,7 +76,7 @@ FO4 install ──► extract ──► IR (work dir) ──► convert-* ──
 | Artist-in-the-loop (rigging, weight fixes) | Blender 5.x + PyNifly (FO4) + Starfield Blender extension | Only where automation can't decide |
 
 Work and output directories live **outside the repo** (`config.toml` → `work_dir`, `staging_dir`). Nothing
-derived from game files is ever committed (enforced by `scripts/guard.py`; CI template in `ci/`).
+derived from game files is ever committed (enforced by `scripts/guard.py` and the active GitHub Actions CI workflow).
 
 Planned repo layout (grows as work packages land):
 ```

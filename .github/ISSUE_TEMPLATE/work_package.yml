@@ -1,0 +1,24 @@
+name: Work package or research proposal
+description: Propose a scoped task with evidence and an acceptance check
+title: "[Task]: "
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Current evidence and unknowns
+      description: Separate verified facts from hypotheses. Do not attach game data.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: State the synthetic/offline/in-game check that will establish completion.
+    validations:
+      required: true
