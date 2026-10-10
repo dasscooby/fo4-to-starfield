@@ -621,3 +621,12 @@ fixed obstacles. Evidence and field meanings: docs/ai/research-log.md "how Starf
   (232 flags, 264 motionType).
 - Offline check: TinCan01 5 kg, Clipboard01 4 kg, Pencil01 0.5 kg read back as dynamic bodies; the skeleton stays
   static with 17 reasons. Tests 262 OK, guard OK. **Not yet seen in game** (next: build, deploy, push a can).
+- **First in-game attempt (2026-10-10 16:2x), aborted, nothing learned about pushing yet.** Test build
+  `C:\Modding\staging\movable_v111` (Vault 111 only: 219 models, 13 movable = coffee cups, beer bottles, folding chairs,
+  clipboards, tools; 10 dynamic-in-FO4 models kept static with reasons: skeletons, gear-room gate, and compound shapes
+  such as the cardboard box and traffic cone). `cycle.ps1` loaded the save but Starfield's "console commands disable
+  achievements" popup swallowed the `coc`; the follow-up `coc.ps1` was blocked by the focus guard (Explorer had focus;
+  also `FO4SF_PYTHON` was unset, so the HUD check had no Pillow). The owner closed the game. The pinned build
+  (`AC379C53` / `B8080348`) was redeployed and its hashes verified. Next attempt: set `FO4SF_PYTHON`, dismiss the
+  popup inside `cycle.ps1`, and only when the owner is away. Follow-up found by the build: dynamic **compound** bodies
+  (several convex parts: boxes, cones, hammers) are common and need one dynamic compound body, not several.
