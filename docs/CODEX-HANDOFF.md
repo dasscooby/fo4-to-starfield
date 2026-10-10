@@ -28,7 +28,7 @@ Door prototype:30 rigs/60 clips read back,42 selected source bodies/62 leaves; o
 
 `.af` samples: Open/Close sizes vary. Claude confirmed the second u16 at 0x28 matches named rig-bone counts in four families; frame rate and track mapping remain unknown. Details: research note and #32.
 
-Codex:13 checkpoint/44 deploy tests; guard passes. Cache/resume validate success, inputs and hashes; a successful conversion whose dependency inventory fails now blocks batch verification. Deploy prevents overwrites, atomically rewrites/restores Plugins.txt, checks for concurrent edits during updates and recovery, preserves a config file created after uninstall's snapshot, validates manifest-owned plugin entries, preserves format/path, tracks published files, and limits uninstall to known artifacts. Recovery preserves changed/unproven files; legacy manifests may need manual cleanup. No live install changed.
+Codex:17 checkpoint/identity/44 deploy tests; full suite 258 passes (1 skip), guard passes. Archive resume identity now streams SHA-256 and rejects changes during hashing, covering same-size edits with restored timestamps; old metadata signatures miss safely. Measured +0.0494 s per synthetic 64 MiB archive (optimization log). A successful conversion whose dependency inventory fails blocks batch verification. Deploy prevents overwrites, atomically rewrites/restores Plugins.txt, checks concurrent edits during updates/recovery, preserves a config created after uninstall snapshot, validates manifest-owned plugin entries, preserves format/path, tracks published files, and limits uninstall to known artifacts. Recovery preserves changed/unproven files; legacy manifests may need manual cleanup. No live install changed.
 
 ## Coordination / housekeeping
 

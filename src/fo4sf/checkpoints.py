@@ -1,8 +1,9 @@
 """Per-model checkpoints with content-verified generated dependencies.
 
-Archive identity uses resolved path, size and nanosecond modification time.
-Archives must be immutable during a run; replace/touch edited archives before
-resuming. Small tools/templates and converter sources use content hashes.
+Archive identity includes a streaming SHA-256 digest, so same-size edits with
+preserved timestamps invalidate resume data. Archives must remain immutable
+while their identity is being computed. Small tools/templates and converter
+sources also use content hashes.
 """
 import hashlib
 import json
@@ -22,10 +23,34 @@ def digest(path):
     return h.hexdigest()
 
 
+def _stat_identity(stat):
+    return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+
+
+def _path_identity(stat):
+    # On Windows, an explicit utime restore can make path and open-handle
+    # ctime reports differ even though the opened file is stable.
+    return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
+
+
+def _hash_open_file(stream):
+    h = hashlib.sha256()
+    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+        h.update(chunk)
+    return h.hexdigest()
+
+
 def archive_identity(path):
     path = Path(path).resolve()
-    stat = path.stat()
-    return [str(path), stat.st_size, stat.st_mtime_ns]
+    with path.open("rb") as stream:
+        before = os.fstat(stream.fileno())
+        content_hash = _hash_open_file(stream)
+        after = os.fstat(stream.fileno())
+    current_path = path.stat()
+    if (_stat_identity(before) != _stat_identity(after)
+            or _path_identity(after) != _path_identity(current_path)):
+        raise OSError(f"archive changed while fingerprinting: {path}")
+    return [str(path), after.st_size, content_hash]
 
 
 def local_path(staging, relative):
