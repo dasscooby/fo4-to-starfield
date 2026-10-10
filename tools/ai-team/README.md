@@ -26,7 +26,10 @@ Rules every agent follows: [AGENTS.md](../../AGENTS.md).
    `python tools\ai-team\load_model.py` (qwen3-14b, 32K context, q8 KV cache, all on GPU, no memory mapping).
    Don't use `lms load`: it memory-maps the file and holds ~10 GB of system RAM, which makes the guardian block.
 2. `powershell -File tools\ai-team\start-team.ps1`: starts the guardian proxy, checks LM Studio, prints status.
-3. In the repository (or an agent worktree): `opencode`. The Lead is the default agent. One OpenCode session at a time.
+3. Interactive: `opencode` in the repository (the Lead is the default agent). Unattended: `powershell -File tools\ai-team\run-lead.ps1`:
+   one Lead session per cycle (default 30 min) in its own worktree (branch `ai/local-lead`); skips while Starfield runs or
+   the guardian is paused/blocked; reloads the model if LM Studio unloaded it; log `lead-cycles.log` in the state dir.
+   One OpenCode session at a time.
 
 Local inference is **blocked while Starfield runs** (the GPU is needed for game tests). Close the game first.
 

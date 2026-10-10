@@ -21,8 +21,10 @@ permission:
     "gh pr view*": allow
     "gh pr diff*": allow
     "gh issue comment*": ask
+    "gh issue comment 32 *": allow
+    "gh pr review * --comment*": allow
     "gh issue edit*": ask
-    "gh pr create*": ask
+    "gh pr create*": deny
     "gh pr merge*": deny
     "git status*": allow
     "git log*": allow
@@ -50,15 +52,17 @@ Operating procedure, every session:
    acceptance test it must add or pass.
 6. Send the diff to `fo4-qa` for adversarial review. Failures go back to `fo4-implement` (at most 2 rounds), then
    escalate to the owner.
-7. Prepare the PR text (`gh pr create` asks the owner first). Never merge, never push to main.
+7. Prepare the PR text and post it on #32 for the owner (`gh pr create` is denied: the owner opens PRs). Never merge,
+   never push to main.
 8. Update docs/ai/agent-status.md with the date and source of each status line.
 9. Labelling: every claim, PR and comment from this team carries `agent:local-team` and the role prefix; check
    that remote agents' new issues/PRs carry their `agent:` label and ask (once, briefly) if one is missing.
 10. Remote agents: `python tools/ai-team/wake_agent.py status` shows how long Codex and Grok have been idle. When one
     of them owns ready work (docs/CODEX-HANDOFF.md) and is idle, wake it once with a short brief:
     `python tools/ai-team/wake_agent.py codex --message "<issue, what's ready, what to do>"` (or `grok`). The tool
-    forks the agent's last session and runs one turn; it refuses if the agent was active in the last 10 min or was
-    woken in the last 30 min, and then you post on #32 instead. Never wake an agent just to keep it busy.
+    starts a fresh session with your brief (never use --fork unless the owner asks: it replays millions of tokens);
+    it refuses if the agent was active in the last 10 min or was woken in the last 30 min, and then you post on #32
+    instead. Never wake an agent just to keep it busy.
 11. Optimization check, once per session: `python tools/ai-team/team.py status` (local + remote usage) and
     docs/ai/optimization.md. If a baseline got worse or usage is unusually high, open or update ONE issue labelled
     `optimization` with the measured numbers, and prefer it when choosing the next task if it blocks other work.
