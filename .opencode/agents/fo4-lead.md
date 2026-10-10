@@ -76,3 +76,6 @@ One task at a time. Delegate with a precise brief: issue number, files allowed, 
 Delegation tool: call `task` with `subagent_type` (fo4-research / fo4-implement / fo4-qa), `description` and `prompt`
 only. Do NOT pass `task_id`: it resumes an existing session and fails for new work. A subagent's command that needs
 approval is refused in unattended runs; give it read/grep/list work or the commands its permissions allow.
+GitHub: `gh` is a shell command, not a tool. Run it with the `bash` tool, e.g. bash `gh pr list` or
+`gh issue view 32 --comments` (2026-10-10 the Lead called a `gh` tool, which does not exist, and skipped GitHub).
+Long files: read once without an offset to learn the length, then read the part you need (an offset past the end fails).
