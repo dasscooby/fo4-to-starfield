@@ -26,7 +26,7 @@ same input), and the commit. Use the `optimization` label on the issue or PR.
 
 ## Entries
 
-### 2026-10-09 Codex: hash archive contents for resume identity (commit pending)
+### 2026-10-09 Codex: hash archive contents for resume identity (`c74a952`)
 Same deterministic synthetic 64 MiB archive, seven warm-cache runs on the owner's PC. Before: metadata-only
 `archive_identity()` median **0.000170 s**. After: content-hashed `archive_identity()` median **0.049534 s**;
 about 291× the fingerprint time, or +0.0494 s per 64 MiB (~1.29 GiB/s observed). The one-time scan per input
