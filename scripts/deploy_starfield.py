@@ -87,11 +87,22 @@ def atomic_write_bytes(p, content, prefix):
 def restore_plugins(state):
     p = state["plugins_txt"]
     original = state["plugins_original"]
-    if original is None:
+    original_bytes = base64.b64decode(original) if original is not None else None
+    current = None
+    if os.path.exists(p):
+        with open(p, "rb") as f:
+            current = f.read()
+    expected = state.get("plugins_activated")
+    expected_bytes = base64.b64decode(expected) if isinstance(expected, str) else None
+    if current == original_bytes:
+        return
+    if expected_bytes is None or current != expected_bytes:
+        raise OSError("Plugins.txt changed since interrupted install; preserved")
+    if original_bytes is None:
         if os.path.exists(p):
             os.remove(p)
     else:
-        atomic_write_bytes(p, base64.b64decode(original), ".fo4port-plugins-")
+        atomic_write_bytes(p, original_bytes, ".fo4port-plugins-")
 
 
 def validate_plugin_cleanup(manifest):
@@ -111,8 +122,7 @@ def validate_plugin_cleanup(manifest):
                 item["original"].strip().startswith("*") or
                 plugin_name(item["original"]).casefold() != PLUGIN.casefold()):
             sys.exit("unexpected plugin restoration entry in manifest; refusing cleanup")
-def write_lines(p, lines, original=None):
-    os.makedirs(os.path.dirname(p), exist_ok=True)
+def render_lines(lines, original=None):
     if original is None:
         bom, newline, trailing = b"", "\r\n", True
     else:
@@ -121,7 +131,12 @@ def write_lines(p, lines, original=None):
         newline = "\r\n" if b"\r\n" in content else "\n" if b"\n" in content else "\r" if b"\r" in content else "\r\n"
         trailing = content.endswith((b"\r", b"\n"))
     text = newline.join(lines) + (newline if lines and trailing else "")
-    atomic_write_bytes(p, bom + text.encode("utf-8"), ".fo4port-plugins-")
+    return bom + text.encode("utf-8")
+
+
+def write_lines(p, lines, original=None):
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    atomic_write_bytes(p, render_lines(lines, original), ".fo4port-plugins-")
 
 
 def build_archive(a, out, folders, fmt):
@@ -239,6 +254,7 @@ def install(a):
     state["plugins_added"] = pl_add
     state["plugins_replaced"] = pl_replaced
     state["plugins_original"] = base64.b64encode(plugins_original).decode("ascii") if plugins_existed else None
+    state["plugins_activated"] = base64.b64encode(render_lines(activated, plugins_original)).decode("ascii")
     state["plugins_restore_pending"] = False
     write_manifest(man_path, state)
     installed_files = set()

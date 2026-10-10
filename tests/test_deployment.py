@@ -680,6 +680,43 @@ class DeploymentRollbackTests(unittest.TestCase):
     def test_interrupted_build_cannot_be_deployed(self):
         self.run_failure("unfinished_build")
 
+    def test_interrupted_install_recovery_preserves_later_plugins_edits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            staging, game = root / "staging", root / "game"
+            staging.mkdir()
+            data = game / "Data"
+            data.mkdir(parents=True)
+            (staging / deploy.PLUGIN).write_bytes(b"TES4" + bytes(32))
+            (staging / "meshes").mkdir()
+            plugins = root / "Plugins.txt"
+            original = b"*Other.esm\r\n"
+            plugins.write_bytes(original)
+            args = SimpleNamespace(staging=str(staging), starfield=str(game), dry_run=False)
+
+            def build(a, out, folders, fmt):
+                Path(out).write_bytes(b"BTDX" + bytes(32))
+
+            real_write_lines = deploy.write_lines
+
+            def interrupt_after_activation(path, lines, before=None):
+                real_write_lines(path, lines, before)
+                raise KeyboardInterrupt("injected interruption after activation")
+
+            with patch.object(deploy, "plugins_txt_path", return_value=str(plugins)), \
+                    patch.object(deploy, "build_archive", side_effect=build), \
+                    patch.object(deploy, "write_lines", side_effect=interrupt_after_activation):
+                with self.assertRaisesRegex(KeyboardInterrupt, "injected interruption"):
+                    deploy.install(args)
+
+            user_edited = original + b"*UserAdded.esm\r\n"
+            plugins.write_bytes(user_edited)
+            with patch.object(deploy, "plugins_txt_path", return_value=str(plugins)):
+                with self.assertRaisesRegex(SystemExit, "Plugins.txt changed.*preserved"):
+                    deploy.uninstall(args)
+            self.assertEqual(plugins.read_bytes(), user_edited)
+            self.assertTrue((data / deploy.MANIFEST).exists())
+
     def test_final_manifest_failure_restores_plugins_exactly(self):
         self.run_failure("manifest")
 

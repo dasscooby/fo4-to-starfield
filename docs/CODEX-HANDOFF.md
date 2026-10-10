@@ -28,7 +28,7 @@ Door prototype:30 rigs/60 clips read back,42 selected source bodies/62 leaves; o
 
 `.af` samples: Open/Close sizes vary. Claude confirmed the second u16 at 0x28 matches named rig-bone counts in four families; frame rate and track mapping remain unknown. Details: research note and #32.
 
-Codex:12 checkpoint/41 deploy tests; guard passes. Cache/resume validate success, inputs and hashes. Deploy prevents overwrites, atomically rewrites/restores Plugins.txt, validates manifest-owned plugin entries, preserves format/path, tracks published files, and limits uninstall to known artifacts. Recovery preserves changed/unproven files; legacy manifests may need manual cleanup. No live install changed.
+Codex:12 checkpoint/42 deploy tests; guard passes. Cache/resume validate success, inputs and hashes. Deploy prevents overwrites, atomically rewrites/restores Plugins.txt, verifies it has not changed before interrupted-install recovery, validates manifest-owned plugin entries, preserves format/path, tracks published files, and limits uninstall to known artifacts. Recovery preserves changed/unproven files; legacy manifests may need manual cleanup. No live install changed.
 
 ## Coordination / housekeeping
 
