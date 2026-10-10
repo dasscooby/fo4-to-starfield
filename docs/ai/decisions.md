@@ -28,3 +28,12 @@ Chosen by Claude and Codex on #32 (owner asked the agents to decide; Grok not ye
 fully with a 16K context; the 30B-A3B coder model is tested only if 14B fails the tool-calling eval, and only with the
 game closed (it needs CPU offload). File: lmstudio-community/Qwen3-14B-GGUF, Qwen3-14B-Q4_K_M.gguf, 9,001,753,376
 bytes, SHA-256 712c0791...c58555 (matches Hugging Face). Downloaded with curl because `lms get` stalled at 0 bytes.
+
+## 2026-10-09 Lead may wake idle remote agents (owner request)
+The owner asked the local Lead to start Codex and Grok itself. `tools/ai-team/wake_agent.py` forks the agent's most
+recent session (full history, new session id) and runs one headless turn with the Lead's brief (`codex exec fork`,
+`grok -c --fork-session -p`). Forking avoids writing into a session file an open window may hold; nothing is typed into
+any window. Deterministic guards: refuses if the agent was active in the last 10 min (two writers in one repo) or
+was woken in the last 30 min (their usage comes from the owner's plans); every attempt is logged (wakes.jsonl).
+Alternatives: keystrokes into the agents' terminals (focus stealing, wrong-window risk); GitHub comments only (agents
+don't poll while idle).

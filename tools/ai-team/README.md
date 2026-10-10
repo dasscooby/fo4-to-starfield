@@ -16,6 +16,7 @@ Rules every agent follows: [AGENTS.md](../../AGENTS.md).
 | Status / report / pause / resume / stop / shutdown | `tools/ai-team/guardian/guardian.py` |
 | Remote usage (Codex, Claude Code, Grok logs; GitHub activity) | `tools/ai-team/remote_usage.py` |
 | Board + combined status | `tools/ai-team/team.py` |
+| Wake an idle Codex / Grok (forks its last session, one headless turn; idle + cooldown guards) | `tools/ai-team/wake_agent.py` |
 | Runtime state, history DB, logs (outside the repo) | `%LOCALAPPDATA%\fo4-ai-team\state\` (`guardian.db`, `proxy.log`; override with `FO4_AI_TEAM_STATE`) |
 | Project knowledge, optimization log | `docs/ai/` (`optimization.md`: baselines + before/after entries) |
 
