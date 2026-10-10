@@ -5,7 +5,7 @@
 # Then run `opencode` in the repository (the Lead is the default agent).
 param([string]$Python = $(if ($env:FO4SF_PYTHON) { $env:FO4SF_PYTHON } else { 'python' }), [int]$Port = 1235)
 $here = $PSScriptRoot
-$state = Join-Path $here 'state'
+$state = if ($env:FO4_AI_TEAM_STATE) { $env:FO4_AI_TEAM_STATE } else { Join-Path $env:LOCALAPPDATA 'fo4-ai-team\state' }   # outside the repo (guard.py scans the tree)
 New-Item -ItemType Directory -Force $state | Out-Null
 try { $s = Invoke-RestMethod "http://127.0.0.1:$Port/guardian/status" -TimeoutSec 2; "guardian proxy already running (mode $($s.mode))" }
 catch {

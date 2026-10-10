@@ -17,7 +17,7 @@
                              | OpenAI-compatible API, model = agent alias (fo4-lead, fo4-qa, ...)
                              v
   Resource Guardian proxy  127.0.0.1:1235   (tools/ai-team/guardian/proxy.py)
-    admission controller: max 1 local inference, resource policy, queue, pause/stop, logs -> state/guardian.db
+    admission controller: max 1 local inference, resource policy, queue, pause/stop, logs -> %LOCALAPPDATA%\fo4-ai-team\state\guardian.db
                              |
                              v
   LM Studio server  127.0.0.1:1234   one loaded coding model shared by all aliases

@@ -1,14 +1,16 @@
 """SQLite history for the Resource Guardian: local inference jobs, throttling decisions, resource samples and the
-pause / stop switch. One file (state/guardian.db), WAL mode so the proxy and the status command can read and write
-at once.
+pause / stop switch. One file (guardian.db), WAL mode so the proxy and the status command can read and write at once.
+
+Runtime state lives OUTSIDE the repository (%LOCALAPPDATA%\\fo4-ai-team\\state, or $FO4_AI_TEAM_STATE): logs hold
+machine paths, and scripts/guard.py scans the whole working tree, ignored files included.
 """
 import json
 import os
 import sqlite3
 import time
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-STATE = os.path.join(os.path.dirname(HERE), "state")
+STATE = os.environ.get("FO4_AI_TEAM_STATE") or os.path.join(
+    os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "fo4-ai-team", "state")
 DB = os.path.join(STATE, "guardian.db")
 
 SCHEMA = """

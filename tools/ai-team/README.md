@@ -16,7 +16,7 @@ Rules every agent follows: [AGENTS.md](../../AGENTS.md).
 | Status / report / pause / resume / stop / shutdown | `tools/ai-team/guardian/guardian.py` |
 | Remote usage (Codex, Claude Code, Grok logs; GitHub activity) | `tools/ai-team/remote_usage.py` |
 | Board + combined status | `tools/ai-team/team.py` |
-| Runtime state, history DB, logs (not in Git) | `tools/ai-team/state/` (`guardian.db`, `proxy.log`) |
+| Runtime state, history DB, logs (outside the repo) | `%LOCALAPPDATA%\fo4-ai-team\state\` (`guardian.db`, `proxy.log`; override with `FO4_AI_TEAM_STATE`) |
 | Project knowledge, optimization log | `docs/ai/` (`optimization.md`: baselines + before/after entries) |
 
 ## Start
@@ -36,7 +36,7 @@ Local inference is **blocked while Starfield runs** (the GPU is needed for game 
 - `python tools\ai-team\team.py board`: GitHub tasks by state (live).
 - `python tools\ai-team\guardian\guardian.py status`: just the guardian (exit code 0 ok, 1 restrict, 2 block).
 - `python tools\ai-team\guardian\guardian.py report --hours 24`: local requests, tokens, latency, throttling.
-- Logs: `tools\ai-team\state\proxy.log` (every non-admit decision and job end), `state\guardian.db` (SQLite:
+- Logs: `%LOCALAPPDATA%\fo4-ai-team\state\proxy.log` (every non-admit decision and job end), `state\guardian.db` (SQLite:
   `jobs`, `decisions`, `samples`, `control`); OpenCode's own logs: `opencode --print-logs`.
 
 ## Pause, resume, stop

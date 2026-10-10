@@ -1,7 +1,7 @@
 """Admission-controlled proxy in front of LM Studio: the deterministic part of the Resource Guardian.
 
 Local agents (OpenCode) talk to http://127.0.0.1:1235/v1 instead of LM Studio's :1234. Every inference request
-(/v1/chat/completions, /v1/completions, /v1/embeddings, /v1/responses) becomes a job in state/guardian.db:
+(/v1/chat/completions, /v1/completions, /v1/embeddings, /v1/responses) becomes a job in the guardian DB (store.STATE, outside the repo):
   queued -> running -> done | failed | timeout       or   queued -> rejected
 At most max_concurrent_local jobs run at once (default 1). Before admitting, the resource policy is checked
 (policy.py); while the level is restrict/block or the manual mode is "paused", jobs wait in the queue up to
