@@ -389,7 +389,7 @@ def uninstall(a):
                     updated.append(line)
             if updated:
                 write_lines(plugins_path, updated, plugins_original)
-            elif os.path.exists(m["plugins_txt"]):
+            elif plugins_original is not None:
                 if m.get("plugins_original") is None:
                     os.remove(m["plugins_txt"])
                 else:

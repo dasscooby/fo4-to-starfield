@@ -487,6 +487,35 @@ class DeploymentRollbackTests(unittest.TestCase):
             self.assertEqual(plugins.read_bytes(), concurrent_edit)
             self.assertEqual({path.name for path in plugins.parent.iterdir()}, {"Plugins.txt"})
 
+    def test_uninstall_does_not_remove_plugins_file_created_after_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data = root / "Data"
+            data.mkdir()
+            plugins = root / "Plugins.txt"
+            manifest = data / deploy.MANIFEST
+            deploy.write_manifest(str(manifest), {"files": [], "plugins_txt": str(plugins),
+                "plugins_added": ["*FO4Port.esm"], "plugins_replaced": [],
+                "plugins_original": None, "complete": True})
+            user_file = b"*UserAdded.esm\n"
+            args = SimpleNamespace(starfield=str(root), dry_run=False)
+            real_exists = deploy.os.path.exists
+            plugin_checks = 0
+
+            def create_after_snapshot(path):
+                nonlocal plugin_checks
+                if os.fspath(path) == str(plugins):
+                    plugin_checks += 1
+                    if plugin_checks == 1:
+                        plugins.write_bytes(user_file)
+                        return False
+                return real_exists(path)
+
+            with patch.object(deploy, "plugins_txt_path", return_value=str(plugins)), \
+                    patch.object(deploy.os.path, "exists", side_effect=create_after_snapshot):
+                deploy.uninstall(args)
+            self.assertEqual(plugins.read_bytes(), user_file)
+
     def check_archive_build(self, outcome):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
