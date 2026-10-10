@@ -40,5 +40,5 @@ below the 92% restrict level with a resident model). Twice the context for +109 
 Before: `wake_agent.py` forked Codex's last session; one headless turn reported **5,677,999 tokens used** (the
 whole long session history replayed) and, in the default read-only sandbox, could not fix or post anything.
 After: default is a fresh session with a short brief pointing at #32 / handoff / AGENTS.md, with workspace-write +
-network. `--fork` stays available when the old context is really needed. (After-measurement: next wake's
-`tokens used` line in its log.)
+network. `--fork` stays available when the old context is really needed. After (measured): the next fresh-session wake fixed the bug it was briefed on, ran the tests and the guard, and
+opened PR #34 using **54,793 tokens** (99% less than the fork's 5,677,999).
