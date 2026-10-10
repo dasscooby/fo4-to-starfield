@@ -5,17 +5,29 @@ Format notes, measurements, a risk-first plan, and (as they land) converters for
 collision, plugin records, terrain and more. Converts from **your own** game copies; no game assets are
 included or distributed.
 
-> **Status: a Fallout 4 prop renders in Starfield.** A Fallout 4 chair, converted by this toolchain and loaded as a
-> plugin, was spawned in the running game (Starfield 1.16.244): correct shape, size and orientation, lit and
-> shadowed by the scene ([screenshot](docs/media/fo4-chair-in-starfield.png), write-ups: [S1](docs/spikes/S1-mesh-writer.md),
-> [S2/S4/S9](docs/spikes/S2-S4-S9-plugin-units-loading.md)), now with its **original Fallout 4 texture**
-> converted to Starfield's material format ([S3](docs/spikes/S3-materials.md)). It now has **box collision** (solid and fixed in place, [S6](docs/spikes/S6-collision.md)); plugin records beyond a static, terrain, actors and animation are still to do.
-> See [Work packages](docs/WORK-PACKAGES.md).
+> **Status (2026-10-10): Fallout 4 interiors are walkable in Starfield.** 15 interior cells (4,014 models) are
+> converted from the owner's own game files: geometry, textures, Fallout 4's own collision converted to Starfield
+> physics, lights, hinged doors that open, and stairs you can climb. An automated walk-test runner checks them in game:
+> Vault 111 passes 12 of 12 routes; Parsons State passes 11 doors from both sides; Hotel Rexford and Vault 114 pass 28 routes each.
+> Not done yet: pushable objects, sliding doors, load-door teleports, NPCs, weapons, the exterior world, and quests.
+> **Full write-up and ETA: [docs/STATUS.md](docs/STATUS.md)**. Live thread: issue #32. Plan: [Work packages](docs/WORK-PACKAGES.md).
 
-**Newest: Fallout 4's Vault 111 interior loads in Starfield as a walk-in cell** (layout, models, textures; lighting still rough):
-[write-up](docs/spikes/WP10-vault111-first-light.md).
+### Latest in-game evidence (walk-test runner screenshots)
 
-**Also converted: Vault 81, the Red Rocket cave, Vault 114, the Prydwen, Hotel Rexford, Boston Public Library and Parsons State** ([write-up](docs/spikes/WP10-more-interiors.md)).
+| | |
+|---|---|
+| ![Parsons State door, opened by the walk-test runner](docs/media/route-parsons-door-bothsides-a.jpg) | ![The same Parsons door, passed from the other side](docs/media/route-parsons-door-bothsides-b.jpg) |
+| Parsons State: a hinged door opened and walked through... | ...and the same door from the other side (11 doors pass both ways) |
+| ![Vault 111 caged switch door, open](docs/media/route-v111-switchdoor-open.jpg) | ![Vault 114 subway door, open](docs/media/route-v114-subdoor-open.jpg) |
+| Vault 111: the caged switch door, open (12/12 routes pass) | Vault 114: a subway door, open |
+| ![Vault 81 stall door route, passed](docs/media/route-v81-stalldoor-pass.jpg) | ![Hotel Rexford door with its OPEN prompt](docs/media/route-rexford-door-prompt.jpg) |
+| Vault 81: a stall door route, passed | Hotel Rexford: a door showing Starfield's own OPEN prompt |
+
+<details><summary>Earlier milestones (first light, first textured prop)</summary>
+
+Write-ups: [Vault 111 first light](docs/spikes/WP10-vault111-first-light.md),
+[more interiors](docs/spikes/WP10-more-interiors.md), [S1 mesh writer](docs/spikes/S1-mesh-writer.md),
+[S3 materials](docs/spikes/S3-materials.md), [S6 collision](docs/spikes/S6-collision.md).
 
 ![Hotel Rexford lobby, converted from Fallout 4, inside Starfield](docs/media/hotel-rexford.jpg)
 
@@ -32,6 +44,8 @@ included or distributed.
 ![A Vault 111 room, converted from Fallout 4, inside Starfield](docs/media/vault111-room-in-starfield.png)
 
 ![Fallout 4 patio chair, with its original texture, rendered inside Starfield](docs/media/fo4-chair-textured-in-starfield.png)
+
+</details>
 
 If you landed here searching for *"Fallout 4 in Starfield"*, *"convert Fallout 4 NIF to Starfield"*,
 *"Starfield .mesh format"*, *"what replaced LAND in Starfield"* or *"port Fallout 4 mods to Starfield"*:
@@ -105,9 +119,9 @@ python -I scripts/recon.py --fo4-esm <Fallout4.esm> --fo4-data <FO4 Data dir> --
 
 This project is led by **dasscooby**, with contributions from these AI coding collaborators:
 
-- **Claude** — core conversion pipeline, materials, native collision integration, plugin generation, and in-game testing.
-- **Codex (OpenAI)** — deployment and recovery, persistent identities and cache checks, source-state preservation, door animation/model tooling, and output verification.
-- **Grok (xAI)** — the interior acceptance harness, evidence requirements, and synthetic gate tests. First contribution: [pinned in-game evidence gate](https://github.com/dasscooby/fo4-to-starfield/commit/76b44dd015b5187d6fc8dee75dbf312b1f585a7b).
+- **Claude** ï¿½ core conversion pipeline, materials, native collision integration, plugin generation, and in-game testing.
+- **Codex (OpenAI)** ï¿½ deployment and recovery, persistent identities and cache checks, source-state preservation, door animation/model tooling, and output verification.
+- **Grok (xAI)** ï¿½ the interior acceptance harness, evidence requirements, and synthetic gate tests. First contribution: [pinned in-game evidence gate](https://github.com/dasscooby/fo4-to-starfield/commit/76b44dd015b5187d6fc8dee75dbf312b1f585a7b).
 
 Agent-assisted commits use the maintainer's configured Git author; `Codex:` and `Grok:` commit subjects identify their work. These acknowledgments describe contributions, not proof that the unfinished conversion is game-ready.
 
