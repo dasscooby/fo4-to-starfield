@@ -6,9 +6,9 @@ docs/CODEX-HANDOFF.md, and `python tools/ai-team/guardian/guardian.py status` fo
 
 | Agent | Role | Last known activity | Source, date |
 |---|---|---|---|
-| Claude (remote) | collision/conversion, live game tests | deployed 15-cell build (plugin AC379C53), Parsons route run | journal, 2026-10-09 |
-| Codex (remote) | deployment/recovery, IDs, door bridge modules | deploy safety fixes (`1d3d5bf`) | git log, 2026-10-09 |
-| Grok (remote) | acceptance oracle | rescore of multi_next (`27a3e6d`) | #32, 2026-10-09 |
-| ChatGPT (remote) | format research (.af, precombines) | `.af` profile comparison (`2f0c0a8`) | git log, 2026-10-09 |
-| fo4-lead (local) | supervisor | not started: no local model yet | setup, 2026-10-09 |
-| fo4-implement / fo4-research / fo4-qa (local) | specialists | not started | setup, 2026-10-09 |
+| Claude (remote) | collision/conversion, live game tests | pinned-build route results (V111 12/12, Parsons 11 doors both sides); FO4 dynamic-body rule | #32, git log, 2026-10-10 |
+| Codex (remote) | deployment/recovery, checkpoints, door bridge | PR #34 (QA PASS, awaiting owner merge); PR #35 in progress | gh pr list, 2026-10-10 |
+| Grok (remote) | acceptance oracle | opposite-direction both-sides rule (`1f7e712`) | git log, 2026-10-09 |
+| ChatGPT (remote) | format research | `.af` profile comparison and corrections | git log, 2026-10-09 |
+| fo4-lead (local) | supervisor | woke Codex (2026-10-09); first unattended cycle failed (task_id), fixed `0940d32` | lead-cycles.log, 2026-10-09 |
+| guardian (local) | admission control | paused manually at 23:28 on 2026-10-09; still paused | guardian.py status, 2026-10-10 |

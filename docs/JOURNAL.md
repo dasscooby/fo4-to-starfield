@@ -594,3 +594,10 @@ start, OPEN read from the prompt (`94d6dcb`), idle-camera wake (`76488be`).
   a door bug. Not fixed yet. Plan: read each FO4 body's motion (dynamic vs static), and give dynamic ones a movable
   Starfield body from a vanilla donor (as the keyframed door leaves do), with mass from FO4. Until then they're
   reported, not silently changed.
+
+## 2026-10-10 Session end (owner powering down)
+Status summary posted on #32 (comment 6094545513): pinned-build route results per cell, open problems by owner,
+open PRs (#34 QA PASS, #35 in progress), local team state, next steps. Removed a stray `needs-qa` label from #32.
+docs/ai/agent-status.md refreshed from live sources. Shut down: guardian proxy stopped, local model unloaded, no
+background jobs left. Next session: re-run Vault 81 and the library, finish the Prydwen (same pinned build), then
+movable bodies for loose items.
