@@ -25,6 +25,7 @@ TEX_ARCHIVE = "FO4Port - Textures.ba2"
 MANIFEST = "FO4Port.deploy.json"
 MAIN_DIRS = ("meshes", "geometries", "materials")
 DEPLOYED_FILES = frozenset((PLUGIN, ARCHIVE, TEX_ARCHIVE))
+_UNSET = object()
 
 
 def plugins_txt_path():
@@ -71,13 +72,20 @@ def write_manifest(p, state):
             os.remove(temporary)
 
 
-def atomic_write_bytes(p, content, prefix):
+def atomic_write_bytes(p, content, prefix, expected_current=_UNSET):
     fd, temporary = tempfile.mkstemp(prefix=prefix, dir=os.path.dirname(p))
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(content)
             f.flush()
             os.fsync(f.fileno())
+        if expected_current is not _UNSET:
+            current = None
+            if os.path.exists(p):
+                with open(p, "rb") as existing:
+                    current = existing.read()
+            if current != expected_current:
+                raise OSError("Plugins.txt changed during update; preserving concurrent edits")
         os.replace(temporary, p)
     finally:
         if os.path.exists(temporary):
@@ -102,7 +110,7 @@ def restore_plugins(state):
         if os.path.exists(p):
             os.remove(p)
     else:
-        atomic_write_bytes(p, original_bytes, ".fo4port-plugins-")
+        atomic_write_bytes(p, original_bytes, ".fo4port-plugins-", expected_current=current)
 
 
 def validate_plugin_cleanup(manifest):
@@ -136,7 +144,7 @@ def render_lines(lines, original=None):
 
 def write_lines(p, lines, original=None):
     os.makedirs(os.path.dirname(p), exist_ok=True)
-    atomic_write_bytes(p, render_lines(lines, original), ".fo4port-plugins-")
+    atomic_write_bytes(p, render_lines(lines, original), ".fo4port-plugins-", expected_current=original)
 
 
 def build_archive(a, out, folders, fmt):

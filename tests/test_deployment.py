@@ -465,6 +465,28 @@ class DeploymentRollbackTests(unittest.TestCase):
             self.assertEqual(plugins.read_bytes(), original)
             self.assertEqual({path.name for path in plugins.parent.iterdir()}, {"Plugins.txt"})
 
+    def test_plugins_write_preserves_edit_during_atomic_update(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plugins = Path(tmp) / "Plugins.txt"
+            original = b"*Other.esm\n*FO4Port.esm\n"
+            concurrent_edit = original + b"*UserAdded.esm\n"
+            plugins.write_bytes(original)
+            real_fsync = deploy.os.fsync
+            changed = False
+
+            def edit_during_write(fd):
+                nonlocal changed
+                real_fsync(fd)
+                if not changed:
+                    changed = True
+                    plugins.write_bytes(concurrent_edit)
+
+            with patch.object(deploy.os, "fsync", side_effect=edit_during_write):
+                with self.assertRaisesRegex(OSError, "changed during update"):
+                    deploy.write_lines(str(plugins), ["*Other.esm"], original)
+            self.assertEqual(plugins.read_bytes(), concurrent_edit)
+            self.assertEqual({path.name for path in plugins.parent.iterdir()}, {"Plugins.txt"})
+
     def check_archive_build(self, outcome):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
