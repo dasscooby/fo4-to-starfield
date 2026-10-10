@@ -57,6 +57,47 @@ class MassDistributionTests(unittest.TestCase):
             meshcollision.mass_distribution(flat + flat, [[0, 1, 2, 3], [7, 6, 5, 4]])
 
 
+class CompoundLayoutTests(unittest.TestCase):
+    """Vanilla dynamic compounds (40 items): SIMD node counts 2->3, 3->3, 5->4, 8->4, 9->5; root always inner."""
+
+    @staticmethod
+    def nodes(n):
+        boxes = [(k, ((k, 0.0, 0.0), (k + 0.5, 1.0, 1.0))) for k in range(n)]
+        raw = meshcollision.build_simd_tree(boxes, leaf_root=False)
+        out = []
+        for i in range(len(raw) // 128):
+            data = struct.unpack_from("<4I", raw, 128 * i + 96)
+            out.append((raw[128 * i + 112], data))
+        return out
+
+    def test_node_counts_match_vanilla_compounds(self):
+        for n, want in ((2, 3), (3, 3), (5, 4), (8, 4), (9, 5)):
+            with self.subTest(n=n):
+                self.assertEqual(len(self.nodes(n)), want)
+
+    def test_root_is_inner_and_every_instance_is_in_exactly_one_leaf(self):
+        for n in (1, 2, 4, 7, 16, 19):
+            with self.subTest(n=n):
+                nodes = self.nodes(n)
+                self.assertEqual(nodes[1][0], 0)                                   # node 1 (root) is not a leaf
+                keys = [d for leaf, data in nodes[1:] if leaf for d in data if d != 0xFFFFFFFF]
+                self.assertEqual(sorted(keys), list(range(n)))
+
+    def test_mesh_trees_keep_a_leaf_root(self):
+        boxes = [(k, ((k, 0.0, 0.0), (k + 0.5, 1.0, 1.0))) for k in range(2)]
+        self.assertEqual(len(meshcollision.build_simd_tree(boxes)), 2 * 128)       # sentinel + leaf root, as before
+
+    def test_compound_mass_is_its_aabb_as_a_solid_box(self):
+        com, vol, q, inertia = meshcollision.box_mass_distribution((-0.1878, -0.0464, -0.00107), (0.18537, 0.0736, 0.26578))
+        # vanilla CB_BlackMarketAntiquities: centre (-0.00122, 0.0136, 0.13235), volume 0.01195, inertia (0.0107, 0.02631, 0.01921)
+        for got, want in zip(com, (-0.00122, 0.0136, 0.13235)):
+            self.assertAlmostEqual(got, want, places=4)
+        self.assertAlmostEqual(vol, 0.01195, places=4)
+        for got, want in zip(inertia, (0.0107, 0.02631, 0.01921)):
+            self.assertAlmostEqual(got, want, places=4)
+        self.assertEqual(q, (0.0, 0.0, 0.0, 1.0))
+
+
 class FakePack:
     """Just enough of hkpackfile.Packfile for fo4collision.body_mass."""
 

@@ -26,6 +26,22 @@ supported hypothesis / unresolved. Older research lives in docs/JOURNAL.md and d
   in-game test. Open: vanilla dynamic shapes also carry `hknpShapeMassProperties`; ours don't (not needed by Havok when
   the body has a mass distribution: **unresolved** until tested).
 
+## 2026-10-10 Claude: Starfield dynamic compound bodies
+- Question: how does Starfield store one movable body made of several convex pieces (FO4 boxes, cones, tools)?
+- Method: field dumps (`hktagfile`) of vanilla single-body dynamic MiscItem / MoveableStatic NIFs; checks against the
+  children decoded through the instance pointers (local scripts).
+- Evidence: single-body dynamic shapes in vanilla: convex 540, **compound 273**, box 109, LOD 19, cylinder 17, sphere 2.
+  A dynamic compound is one `hknpCompoundShape` (type 11, dispatch 3): instances (identity transforms in every sample;
+  vertices are already in compound space), `numShapeKeyBits` = bit length of the instance count (2->2, 3->2, 4->3,
+  8->4, 19->5; 40 of 40), `estimatedNumShapeKeys` = `numAllocated` = count, `aabb` = union of child boxes (child
+  vertices +/- child convex radius; 25 of 25 exact), a SIMD tree whose root is always an inner node and whose leaf boxes
+  are the child boxes (exact), `boundingRadius` between 0.78 and 1.0 of the aabb half-diagonal.
+- Mass distribution: a compound's is a **solid box equal to its aabb** (centre, volume, inertia per kg x 1.5, identity
+  axes; 40 of 40 exact). A single convex body's is the grown hull (40 vanilla convex items: volume 0.98-1.0 for most,
+  worst 0.82; centre within 7 mm), not its aabb.
+- Status: compound layout and both mass rules **verified** on vanilla files; converted FO4 compounds pass the same checks
+  offline. In-game behaviour: **supported hypothesis** until tested.
+
 ## 2026-10-09 Claude: which FO4 collision bodies are movable?
 - Question: how does an FO4 `bhkPhysicsSystem` mark a body as movable (pushable), so the converter can stop turning
   physics objects into fixed obstacles (Vault 114 door `05C7DC` is blocked by a ragdoll skeleton)?

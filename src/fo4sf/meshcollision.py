@@ -257,10 +257,12 @@ def template_from_nif(sf_nif: bytes) -> bytes:
 FLT_MAX = 3.40282e38
 
 
-def build_simd_tree(leaves) -> bytes:
+def build_simd_tree(leaves, leaf_root: bool = True) -> bytes:
     """hkcdSimdTree nodes (128 bytes each: lx hx ly hy lz hz as 4-lane float vectors, data u32[4], isLeaf, isActive) over
     [(key, (lo, hi))]: node 0 is an empty sentinel, node 1 the root; inner lanes hold child node indices and child boxes,
-    leaf lanes hold triangle shape keys (unused lanes: empty box, data 0xffffffff in leaves / 0 in inner nodes)."""
+    leaf lanes hold triangle shape keys (unused lanes: empty box, data 0xffffffff in leaves / 0 in inner nodes).
+    leaf_root=False (compound shapes): the root is always an inner node and up to 16 keys go into leaves of 4 in spatial
+    order, as in every vanilla dynamic compound (2 keys: 3 nodes; 5: 4 nodes; 9: 5 nodes)."""
     nodes = [None]                                     # index 0: sentinel
 
     def bounds(items):
@@ -283,14 +285,17 @@ def build_simd_tree(leaves) -> bytes:
                         + bytes([1 if leaf else 0, 0]) + bytes(14))
 
     def build(index, items):
-        if len(items) <= 4:
+        if len(items) <= 4 and (leaf_root or index != 1):
             emit(index, [(it[1], it[0]) for it in items], True)
             return
         lo, hi = bounds(items)
         axis = max(range(3), key=lambda a: hi[a] - lo[a])
         items = sorted(items, key=lambda it: it[1][0][axis] + it[1][1][axis])
         n = len(items)
-        groups = [g for g in (items[i * n // 4:(i + 1) * n // 4] for i in range(4)) if g]
+        if not leaf_root and index == 1 and n <= 16:            # compound root: leaves of 4, in order
+            groups = [items[i:i + 4] for i in range(0, n, 4)]
+        else:
+            groups = [g for g in (items[i * n // 4:(i + 1) * n // 4] for i in range(4)) if g]
         first = len(nodes)
         nodes.extend([None] * len(groups))             # children get consecutive indices, then recurse (as vanilla)
         emit(index, [(bounds(g), first + i) for i, g in enumerate(groups)], False)
@@ -534,23 +539,41 @@ def _faces_raw(faces, fo4_raw: bytes) -> bytes:
 # ---- dynamic (pushable) bodies -------------------------------------------------------------------------------------
 # Decoded from vanilla Starfield MiscItem bodies (docs/ai/research-log.md 2026-10-10): motionType 2 (static 0,
 # keyframed 1), flags 0x8a, mass in kg, motionPropertiesId 0 = the system's one motionProperties entry (Bethesda's defaults),
-# and an hknpRefMassDistribution: centre of mass and volume of the shape grown by its convex radius, principal axes,
-# and principal inertia per kg x 1.5 (30 of 30 vanilla box items). BSXFlags 0x42 on the NIF.
+# and an hknpRefMassDistribution with principal inertia per kg x 1.5 (30 of 30 vanilla box items). Its centre / volume:
+# - one convex shape: the shape grown by its convex radius (box items exact; 40 convex items within a few percent);
+# - a compound: a SOLID BOX equal to the compound's aabb, identity axes (40 of 40 vanilla compounds, exact).
+# A dynamic compound (273 vanilla items: mugs, tools) is one hknpCompoundShape: instances (identity transforms, vertices
+# already in compound space), aabb = union of child boxes (child vertices +/- child radius, 25 of 25 exact), a SIMD tree
+# over the instances whose leaf boxes are those child boxes, numShapeKeyBits = instance count's bit length,
+# estimatedNumShapeKeys = numAllocated = instance count. BSXFlags 0x42 on the NIF.
 # The universal template names hknpMotionProperties / hknpRefMassDistribution but has no layout for them (size 0: it has
-# no dynamic body), so dynamic bodies are built on a vanilla dynamic convex item instead: its TYPE section, system,
-# material, body cinfo and motion properties (read from the user's install like the other templates, never shipped).
-DYNAMIC_TEMPLATE_NIF = "meshes/items/fooddrink_set/fooddrink_set_container01_empty_lid.nif"
+# no dynamic body), so dynamic bodies are built on a vanilla dynamic compound item instead: its TYPE section, system,
+# material, body cinfo, motion properties and compound shape (read from the user's install like the other templates,
+# never shipped).
+DYNAMIC_TEMPLATE_NIF = "meshes/setdressing/contraband/cb_blackmarketantiquities.nif"
 DYNAMIC_MOTION_TYPE, DYNAMIC_FLAGS, INERTIA_FACTOR = 2, 0x8A, 1.5
+DYNAMIC_TYPES = ("hknpMotionProperties", "hknpRefMassDistribution", "hknpConvexShape", "hknpCompoundShape",
+                 "hkFreeListArrayElement<hknpShapeInstance>", "hkcdSimdTree::Node")
 
 
 def check_dynamic_template(blob: bytes) -> bytes:
-    """blob if it is a vanilla dynamic convex body (motion properties, mass distribution and convex shape types)."""
+    """blob if it is a vanilla dynamic compound body (layouts for motion properties, mass distribution, convex and
+    compound shapes, shape instances and SIMD tree nodes)."""
     t = _Tmpl(blob)
-    for name in ("hknpMotionProperties", "hknpRefMassDistribution", "hknpConvexShape"):
+    for name in DYNAMIC_TYPES:
         if t.tf.size_of(t.type(name)) == 0:
             raise ValueError(f"dynamic template has no layout for {name}")
-    t.item_bytes("hknpMotionProperties", count=1)
+    for name in ("hknpMotionProperties", "hknpCompoundShape", "hkFreeListArrayElement<hknpShapeInstance>"):
+        t.item_bytes(name, count=1)
     return blob
+
+
+def box_mass_distribution(lo, hi):
+    """Solid box: centre, volume, identity axes, principal inertia per kg x INERTIA_FACTOR (vanilla compounds)."""
+    h = [(hi[a] - lo[a]) / 2 for a in range(3)]
+    inertia = ((h[1] ** 2 + h[2] ** 2) / 3, (h[0] ** 2 + h[2] ** 2) / 3, (h[0] ** 2 + h[1] ** 2) / 3)
+    return (tuple((hi[a] + lo[a]) / 2 for a in range(3)), 8 * h[0] * h[1] * h[2], (0.0, 0.0, 0.0, 1.0),
+            tuple(x * INERTIA_FACTOR for x in inertia))
 
 
 def _quat_from_matrix(m):
@@ -884,9 +907,10 @@ def convert_bodies(fo4_blob: bytes, template_blob: bytes, select: Optional[List[
     Items are blobs, or (blob, translation, rotation 3x3 row-major) for a rotated compound mesh instance: that body is
     in its own space and goes on a child node with this transform (relative to the FO4 collision node).
     Dynamic (pushable) FO4 bodies: with `motion` given, every one is reported. With `dynamic_template` too (a vanilla
-    dynamic convex body blob, DYNAMIC_TEMPLATE_NIF), a system of ONE dynamic body that converts to one convex part is
-    written dynamic with FO4's mass (motion["dynamic"] = kg); any other dynamic body stays static and
-    motion["kept_static"] lists why (ragdolls and breakables need constraints; never silently flattened)."""
+    dynamic compound body blob, DYNAMIC_TEMPLATE_NIF), a system of ONE dynamic body made of convex parts is written as
+    one dynamic body (one part: a convex shape; several: a compound of them) with FO4's mass (motion["dynamic"] = kg);
+    any other dynamic body stays static and motion["kept_static"] lists why (ragdolls and breakables need constraints;
+    mesh and sphere parts have no dynamic template yet; never silently flattened)."""
     from . import fo4collision as fc
     p = hkpackfile.Packfile(fo4_blob)
     classes = dict(p.objects())
@@ -926,8 +950,9 @@ def convert_bodies(fo4_blob: bytes, template_blob: bytes, select: Optional[List[
             why = None
             if n != 1:
                 why = f"one of {n} bodies (ragdoll / breakable: constraints not converted)"
-            elif len(parts) != 1 or parts[0][0] not in ("convex", "convex-verts"):
-                why = f"shape is {len(parts)} part(s) of kind {parts[0][0] if parts else '-'} (single convex only)"
+            elif not parts or any(part[0] not in ("convex", "convex-verts") for part in parts):
+                kinds = sorted({part[0] for part in parts}) or ["none"]
+                why = f"shape has {len(parts)} part(s) of kind {'/'.join(kinds)} (convex parts only)"
             elif dynamic_template is None:
                 why = "dynamic body not allowed here (collision on a child node, or no dynamic template)"
             if why:
@@ -935,8 +960,10 @@ def convert_bodies(fo4_blob: bytes, template_blob: bytes, select: Optional[List[
             else:
                 dynamic = True
                 motion["dynamic"] = mass
+                if len(parts) > 1:
+                    motion["compound_parts"] = len(parts)
         if dynamic:
-            out.append(_dynamic_body(dynamic_template, p, parts[0], filt, mass))
+            out.append(_dynamic_body(dynamic_template, p, parts, filt, mass))
             continue
         for kind, obj, R, tr in parts:
             w = _Writer()
@@ -983,10 +1010,70 @@ def convert_bodies(fo4_blob: bytes, template_blob: bytes, select: Optional[List[
     return out
 
 
-def _dynamic_body(template_blob: bytes, p: hkpackfile.Packfile, part, filt: int, mass: float) -> bytes:
+def _path(t: _Tmpl, type_idx: int, path: str):
+    """(offset inside the object, field) of a dotted field path such as "boundingVolumeData.simdTree.nodes"."""
+    off, f = 0, None
+    for name in path.split("."):
+        f = t.field(type_idx, name)
+        off += f.offset
+        type_idx = f.type
+    return off, f
+
+
+def _emit_dynamic_compound(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, parts):
+    """hknpCompoundShape over FO4 convex parts, laid out as vanilla dynamic compounds (see the notes above
+    DYNAMIC_TEMPLATE_NIF): identity instances, child boxes, SIMD tree, aabb. Returns (shape item, aabb lo, aabb hi)."""
+    T_CS, T_INST = t.type("hknpCompoundShape"), t.type("hkFreeListArrayElement<hknpShapeInstance>")
+    T_NODE = t.type("hkcdSimdTree::Node")
+    if t.tf.size_of(T_NODE) != 128:
+        raise hkpackfile.PackfileError("unexpected SIMD tree node layout in the dynamic template")
+    children, boxes = [], []
+    for kind, obj, R, tr in parts:
+        geom = {}
+        children.append(_emit_convex(w, t, p, obj, R, tr, vertex_only=(kind == "convex-verts"), geom=geom))
+        r = geom["radius"]
+        boxes.append((tuple(min(v[a] for v in geom["verts"]) - r for a in range(3)),
+                      tuple(max(v[a] for v in geom["verts"]) + r for a in range(3))))
+    n = len(children)
+    lo = tuple(min(b[0][a] for b in boxes) for a in range(3))
+    hi = tuple(max(b[1][a] for b in boxes) for a in range(3))
+    cs = bytearray(t.item_bytes("hknpCompoundShape", count=1))
+    put = lambda path, fmt, *v: struct.pack_into(fmt, cs, _path(t, T_CS, path)[0], *v)
+    put("properties", "<Q", 0)
+    put("numShapeKeyBits", "<B", n.bit_length())
+    put("estimatedNumShapeKeys", "<i", n)
+    put("instances.firstFree", "<i", -1)
+    put("instances.numAllocated", "<I", n)
+    put("instanceVelocities", "<Q", 0)
+    put("aabb.min", "<4f", *lo, 0.0)
+    put("aabb.max", "<4f", *hi, 0.0)
+    put("boundingRadius", "<f", math.dist(lo, hi) / 2)     # >= vanilla's value on 25 of 25 compounds (0.78-1.0 of it)
+    i_cs = w.add(T_CS, 0x10, cs, 1)
+    elem = t.item_bytes("hkFreeListArrayElement<hknpShapeInstance>", count=1)
+    inst = bytearray()
+    for _ in range(n):
+        e = bytearray(elem)
+        struct.pack_into("<4f", e, _path(t, T_INST, "rotation")[0], 0.0, 0.0, 0.0, 1.0)
+        struct.pack_into("<3f", e, _path(t, T_INST, "translation")[0], 0.0, 0.0, 0.0)
+        struct.pack_into("<3f", e, _path(t, T_INST, "scale")[0], 1.0, 1.0, 1.0)
+        struct.pack_into("<Q", e, _path(t, T_INST, "shape")[0], 0)
+        inst += e
+    i_inst = w.add(T_INST, 0x20, bytes(inst), n)
+    shape_off, shape_f = _path(t, T_INST, "shape")
+    for k, child in enumerate(children):
+        w.ptr(shape_f.type, i_inst, len(elem) * k + shape_off, child)
+    nodes = build_simd_tree([(k, b) for k, b in enumerate(boxes)], leaf_root=False)
+    i_nodes = w.add(T_NODE, 0x20, nodes, len(nodes) // 128)
+    for path, item in (("instances.elements", i_inst), ("boundingVolumeData.simdTree.nodes", i_nodes)):
+        off, f = _path(t, T_CS, path)
+        w.ptr(f.type, i_cs, off, item)
+    return i_cs, lo, hi
+
+
+def _dynamic_body(template_blob: bytes, p: hkpackfile.Packfile, parts, filt: int, mass: float) -> bytes:
     """One dynamic body on the vanilla dynamic template: its system, material, body cinfo (motion type, flags, user data
-    as vanilla) and motion properties; FO4's convex shape, collision layer and mass; a computed mass distribution."""
-    kind, obj, R, tr = part
+    as vanilla) and motion properties; FO4's convex part(s) (several: one compound shape), collision layer and mass; a
+    computed mass distribution (one convex: the grown hull; a compound: its aabb as a solid box, as vanilla)."""
     t = _Tmpl(template_blob)
     T_PSD, T_MAT = t.type("hknpPhysicsSystemData"), t.type("hknpMaterial")
     T_BODY, T_MP = t.type("hknpPhysicsSystemData::bodyCinfoWithAttachment"), t.type("hknpMotionProperties")
@@ -1007,11 +1094,17 @@ def _dynamic_body(template_blob: bytes, p: hkpackfile.Packfile, part, filt: int,
     for name, item in (("materials", i_mat), ("motionProperties", i_mp), ("bodyCinfos", i_body)):
         f = t.field(T_PSD, name)
         w.ptr(f.type, i_psd, f.offset, item)
-    geom = {}
-    i_shape = _emit_convex(w, t, p, obj, R, tr, vertex_only=(kind == "convex-verts"), geom=geom)
+    if len(parts) == 1:
+        kind, obj, R, tr = parts[0]
+        geom = {}
+        i_shape = _emit_convex(w, t, p, obj, R, tr, vertex_only=(kind == "convex-verts"), geom=geom)
+        md = mass_distribution(geom["verts"], geom["faces"], geom["radius"])
+    else:
+        i_shape, lo, hi = _emit_dynamic_compound(w, t, p, parts)
+        md = box_mass_distribution(lo, hi)
     f = t.field(T_BODY, "shape")
     w.ptr(f.type, i_body, f.offset, i_shape)
-    _add_mass_distribution(w, t, T_BODY, i_body, mass_distribution(geom["verts"], geom["faces"], geom["radius"]))
+    _add_mass_distribution(w, t, T_BODY, i_body, md)
     return w.build(sdk, type_sec)
 
 

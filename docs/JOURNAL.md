@@ -630,3 +630,11 @@ fixed obstacles. Evidence and field meanings: docs/ai/research-log.md "how Starf
   (`AC379C53` / `B8080348`) was redeployed and its hashes verified. Next attempt: set `FO4SF_PYTHON`, dismiss the
   popup inside `cycle.ps1`, and only when the owner is away. Follow-up found by the build: dynamic **compound** bodies
   (several convex parts: boxes, cones, hammers) are common and need one dynamic compound body, not several.
+- **Movable compounds (offline, owner at the PC).** FO4 loose items made of several convex pieces (cardboard boxes,
+  traffic cones, hammers, wrenches) now convert to one dynamic `hknpCompoundShape` body, laid out exactly as Starfield's
+  273 vanilla movable compounds (research log "Starfield dynamic compound bodies"); their mass distribution is the
+  compound's bounding box as a solid box, as vanilla. Dynamic bodies now use a vanilla compound item as the template
+  (`cb_blackmarketantiquities.nif`). Offline: the cardboard box (9 pieces, 5 kg), traffic cone (8), hammer (2) and
+  wrench (4) read back with bounds, tree leaves and mass matching to 1e-8. Vault 111 test build: **18** movable models
+  (was 13); only multi-body objects stay fixed (3 skeletons, gear-room gate, oxygen tank: they need joints). Tests 266
+  OK. Still not seen in game (the next test waits until the owner is away or says go).
