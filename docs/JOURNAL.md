@@ -601,3 +601,23 @@ open PRs (#34 QA PASS, #35 in progress), local team state, next steps. Removed a
 docs/ai/agent-status.md refreshed from live sources. Shut down: guardian proxy stopped, local model unloaded, no
 background jobs left. Next session: re-run Vault 81 and the library, finish the Prydwen (same pinned build), then
 movable bodies for loose items.
+
+## 2026-10-10 Movable loose items (offline; owner at the PC, so no game input)
+FO4 loose items (one dynamic body: pencils, cans, clipboards) now convert as movable Starfield objects instead of
+fixed obstacles. Evidence and field meanings: docs/ai/research-log.md "how Starfield makes a body movable".
+- **Starfield side, decoded by name** with `hktagfile`: motionType 2, flags 0x8a, mass, a motion-properties entry and
+  a mass distribution (centre, volume of the shape grown by its convex radius, inertia per kg x 1.5: 30 of 30 vanilla
+  boxes). Movable set dressing is a **MoveableStatic** record (a Static never moves; the clutter layer alone does
+  nothing) and the NIF has BSXFlags 0x42.
+- **Converter:** `meshcollision.convert_bodies` writes a lone dynamic FO4 convex body on a vanilla dynamic item's
+  template (`fooddrink_set_container01_empty_lid.nif`, read from the user's install), with FO4's mass and layer and a
+  computed mass distribution; `convert_static` puts it on the root node; the manifest marks the item `movable`; the
+  plugin writer makes it a MoveableStatic (`DATA 4` as vanilla). Default on with `--starfield-data`;
+  `--static-items` turns it off.
+- **Not converted (reported, not hidden):** ragdolls and breakables (several bodies: need constraints, e.g. the Vault
+  114 skeleton), dynamic compound / mesh / sphere bodies, and dynamic bodies on child nodes stay static, listed in
+  `collision_report.dynamic_kept_static`.
+- **Correction:** an old comment in `sfcollision.py` called offset 240 the motion type; it is the collision layer
+  (232 flags, 264 motionType).
+- Offline check: TinCan01 5 kg, Clipboard01 4 kg, Pencil01 0.5 kg read back as dynamic bodies; the skeleton stays
+  static with 17 reasons. Tests 262 OK, guard OK. **Not yet seen in game** (next: build, deploy, push a can).

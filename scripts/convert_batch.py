@@ -37,7 +37,7 @@ def checkpoint_signature(a):
             "archives": [checkpoints.archive_identity(p) for p in archives],
             "content": {str(p.resolve()): checkpoints.digest(p) for p in
                         [*code, Path(a.texconv), Path(a.content_resources), Path(a.collision_template)]},
-            "rig_doors": bool(a.starfield_data)}
+            "rig_doors": bool(a.starfield_data), "movable_items": bool(a.starfield_data) and not a.static_items}
 
 
 def source_identity(source):
@@ -110,6 +110,8 @@ def main():
     ap.add_argument("--collision-template", required=True)
     ap.add_argument("--starfield-data", default="",
                     help="Starfield Data folder: enables opening doors (needs the vanilla door body as a keyframed donor)")
+    ap.add_argument("--static-items", action="store_true",
+                    help="keep FO4 loose items fixed (default with --starfield-data: movable, as in FO4)")
     ap.add_argument("--resume", action="store_true", help="reuse content-verified per-model checkpoints")
     ap.add_argument("--pattern", default=r"^meshes[\\/]setdressing[\\/]")
     ap.add_argument("--limit", type=int, default=20)
@@ -133,6 +135,10 @@ def main():
     if a.starfield_data:                          # FO4's own collision meshes, transplanted into a vanilla container
         mesh_template = meshcollision.template_from_nif(ba2.Ba2(os.path.join(a.starfield_data, "Starfield - Meshes01.ba2")).read(
             meshcollision.UNIVERSAL_TEMPLATE_NIF))
+    dynamic_template = None
+    if a.starfield_data and not a.static_items:   # FO4 loose items movable: built on a vanilla dynamic item's body
+        dynamic_template = meshcollision.check_dynamic_template(meshcollision.template_from_nif(
+            ba2.Ba2(os.path.join(a.starfield_data, "Starfield - Meshes01.ba2")).read(meshcollision.DYNAMIC_TEMPLATE_NIF)))
     cache =checkpoints.Checkpoints(a.staging, checkpoint_signature(a)) if a.resume else None
     conv = None
     if a.cell_json:
@@ -161,7 +167,7 @@ def main():
             if conv is None:
                 conv = pipeline.Converter(src, a.staging, a.texconv, a.content_resources, template,
                                           rig_doors=donor is not None, door_physics_donor=donor,
-                                          sf_mesh_template=mesh_template)
+                                          sf_mesh_template=mesh_template, dynamic_template=dynamic_template)
             r = conv.convert_nif(name)
             if cache:
                 try:
@@ -179,6 +185,7 @@ def main():
                       "shapes": r["shapes"], "fallback_materials": r["fallback_materials"], "form_index": len(items),
                       "collision_report": r.get("collision_report") or {}, **({"door": r["door"]} if "door" in r else {}),
                       **({"load_door": r["load_door"]} if "load_door" in r else {}),
+                      **({"movable": r["movable"]} if "movable" in r else {}),
                       **({"door_not_opening": r["door_not_opening"]} if "door_not_opening" in r else {})})
         print(f"  ok  {name} -> {eid} (shapes {r['shapes']}, fallback materials {r['fallback_materials']})")
     for f in failures[:15]:

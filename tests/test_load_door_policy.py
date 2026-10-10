@@ -19,6 +19,7 @@ class LoadDoorPolicyTests(unittest.TestCase):
         converter.sf_mesh_template = b"synthetic native template"
         converter.rig_doors = True
         converter.door_physics_donor = b"synthetic donor"
+        converter.dynamic_template = None
         converter.neutral = "placeholder.mat"
         converter._shape_material = Mock(return_value="synthetic.mat")
         converter.stats = {"assets": 0, "failed": 0}

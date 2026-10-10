@@ -16,6 +16,7 @@ from . import sfcollision, sfmesh, sfnif
 
 UNIT_SCALE = 1.0 / 70.0           # Fallout 4 units -> metres (Starfield .mesh coordinates are metres)
 PLACEHOLDER_MATERIAL = "Materials\\Common\\Metal\\MetalIronCast01.mat"   # vanilla material, T0 look
+DYNAMIC_BSX = 0x42                 # havok + dynamic: 145 of 150 vanilla MiscItem NIFs (statics: mostly 0x2)
 
 
 def _sub(a, b):
@@ -102,15 +103,20 @@ def collision_template_from_nif(sf_nif: bytes) -> bytes:
     raise nifmod.NifError("template NIF has no bhkPhysicsSystem")
 
 
-def fo4_native_collision(src, universal_template: bytes, report: dict = None):
+def fo4_native_collision(src, universal_template: bytes, report: dict = None, dynamic_template: bytes = None,
+                         motion: dict = None):
     """[Starfield single-body physics blobs], one per FO4 collision body (meshcollision.convert_bodies), or None to fall
     back. Unsupported shape classes and malformed data return None and record why. One exception, reported as
     report["skipped_parts"]: precombine debris parts in the undecoded primitive encoding (see convert_bodies) are left
-    out and the rest of the model keeps its native bodies."""
+    out and the rest of the model keeps its native bodies.
+    dynamic_template (a vanilla dynamic convex body): a model whose only collision object sits on the root node and holds
+    one dynamic FO4 body becomes movable (motion["dynamic"] = kg, the single blob is that body); dynamic bodies that
+    can't be converted are listed in motion["kept_static"]."""
     from . import meshcollision
     objs = [i for i in range(len(src.blocks)) if src.type_of(i) == "bhkNPCollisionObject"]
     if not objs:
         return None
+    motion = {} if motion is None else motion
     blobs, skipped = [], []
     world = nifmod.world_transforms(src)
     for i in objs:
@@ -135,9 +141,11 @@ def fo4_native_collision(src, universal_template: bytes, report: dict = None):
             return None
         n, = struct.unpack_from("<I", src.blocks[data], 0)
         try:
+            # a dynamic body moves the node it is attached to: only a lone root-node body can carry the whole model
+            dyn = dynamic_template if (len(objs) == 1 and target == 0) else None
             new = meshcollision.convert_bodies(src.blocks[data][4:4 + n], universal_template,
                                                select=[body] if shared > 1 else None, node_rot=tuple(rot),
-                                               skipped=skipped)
+                                               skipped=skipped, dynamic_template=dyn, motion=motion)
             node = place or ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
             for b in new:
                 if isinstance(b, tuple):                 # rotated compound instance: node transform * instance
@@ -157,6 +165,11 @@ def fo4_native_collision(src, universal_template: bytes, report: dict = None):
     if report is not None and blobs:
         report["source"] = "fo4-native"
         report["bodies"] = len(blobs)
+    if report is not None and motion.get("dynamic"):
+        report["motion"] = "dynamic"
+        report["mass_kg"] = round(motion["dynamic"], 4)
+    if report is not None and motion.get("kept_static"):
+        report["dynamic_kept_static"] = motion["kept_static"]
     return blobs or None
 
 
@@ -187,12 +200,14 @@ def convert_static(fo4_nif: bytes, out_name: str, material_path: str = PLACEHOLD
                    unit_scale: float = UNIT_SCALE, collision_template: bytes = None,
                    material_paths: list = None, collision_mode: str = "box",
                    include_skinned: bool = False, report: dict = None, sf_mesh_template: bytes = None,
-                   allow_guess: bool = True) -> Dict[str, bytes]:
+                   allow_guess: bool = True, dynamic_template: bytes = None) -> Dict[str, bytes]:
     """collision_mode: "box" = one AABB on the root; "surfaces" = thin boxes behind flat surfaces, one body each.
     sf_mesh_template: a vanilla Starfield mesh-collision blob; when given, FO4's own collision mesh is transplanted
     (meshcollision.transplant) and the box methods are only the fallback.
     allow_guess=False: FO4's own collision or nothing, never a guessed box (vegetation, mounds, door frames: a box
-    around them would be an invisible wall). A failed native conversion is reported as "fo4-native-failed"."""
+    around them would be an invisible wall). A failed native conversion is reported as "fo4-native-failed".
+    dynamic_template: FO4 loose items (one dynamic body on the root) become movable: their body goes on the root node
+    and BSXFlags is 0x42 as on vanilla MiscItems; the caller places them as MoveableStatic (report["motion"])."""
     src = nifmod.parse(fo4_nif)
     shapes = [s for s in nifmod.fo4_trishapes(src) if (include_skinned or not s.skinned) and s.positions and s.triangles]
     if not shapes:
@@ -213,16 +228,19 @@ def convert_static(fo4_nif: bytes, out_name: str, material_path: str = PLACEHOLD
         static_shapes.append(sfnif.StaticShape(name, f"{d}\\{f}".encode(), len(m.triangles) * 3, len(m.positions),
                                                material_paths[i] if material_paths else material_path, sphere, box))
     node_name = out_name.rsplit("/", 1)[-1].encode()
-    blob, child_blobs = None, []
-    native = None
+    blob, child_blobs, bsx = None, [], None
+    native, motion = None, {}
     fo4_has_collision = any(src.type_of(i) == "bhkNPCollisionObject" for i in range(len(src.blocks)))
     if sf_mesh_template is not None and collision_template is not None:
-        native = fo4_native_collision(src, sf_mesh_template, report)   # FO4's own bodies as native Starfield bodies
+        native = fo4_native_collision(src, sf_mesh_template, report,      # FO4's own bodies as native Starfield bodies
+                                      dynamic_template=dynamic_template, motion=motion)
     if sf_mesh_template is not None and collision_template is not None and not fo4_has_collision:
         # FO4 gives this model no collision (rubble, debris, paper, signs, posters, plants): the player walks through
         # it there, so it gets none here either. A guessed box would be an invisible wall.
         if report is not None:
             report["source"] = "fo4-none"
+    elif native and motion.get("dynamic"):
+        blob, bsx = native[0], DYNAMIC_BSX           # movable: the body carries the whole model, as vanilla MiscItems
     elif native:
         child_blobs = native                         # one body per child node, as vanilla multi-body files do
     elif not allow_guess:
@@ -236,7 +254,8 @@ def convert_static(fo4_nif: bytes, out_name: str, material_path: str = PLACEHOLD
         hi = [max(p[a] for p in all_pts) for a in range(3)]
         blob = sfcollision.box_blob(collision_template, tuple((lo[a] + hi[a]) / 2 for a in range(3)),
                                     tuple((hi[a] - lo[a]) / 2 for a in range(3)))
-    out = sfnif.build_static_nif(node_name, static_shapes, collision_blob=blob, child_collision_blobs=child_blobs)
+    out = sfnif.build_static_nif(node_name, static_shapes, collision_blob=blob, child_collision_blobs=child_blobs,
+                                 bsx_flags=bsx)
     files[f"meshes/{out_name}.nif"] = nifmod.serialize(out)
     return files
 

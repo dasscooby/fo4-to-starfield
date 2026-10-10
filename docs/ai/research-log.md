@@ -3,6 +3,29 @@
 New findings go here (newest first). Each entry: question, method, evidence, **status**: verified /
 supported hypothesis / unresolved. Older research lives in docs/JOURNAL.md and docs/spikes/; link, don't copy.
 
+## 2026-10-10 Claude: how Starfield makes a body movable
+- Question: what must a converted body and record carry so Starfield simulates it (FO4 loose items, known unknown #6)?
+- Method: field-level dumps with `hktagfile` (field names from the files' own type tables) of vanilla Static, MiscItem,
+  MoveableStatic and animated-door bodies; `SfInspect models` / `mstt` for which records use which meshes; scans of
+  ~10,400 vanilla item NIFs and 400 models per record type (local scripts, not in the repo).
+- Evidence (body cinfo): `motionType` static 0 / keyframed 1 / **dynamic 2**; `flags` 0 / 0x4 / **0x8a**;
+  `collisionFilterInfo` = collision layer (1 STATIC, 2 ANIMSTATIC, 4 CLUTTER, 26); dynamic bodies have `mass` (kg),
+  `motionPropertiesId` 0 into the system's `motionProperties` array (Bethesda defaults: gravity 1, max speed 100 / 200,
+  damping 0.1 / 0.05) and an `hknpRefMassDistribution`. Static box blob offsets: 232 flags, 240 layer, 264 motionType
+  (an older comment called 240 the motion type: **corrected**).
+- Evidence (mass distribution, 30 of 30 vanilla box items): centre of mass = box centre; volume = the box grown by its
+  convex radius (ratio 1.000); inertia = per-kg inertia of that grown box x **1.5** (ratios 1.499-1.500); axes identity.
+- Evidence (records / NIF): layer CLUTTER alone does not move anything (the ingot `Ingot_PreciousMetal_01` is a Static);
+  movable set dressing is **MoveableStatic** (`DATA = 4` on every vanilla one checked) or MiscItem. 145 of 150 MiscItem
+  NIFs have **BSXFlags 0x42** (statics mostly 0x2); the collision object is on the root node. MiscItem physics layouts
+  add exactly one class over the static ones: `hknpMassDistribution`.
+- FO4 side: motion cinfo stride **112** bytes (skeleton: ids 0..16, inverse masses 0.1 / 0.2); pencil 0.5 kg, tin can
+  5 kg, clipboard 4 kg.
+- Status: field meanings **verified** (named by the type tables, consistent across samples); inertia factor 1.5
+  **verified** (30 items); "a dynamic body on a MoveableStatic is pushable in game" **supported hypothesis** until the
+  in-game test. Open: vanilla dynamic shapes also carry `hknpShapeMassProperties`; ours don't (not needed by Havok when
+  the body has a mass distribution: **unresolved** until tested).
+
 ## 2026-10-09 Claude: which FO4 collision bodies are movable?
 - Question: how does an FO4 `bhkPhysicsSystem` mark a body as movable (pushable), so the converter can stop turning
   physics objects into fixed obstacles (Vault 114 door `05C7DC` is blocked by a ragdoll skeleton)?

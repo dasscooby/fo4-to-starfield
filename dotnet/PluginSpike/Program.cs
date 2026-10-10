@@ -6,7 +6,8 @@
 //
 // FormIDs are STABLE: <output dir>/formids.json maps an identity key to its FormID and is reused on every run, so adding or
 // removing assets never renumbers existing records (saves and cross-references keep working). Keys:
-//   STAT:<editor id>   CELL:<cell name>   REFR:<cell name>:<source FO4 FormKey>   (lights and COC markers use their source ref)
+//   STAT:<editor id>   MSTT:<editor id> (movable items)   DOOR:<editor id>   CELL:<cell name>
+//   REFR:<cell name>:<source FO4 FormKey>   (lights and COC markers use their source ref)
 using System.Text.Json;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Plugins.Records;
@@ -39,18 +40,28 @@ FormKey Id(string key)
 }
 
 // ---- statics ----------------------------------------------------------------------------------------------------------
-var items = new List<(string editorId, string model, string source, JsonElement? door)>();
+var items = new List<(string editorId, string model, string source, JsonElement? door, bool movable)>();
 using var manifestDoc = JsonDocument.Parse(File.ReadAllText(args[1]));
 foreach (var it in manifestDoc.RootElement.GetProperty("items").EnumerateArray())
     items.Add((it.GetProperty("editor_id").GetString()!, it.GetProperty("model").GetString()!, it.GetProperty("source").GetString()!,
-               it.TryGetProperty("door", out var dj) ? dj : null));
+               it.TryGetProperty("door", out var dj) ? dj : null, it.TryGetProperty("movable", out _)));
 
 // source FO4 model -> (base record, origin offset in metres). Hinged doors become DOOR records animated by a vanilla door's
 // graph / skeleton / animations; their NIF origin sits at a different point, so references are shifted by origin_offset.
 var bySource = new Dictionary<string, (FormKey key, P3Float offset)>(StringComparer.OrdinalIgnoreCase);
-int doors = 0;
-foreach (var (editorId, model, source, door) in items)
+int doors = 0, movables = 0;
+foreach (var (editorId, model, source, door, movable) in items)
 {
+    if (movable)
+    {
+        // FO4 loose item converted with a dynamic body (manifest "movable"): a MoveableStatic, as Starfield's own
+        // pushable set dressing; a Static never simulates. DATA 4 as every vanilla MSTT checked (SfInspect mstt).
+        var ms = new MoveableStatic(Id("MSTT:" + editorId), release) { EditorID = editorId, Model = new Model { File = model }, DATA = 4 };
+        mod.MoveableStatics.Add(ms);
+        bySource[source.Replace('/', '\\')] = (ms.FormKey, new P3Float(0, 0, 0));
+        movables++;
+        continue;
+    }
     if (door is JsonElement d)
     {
         var rec = new Door(Id("DOOR:" + editorId), release)
@@ -84,7 +95,7 @@ foreach (var (editorId, model, source, door) in items)
     mod.Statics.Add(stat);
     bySource[source.Replace('/', '\\')] = (stat.FormKey, new P3Float(0, 0, 0));
 }
-Console.WriteLine($"{items.Count - doors} statics, {doors} doors");
+Console.WriteLine($"{items.Count - doors - movables} statics, {movables} movable statics, {doors} doors");
 
 // FO4 / Starfield reference rotation (radians): Bethesda angles turn CLOCKWISE seen from the positive axis, so the matrix
 // uses the negated angles; applied X, then Y, then Z. Rotates a door-local offset into the cell. (0 / 180 degree doors are

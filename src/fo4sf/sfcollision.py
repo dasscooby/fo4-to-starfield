@@ -250,8 +250,10 @@ def read_box(blob: bytes):
 
 
 # Words that differ between the static box template and the body on a vanilla animated door leaf
-# (AK_Ext_Bld_WallA_DoorA_01 mesh001, same 6,168-byte box layout) apart from the box geometry: motion type (240: 2 vs 1),
-# filter / flags (232, 264), body ids / hashes (448, 456, 472) and the compressed mass properties (1064-1095).
+# (AK_Ext_Bld_WallA_DoorA_01 mesh001, same 6,168-byte box layout) apart from the box geometry. Named with hktagfile
+# (2026-10-10; an earlier note called 240 the motion type, which was wrong): body cinfo flags (232: 0x4 vs 0),
+# collisionFilterInfo = collision layer (240: 2 ANIMSTATIC vs 1 STATIC), motionType (264: 1 keyframed vs 0 static),
+# box shape words (448, 456, 472) and the shape's compressed mass properties (1064-1095).
 # Copying them from that donor turns a static box into a keyframed one that follows its animated node.
 KEYFRAMED_FIELDS = ((232, 4), (240, 4), (264, 4), (448, 4), (456, 4), (472, 4), (1064, 16), (1088, 8))
 

@@ -531,6 +531,101 @@ def _faces_raw(faces, fo4_raw: bytes) -> bytes:
     return out
 
 
+# ---- dynamic (pushable) bodies -------------------------------------------------------------------------------------
+# Decoded from vanilla Starfield MiscItem bodies (docs/ai/research-log.md 2026-10-10): motionType 2 (static 0,
+# keyframed 1), flags 0x8a, mass in kg, motionPropertiesId 0 = the system's one motionProperties entry (Bethesda's defaults),
+# and an hknpRefMassDistribution: centre of mass and volume of the shape grown by its convex radius, principal axes,
+# and principal inertia per kg x 1.5 (30 of 30 vanilla box items). BSXFlags 0x42 on the NIF.
+# The universal template names hknpMotionProperties / hknpRefMassDistribution but has no layout for them (size 0: it has
+# no dynamic body), so dynamic bodies are built on a vanilla dynamic convex item instead: its TYPE section, system,
+# material, body cinfo and motion properties (read from the user's install like the other templates, never shipped).
+DYNAMIC_TEMPLATE_NIF = "meshes/items/fooddrink_set/fooddrink_set_container01_empty_lid.nif"
+DYNAMIC_MOTION_TYPE, DYNAMIC_FLAGS, INERTIA_FACTOR = 2, 0x8A, 1.5
+
+
+def check_dynamic_template(blob: bytes) -> bytes:
+    """blob if it is a vanilla dynamic convex body (motion properties, mass distribution and convex shape types)."""
+    t = _Tmpl(blob)
+    for name in ("hknpMotionProperties", "hknpRefMassDistribution", "hknpConvexShape"):
+        if t.tf.size_of(t.type(name)) == 0:
+            raise ValueError(f"dynamic template has no layout for {name}")
+    t.item_bytes("hknpMotionProperties", count=1)
+    return blob
+
+
+def _quat_from_matrix(m):
+    """(x, y, z, w) of a proper rotation given as a 3x3 nested list / array (columns = rotated axes)."""
+    tr = m[0][0] + m[1][1] + m[2][2]
+    if tr > 0:
+        s = math.sqrt(tr + 1.0) * 2
+        return ((m[2][1] - m[1][2]) / s, (m[0][2] - m[2][0]) / s, (m[1][0] - m[0][1]) / s, 0.25 * s)
+    i = max(range(3), key=lambda k: m[k][k])
+    j, k = (i + 1) % 3, (i + 2) % 3
+    s = math.sqrt(1.0 + m[i][i] - m[j][j] - m[k][k]) * 2
+    q = [0.0, 0.0, 0.0, (m[k][j] - m[j][k]) / s]
+    q[i] = 0.25 * s
+    q[j] = (m[j][i] + m[i][j]) / s
+    q[k] = (m[k][i] + m[i][k]) / s
+    return tuple(q)
+
+
+def mass_distribution(verts, faces, radius: float = 0.0):
+    """Havok mass distribution of a convex hull grown by its convex radius: (centre of mass xyz, volume,
+    principal-axes quaternion xyzw, principal inertia per kg x INERTIA_FACTOR). The hull is grown by moving every face
+    plane out by radius (each vertex re-solved from its faces), which reproduces vanilla box values exactly."""
+    import numpy as np
+    V = np.asarray(verts, dtype=float)
+    c0 = V.mean(axis=0)
+    normals, ds = [], []
+    for f in faces:
+        a, b, c = V[f[0]], V[f[1]], V[f[2]]
+        n = np.cross(b - a, c - a)
+        ln = np.linalg.norm(n)
+        n = n / ln if ln > 0 else n
+        if np.dot(n, c0 - a) > 0:
+            n = -n
+        normals.append(n)
+        ds.append(-np.dot(n, a))
+    G = V.copy()
+    if radius > 0:
+        for v in range(len(V)):
+            adj = [i for i, f in enumerate(faces) if v in f]
+            A = np.array([normals[i] for i in adj])
+            rhs = np.array([radius - ds[i] for i in adj])
+            if len(adj) >= 3 and np.linalg.matrix_rank(A, tol=1e-6) == 3:
+                G[v] = np.linalg.lstsq(A, rhs, rcond=None)[0]
+            else:                                         # degenerate corner: push out along the mean normal
+                m = A.sum(axis=0)
+                G[v] = V[v] + radius * m / (np.linalg.norm(m) or 1.0)
+    vol, com, cov = 0.0, np.zeros(3), np.zeros((3, 3))
+    for f in faces:                                       # signed tetrahedra (origin, fan triangle)
+        for k in range(1, len(f) - 1):
+            a, b, c = G[f[0]], G[f[k]], G[f[k + 1]]
+            n = np.cross(b - a, c - a)
+            if np.dot(n, a - c0) < 0:                     # wind outward
+                b, c = c, b
+            dv = np.dot(a, np.cross(b, c)) / 6.0
+            vol += dv
+            com += dv * (a + b + c) / 4.0
+            s = a + b + c
+            cov += dv / 20.0 * (np.outer(a, a) + np.outer(b, b) + np.outer(c, c) + np.outer(s, s))
+    if vol <= 1e-12:
+        raise hkpackfile.PackfileError("dynamic body shape has no volume")
+    com /= vol
+    cov = cov / vol - np.outer(com, com)                  # second moments about the centre, per unit mass
+    inertia = np.trace(cov) * np.eye(3) - cov
+    off = abs(inertia - np.diag(np.diag(inertia))).max()
+    if off <= 1e-9 * max(np.trace(inertia), 1e-12):
+        axes, principal = np.eye(3), np.diag(inertia)
+    else:
+        principal, axes = np.linalg.eigh(inertia)
+        if np.linalg.det(axes) < 0:
+            axes[:, 2] = -axes[:, 2]
+    q = _quat_from_matrix(axes.tolist())
+    return (tuple(float(x) for x in com), float(vol), tuple(float(x) for x in q),
+            tuple(float(x) * INERTIA_FACTOR for x in principal))
+
+
 def _emit_sphere(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, shape: int, R, tr) -> int:
     """FO4 hknpSphereShape (radius @20, centre as the first hull vertex) -> Starfield hknpSphereShape (hull with one
     float3 vertex, radius in convexRadius), centre moved by the instance transform."""
@@ -605,7 +700,8 @@ def _planes_from_faces(verts, faces) -> bytes:
 
 
 def _emit_convex(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, shape: int, rot=(0.0, 0.0, 0.0, 1.0),
-                 pos=(0.0, 0.0, 0.0), flatten_node_rot=None, vertex_only: bool = False) -> int:
+                 pos=(0.0, 0.0, 0.0), flatten_node_rot=None, vertex_only: bool = False,
+                 geom: Optional[dict] = None) -> int:
     """FO4 hknpConvexPolytopeShape -> Starfield hknpConvexShape (hull: float3 vertices, planes, faces, indices, links).
     The FO4 body transform (absolute, NIF-root space) is baked into vertices and planes.
     vertex_only: FO4 plain hknpConvexShape (e.g. V111Glass01's panes) stores only vertices; faces come from the hull
@@ -684,6 +780,8 @@ def _emit_convex(w: "_Writer", t: _Tmpl, p: hkpackfile.Packfile, shape: int, rot
         elem_t = dict(t.tf.types[rel_t].params)["tT"]
         i = w.add(elem_t, 0x20, raw, n)
         w.ptr(rel_t, i_shape, hull.offset + t.field(hull.type, fname).offset, i)
+    if geom is not None:                                  # final hull (as written) for a dynamic body's mass
+        geom.update(verts=verts, faces=faces, radius=radius)
     return i_shape
 
 
@@ -775,7 +873,8 @@ UNMAPPED_LAYERS = {37: "L_DOORDETECTION", 43: "L_CUSTOMPICK1"}
 
 
 def convert_bodies(fo4_blob: bytes, template_blob: bytes, select: Optional[List[int]] = None,
-                   node_rot=None, skipped: Optional[list] = None) -> list:
+                   node_rot=None, skipped: Optional[list] = None, dynamic_template: Optional[bytes] = None,
+                   motion: Optional[dict] = None) -> list:
     """One native Starfield single-body physics blob per selected FO4 body (all bodies when select is None).
     FO4 shapes live in the space of the NIF node that owns the collision object; the body cinfo transform is not a
     placement (a crate whose shape already matches its render mesh carries a 0.29 m body position; a stair helper's
@@ -783,7 +882,11 @@ def convert_bodies(fo4_blob: bytes, template_blob: bytes, select: Optional[List[
     blob on a node with the FO4 node's transform. The FO4 collision layer is kept (stair helpers stay stair helpers).
     Unsupported shapes or layers raise PackfileError (explicit fallback).
     Items are blobs, or (blob, translation, rotation 3x3 row-major) for a rotated compound mesh instance: that body is
-    in its own space and goes on a child node with this transform (relative to the FO4 collision node)."""
+    in its own space and goes on a child node with this transform (relative to the FO4 collision node).
+    Dynamic (pushable) FO4 bodies: with `motion` given, every one is reported. With `dynamic_template` too (a vanilla
+    dynamic convex body blob, DYNAMIC_TEMPLATE_NIF), a system of ONE dynamic body that converts to one convex part is
+    written dynamic with FO4's mass (motion["dynamic"] = kg); any other dynamic body stays static and
+    motion["kept_static"] lists why (ragdolls and breakables need constraints; never silently flattened)."""
     from . import fo4collision as fc
     p = hkpackfile.Packfile(fo4_blob)
     classes = dict(p.objects())
@@ -816,7 +919,26 @@ def convert_bodies(fo4_blob: bytes, template_blob: bytes, select: Optional[List[
             continue                                       # diagnostic only: test stairs without the helper ramp
         if (filt & 0x7F) in UNMAPPED_LAYERS:
             raise hkpackfile.PackfileError(f"body {k} uses {UNMAPPED_LAYERS[filt & 0x7F]} (no Starfield equivalent)")
-        for kind, obj, R, tr in _shape_parts(p, classes, shape, IDENTITY3, (0.0, 0.0, 0.0)):
+        parts = _shape_parts(p, classes, shape, IDENTITY3, (0.0, 0.0, 0.0))
+        mass = fc.body_mass(p, systems[0], k) if motion is not None else None
+        dynamic = False
+        if mass is not None:
+            why = None
+            if n != 1:
+                why = f"one of {n} bodies (ragdoll / breakable: constraints not converted)"
+            elif len(parts) != 1 or parts[0][0] not in ("convex", "convex-verts"):
+                why = f"shape is {len(parts)} part(s) of kind {parts[0][0] if parts else '-'} (single convex only)"
+            elif dynamic_template is None:
+                why = "dynamic body not allowed here (collision on a child node, or no dynamic template)"
+            if why:
+                motion.setdefault("kept_static", []).append(f"body {k} ({mass:.3g} kg): {why}")
+            else:
+                dynamic = True
+                motion["dynamic"] = mass
+        if dynamic:
+            out.append(_dynamic_body(dynamic_template, p, parts[0], filt, mass))
+            continue
+        for kind, obj, R, tr in parts:
             w = _Writer()
             i_psd = w.add(T_PSD, 0x10, t.item_bytes("hknpPhysicsSystemData"), 1)
             i_mat = w.add(T_MAT, 0x20, t.item_bytes("hknpMaterial", count=1), 1)
@@ -859,6 +981,62 @@ def convert_bodies(fo4_blob: bytes, template_blob: bytes, select: Optional[List[
             w.ptr(t.field(T_BODY, "shape").type, i_body, t.field(T_BODY, "shape").offset, i_shape)
             out.append(w.build(sdk, type_sec))
     return out
+
+
+def _dynamic_body(template_blob: bytes, p: hkpackfile.Packfile, part, filt: int, mass: float) -> bytes:
+    """One dynamic body on the vanilla dynamic template: its system, material, body cinfo (motion type, flags, user data
+    as vanilla) and motion properties; FO4's convex shape, collision layer and mass; a computed mass distribution."""
+    kind, obj, R, tr = part
+    t = _Tmpl(template_blob)
+    T_PSD, T_MAT = t.type("hknpPhysicsSystemData"), t.type("hknpMaterial")
+    T_BODY, T_MP = t.type("hknpPhysicsSystemData::bodyCinfoWithAttachment"), t.type("hknpMotionProperties")
+    secs = list(hktagfile.sections(template_blob, 8, len(template_blob)))
+    type_sec = next(template_blob[s - 8:e] for tag, s, e in secs if tag == "TYPE")
+    sdk = next(template_blob[s:e] for tag, s, e in secs if tag == "SDKV")
+    w = _Writer()
+    i_psd = w.add(T_PSD, 0x10, t.item_bytes("hknpPhysicsSystemData"), 1)
+    i_mat = w.add(T_MAT, 0x20, t.item_bytes("hknpMaterial", count=1), 1)
+    i_mp = w.add(T_MP, 0x20, t.item_bytes("hknpMotionProperties", count=1), 1)
+    body = bytearray(t.item_bytes("hknpPhysicsSystemData::bodyCinfoWithAttachment", count=1))
+    struct.pack_into("<H", body, t.field(T_BODY, "materialId").offset, 0)
+    struct.pack_into("<4f", body, t.field(T_BODY, "position").offset, 0.0, 0.0, 0.0, 0.0)
+    struct.pack_into("<4f", body, t.field(T_BODY, "orientation").offset, 0.0, 0.0, 0.0, 1.0)
+    struct.pack_into("<I", body, t.field(T_BODY, "collisionFilterInfo").offset, filt)
+    _dynamic_body_fields(t, T_BODY, body, mass)
+    i_body = w.add(T_BODY, 0x20, body, 1)
+    for name, item in (("materials", i_mat), ("motionProperties", i_mp), ("bodyCinfos", i_body)):
+        f = t.field(T_PSD, name)
+        w.ptr(f.type, i_psd, f.offset, item)
+    geom = {}
+    i_shape = _emit_convex(w, t, p, obj, R, tr, vertex_only=(kind == "convex-verts"), geom=geom)
+    f = t.field(T_BODY, "shape")
+    w.ptr(f.type, i_body, f.offset, i_shape)
+    _add_mass_distribution(w, t, T_BODY, i_body, mass_distribution(geom["verts"], geom["faces"], geom["radius"]))
+    return w.build(sdk, type_sec)
+
+
+def _dynamic_body_fields(t: _Tmpl, T_BODY: int, body: bytearray, mass: float):
+    """Body cinfo fields that make a body dynamic, as in vanilla MiscItem bodies (the template already has them; set
+    explicitly so a different template can't silently produce a static body)."""
+    body[t.field(T_BODY, "motionType").offset] = DYNAMIC_MOTION_TYPE
+    flags = t.field(T_BODY, "flags")
+    struct.pack_into("<I" if t.tf.size_of(flags.type) == 4 else "<H", body, flags.offset, DYNAMIC_FLAGS)
+    struct.pack_into("<f", body, t.field(T_BODY, "mass").offset, mass)
+    struct.pack_into("<H", body, t.field(T_BODY, "motionPropertiesId").offset, 0)
+
+
+def _add_mass_distribution(w: "_Writer", t: _Tmpl, T_BODY: int, i_body: int, md):
+    """The body's hknpRefMassDistribution (centre of mass + volume, principal axes, inertia per kg)."""
+    T_RMD = t.type("hknpRefMassDistribution")
+    com, vol, quat, inertia = md
+    rmd = bytearray(t.tf.size_of(T_RMD))
+    mdf = t.field(T_RMD, "massDistribution")
+    struct.pack_into("<4f", rmd, mdf.offset + t.field(mdf.type, "centerOfMassAndVolume").offset, *com, vol)
+    struct.pack_into("<4f", rmd, mdf.offset + t.field(mdf.type, "majorAxisSpace").offset, *quat)
+    struct.pack_into("<4f", rmd, mdf.offset + t.field(mdf.type, "inertiaTensor").offset, *inertia, 0.0)
+    i_rmd = w.add(T_RMD, 0x10, rmd, 1)
+    f = t.field(T_BODY, "massDistribution")
+    w.ptr(f.type, i_body, f.offset, i_rmd)
 
 
 IDENTITY3 = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)

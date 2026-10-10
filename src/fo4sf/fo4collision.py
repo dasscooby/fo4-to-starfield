@@ -80,6 +80,27 @@ def _compressed_mesh(p: hkpackfile.Packfile, data_obj: int) -> Tuple[List[Vec], 
 # hknpPhysicsSystemData: bodyCinfos hkArray @64, 96 bytes each: shape pointer @0, position hkVector4 @48,
 # orientation quaternion (x, y, z, w) @64
 SYS_BODIES, BODY_SIZE, BODY_POS, BODY_ROT = 64, 96, 48, 64
+# Motion (docs/ai/research-log.md 2026-10-09/10): body +12 = motion index (0x7FFFFFFF = static); the system's motion
+# cinfos (+48, 112 bytes each: u16 motion-properties id @0, f32 inverse mass @4) say whether that motion is dynamic
+# (id != 0xFFFF and inverse mass > 0) or keyframed (id 0xFFFF, inverse mass 0: animated railings, cryo pods).
+SYS_MOTION_CINFOS, MOTION_CINFO_SIZE, BODY_MOTION, STATIC_MOTION = 48, 112, 12, 0x7FFFFFFF
+
+
+def body_mass(p: hkpackfile.Packfile, sysobj: int, k: int):
+    """Mass in kg of body k of the FO4 physics system at sysobj when the body is dynamic (pushable), else None."""
+    bodies_at, n = p.array(sysobj + SYS_BODIES)
+    if bodies_at is None or not 0 <= k < n:
+        return None
+    mi, = p.unpack("<I", bodies_at + BODY_SIZE * k + BODY_MOTION)
+    if mi == STATIC_MOTION:
+        return None
+    at, nm = p.array(sysobj + SYS_MOTION_CINFOS)
+    if at is None or not 0 <= mi < nm:
+        return None
+    props_id, inv_mass = p.unpack("<H2xf", at + MOTION_CINFO_SIZE * mi)
+    if props_id == 0xFFFF or not inv_mass > 0:
+        return None
+    return 1.0 / inv_mass
 CMS_DATA = 96                                        # hknpCompressedMeshShape -> hknpCompressedMeshShapeData pointer
 # hknpConvexPolytopeShape: hkRelArray (u16 count, u16 offset from the field) vertices @48 (hkVector4),
 # faces @68 (u16 first index, u8 count, u8 angle), indices @72 (u8)
