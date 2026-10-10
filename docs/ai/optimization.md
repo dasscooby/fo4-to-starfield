@@ -26,6 +26,13 @@ same input), and the commit. Use the `optimization` label on the issue or PR.
 
 ## Entries
 
+### 2026-10-09 Codex: hash archive contents for resume identity (commit pending)
+Same deterministic synthetic 64 MiB archive, seven warm-cache runs on the owner's PC. Before: metadata-only
+`archive_identity()` median **0.000170 s**. After: content-hashed `archive_identity()` median **0.049534 s**;
+about 291× the fingerprint time, or +0.0494 s per 64 MiB (~1.29 GiB/s observed). The one-time scan per input
+archive closes stale-resume reuse when size and timestamp are preserved. Large archive sets pay this scan on
+each resume invocation; correctness was prioritized over this added startup I/O.
+
 ### 2026-10-09 Claude: model load without memory mapping (local team)
 Before: `lms load qwen3-14b --gpu max` -> LM Studio held 10.5 GB of system RAM for a model fully in VRAM; RAM 88.2%,
 the guardian held every request (restrict/block). After: `tools/ai-team/load_model.py` (tryMmap=false,
