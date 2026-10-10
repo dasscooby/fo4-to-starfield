@@ -28,6 +28,13 @@ def archive_identity(path):
     return [str(path), stat.st_size, stat.st_mtime_ns]
 
 
+def reusable_result(result):
+    """Retry degraded/failing conversions rather than freezing a placeholder."""
+    return (result.get("ok") is True
+            and not result.get("fallback_materials")
+            and not result.get("door_error"))
+
+
 def local_path(staging, relative):
     root = Path(staging).resolve()
     path = (root / relative.replace("\\", "/")).resolve()
@@ -97,9 +104,9 @@ class Checkpoints:
             if any(type(result.get(field)) is not int or result[field] < 0
                    for field in ("shapes", "fallback_materials")):
                 return None
-            if output_inventory(self.staging, result) != cached["outputs"]:
+            if not reusable_result(result):
                 return None
-            if result.get("ok") is not True:
+            if output_inventory(self.staging, result) != cached["outputs"]:
                 return None
             self.expected[source] = cached["outputs"]
             return cached["result"]
@@ -107,7 +114,7 @@ class Checkpoints:
             return None
 
     def save(self, source, result):
-        if result.get("ok") is not True or result.get("fallback_materials") or result.get("door_error"):
+        if not reusable_result(result):
             self.path(source).unlink(missing_ok=True)
             return False  # Retry degraded/failing conversions rather than freezing a placeholder.
         outputs = output_inventory(self.staging, result)

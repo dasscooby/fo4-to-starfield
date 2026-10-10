@@ -594,3 +594,10 @@ start, OPEN read from the prompt (`94d6dcb`), idle-camera wake (`76488be`).
   a door bug. Not fixed yet. Plan: read each FO4 body's motion (dynamic vs static), and give dynamic ones a movable
   Starfield body from a vanilla donor (as the keyframed door leaves do), with mass from FO4. Until then they're
   reported, not silently changed.
+
+## 2026-10-09 — Codex: checkpoint success-validation parity (#32)
+
+- Verified with synthetic generated NIF/material/texture outputs: a checkpoint with intact output hashes but `fallback_materials: 1` or `door_error` was reused although save rejects it. The new regression fails both cases against baseline `cd94162`.
+- Load and save now share the same success predicate; degraded cached results cause reconversion and do not enter batch expectations.
+- Validation with the numpy-enabled render venv: `python -m unittest discover -s tests -p test_checkpoints.py` (13 pass), `python -m unittest discover -s tests` (253 tests, one skipped), `python scripts/guard.py` (ok). Tests ran outside the sandbox after temporary-directory permission errors inside it.
+- Synthetic/offline only; game versions not applicable, no game assets or live installation changed. QA required before merge.
