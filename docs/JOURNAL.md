@@ -587,3 +587,10 @@ start, OPEN read from the prompt (`94d6dcb`), idle-camera wake (`76488be`).
 - Runner safety this session: routes whose start the engine relocated are skipped (`2794e07`; E at the entrance had
   opened a dialogue with the companion); cells change only through `coc.ps1`, which verifies arrival at the COC
   marker. The companion (Vasco) was told to wait in Vault 81 for this session (in-game dialogue, nothing saved).
+- **Finding: FO4 physics objects become fixed obstacles.** Vault 114 door `05C7DC` (`SubDoor01Right`) opens but
+  blocks from both sides: a `SkeletonClothed01` lies in the doorway. In FO4 it is a MovableStatic, a physics
+  object the player pushes aside. `convert_bodies` gives every FO4 body a static Starfield body, so here it is an
+  immovable wall. This is a systematic gameplay change for all FO4 dynamic objects (MovableStatic, loose items), not
+  a door bug. Not fixed yet. Plan: read each FO4 body's motion (dynamic vs static), and give dynamic ones a movable
+  Starfield body from a vanilla donor (as the keyframed door leaves do), with mass from FO4. Until then they're
+  reported, not silently changed.
