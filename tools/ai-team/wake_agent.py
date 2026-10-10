@@ -98,8 +98,8 @@ def wake(agent, message, idle_min, cooldown_min, dry, fork=False):
     if agent == "codex":
         # workspace writes + network (gh) with Codex's automatic approval review; never the "bypass sandbox" flag.
         # A plain `codex exec` runs read-only without network: the first wake could read but not fix or post.
-        rights = ["-s", "workspace-write", "--approve-for-me", "-c", "sandbox_workspace_write.network_access=true",
-                  "-C", repo]
+        # --approve-for-me implies the workspace-write sandbox (Codex rejects it together with -s)
+        rights = ["--approve-for-me", "-c", "sandbox_workspace_write.network_access=true", "-C", repo]
         cmd = [CODEX, "exec"] + rights + (["fork", sid, msg] if fork else [msg])
         run_cwd = repo
     else:
@@ -114,8 +114,14 @@ def wake(agent, message, idle_min, cooldown_min, dry, fork=False):
     with open(out, "w", encoding="utf-8") as fh:
         p = subprocess.Popen(cmd, cwd=run_cwd, stdout=fh, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    record(dict(base, result="woken", pid=p.pid, output=out))
-    return 0
+    try:                                               # an argument or auth error exits at once: don't call that "woken"
+        code = p.wait(timeout=8)
+    except subprocess.TimeoutExpired:
+        record(dict(base, result="woken", pid=p.pid, output=out))
+        return 0
+    tail = open(out, encoding="utf-8", errors="replace").read()[-400:]
+    record(dict(base, result="failed", exit_code=code, output=out, error=tail.strip()))
+    return 4
 
 
 def main():
