@@ -15,7 +15,14 @@ supported hypothesis / unresolved. Older research lives in docs/JOURNAL.md and d
 - Status: "+12 = motion index, 0x7FFFFFFF = static": **supported hypothesis** (2 files). "Motion index means
   pushable": **refuted as stated**: placed Statics like `BldgShellWoodStairsRailing01` also have one, so it also covers
   keyframed / animated bodies. **Unresolved:** the motion entries' mass / motion type, which separates pushable
-  (dynamic) from keyframed bodies. Next: decode the motion cinfo array (system +32) and read inverse mass.
+  (dynamic) from keyframed bodies.
+- Follow-up (same day): system +32 holds motion *properties* (present only for dynamic bodies; values like 104.375 /
+  31.57 / 0.1 / 0.05 identical in skeleton and pencil) and +48 the motion *cinfos*: u16 motion-properties id at +0,
+  inverse mass f32 at +4. Skeleton: id 0, inverse mass 0.1 (10 kg); pencil: id 0, 2.0 (0.5 kg); stair railing and cryo
+  pod: id 0xFFFF, inverse mass 0 (keyframed). Rule "dynamic = motion index != 0x7FFFFFFF, its cinfo id != 0xFFFF and
+  inverse mass > 0": **supported hypothesis** (4 files, consistent across the scan). Rescan of 4,014 models: 373 single
+  dynamic (4,642 placements: loose items), 22 multi-body without joints (156: breakable railings, gore), 29 ragdolls
+  (167). Railings and cryo pods move to static, which is correct for them.
 
 ## 2026-10-09 Starfield `.af` animation header (door rigs)
 - Question: what are the u16 fields at 0x28 of `open.af`?
