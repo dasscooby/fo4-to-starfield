@@ -110,7 +110,13 @@ class Checkpoints:
         if result.get("ok") is not True or result.get("fallback_materials") or result.get("door_error"):
             self.path(source).unlink(missing_ok=True)
             return False  # Retry degraded/failing conversions rather than freezing a placeholder.
-        outputs = output_inventory(self.staging, result)
+        try:
+            outputs = output_inventory(self.staging, result)
+        except (OSError, ValueError, KeyError, TypeError, struct.error):
+            # The batch runner may continue after checkpoint I/O errors. Keep an
+            # explicit failed expectation so it cannot publish an unverified build.
+            self.expected[source] = None
+            raise
         self.expected[source] = outputs
         self.directory.mkdir(parents=True, exist_ok=True)
         fd, temporary = tempfile.mkstemp(dir=self.directory, prefix=".pending-")
@@ -129,6 +135,9 @@ class Checkpoints:
         """Recheck expectations after all writes, including dependencies shared by models."""
         actual, errors = {}, []
         for source, outputs in self.expected.items():
+            if not isinstance(outputs, dict):
+                errors.append({"source": source, "output": "<dependency inventory unavailable>"})
+                continue
             for relative, expected in outputs.items():
                 path = local_path(self.staging, relative)
                 if path not in actual:
