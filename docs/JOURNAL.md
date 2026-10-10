@@ -578,3 +578,12 @@ start, OPEN read from the prompt (`94d6dcb`), idle-camera wake (`76488be`).
   none from the unread fallback) ([side A](media/route-parsons-door-bothsides-a.jpg),
   [side B](media/route-parsons-door-bothsides-b.jpg)). Left: `06CF29` double door stops 0.30 m past the plane (needs 0.8),
   `IndMetalDoor02` blocked on one side, its other start not reached. Routes 36-44 still to run.
+- **Vault 111 and Vault 114 on the same pinned build** (`AC379C53...`), cells entered with the verified `coc.ps1`
+  (`957ddf2`): **Vault 111: 12 of 12 routes pass** (10 stairs + the caged switch door from both sides,
+  [open](media/route-v111-switchdoor-open.jpg)). **Vault 114:** 28 PASS, 1 STUCK, 3 BLOCKED, 1 UNOPENED, 12 UNREAD
+  (swapped OCR columns); doors 5 both sides ([subway door](media/route-v114-subdoor-open.jpg)), 3 one side, 3 none
+  (`SubDoor01Right` `05C7DC` and two stall doors). A first Vault 111 attempt used a blind console toggle for `coc`,
+  missed, and ran inside Parsons (falls to z -4990); those 5 lines were removed from the results before scoring.
+- Runner safety this session: routes whose start the engine relocated are skipped (`2794e07`; E at the entrance had
+  opened a dialogue with the companion); cells change only through `coc.ps1`, which verifies arrival at the COC
+  marker. The companion (Vasco) was told to wait in Vault 81 for this session (in-game dialogue, nothing saved).
