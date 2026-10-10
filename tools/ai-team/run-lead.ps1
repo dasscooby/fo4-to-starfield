@@ -53,6 +53,7 @@ try {
     $out = Join-Path $state ("lead-session-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
     $p = Start-Process -FilePath $opencode -ArgumentList @('run', '--agent', 'fo4-lead', "`"$prompt`"") `
          -WorkingDirectory $wt -WindowStyle Hidden -PassThru -RedirectStandardOutput $out -RedirectStandardError "$out.err"
+    $null = $p.Handle                                   # hold the handle, or ExitCode is lost (redirected Start-Process)
     if (-not $p.WaitForExit($SessionTimeout * 1000)) {
       Stop-Process -Id $p.Id -Force -Confirm:$false; Log "cycle ${cycle}: session timed out, stopped"
       $wait = [Math]::Min($wait * 2, 14400)

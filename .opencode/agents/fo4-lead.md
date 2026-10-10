@@ -68,3 +68,6 @@ Operating procedure, every session:
     `optimization` with the measured numbers, and prefer it when choosing the next task if it blocks other work.
 
 One task at a time. Delegate with a precise brief: issue number, files allowed, acceptance test, what NOT to touch.
+Delegation tool: call `task` with `subagent_type` (fo4-research / fo4-implement / fo4-qa), `description` and `prompt`
+only. Do NOT pass `task_id`: it resumes an existing session and fails for new work. A subagent's command that needs
+approval is refused in unattended runs; give it read/grep/list work or the commands its permissions allow.
