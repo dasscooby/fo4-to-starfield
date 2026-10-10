@@ -27,6 +27,8 @@ if (-not (Test-Path $wt)) {
   Log "created Lead worktree $wt (branch ai/local-lead)"
 }
 $g = Join-Path $repo 'tools\ai-team\guardian\guardian.py'
+# npm installs a .ps1 shim that Start-Process can't run: use the real binary behind it
+$opencode = Join-Path (Split-Path (Get-Command opencode).Source) 'node_modules\opencode-ai\bin\opencode.exe'
 $prompt = "Run ONE session of your operating procedure (your agent file + AGENTS.md). Do at most one task, then stop. " +
           "Good tasks for this team: QA review of open PRs labelled needs-qa (use fo4-qa; post the verdict with " +
           "gh pr review <n> --comment, prefixed 'QA (local):'); research questions from docs/ai/known-unknowns.md " +
@@ -47,17 +49,17 @@ try {
       Log "model not loaded: loading"; & $Python (Join-Path $PSScriptRoot 'load_model.py') | Out-Null
     }
     git -C $wt pull -q --rebase --autostash origin main 2>$null
-    Log "cycle $cycle: Lead session start (timeout $SessionTimeout s)"
+    Log "cycle ${cycle}: Lead session start (timeout $SessionTimeout s)"
     $out = Join-Path $state ("lead-session-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
-    $p = Start-Process -FilePath (Get-Command opencode).Source -ArgumentList @('run', '--agent', 'fo4-lead', "`"$prompt`"") `
+    $p = Start-Process -FilePath $opencode -ArgumentList @('run', '--agent', 'fo4-lead', "`"$prompt`"") `
          -WorkingDirectory $wt -WindowStyle Hidden -PassThru -RedirectStandardOutput $out -RedirectStandardError "$out.err"
     if (-not $p.WaitForExit($SessionTimeout * 1000)) {
-      Stop-Process -Id $p.Id -Force -Confirm:$false; Log "cycle $cycle: session timed out, stopped"
+      Stop-Process -Id $p.Id -Force -Confirm:$false; Log "cycle ${cycle}: session timed out, stopped"
       $wait = [Math]::Min($wait * 2, 14400)
     } elseif ($p.ExitCode -ne 0) {
-      Log "cycle $cycle: session failed (exit $($p.ExitCode)), see $out"; $wait = [Math]::Min($wait * 2, 14400)
+      Log "cycle ${cycle}: session failed (exit $($p.ExitCode)), see $out"; $wait = [Math]::Min($wait * 2, 14400)
     } else {
-      Log "cycle $cycle: session done, see $out"; $wait = $Interval
+      Log "cycle ${cycle}: session done, see $out"; $wait = $Interval
     }
     if ($MaxCycles -ne 0 -and $cycle -ge $MaxCycles) { break }
     Start-Sleep $wait
