@@ -94,6 +94,23 @@ def restore_plugins(state):
         atomic_write_bytes(p, base64.b64decode(original), ".fo4port-plugins-")
 
 
+def validate_plugin_cleanup(manifest):
+    added = manifest.get("plugins_added", [])
+    replaced = manifest.get("plugins_replaced", [])
+    if (not isinstance(added, list) or len(added) > 1 or
+            any(not isinstance(line, str) or line.casefold() != f"*{PLUGIN}".casefold()
+                for line in added)):
+        sys.exit("unexpected plugin cleanup entry in manifest; refusing cleanup")
+    if not isinstance(replaced, list) or len(replaced) > 1:
+        sys.exit("unexpected plugin restoration entry in manifest; refusing cleanup")
+    for item in replaced:
+        if (not isinstance(item, dict) or
+                not isinstance(item.get("active"), str) or
+                item["active"].casefold() != f"*{PLUGIN}".casefold() or
+                not isinstance(item.get("original"), str) or
+                item["original"].strip().startswith("*") or
+                plugin_name(item["original"]).casefold() != PLUGIN.casefold()):
+            sys.exit("unexpected plugin restoration entry in manifest; refusing cleanup")
 def write_lines(p, lines, original=None):
     os.makedirs(os.path.dirname(p), exist_ok=True)
     if original is None:
@@ -293,6 +310,7 @@ def uninstall(a):
             os.path.normcase(os.path.abspath(recorded_plugins)) !=
             os.path.normcase(os.path.abspath(expected_plugins))):
         sys.exit("Plugins.txt path in manifest does not match the current user path; refusing cleanup")
+    validate_plugin_cleanup(m)
     print(f"removing {m['files']} and Plugins.txt entries {m['plugins_added']}")
     if a.dry_run:
         return

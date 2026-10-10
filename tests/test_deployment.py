@@ -58,6 +58,31 @@ class DeploymentRollbackTests(unittest.TestCase):
                 deploy.uninstall(args)
             self.assertEqual(victim.read_bytes(), original)
 
+    def test_uninstall_rejects_manifest_claiming_an_unrelated_plugin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data = root / "Data"
+            data.mkdir()
+            plugins = root / "Plugins.txt"
+            original = b"*Other.esm\n*FO4Port.esm\n"
+            manifest = data / deploy.MANIFEST
+            args = SimpleNamespace(starfield=str(root), dry_run=False)
+            malformed = [
+                ({"plugins_added": ["*Other.esm"], "plugins_replaced": []}, "cleanup"),
+                ({"plugins_added": [], "plugins_replaced": [
+                    {"active": "*Other.esm", "original": "Other.esm"}]}, "restoration"),
+            ]
+            for changes, reason in malformed:
+                with self.subTest(reason=reason):
+                    plugins.write_bytes(original)
+                    deploy.write_manifest(str(manifest), {"files": [], "plugins_txt": str(plugins),
+                        **changes, "complete": True})
+                    with patch.object(deploy, "plugins_txt_path", return_value=str(plugins)):
+                        with self.assertRaisesRegex(SystemExit, f"unexpected plugin {reason} entry"):
+                            deploy.uninstall(args)
+                    self.assertEqual(plugins.read_bytes(), original)
+                    self.assertTrue(manifest.exists())
+
     def test_atomic_publish_handles_read_only_source_and_cleans_temporary(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
