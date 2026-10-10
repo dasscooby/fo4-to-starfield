@@ -1,127 +1,93 @@
-# fo4-to-starfield
+# Fallout 4 → Starfield: a measured conversion toolchain
 
-**Research and toolchain for porting Fallout 4 to Starfield's engine (Creation Engine 2).**
-Format notes, measurements, a risk-first plan, and (as they land) converters for meshes, materials,
-collision, plugin records, terrain and more. Converts from **your own** game copies; no game assets are
-included or distributed.
+**An experimental, unofficial research and converter project for carrying Fallout 4 content into Starfield (Creation Engine 2).** It reads game files from installations you select and generates local outputs. The repository contains no raw Bethesda game data or extracted assets; it does include a small set of in-game screenshots depicting Bethesda-owned visuals, which are not covered by this repository's code license. This is a work in progress, not a playable total conversion.
 
-> **Status: a Fallout 4 prop renders in Starfield.** A Fallout 4 chair, converted by this toolchain and loaded as a
-> plugin, was spawned in the running game (Starfield 1.16.244): correct shape, size and orientation, lit and
-> shadowed by the scene ([screenshot](docs/media/fo4-chair-in-starfield.png), write-ups: [S1](docs/spikes/S1-mesh-writer.md),
-> [S2/S4/S9](docs/spikes/S2-S4-S9-plugin-units-loading.md)), now with its **original Fallout 4 texture**
-> converted to Starfield's material format ([S3](docs/spikes/S3-materials.md)). It now has **box collision** (solid and fixed in place, [S6](docs/spikes/S6-collision.md)); plugin records beyond a static, terrain, actors and animation are still to do.
-> See [Work packages](docs/WORK-PACKAGES.md).
+[Issues](https://github.com/dasscooby/fo4-to-starfield/issues) · [Current project status](https://github.com/dasscooby/fo4-to-starfield/issues/32) · [Work packages](docs/WORK-PACKAGES.md) · [Format research](docs/FORMAT-GAP.md)
 
-**Newest: Fallout 4's Vault 111 interior loads in Starfield as a walk-in cell** (layout, models, textures; lighting still rough):
-[write-up](docs/spikes/WP10-vault111-first-light.md).
+[![CI](https://github.com/dasscooby/fo4-to-starfield/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/dasscooby/fo4-to-starfield/actions/workflows/ci.yml)
 
-**Also converted: Vault 81, the Red Rocket cave, Vault 114, the Prydwen, Hotel Rexford, Boston Public Library and Parsons State** ([write-up](docs/spikes/WP10-more-interiors.md)).
+## What is working
 
-![Hotel Rexford lobby, converted from Fallout 4, inside Starfield](docs/media/hotel-rexford.jpg)
+A Fallout 4 patio chair has rendered inside Starfield with its shape, scale, original texture, lighting, shadows, and converted box collision. Experimental interior builds also load in Starfield. The latest pinned route report shows real progress and remaining failures; it does **not** establish that the interior milestone is complete.
 
-![The Vault 111 cryo pods, converted from Fallout 4, inside Starfield](docs/media/vault111-cryo-row.jpg)
+### Recent in-game route results
 
-![The cave under Red Rocket, converted from Fallout 4, inside Starfield](docs/media/redrocket-cave.jpg)
+Reported by Claude on 2026-10-10 for one pinned test build (code `1d3d5bf`; details and limitations in [shared status #32](https://github.com/dasscooby/fo4-to-starfield/issues/32)):
 
-![Vault 111 corridor, converted from Fallout 4, inside Starfield](docs/media/vault111-corridor.jpg)
+| Test area | Result |
+|---|---|
+| Vault 111 | 12/12 routes passed, including stairs and a switch door from both sides |
+| Parsons | 11 hinged doors passed from both sides with an `OPEN` prompt recorded |
+| Vault 114 | 28 routes passed; three doors still failed on both sides and three passed on one side only |
+| Hotel Rexford | 28 routes passed; one door failed on both sides and three passed on one side only |
+| Prydwen | Partial run: 11 passes, 7 falls, and 14 unread results among 33 reported attempts (one attempt is unclassified in the status summary) |
+| Vault 81 and Boston Public Library | Not yet run on that pinned route build |
 
-![Vault 111 in colour, converted from Fallout 4, inside Starfield](docs/media/vault111-color-catwalk.jpg)
+These are reports for a particular build, not a guarantee about other builds or a finished conversion. Offline tests and screenshots are not substitutes for in-game acceptance.
 
-![Vault 111 stairs, converted from Fallout 4, inside Starfield](docs/media/vault111-color-stairs.jpg)
+### See the work
 
-![A Vault 111 room, converted from Fallout 4, inside Starfield](docs/media/vault111-room-in-starfield.png)
+**A converted object in Starfield**
 
-![Fallout 4 patio chair, with its original texture, rendered inside Starfield](docs/media/fo4-chair-textured-in-starfield.png)
+![Fallout 4 patio chair with its original texture, rendered in Starfield](docs/media/fo4-chair-textured-in-starfield.png)
 
-If you landed here searching for *"Fallout 4 in Starfield"*, *"convert Fallout 4 NIF to Starfield"*,
-*"Starfield .mesh format"*, *"what replaced LAND in Starfield"* or *"port Fallout 4 mods to Starfield"*:
-the answers we have so far are in [docs/FORMAT-GAP.md](docs/FORMAT-GAP.md) and [docs/RISKS.md](docs/RISKS.md).
+**Interiors and routes**
 
-## Why this is hard (measured, not guessed)
+![Vault 111 stairs in Starfield](docs/media/vault111-stairs-catwalk-in-starfield.png)
 
-| | Fallout 4 (Creation Engine 1) | Starfield (Creation Engine 2) |
+![Hotel Rexford door opened in Starfield](docs/media/rexford-door-native.jpg)
+
+![Parsons hinged door routes, side A](docs/media/route-parsons-door-bothsides-a.jpg)
+
+![Parsons hinged door routes, side B](docs/media/route-parsons-door-bothsides-b.jpg)
+
+More captured work: [Vault 111](docs/spikes/WP10-vault111-first-light.md) · [additional interiors](docs/spikes/WP10-more-interiors.md) · [collision](docs/spikes/S6-collision.md) · [door routes and test evidence](https://github.com/dasscooby/fo4-to-starfield/issues/32).
+
+## What remains
+
+The current priority is finishing a measured interior slice: stairs and openings that preserve walkable collision, doors that work from both sides, and repeatable deployment. Open problems include Prydwen stair falls, some blocked or one-sided doors, and Fallout 4 physics objects that still behave as fixed obstacles in Starfield. See [the issue tracker](https://github.com/dasscooby/fo4-to-starfield/issues) and [risk register](docs/RISKS.md) for current work. Actors, terrain, quests, animation systems, and full-game parity are not complete.
+
+## Why conversion is difficult
+
+| Format area | Fallout 4 | Starfield |
 |---|---|---|
 | Plugin form version | 131 | 581 |
-| Record types | 137 (116 shared) | 180 |
-| Sampled field overlap on shared types | | mostly 25–60% (`STAT` 0.23, `WEAP` 0.30, `NPC_` 0.51) |
-| Terrain | 37,020 `LAND` records | **none**; `.btd` files + procedural planets |
-| NIF mesh | BS 130, geometry inline | BS 173 (base game) / 175 (DLC), geometry in external `.mesh` files (~684k of them) |
-| Materials | 7,077 `.bgsm` + 295 `.bgem` | `.mat` JSON, compiled into one `.cdb` |
-| Collision | Havok 2014 packfile | Havok tagfile, `hknp` shapes |
-| Animation | 15.7k `.hkx` | `.af`/`.afx`/`.agx`/`.rig` |
-| Voice | 123k `.fuz` | Wwise `.wem` + FaceFX `.ffxanim` |
+| Shared record fields | Sampled overlap is mostly 25–60% | Different record model and fields |
+| Terrain | 37,020 `LAND` records in the measured sample | `.btd` terrain and procedural planets |
+| Meshes | NIF geometry | NIF metadata plus external `.mesh` geometry |
+| Materials | `.bgsm` / `.bgem` | JSON `.mat`, compiled into `.cdb` |
+| Collision | Havok 2014 packfile | Havok tagfile and `hknp` shapes |
 
-Details and sources: [docs/FORMAT-GAP.md](docs/FORMAT-GAP.md).
+These are measured research notes, not promises of complete format support. Methods and sources: [format gap](docs/FORMAT-GAP.md), [spikes](docs/spikes/), and [measurement scripts](scripts/).
 
-## Approach in one paragraph
+## Try it
 
-A deterministic, resumable **conversion pipeline**, not a hand rebuild: Fallout 4 data → open intermediate
-formats (glTF, PNG/DDS, JSON) → Starfield formats, run by anyone on their own installs, verified by
-machine oracles at every step (parser round-trip → NifSkope/xEdit → Creation Kit → in-game screenshot),
-with fidelity tiers so the build always completes. It starts with spikes that kill or confirm the
-riskiest assumptions, then the order is **item → static → interior (Vault 111) → actor → exterior**.
-Full reasoning: [docs/PLAN.md](docs/PLAN.md).
-
-## Repo map
-
-| Path | What |
-|---|---|
-| [docs/PLAN.md](docs/PLAN.md) | Strategy, architecture, phases, verification ladder |
-| [docs/RISKS.md](docs/RISKS.md) | Risk register and the nine spikes (S1–S9) with go/no-go and fallbacks |
-| [docs/WORK-PACKAGES.md](docs/WORK-PACKAGES.md) | The task list; mirrored as GitHub issues |
-| [docs/FORMAT-GAP.md](docs/FORMAT-GAP.md) | Measured differences between the two games |
-| [docs/SETUP.md](docs/SETUP.md) | Tools and pinned versions |
-| [docs/spikes/S1-mesh-writer.md](docs/spikes/S1-mesh-writer.md) | First result: the `.mesh` / NIF format, solved offline |
-| [src/fo4sf/](src/fo4sf/) | `sfmesh` (.mesh read/write), `nif` (container), `sfnif` (Starfield blocks), `convert_static` |
-| [docs/JOURNAL.md](docs/JOURNAL.md) | Evidence journal: every experiment, newest last |
-| [docs/measurements/](docs/measurements/) | Raw JSON from the recon scripts (counts only, no game content) |
-| [scripts/](scripts/) | `recon.py`, `recon_physics.py`, `guard.py`, `render_preview.py`, [`oracles/`](scripts/oracles/) (the checks behind S1) |
-
-## Quick start (contributors)
-
-```
+```powershell
 git clone https://github.com/dasscooby/fo4-to-starfield
 cd fo4-to-starfield
-python -m unittest discover tests        # synthetic fixtures only
-python scripts/guard.py                   # must pass before every commit
-```
-Then read [docs/SETUP.md](docs/SETUP.md) and pick a work package marked `ready`.
-
-To reproduce the measurements on your own installs:
-```
-python -I scripts/recon.py --fo4-esm <Fallout4.esm> --fo4-data <FO4 Data dir> --sf-data <Starfield Data dir> --out out/
+python -m pip install -r requirements-ci.txt
+python -m unittest discover -s tests -v
+python scripts/guard.py
 ```
 
-## Rules of the repo
+To reproduce measurements, install the tools listed in [setup](docs/SETUP.md), use your own game installations, and provide local input paths to the recon scripts. Keep generated data and converted assets outside this repository. Read [contributing](CONTRIBUTING.md) before opening a pull request.
 
-- **No game data, ever.** No `.esm`, `.ba2`, `.nif`, `.dds`, `.mesh`, `.hkx`, `.wem`, executables, or
-  anything derived from them beyond statistics. `scripts/guard.py` enforces it (a GitHub Actions template is in [`ci/`](ci/), not enabled yet).
-- Converters read your copies of the games; output stays on your machine.
-- Offline / single-player only.
-- AI-assisted: this project was started with AI coding assistance. Contributions of any kind are welcome;
-  please say if yours was AI-assisted.
+## Safety and project rules
 
-## Acknowledgments
+- **No raw game assets or extracted files in Git or releases.** Do not submit `.esm`, `.ba2`, `.nif`, `.dds`, `.mesh`, `.hkx`, audio, executables, or converted outputs. The repository currently includes a limited set of screenshots captured in-game; these depict third-party visuals, are excluded from the MIT grant, and do not establish permission for reuse. The guard and CI check for raw assets and local paths.
+- Converters read local files selected by the user; generated outputs stay local. The project does not distribute a conversion pack.
+- Tests use synthetic fixtures. Offline passes do not prove that an asset works in-game.
+- This is for offline, single-player modding research. It does not modify either game's executable.
+- Do not commit credentials, personal machine paths, or private game data. Report suspected vulnerabilities using [GitHub's private reporting option](https://github.com/dasscooby/fo4-to-starfield/security/advisories/new) when available; see [SECURITY.md](SECURITY.md).
 
-This project is led by **dasscooby**, with contributions from these AI coding collaborators:
+## Legal and license
 
-- **Claude** � core conversion pipeline, materials, native collision integration, plugin generation, and in-game testing.
-- **Codex (OpenAI)** � deployment and recovery, persistent identities and cache checks, source-state preservation, door animation/model tooling, and output verification.
-- **Grok (xAI)** � the interior acceptance harness, evidence requirements, and synthetic gate tests. First contribution: [pinned in-game evidence gate](https://github.com/dasscooby/fo4-to-starfield/commit/76b44dd015b5187d6fc8dee75dbf312b1f585a7b).
+This repository is unofficial and is not affiliated with or endorsed by Bethesda Softworks or ZeniMax Media. Fallout, Starfield, Creation Engine, and related names and materials belong to their respective owners. **The MIT license in this repository applies only to original project code and documentation; it does not grant rights to Bethesda software, game assets, trademarks, screenshots, or user-generated outputs.**
 
-Agent-assisted commits use the maintainer's configured Git author; `Codex:` and `Grok:` commit subjects identify their work. These acknowledgments describe contributions, not proof that the unfinished conversion is game-ready.
+The project does not provide legal advice or establish that any particular extraction, conversion, or use is permitted. Check the current [Bethesda Terms of Service](https://bethesda.net/data/tos/en.html), the applicable [game EULA](https://bethesda.net/data/eula/en.html), and laws where you live; seek qualified legal advice if you need a determination for your circumstances. Avoid uploading or sharing game-derived outputs unless you have confirmed you have the necessary rights.
 
-## Related projects
+## Contributing and attribution
 
-- [fo76utils/nifskope](https://github.com/fo76utils/nifskope): NifSkope fork with Starfield `.mesh` / `.mat` support
-- [Mutagen](https://github.com/Mutagen-Modding/Mutagen): .NET library with Fallout 4 and Starfield record support
-- [PyNifly](https://github.com/BadDogSkyrim/PyNifly): Blender NIF import/export (Fallout 4)
-- [xEdit](https://github.com/TES5Edit/TES5Edit): plugin editor (`xSFEdit`, `xFOEdit`)
-- [CoACD (fo76utils fork)](https://github.com/fo76utils/CoACD): convex decomposition for collision
-- [SFSE](https://sfse.silverlock.org/): Starfield Script Extender
+Read [CONTRIBUTING.md](CONTRIBUTING.md), choose an open issue, and use its acceptance criteria. Every change must pass the synthetic tests and asset guard. Identify whether a result is **in-game verified**, **offline tested**, or an **unverified hypothesis**.
 
-## Legal
-
-Fallout, Starfield and Creation Engine are trademarks of Bethesda Softworks / ZeniMax Media. This project is
-unofficial and unaffiliated. It contains no Bethesda content. You need legitimate copies of both games.
-Licence: [MIT](LICENSE) (code and documentation).
+The project is led by **dasscooby**. AI-assisted contributions are acknowledged by role: **Claude** (conversion pipeline and in-game testing), **Codex** (deployment, recovery, persistent identities, and output verification), and **Grok** (acceptance criteria and evidence gates). Agent labels and commit subjects identify work; these names do not represent separate human contributors or endorsements.
