@@ -3,9 +3,11 @@
   python wake_agent.py codex|grok --message "..." [--idle-min 10] [--cooldown-min 30] [--dry-run]
   python wake_agent.py status
 
-How it wakes: it FORKS the agent's most recent session (its full history, a new session id) and runs one headless
-turn with the message: `codex exec fork <id> <msg>`, `grok --cwd <its cwd> -c --fork-session -p <msg>`. Forking means
-it never writes into the session file an open Codex/Grok window may still hold. Nothing is typed into any window.
+How it wakes: a FRESH headless session in the repository with a short brief that points at #32, the handoff and
+AGENTS.md (`codex exec -s workspace-write --approve-for-me` + network; `grok -p ... --always-approve --max-turns 40`).
+`--fork` instead continues from the agent's last session history: measured 5.7 M tokens for one Codex turn, so only
+when that context is really needed. Either way it never writes into a session file an open window may hold, and
+nothing is typed into any window.
 
 Guards (deterministic, not a prompt):
 - idle: refuses if the agent's newest session log changed in the last --idle-min minutes (it's working; a second copy
@@ -77,7 +79,7 @@ def record(entry):
     print(json.dumps(entry))
 
 
-def wake(agent, message, idle_min, cooldown_min, dry):
+def wake(agent, message, idle_min, cooldown_min, dry, fork=False):
     sid, cwd, idle_s = latest_session(agent)
     base = {"t": time.time(), "time": time.strftime("%Y-%m-%dT%H:%M:%S"), "agent": agent, "session": sid,
             "idle_min": None if idle_s is None else round(idle_s / 60, 1)}
@@ -92,12 +94,19 @@ def wake(agent, message, idle_min, cooldown_min, dry):
         record(dict(base, result="refused", reason=f"cooldown: woken {(time.time() - lw) / 60:.0f} min ago"))
         return 3
     msg = PREFIX + message
+    repo = os.path.dirname(os.path.dirname(HERE))
     if agent == "codex":
-        cmd = [CODEX, "exec", "fork", sid, msg]
-        run_cwd = os.path.dirname(os.path.dirname(HERE))              # the repository
+        # workspace writes + network (gh) with Codex's automatic approval review; never the "bypass sandbox" flag.
+        # A plain `codex exec` runs read-only without network: the first wake could read but not fix or post.
+        rights = ["-s", "workspace-write", "--approve-for-me", "-c", "sandbox_workspace_write.network_access=true",
+                  "-C", repo]
+        cmd = [CODEX, "exec"] + rights + (["fork", sid, msg] if fork else [msg])
+        run_cwd = repo
     else:
-        cmd = [GROK, "-c", "--fork-session", "-p", msg] + (["--cwd", cwd] if cwd else [])
-        run_cwd = cwd or os.path.dirname(os.path.dirname(HERE))
+        # as the owner runs Grok (always-approve), bounded by max-turns
+        cmd = [GROK] + (["-c", "--fork-session"] if fork else []) + ["-p", msg, "--always-approve",
+                                                                     "--max-turns", "40", "--cwd", repo]
+        run_cwd = repo
     if dry:
         record(dict(base, result="dry-run", command=[os.path.basename(cmd[0])] + cmd[1:3]))
         return 0
@@ -116,6 +125,8 @@ def main():
     ap.add_argument("--idle-min", type=float, default=10)
     ap.add_argument("--cooldown-min", type=float, default=30)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--fork", action="store_true",
+                    help="continue from the agent's last session history (costly: one forked Codex turn used 5.7 M tokens)")
     a = ap.parse_args()
     if a.agent == "status":
         for ag in ("codex", "grok"):
@@ -123,7 +134,7 @@ def main():
             print(json.dumps({"agent": ag, "session": sid, "idle_min": None if idle_s is None else round(idle_s / 60, 1),
                               "last_wake": last_wake(ag)}))
         return 0
-    return wake(a.agent, a.message, a.idle_min, a.cooldown_min, a.dry_run)
+    return wake(a.agent, a.message, a.idle_min, a.cooldown_min, a.dry_run, a.fork)
 
 
 if __name__ == "__main__":

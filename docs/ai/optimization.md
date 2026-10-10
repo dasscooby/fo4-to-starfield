@@ -35,3 +35,10 @@ keepModelInMemory=false) -> LM Studio 5.4 GB, RAM 71.4%, VRAM unchanged (10,890 
 OpenCode's own system prompt + tools is ~12K tokens; at 16K context it compacted and re-continued in a loop.
 Before: 16K, f16 KV cache, VRAM 10,952 MiB. After: 32K, q8_0 K/V cache + flash attention, VRAM 11,061 MiB (90.1%,
 below the 92% restrict level with a resident model). Twice the context for +109 MiB.
+
+### 2026-10-09 Claude: wake remote agents with a fresh session, not a fork
+Before: `wake_agent.py` forked Codex's last session; one headless turn reported **5,677,999 tokens used** (the
+whole long session history replayed) and, in the default read-only sandbox, could not fix or post anything.
+After: default is a fresh session with a short brief pointing at #32 / handoff / AGENTS.md, with workspace-write +
+network. `--fork` stays available when the old context is really needed. (After-measurement: next wake's
+`tokens used` line in its log.)
