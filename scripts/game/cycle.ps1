@@ -2,9 +2,14 @@
 # usage: cycle.ps1 -Staging <staging dir> -Starfield <game dir> -Cell FO4Port_Vault111Cryo -Shot <out.png> [-CellJson <cell.json>]
 # -CellJson: enter the cell with coc.ps1, which verifies the arrival at the cell's COC marker (needs FO4SF_PYTHON = a Python
 # with Pillow); exit 4 if the jump did not happen. Without it, coc is typed blind as before.
-# Starfield's "Use of certain console commands will disable achievements." popup (first console command of a session)
-# blocks the console until OK (E). It is detected by OCR and dismissed only when it is on screen: a blind E in game can
-# start a conversation (2026-10-10: the popup swallowed the coc; a fixed-time E had missed it).
+# Starfield's "Use of certain console commands will disable achievements." popup (2026-10-10, observed step by step):
+# - it opens together with the console, the first time the console is opened in a session (main menu or game);
+# - while the console is open, keys go to the console line, so E cannot close it; with the console closed, E does;
+# - in game it can be open but INVISIBLE and then swallows the keyboard (console, Tab, E) until it is closed.
+# So: open + close the console, then press E once (unless an activation prompt is under the crosshair: E would use it),
+# then OCR-check and press E again if it is still shown. (Earlier: the popup swallowed the coc; a fixed-time E missed it.)
+# coc from the main menu works but is unusable for tests: the blank character is pulled into the new-game start after a
+# few minutes (load screen, then a hang).
 param([Parameter(Mandatory)][string]$Staging, [Parameter(Mandatory)][string]$Starfield, [string]$Cell = 'FO4Port_Vault111Cryo',
       [string]$Shot = (Join-Path $env:TEMP 'fo4sf_cycle.png'), [string]$CellJson = '')
 $repo = Split-Path (Split-Path $PSScriptRoot); $sf = $Starfield
@@ -35,8 +40,17 @@ function Clear-AchievementsPopup {
 
 # main menu: Continue, clear load-time notices, wait for the save to load
 Send 'click:768,432|wait:6000|key:up|wait:700|key:enter|wait:2500|hold:e,300|wait:2500|hold:e,300|wait:45000'
-# first console command of the session (raises the popup on saves with achievements still on)
+function Prompt-Visible {
+  # an activation prompt (door, NPC, item) under the crosshair: E would use it
+  $tmp = Join-Path $env:TEMP 'fo4sf_prompt.png'
+  powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'shot.ps1') -Out $tmp | Out-Null
+  $py = if ($env:FO4SF_PYTHON) { $env:FO4SF_PYTHON } else { 'python' }
+  return ((& $py (Join-Path $PSScriptRoot 'prompt_visible.py') $tmp) -eq 'yes')
+}
+# first console opening of the session raises the popup (possibly invisible); close the console, then E closes the popup
 Send 'key:grave|wait:1500|type:fov 90|wait:300|key:enter|wait:2500|key:grave|wait:1500'
+if (Prompt-Visible) { Send 'move:300,0|wait:800' }           # look away from the prompt before E
+if (-not (Prompt-Visible)) { Send 'hold:e,300|wait:1500' } else { "activation prompt under the crosshair: E not pressed" }
 Clear-AchievementsPopup | Out-Null
 if ($CellJson) {
   $name = $Cell -replace '^FO4Port_', ''
