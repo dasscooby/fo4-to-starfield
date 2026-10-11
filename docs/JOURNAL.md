@@ -638,3 +638,19 @@ fixed obstacles. Evidence and field meanings: docs/ai/research-log.md "how Starf
   wrench (4) read back with bounds, tree leaves and mass matching to 1e-8. Vault 111 test build: **18** movable models
   (was 13); only multi-body objects stay fixed (3 skeletons, gear-room gate, oxygen tank: they need joints). Tests 266
   OK. Still not seen in game (the next test waits until the owner is away or says go).
+
+## 2026-10-10 In game: movable items and the Vault 114 skeleton door (owner away, said go)
+Test build `movable_v114` (Vault 114 only, PR #41 code: 97 movable models, 7 of them merged multi-body), entered with
+the fixed `cycle.ps1` (PR #42) and verified at the COC marker (0.0 m).
+- **Door `05C7DC` passes from both sides** (routes 26 and 27, OPEN prompt both): 25.60 -69.71 -> 25.80 -74.80 and
+  25.64 -72.95 -> 25.64 -67.63 (5.1 m and 5.3 m through). Before: blocked from both sides by the skeleton.
+- **The skeleton moved** (one rigid 115 kg body, phase A): placed at 25.39 -72.55 -15.82 (FO4 position / 70), read
+  back with `prid 02002E61` + `getpos` at 24.50 -72.89 -16.70: about 1 m sideways and 0.88 m down. The drop needs a
+  visual check (a lower area, or partly through the floor?); the spot is too dark in screenshots. Open question.
+- **A tin can is pushed by walking into it**: `02002CCB` 25.30 -67.10 -1.31 -> 24.74 -67.17 -1.30 after the
+  player walked into it for 1.6 s. Screenshots are too dark to show it; the console read-back is the evidence.
+- Status: dynamic bodies, MoveableStatic records and the walk-push are **verified in game** (one item, one ragdoll);
+  the skeleton's resting height is **unresolved**.
+- Popup (PR #42): it opens with the console; while the console is open, keys go to the console line; closing the
+  console and pressing E closes it. `coc` from the main menu loads cells without a save, but the blank character is
+  pulled into the new-game start after a few minutes (load screen, hang), so tests keep using the autosave.
