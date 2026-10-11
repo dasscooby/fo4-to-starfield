@@ -654,3 +654,8 @@ the fixed `cycle.ps1` (PR #42) and verified at the COC marker (0.0 m).
 - Popup (PR #42): it opens with the console; while the console is open, keys go to the console line; closing the
   console and pressing E closes it. `coc` from the main menu loads cells without a save, but the blank character is
   pulled into the new-game start after a few minutes (load screen, hang), so tests keep using the autosave.
+- **Skeleton drop explained (offline; someone was using the PC, so no game input).** The converted skeleton is drawn in
+  its skinned bind pose (standing, 1.88 m tall), while FO4 lays placed skeletons down with per-reference ragdoll data
+  (`XRGD`, 28 bytes per body; research log). So the phase A rigid skeleton spawns standing and topples, which is the
+  ~1 m slide and 0.88 m drop measured in game. Needed: `XRGD` in Fo4Export (Codex) and a posed bake on the converter
+  side (skin weights). Until then skeletons are movable but in the wrong pose; reported, not hidden.

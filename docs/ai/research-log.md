@@ -26,6 +26,22 @@ supported hypothesis / unresolved. Older research lives in docs/JOURNAL.md and d
   in-game test. Open: vanilla dynamic shapes also carry `hknpShapeMassProperties`; ours don't (not needed by Havok when
   the body has a mass distribution: **unresolved** until tested).
 
+## 2026-10-10 Claude: why the converted skeleton spawns standing (FO4 `XRGD` ragdoll pose)
+- Question: in game the rigid skeleton (Vault 114 `05C942`) ended about 1 m sideways and 0.88 m lower than placed. Why?
+- Method: render bounds vs collision bounds of the converted NIF; `XRGD` of the Vault 114 skeleton REFRs read straight
+  from Fallout4.esm (local script: linear record walk, zlib records, `recon.iter_subrecords`).
+- Evidence: the converted render mesh is the skinned mesh in its bind pose, a standing figure (z 0.01-1.88 m, 0.44 m
+  deep); the collision built from the NIF's bone nodes does not match it (y -0.54..0.92). FO4 lays placed skeletons down
+  with per-reference ragdoll data: `05C942` (SkeletonClothed01, 17 bodies) has `XRGD` of 476 bytes = 17 x 28; `05C94F`
+  (SkeletonBareBody01) 504 = 18 x 28. Entry: u8 0 (+3 bytes that look like garbage), 3 floats position, 3 floats
+  rotation; the first entry has position 0 and a rotation, the others bone-length offsets (13-33 game units) and
+  rotations in radians. Loose bone props (BonesSkull, BonesRibCage) have no `XRGD`. Mutagen's Fallout 4 library reads
+  it (`PlacedObject.RagdollData`, type `RagdollData`).
+- Status: "one 28-byte entry per ragdoll body, in body order, local position (game units) + rotation (radians)":
+  **supported hypothesis** (2 references; parent order and Euler convention unverified). Consequence: phase A spawns
+  skeletons in bind pose (standing) and they topple; FO4 shows them lying. Fix: export `XRGD` (Fo4Export, Codex's file)
+  and bake each placement's pose into its mesh and rigid body (needs skin weights: phase B work).
+
 ## 2026-10-10 Claude: Starfield dynamic compound bodies
 - Question: how does Starfield store one movable body made of several convex pieces (FO4 boxes, cones, tools)?
 - Method: field dumps (`hktagfile`) of vanilla single-body dynamic MiscItem / MoveableStatic NIFs; checks against the
