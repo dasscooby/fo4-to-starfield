@@ -25,6 +25,14 @@ public static class ReferenceExport
                 unknown = r.Primitive.Unknown,
                 type = r.Primitive.Type.ToString(), type_value = (int)r.Primitive.Type,
             },
+            // Preserve XRGD payload order, source game units/radians, and opaque bytes.
+            ragdoll = r.RagdollData == null || r.RagdollData.Count == 0 ? null : r.RagdollData.Select((entry, index) => new
+            {
+                index, bone_id = entry.BoneId,
+                unused = Convert.ToHexString(entry.Unused.Span),
+                pos = new[] { entry.Position.X, entry.Position.Y, entry.Position.Z },
+                rot = new[] { entry.Rotation.X, entry.Rotation.Y, entry.Rotation.Z },
+            }).ToArray(),
             open_by_default = r.OpenByDefault,
             ownership = r.Ownership == null ? null : new
             {
