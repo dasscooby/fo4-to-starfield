@@ -34,6 +34,7 @@ function Clear-AchievementsPopup {
   $tmp = Join-Path $env:TEMP 'fo4sf_popup.png'
   powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'shot.ps1') -Out $tmp | Out-Null
   $text = powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'ocr.ps1') -Image $tmp -X 390 -Y 285 -W 500 -H 60
+  if ($LASTEXITCODE -ne 0) { "popup OCR check failed (ocr.ps1 exit $LASTEXITCODE): nothing pressed"; exit 5 }   # fail closed
   if (($text | Out-String) -match 'achievement') { Send 'hold:e,300|wait:1500'; return $true }
   return $false
 }
@@ -45,7 +46,11 @@ function Prompt-Visible {
   $tmp = Join-Path $env:TEMP 'fo4sf_prompt.png'
   powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'shot.ps1') -Out $tmp | Out-Null
   $py = if ($env:FO4SF_PYTHON) { $env:FO4SF_PYTHON } else { 'python' }
-  return ((& $py (Join-Path $PSScriptRoot 'prompt_visible.py') $tmp) -eq 'yes')
+  $out = & $py (Join-Path $PSScriptRoot 'prompt_visible.py') $tmp 2>$null
+  if ($LASTEXITCODE -ne 0 -or @('yes', 'no') -notcontains "$out") {   # fail closed (QA 2026-10-10: a missing Pillow read as "no prompt")
+    "prompt check failed (python exit $LASTEXITCODE; set FO4SF_PYTHON to a Python with Pillow): nothing pressed"; exit 5
+  }
+  return ("$out" -eq 'yes')
 }
 # first console opening of the session raises the popup (possibly invisible); close the console, then E closes the popup
 Send 'key:grave|wait:1500|type:fov 90|wait:300|key:enter|wait:2500|key:grave|wait:1500'

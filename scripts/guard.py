@@ -8,7 +8,8 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SKIP_DIRS = {".git", "__pycache__", ".venv", "bin", "obj", ".vs", "node_modules"}
+SKIP_DIRS = {".git", "__pycache__", ".venv", "bin", "obj", ".vs", "node_modules",
+             ".claude"}      # agent worktrees (whole repo copies, untracked) live under .claude/worktrees
 BANNED_EXT = {
     ".ba2", ".bsa", ".esm", ".esp", ".esl", ".nif", ".dds", ".mesh", ".hkx", ".fuz", ".wem", ".xwm",
     ".bgsm", ".bgem", ".btd", ".btr", ".bto", ".cdb", ".pex", ".swf", ".exe", ".dll", ".7z", ".zip",
