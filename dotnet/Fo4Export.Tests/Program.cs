@@ -85,3 +85,32 @@ destinationCell.Persistent.Remove(destinationDoor);
 destinationCell.Temporary.Add(destinationDoor);
 Require(TeleportDependencies.Build(new[] { r }, new[] { ((ICellGetter)destinationCell, (string?)null) }).Single().destination_cell!.worldspace == null, "temporary interior destination lost");
 Console.WriteLine("Teleport dependency location checks passed.");
+
+// Synthetic XRGD entries retain their order and all payload fields, including opaque bytes.
+r.RagdollData = new();
+r.RagdollData.Add(new RagdollData
+{
+    BoneId = 17, Unused = new byte[] { 0x00, 0x80, 0xFF },
+    Position = new P3Float(70, -140, 210.5f), Rotation = new P3Float(-1.25f, 0.5f, 3.125f),
+});
+r.RagdollData.Add(new RagdollData
+{
+    BoneId = 3, Unused = new byte[] { 0xAB, 0xCD, 0xEF },
+    Position = new P3Float(-7, 8, 9), Rotation = new P3Float(0, -2, 1),
+});
+using var ragdollJson = JsonDocument.Parse(JsonSerializer.Serialize(ReferenceExport.Build(r, "MovableStatic", "SyntheticSkeleton", "synthetic.nif", false)));
+var pose = ragdollJson.RootElement.GetProperty("ragdoll");
+Require(pose.GetArrayLength() == 2, "ragdoll entries lost");
+Require(pose[0].GetProperty("index").GetInt32() == 0 && pose[1].GetProperty("index").GetInt32() == 1, "ragdoll order changed");
+Require(pose[0].GetProperty("bone_id").GetByte() == 17 && pose[1].GetProperty("bone_id").GetByte() == 3, "bone IDs changed");
+Require(pose[0].GetProperty("unused").GetString() == "0080FF" && pose[1].GetProperty("unused").GetString() == "ABCDEF", "opaque bytes lost");
+Require(pose[0].GetProperty("pos").EnumerateArray().Select(v => v.GetSingle()).SequenceEqual(new float[] { 70, -140, 210.5f }), "ragdoll game units changed");
+Require(pose[0].GetProperty("rot").EnumerateArray().Select(v => v.GetSingle()).SequenceEqual(new float[] { -1.25f, 0.5f, 3.125f }), "ragdoll radians changed");
+Require(pose[1].GetProperty("pos")[0].GetSingle() == -7 && pose[1].GetProperty("rot")[1].GetSingle() == -2, "second pose lost");
+Require(absent.RootElement.GetProperty("ragdoll").ValueKind == JsonValueKind.Null, "absent ragdoll invented");
+Console.WriteLine("Ragdoll export synthetic loss-free payload checks passed.");
+
+
+empty.RagdollData = new();
+using var emptyPose = JsonDocument.Parse(JsonSerializer.Serialize(ReferenceExport.Build(empty, "?", "", "", false)));
+Require(emptyPose.RootElement.GetProperty("ragdoll").ValueKind == JsonValueKind.Null, "empty ragdoll list invented");

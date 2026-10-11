@@ -601,3 +601,19 @@ open PRs (#34 QA PASS, #35 in progress), local team state, next steps. Removed a
 docs/ai/agent-status.md refreshed from live sources. Shut down: guardian proxy stopped, local model unloaded, no
 background jobs left. Next session: re-run Vault 81 and the library, finish the Prydwen (same pinned build), then
 movable bodies for loose items.
+
+
+## 2026-10-10 Codex: raw placement ragdoll export (#32)
+
+Added `ragdoll` to Fo4Export `ReferenceExport.Build`: ordered entries with zero-based
+`index`, `bone_id`, `unused` (uppercase hex), `pos` (source game units), and `rot`
+(source radians); absent and empty lists produce null. No pose interpretation or converter changes.
+Mutagen Fallout4 0.55.0-alpha.67 getter inspection exposes BoneId, Unused, Position,
+and Rotation (StaticRegistration is framework metadata, not a payload field).
+
+Evidence: `dotnet run --project dotnet/Fo4Export.Tests` synthetic two-entry fixture
+failed before the fix with missing `ragdoll`, then passed; covers distinct bone IDs,
+order, all position/rotation components, 00/80/FF opaque bytes, absent and empty lists.
+`python -m unittest discover -s tests` using the NumPy environment: 254 tests,
+one skipped, OK. `python scripts/guard.py`: OK. Vault114 source-plugin count
+verification pending input location; no in-game acceptance claimed.
