@@ -601,3 +601,61 @@ open PRs (#34 QA PASS, #35 in progress), local team state, next steps. Removed a
 docs/ai/agent-status.md refreshed from live sources. Shut down: guardian proxy stopped, local model unloaded, no
 background jobs left. Next session: re-run Vault 81 and the library, finish the Prydwen (same pinned build), then
 movable bodies for loose items.
+
+## 2026-10-10 Movable loose items (offline; owner at the PC, so no game input)
+FO4 loose items (one dynamic body: pencils, cans, clipboards) now convert as movable Starfield objects instead of
+fixed obstacles. Evidence and field meanings: docs/ai/research-log.md "how Starfield makes a body movable".
+- **Starfield side, decoded by name** with `hktagfile`: motionType 2, flags 0x8a, mass, a motion-properties entry and
+  a mass distribution (centre, volume of the shape grown by its convex radius, inertia per kg x 1.5: 30 of 30 vanilla
+  boxes). Movable set dressing is a **MoveableStatic** record (a Static never moves; the clutter layer alone does
+  nothing) and the NIF has BSXFlags 0x42.
+- **Converter:** `meshcollision.convert_bodies` writes a lone dynamic FO4 convex body on a vanilla dynamic item's
+  template (`fooddrink_set_container01_empty_lid.nif`, read from the user's install), with FO4's mass and layer and a
+  computed mass distribution; `convert_static` puts it on the root node; the manifest marks the item `movable`; the
+  plugin writer makes it a MoveableStatic (`DATA 4` as vanilla). Default on with `--starfield-data`;
+  `--static-items` turns it off.
+- **Not converted (reported, not hidden):** ragdolls and breakables (several bodies: need constraints, e.g. the Vault
+  114 skeleton), dynamic compound / mesh / sphere bodies, and dynamic bodies on child nodes stay static, listed in
+  `collision_report.dynamic_kept_static`.
+- **Correction:** an old comment in `sfcollision.py` called offset 240 the motion type; it is the collision layer
+  (232 flags, 264 motionType).
+- Offline check: TinCan01 5 kg, Clipboard01 4 kg, Pencil01 0.5 kg read back as dynamic bodies; the skeleton stays
+  static with 17 reasons. Tests 262 OK, guard OK. **Not yet seen in game** (next: build, deploy, push a can).
+- **First in-game attempt (2026-10-10 16:2x), aborted, nothing learned about pushing yet.** Test build
+  `C:\Modding\staging\movable_v111` (Vault 111 only: 219 models, 13 movable = coffee cups, beer bottles, folding chairs,
+  clipboards, tools; 10 dynamic-in-FO4 models kept static with reasons: skeletons, gear-room gate, and compound shapes
+  such as the cardboard box and traffic cone). `cycle.ps1` loaded the save but Starfield's "console commands disable
+  achievements" popup swallowed the `coc`; the follow-up `coc.ps1` was blocked by the focus guard (Explorer had focus;
+  also `FO4SF_PYTHON` was unset, so the HUD check had no Pillow). The owner closed the game. The pinned build
+  (`AC379C53` / `B8080348`) was redeployed and its hashes verified. Next attempt: set `FO4SF_PYTHON`, dismiss the
+  popup inside `cycle.ps1`, and only when the owner is away. Follow-up found by the build: dynamic **compound** bodies
+  (several convex parts: boxes, cones, hammers) are common and need one dynamic compound body, not several.
+- **Movable compounds (offline, owner at the PC).** FO4 loose items made of several convex pieces (cardboard boxes,
+  traffic cones, hammers, wrenches) now convert to one dynamic `hknpCompoundShape` body, laid out exactly as Starfield's
+  273 vanilla movable compounds (research log "Starfield dynamic compound bodies"); their mass distribution is the
+  compound's bounding box as a solid box, as vanilla. Dynamic bodies now use a vanilla compound item as the template
+  (`cb_blackmarketantiquities.nif`). Offline: the cardboard box (9 pieces, 5 kg), traffic cone (8), hammer (2) and
+  wrench (4) read back with bounds, tree leaves and mass matching to 1e-8. Vault 111 test build: **18** movable models
+  (was 13); only multi-body objects stay fixed (3 skeletons, gear-room gate, oxygen tank: they need joints). Tests 266
+  OK. Still not seen in game (the next test waits until the owner is away or says go).
+
+## 2026-10-10 In game: movable items and the Vault 114 skeleton door (owner away, said go)
+Test build `movable_v114` (Vault 114 only, PR #41 code: 97 movable models, 7 of them merged multi-body), entered with
+the fixed `cycle.ps1` (PR #42) and verified at the COC marker (0.0 m).
+- **Door `05C7DC` passes from both sides** (routes 26 and 27, OPEN prompt both): 25.60 -69.71 -> 25.80 -74.80 and
+  25.64 -72.95 -> 25.64 -67.63 (5.1 m and 5.3 m through). Before: blocked from both sides by the skeleton.
+- **The skeleton moved** (one rigid 115 kg body, phase A): placed at 25.39 -72.55 -15.82 (FO4 position / 70), read
+  back with `prid 02002E61` + `getpos` at 24.50 -72.89 -16.70: about 1 m sideways and 0.88 m down. The drop needs a
+  visual check (a lower area, or partly through the floor?); the spot is too dark in screenshots. Open question.
+- **A tin can is pushed by walking into it**: `02002CCB` 25.30 -67.10 -1.31 -> 24.74 -67.17 -1.30 after the
+  player walked into it for 1.6 s. Screenshots are too dark to show it; the console read-back is the evidence.
+- Status: dynamic bodies, MoveableStatic records and the walk-push are **verified in game** (one item, one ragdoll);
+  the skeleton's resting height is **unresolved**.
+- Popup (PR #42): it opens with the console; while the console is open, keys go to the console line; closing the
+  console and pressing E closes it. `coc` from the main menu loads cells without a save, but the blank character is
+  pulled into the new-game start after a few minutes (load screen, hang), so tests keep using the autosave.
+- **Skeleton drop explained (offline; someone was using the PC, so no game input).** The converted skeleton is drawn in
+  its skinned bind pose (standing, 1.88 m tall), while FO4 lays placed skeletons down with per-reference ragdoll data
+  (`XRGD`, 28 bytes per body; research log). So the phase A rigid skeleton spawns standing and topples, which is the
+  ~1 m slide and 0.88 m drop measured in game. Needed: `XRGD` in Fo4Export (Codex) and a posed bake on the converter
+  side (skin weights). Until then skeletons are movable but in the wrong pose; reported, not hidden.

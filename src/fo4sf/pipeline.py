@@ -87,8 +87,12 @@ class Converter:
     def __init__(self, src: Fo4Archives, staging: str, texconv_exe: str, content_resources: str,
                  collision_template: Optional[bytes] = None, prefix: str = "fo4port",
                  no_collision_pattern: str = r"^meshes[\\/](architecture|interiors|scol)[\\/]", rig_doors: bool = False,
-                 door_physics_donor: Optional[bytes] = None, sf_mesh_template: Optional[bytes] = None):
+                 door_physics_donor: Optional[bytes] = None, sf_mesh_template: Optional[bytes] = None,
+                 dynamic_template: Optional[bytes] = None):
         self.src, self.staging, self.texconv = src, staging, texconv_exe
+        # dynamic_template (a vanilla dynamic convex body, meshcollision.DYNAMIC_TEMPLATE_NIF): FO4 loose items with one
+        # dynamic body become movable; their result carries "movable" (plugin writer: MoveableStatic, not Static)
+        self.dynamic_template = dynamic_template
         # rig_doors: hinged doors become DOOR NIFs that open (needs door_physics_donor: without a keyframed leaf body the leaf
         # is pinned and blocks the doorway). Off by default because the donor comes from the Starfield install.
         self.rig_doors = rig_doors
@@ -460,7 +464,11 @@ class Converter:
                                                       include_skinned=True, report=coll_report,
                                                       sf_mesh_template=self.sf_mesh_template if use_box else None,
                                                       collision_template=self.collision_template if use_box else None,
-                                                      allow_guess=not no_guess)
+                                                      allow_guess=not no_guess,
+                                                      dynamic_template=self.dynamic_template if use_box else None)
+                if coll_report.get("motion") == "dynamic":
+                    res["movable"] = {"mass_kg": coll_report["mass_kg"],
+                                      **({"note": coll_report["motion_note"]} if "motion_note" in coll_report else {})}
                 if "door_not_opening" in res:
                     coll_report["source"] = "passable-door"   # deliberately none (see above), not a failed conversion
             for relp, data in files.items():

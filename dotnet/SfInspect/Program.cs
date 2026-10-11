@@ -2,6 +2,7 @@
 //   dotnet run -- <Starfield.esm> cells <substr>     interior cells (EditorID contains substr) + lighting template
 //   dotnet run -- <Starfield.esm> lights <substr>    LIGH records (EditorID contains substr) + radius/colour
 //   dotnet run -- <Starfield.esm> templates          lighting templates in use by interior cells (most used first)
+//   dotnet run -- <Starfield.esm> models "<a>|<b>"   every record (any type) using a model whose path contains a or b
 using Mutagen.Bethesda.Plugins.Cache;
 using Mutagen.Bethesda.Starfield;
 
@@ -35,6 +36,19 @@ switch (args[1])
         break;
     case "doors":
         foreach (var d in mod.Doors.Where(d => (d.Model?.File?.ToString() ?? "").Contains(args[2], StringComparison.OrdinalIgnoreCase)).Take(3))
+        {
+            Console.WriteLine($"== {d.EditorID} {d.FormKey} model={d.Model?.File}");
+            foreach (var p in d.GetType().GetProperties())
+            {
+                object? v; try { v = p.GetValue(d); } catch { continue; }
+                var s = v switch { null => "null", string str => str, System.Collections.IEnumerable e and not string => "[" + string.Join(", ", e.Cast<object>().Take(6)) + "]", _ => v.ToString() };
+                if (s != null && s.Length > 160) s = s.Substring(0, 160);
+                Console.WriteLine($"   {p.Name} = {s}");
+            }
+        }
+        break;
+    case "mstt":     // MoveableStatic records whose model contains the substring: every property (what vanilla fills in)
+        foreach (var d in mod.MoveableStatics.Where(d => (d.Model?.File?.ToString() ?? "").Contains(args[2], StringComparison.OrdinalIgnoreCase)).Take(3))
         {
             Console.WriteLine($"== {d.EditorID} {d.FormKey} model={d.Model?.File}");
             foreach (var p in d.GetType().GetProperties())
@@ -90,5 +104,12 @@ switch (args[1])
     case "lights":
         foreach (var l in mod.Lights.Where(l => (l.EditorID ?? "").Contains(args[2], StringComparison.OrdinalIgnoreCase)).Take(40))
             Console.WriteLine($"{l.EditorID}  {l.FormKey}  radius={l.Radius}  color={l.Color}  model={l.Model?.File}");
+        break;
+    case "models":   // every record (any type) whose model path contains one of the |-separated substrings
+        var wanted = args[2].Split('|');
+        foreach (var r in mod.EnumerateMajorRecords())
+            if (r is IModeledGetter m && m.Model?.File is { } file
+                && wanted.Any(w => file.ToString().Contains(w, StringComparison.OrdinalIgnoreCase)))
+                Console.WriteLine($"{r.GetType().Name.Replace("BinaryOverlay", "")}  {r.EditorID}  {r.FormKey}  model={file}");
         break;
 }

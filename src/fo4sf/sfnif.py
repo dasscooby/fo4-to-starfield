@@ -114,10 +114,12 @@ class StaticShape:
 
 def build_static_nif(node_name: bytes, shapes: List[StaticShape], bs_version: int = 173,
                      collision_blob: Optional[bytes] = None,
-                     child_collision_blobs: Optional[List[bytes]] = None) -> nifmod.NifFile:
+                     child_collision_blobs: Optional[List[bytes]] = None,
+                     bsx_flags: Optional[int] = None) -> nifmod.NifFile:
     """A static prop NIF laid out like vanilla `setdressing` props: NiNode, BSXFlags, [bhkNPCollisionObject,
     bhkPhysicsSystem,] then per shape BSGeometry + NiIntegerExtraData("MaterialID") + BSLightingShaderProperty
-    (named by its .mat path). The root node owns the collision object; BSXFlags is 2 when there is collision."""
+    (named by its .mat path). The root node owns the collision object; BSXFlags is 2 when there is collision
+    (bsx_flags overrides it: 0x42 for a movable item)."""
     f = nifmod.NifFile(endian=1, user_version=12, bs_version=bs_version, author=b"\x00", unknown_int=0,
                        export_script=b"\x00", sf_data=b"\x7a\x00")
     s_node = f.string_index(node_name)
@@ -131,7 +133,9 @@ def build_static_nif(node_name: bytes, shapes: List[StaticShape], bs_version: in
     coll_ref = 2 if collision_blob is not None else -1
     f.add_block("NiNode", struct.pack("<iIiiI", s_node, 1, 1, -1, 0xE) + ident
                 + struct.pack("<iI", coll_ref, len(children)) + struct.pack(f"<{len(children)}i", *children))
-    f.add_block("BSXFlags", struct.pack("<iI", s_bsx, 2 if (collision_blob is not None or extra) else 0))
+    if bsx_flags is None:
+        bsx_flags = 2 if (collision_blob is not None or extra) else 0
+    f.add_block("BSXFlags", struct.pack("<iI", s_bsx, bsx_flags))
     if collision_blob is not None:
         f.add_block("bhkNPCollisionObject", struct.pack("<iHiI", 0, 0x80, 3, 0))      # target = root node, data = block 3
         f.add_block("bhkPhysicsSystem", struct.pack("<I", len(collision_blob)) + collision_blob)
