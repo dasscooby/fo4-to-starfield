@@ -76,6 +76,7 @@ PLACEHOLDERS = {
                                               # out, so the command has 5 m or more to close (an actor already under
                                               # 10 m at the go has arrived on its own; Codex review of #560)
     "p9u_seconds": 900.0,                     # P9u (the actor comes to a loaded player from beyond the loaded area):
+    "p9u_s_per_m": 2.0,                       # within max(900 s, 2 s per metre of the go's distance: 0.5 m/s on average)
     "p9u_unloaded_m": 100.0,                  # arrives within 900 s with 100 m (a cell) or more made while unloaded; on
                                               # 1 Nov an actor 270 m from the player read unloaded, so 440 m leaves ~160
     "p10_start_window_s": 10.0,               # P10: the quest must start within 10 s (rt) of the send
@@ -1976,7 +1977,7 @@ def check_p9u(c: Collection) -> Verdict:
     samples after the go run forward in time with no step faster than p9_jump_m_per_s (an actor the engine moves in
     jumps, loaded or not, is abstract travel, not a walk: review of 861714e0), the actor made p9u_unloaded_m or more of
     progress toward the marker between samples that both read unloaded, and a sample comes under p9_arrive_m (3D)
-    within p9u_seconds of the go. Never FAIL: an actor that does not come is a finding about how the engine treats
+    within max(p9u_seconds, p9u_s_per_m x the go's distance) of the go (a 900 m start: 1800 s). Never FAIL: an actor that does not come is a finding about how the engine treats
     actors out of the loaded area, not about the converted navmesh (P9 asks that with the actor loaded). The 1 Nov
     package rung read smooth positions while unloaded, from about 270 m from the player."""
     v = Verdict("p9u", INCONCLUSIVE)
@@ -2041,7 +2042,9 @@ def check_p9u(c: Collection) -> Verdict:
                                "p90": round(gaps[min(len(gaps) - 1, int(len(gaps) * 0.9))], 2),
                                "max": round(gaps[-1], 2)}
     v.extra["closest_m"] = round(min(r[1] for r in rows), 1)
-    hit = next((r for r in rows if r[1] < P["p9_arrive_m"] and r[0] <= P["p9u_seconds"]), None)
+    window = max(P["p9u_seconds"], P["p9u_s_per_m"] * go)  # 2 Nov 2026: a 900 m start walks ~1100 m at ~1 m/s
+    v.extra["window_s"] = round(window, 1)
+    hit = next((r for r in rows if r[1] < P["p9_arrive_m"] and r[0] <= window), None)
     v.extra["arrived_at_s"] = round(hit[0], 1) if hit else None
     # a rate, as P9's: a jump inside a long gap (a Papyrus delay of 10 s) must exceed 150 m to show (review of 909c43f2)
     jump = next((st for st in steps if st[0] > P["p9_jump_m_per_s"]), None)
@@ -2059,7 +2062,7 @@ def check_p9u(c: Collection) -> Verdict:
                          "the loaded area")
         return v
     if hit is None:
-        v.reasons.append(f"no sample under {P['p9_arrive_m']:g} m within {P['p9u_seconds']:g} s (closest "
+        v.reasons.append(f"no sample under {P['p9_arrive_m']:g} m within {window:g} s (closest "
                          f"{v.extra['closest_m']} m after {progress:.0f} m of progress while unloaded): the actor did "
                          "not arrive in time, which is the engine's handling of actors out of the loaded area, not a "
                          "navmesh verdict")

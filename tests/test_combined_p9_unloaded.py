@@ -55,6 +55,7 @@ class P9UnloadedTests(unittest.TestCase):
         self.assertEqual(v.verdict, PASS, v.to_dict())
         self.assertEqual(v.extra["unloaded_progress_m"], 136.0)           # 410 m to 274 m, then loaded again
         self.assertLess(v.extra["arrived_at_s"], P["p9u_seconds"])
+        self.assertEqual(v.extra["window_s"], P["p9u_seconds"])           # 450 m: the 900 s floor
         self.assertEqual(v.extra["unloaded_from_m"], 410.0)                 # 40 m walked before the player went back
         self.assertEqual(v.extra["sample_gap_s"], {"median": 2.0, "p90": 2.0, "max": 2.0})   # the tracker's 2 s
         self.assertEqual(v.extra["max_step_m_per_s"], 2.0)
@@ -85,6 +86,16 @@ class P9UnloadedTests(unittest.TestCase):
         self.assertEqual(v.verdict, INCONCLUSIVE, v.to_dict())
         self.assertLess(v.extra["closest_m"], P["p9_arrive_m"])
         self.assertIsNone(v.extra["arrived_at_s"])
+        self.assertTrue(any("did not arrive in time" in r for r in v.reasons), v.reasons)
+
+    def test_the_window_grows_with_the_start_distance(self):
+        # 2 Nov 2026: a 900 m start; 0.8 m/s arrives after about 1100 s, inside 2 s per metre (1800 s), not inside 900 s
+        v = judge(out_of_range(walk(start=900.0, speed=0.8, seconds=1800)))
+        self.assertEqual(v.verdict, PASS, v.to_dict())
+        self.assertEqual(v.extra["window_s"], 1800.0)
+        self.assertGreater(v.extra["arrived_at_s"], P["p9u_seconds"])
+        v = judge(out_of_range(walk(start=900.0, speed=0.45, seconds=2200)))  # about 2000 s: past 1800
+        self.assertEqual(v.verdict, INCONCLUSIVE, v.to_dict())
         self.assertTrue(any("did not arrive in time" in r for r in v.reasons), v.reasons)
 
     def test_a_start_under_400_m_does_not_count(self):

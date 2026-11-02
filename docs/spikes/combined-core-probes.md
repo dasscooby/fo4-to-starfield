@@ -619,7 +619,7 @@ Judge `probes p9u`, which never says FAIL:
 - PASS: a link driver whose package took, a go to the tracked marker 400 m or more out, samples that run forward in
   time with no step faster than 15 m/s (`p9_jump_m_per_s`, as P9), 100 m or more of progress toward the marker
   between samples that both read unloaded (`p9u_unloaded_m`), and a sample under 10 m within 900 s of the go
-  (`p9u_seconds`).
+  (`p9u_seconds`), or 2 s per metre of the go's distance when that is longer (`p9u_s_per_m`: 1800 s from 900 m).
 - INCONCLUSIVE otherwise, with the reason. The reason may be jumps (an engine that moves an unloaded actor abstractly,
   or only when it loads again, which is what positions that froze while unloaded end in), too little travel while
   unloaded, or no arrival in time. None of these is about the converted navmesh, which P9 judges with the actor
