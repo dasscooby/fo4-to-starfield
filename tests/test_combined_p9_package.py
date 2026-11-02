@@ -168,7 +168,7 @@ class P9PackageDriverTests(unittest.TestCase):
     def test_still_periods_are_reported_with_the_package_and_the_player(self):
         # 1 Nov 2026 (#644): loaded actors stood 95-200 s mid-route and walked on; the judge lists such spans
         self.assertEqual(probes.check_p9(col(log=drive(driver="link", package=PATROL))).extra["still_periods"], [])
-        lines = [re.sub(r" dist=", f" package={PATROL} player_m=25.000000 dist=", ln) if " p9 sample " in ln else ln
+        lines = [re.sub(r" dist=", f" package={PATROL} player_m=80.000000 dist=", ln) if " p9 sample " in ln else ln
                  for ln in drive(driver="link", package=PATROL, stuck_from=100)]
         v = probes.check_p9(col(log=lines))
         still = v.extra["still_periods"]
@@ -176,8 +176,30 @@ class P9PackageDriverTests(unittest.TestCase):
         self.assertEqual(still[0]["from_s"], 98.0)                  # the go at rt 1.5; the last step lands at t=98
         self.assertGreaterEqual(still[0]["for_s"], 500.0)
         self.assertEqual(still[0]["packages"], [str(PATROL)])
-        self.assertEqual(still[0]["player_m"], [25.0, 25.0])
-        self.assertEqual(v.verdict, probes.FAIL, v.to_dict())       # stuck 500 s while loaded: P9's own rule, unchanged
+        self.assertEqual(still[0]["player_m"], [80.0, 80.0])
+        self.assertEqual(v.verdict, probes.FAIL, v.to_dict())       # stuck 500 s while loaded, the player far: P9's rule
+
+    def test_a_stop_with_the_player_near_is_never_stuck(self):
+        # owner, 1 Nov 2026 (#644): within about 30 m the NPC's own behaviour may take over; such a stop is listed but
+        # is no navmesh FAIL. The same stop with the player 80 m off stays FAIL (the test above)
+        def with_player(lines, near_from=None):
+            out = []
+            for ln in lines:
+                if " p9 sample " in ln:
+                    t = float(re.search(r" t=([\d.]+)", ln)[1])
+                    m = 20.0 if near_from is None or t >= near_from else 80.0
+                    ln = re.sub(r" dist=", f" package={PATROL} player_m={m:.6f} dist=", ln)
+                out.append(ln)
+            return out
+        stuck = drive(driver="link", package=PATROL, stuck_from=100)
+        v = probes.check_p9(col(log=with_player(stuck)))                      # near the whole time
+        self.assertNotEqual(v.verdict, probes.FAIL, v.to_dict())
+        self.assertFalse(any("stuck" in r for r in v.reasons), v.reasons)
+        self.assertEqual(v.extra["still_periods"][0]["player_m"], [20.0, 20.0])
+        v = probes.check_p9(col(log=with_player(stuck, near_from=400)))       # far for 300 s of the stop, then near
+        self.assertEqual(v.verdict, probes.FAIL, v.to_dict())                 # 300 s far is stuck all the same
+        v = probes.check_p9(col(log=drive(driver="link", package=PATROL, stuck_from=100)))
+        self.assertEqual(v.verdict, probes.FAIL, v.to_dict())                 # no player_m= (logs before 1 Nov): as before
 
     def test_the_old_scripted_go_reads_as_before(self):
         v = probes.check_p9(col(log=drive(driver="script")))
