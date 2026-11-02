@@ -76,7 +76,7 @@ PLACEHOLDERS = {
                                               # out, so the command has 5 m or more to close (an actor already under
                                               # 10 m at the go has arrived on its own; Codex review of #560)
     "p9u_seconds": 900.0,                     # P9u (the actor comes to a loaded player from beyond the loaded area):
-    "p9u_s_per_m": 2.0,                       # within max(900 s, 2 s per metre of the go's distance: 0.5 m/s on average)
+    "p9u_s_per_m": 2.0,                       # within max(900 s, 2 s per metre of the go's distance: 0.5 m/s)
     "p9u_unloaded_m": 100.0,                  # arrives within 900 s with 100 m (a cell) or more made while unloaded; on
                                               # 1 Nov an actor 270 m from the player read unloaded, so 440 m leaves ~160
     "p10_start_window_s": 10.0,               # P10: the quest must start within 10 s (rt) of the send
@@ -1977,9 +1977,10 @@ def check_p9u(c: Collection) -> Verdict:
     samples after the go run forward in time with no step faster than p9_jump_m_per_s (an actor the engine moves in
     jumps, loaded or not, is abstract travel, not a walk: review of 861714e0), the actor made p9u_unloaded_m or more of
     progress toward the marker between samples that both read unloaded, and a sample comes under p9_arrive_m (3D)
-    within max(p9u_seconds, p9u_s_per_m x the go's distance) of the go (a 900 m start: 1800 s). Never FAIL: an actor that does not come is a finding about how the engine treats
-    actors out of the loaded area, not about the converted navmesh (P9 asks that with the actor loaded). The 1 Nov
-    package rung read smooth positions while unloaded, from about 270 m from the player."""
+    within max(p9u_seconds, p9u_s_per_m x the go's distance) of the go (a 900 m start: 1800 s). Never FAIL: an
+    actor that does not come is a finding about how the engine treats actors out of the loaded area, not about the
+    converted navmesh (P9 asks that with the actor loaded). On 2 Nov the actor walked unloaded from 643 m and was
+    loaded again from about 470 m; from 710 m and 899 m the engine moved it in one step (#644, #670)."""
     v = Verdict("p9u", INCONCLUSIVE)
     v.extra["settles"] = "whether an actor travels to a loaded player from beyond the loaded area (P9u)"
     P = PLACEHOLDERS

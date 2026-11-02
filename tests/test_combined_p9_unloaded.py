@@ -96,7 +96,12 @@ class P9UnloadedTests(unittest.TestCase):
         self.assertGreater(v.extra["arrived_at_s"], P["p9u_seconds"])
         v = judge(out_of_range(walk(start=900.0, speed=0.45, seconds=2200)))  # about 2000 s: past 1800
         self.assertEqual(v.verdict, INCONCLUSIVE, v.to_dict())
-        self.assertTrue(any("did not arrive in time" in r for r in v.reasons), v.reasons)
+        self.assertTrue(any("did not arrive in time" in r and "within 1800 s" in r for r in v.reasons), v.reasons)
+        # the floor (review of c51e7074): from 420 m, 2 s per metre is 840 s; an arrival at about 870 s still counts
+        v = judge(out_of_range(walk(start=420.0, speed=0.47, seconds=1000)))
+        self.assertEqual(v.verdict, PASS, v.to_dict())
+        self.assertEqual(v.extra["window_s"], P["p9u_seconds"])
+        self.assertGreater(v.extra["arrived_at_s"], 2 * 420.0)
 
     def test_a_start_under_400_m_does_not_count(self):
         # 300 m out, unloaded from 260 m to 150 m (110 m): every other gate holds
