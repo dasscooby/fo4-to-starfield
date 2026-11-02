@@ -421,7 +421,18 @@ class ScriptContractTests(unittest.TestCase):
         for s in ("a.SetLinkedRef(None)", "a.EvaluatePackage()", '"p9 link cleared actor="'):
             self.assertIn(s, end)
         shadow = fn("Function Shadow(int actorId, float seconds, float behind) global")
-        self.assertIn("p.SetPosition(a.GetPositionX() - behind, a.GetPositionY(), a.GetPositionZ() + 5.0)", shadow)
+        # 5 m above the higher of the actor and the player: run A2 (1 Nov) put the player under the quarry rim
+        self.assertIn("p.SetPosition(a.GetPositionX() + ux * behind, a.GetPositionY() + uy * behind, az + 5.0)", shadow)
+        # behind = back along the line from the marker through the actor, any route direction (the owner, 1 Nov: the
+        # east route crosses the quarry, which a scripted event changes); -X without a marker, as before
+        self.assertIn("ObjectReference dest = q.P9Dest", shadow)
+        self.assertIn("float ux = -1.0", shadow)
+        self.assertLess(shadow.index("if adx >= ady"), shadow.index("p.SetPosition("))   # the main axis, no Math
+        self.assertLess(shadow.index("if adx + ady > 1.0"), shadow.index("if adx >= ady"))  # at the marker: keep the last
+        self.assertLess(shadow.index("az = a.GetPositionZ()"), shadow.index("if pz > az"))
+        self.assertLess(shadow.index("if pz > az"), shadow.index("az = pz"))
+        self.assertLess(shadow.index("az = pz"), shadow.index("p.SetPosition("))
+        self.assertIn('"p9 shadow rim actor="', shadow)
         self.assertNotIn("a.SetPosition", shadow)                              # never the walking actor
         self.assertNotIn("a.MoveTo", shadow)
         self.assertIn("Utility.Wait(5.0)", shadow)
@@ -429,6 +440,19 @@ class ScriptContractTests(unittest.TestCase):
         # reopened it and the game sat paused)
         self.assertLess(shadow.index("Utility.Wait(3.0)"), shadow.index("p.SetPosition("))
         self.assertIn('"p9 shadow done actor="', shadow)
+
+    def test_p9_samples_log_the_package_and_the_player_with_dist_last(self):
+        # 1 Nov 2026 (#644): loaded actors stood still 95-200 s mid-route; each sample now says what the actor ran and
+        # how far the player was. dist= stays last: the sessions read the sample's dist with a greedy pattern
+        body = QUEST[QUEST.index("Function P9Sample()"):]
+        body = body[:body.index("EndFunction")]
+        line = next(ln for ln in body.splitlines() if '"p9 sample t="' in ln)
+        self.assertIn('" package=" + Id(pk)', line)
+        self.assertIn('" player_m=" + a.GetDistance(Game.GetPlayer())', line)
+        self.assertTrue(line.rstrip().endswith('" dist=" + dist)'), line)
+        self.assertNotIn("pdist", line)
+        self.assertLess(body.index("Actor act = a as Actor"), body.index("pk = act.GetCurrentPackage()"))
+        self.assertLess(body.index("if act != None"), body.index("pk = act.GetCurrentPackage()"))
 
     def test_p9_dest_is_snapped_to_the_ground_and_logs_the_drop(self):
         # #663 review: P9Track's distance is 3D; a marker left at the player's height floats where the land falls

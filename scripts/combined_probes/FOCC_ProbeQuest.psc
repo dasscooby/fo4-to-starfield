@@ -469,7 +469,14 @@ Function P9Sample()
     ObjectReference a = p9Actor
     p9Elapsed = Utility.GetCurrentRealTime() - p9StartRT   ; real seconds: a late timer must not stretch the deadline
     float dist = a.GetDistance(P9Dest)
-    Trace("p9 sample t=" + p9Elapsed + " actor=" + a.GetFormID() + " pos=" + a.GetPositionX() + " " + a.GetPositionY() + " " + a.GetPositionZ() + " cell=" + Id(a.GetParentCell()) + " loaded=" + a.Is3DLoaded() + " dist=" + dist)
+    ; package= and player_m=: what the actor ran and how far the player was, every sample (1 Nov 2026: loaded actors
+    ; stood still 95-200 s mid-route with nothing else in the log, #644); dist= stays last (the sessions read it)
+    Actor act = a as Actor
+    Package pk = None
+    if act != None
+        pk = act.GetCurrentPackage()
+    endif
+    Trace("p9 sample t=" + p9Elapsed + " actor=" + a.GetFormID() + " pos=" + a.GetPositionX() + " " + a.GetPositionY() + " " + a.GetPositionZ() + " cell=" + Id(a.GetParentCell()) + " loaded=" + a.Is3DLoaded() + " package=" + Id(pk) + " player_m=" + a.GetDistance(Game.GetPlayer()) + " dist=" + dist)
     if dist < 10.0 || p9Elapsed >= p9Seconds
         Trace("p9 done t=" + p9Elapsed + " dist=" + dist)
         p9Actor = None

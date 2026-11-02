@@ -65,6 +65,8 @@ PLACEHOLDERS = {
     "p9_min_cells": 4,                        # P9: distinct parent cells among the samples
     "p9_stuck_m": 2.0,                        # P9: dist unchanged within 2 m ...
     "p9_stuck_s": 120.0,                      # ... for 120 s while loaded = stuck
+    "p9_player_near_m": 35.0,                 # ... and the player farther than 35 m: a stop near the player is the NPC's
+                                              # own behaviour (owner, 1 Nov 2026; #644: pauses only within ~30 m)
     "p9_jump_m_per_s": 15.0,                  # P9: faster than this between samples reads as a teleport, not a walk
     "p9_progress_m": 20.0,                    # P9: a FAIL needs the actor this much closer on its own route (N1c's
                                               # uncommanded drift reached 14.06 m) ...
@@ -1356,6 +1358,30 @@ def _p9_continuous(samples: list[Event], origin: Event) -> bool | None:
     return sum(1 for r in rows if r[3] is True) / len(rows) >= 0.5
 
 
+def _p9_still_periods(samples: list[Event], origin_rt: float | None, min_s: float = 30.0) -> list[dict]:
+    """Where a rung's actor stood still: spans of min_s or more whose positions stay within p9_stuck_m of the span's
+    first, with the seconds since the origin (the go, else the start), the distance to the marker and, from the
+    samples that log them (since 1 Nov 2026), the packages the actor ran and how far the player was. Readings only:
+    on 1 Nov loaded actors stood 95-200 s mid-route and walked on, with nothing else in the log (#644)."""
+    rows = [(e.rt, pos(e), e) for e in samples if e.rt is not None and pos(e) is not None]
+    out, i = [], 0
+    while i < len(rows):
+        j = i
+        while j + 1 < len(rows) and (sum((a - b) ** 2 for a, b in zip(rows[i][1], rows[j + 1][1])) ** 0.5
+                                      <= PLACEHOLDERS["p9_stuck_m"]):
+            j += 1
+        span = rows[j][0] - rows[i][0]
+        if span >= min_s:
+            part = [r[2] for r in rows[i:j + 1]]
+            player = [d for d in (e.num("player_m") for e in part) if d is not None]
+            out.append({"from_s": round(rows[i][0] - origin_rt, 1) if origin_rt is not None else None,
+                        "for_s": round(span, 1), "dist_m": part[0].num("dist"),
+                        "packages": sorted({e.fields["package"] for e in part if "package" in e.fields}),
+                        "player_m": [round(min(player), 1), round(max(player), 1)] if player else None})
+        i = j + 1
+    return out
+
+
 def _p9_attempts(evs: list[Event], starts: list[Event]) -> list[dict]:
     """One summary per `p9 start` in the log, oldest first: the ladder's rungs. A start's track is the started actor's
     samples up to its own `p9 done` or the next start. driver "script" when FOCC_P9Drive.Go sent this actor inside the
@@ -1483,6 +1509,12 @@ def check_p9(c: Collection) -> Verdict:
     attempts = _p9_attempts(evs, starts)        # the ladder's rungs, for the record (docs/spikes/combined-core-probes.md)
     v.extra["attempts"] = attempts
     latest = attempts[-1]
+    seg = [e for e in evs if e.line > latest["line"]]
+    seg_done = _by_kind(seg, "p9 done")[:1]
+    v.extra["still_periods"] = _p9_still_periods(
+        [e for e in _by_kind(seg, "p9 sample") if (not seg_done or e.line < seg_done[0].line)
+         and e.form("actor") == latest["actor"] and (latest["go_line"] is None or e.line > latest["go_line"])],
+        latest["go_rt"] if latest["go_rt"] is not None else latest["rt"])
     driver = latest["driver"]
     v.extra["driver"] = P9_DRIVERS.get(driver, "none logged (a console command, or none)")
     wanted = _p9_wanted(latest)
@@ -1647,10 +1679,14 @@ def check_p9(c: Collection) -> Verdict:
     if len(cells) <= 1 and rows[-1][0] >= P["p9_seconds"]:
         failed = ([], f"the actor never left its first cell {first_cell} within {P['p9_seconds']} s")
     else:
-        # Stuck: dist within 2 m of a value for 120 s while loaded.
+        # Stuck: dist within 2 m of a value for 120 s while loaded and the player is not near. Near the player the NPC's
+        # own behaviour may take over (reactions, combat): on 1 Nov loaded actors stood 40-220 s only with the player
+        # within about 30 m, and walked straight through with the player 83 m off (#644). Samples before 1 Nov carry no
+        # player_m= and count as before.
         anchor = rows[0]
         for r in rows:
-            if abs(r[1] - anchor[1]) > P["p9_stuck_m"] or r[4] is not True:
+            near = r[5].num("player_m") is not None and r[5].num("player_m") < P["p9_player_near_m"]
+            if abs(r[1] - anchor[1]) > P["p9_stuck_m"] or r[4] is not True or near:
                 anchor = r
             elif r[0] - anchor[0] >= P["p9_stuck_s"]:
                 failed = ([anchor[5], r[5]], f"dist stayed within {P['p9_stuck_m']} m of {anchor[1]:.1f} for "

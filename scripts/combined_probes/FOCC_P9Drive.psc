@@ -149,9 +149,15 @@ Function LinkEnd(int actorId) global
     q.Trace("p9 link cleared actor=" + a.GetFormID() + " package=" + q.Id(a.GetCurrentPackage()))
 EndFunction
 
-; Keeps the actor loaded on a long rung: every 5 s, for `seconds`, the player is set `behind` metres short of the actor
-; along -X (the card's routes run east along +X) and 5 m up (tgm: the fall is harmless), so the actor stays inside the
-; loaded cells; the 1 Nov 330 m walk was unloaded in 79 of 130 samples. It moves only the player, never the actor.
+; Keeps the actor loaded on a long rung: every 5 s, for `seconds`, the player is set `behind` metres back from the
+; actor along the main axis of the line from the marker (P9Dest) through the actor, so a route east, west, north or
+; south works (the sessions hop along one axis; no square root: Math is unverified in Starfield; without a marker,
+; along -X as before), 5 m above the higher of the actor and the player (tgm: the fall is harmless), so the actor stays
+; inside the loaded cells; the 1 Nov 330 m walk was unloaded in 79 of 130 samples. It moves only the player, never the
+; actor. The higher of the two: on 1 Nov (run A2) the actor stepped 6 m down into the dry quarry east of Red Rocket and
+; stopped there, and the actor's height + 5 m put the player about 2 m under the ground on the rim behind it; the
+; player's own height (on that rim, a hop ago) keeps it above. Each hop where the player stands more than 5 m above
+; the actor is logged (`p9 shadow rim`). The owner (1 Nov): that quarry changes by a scripted event; routes avoid it.
 ; The first hop waits 3 s: on the PC (1 Nov) a hop typed in a console batch closed the console, and the batch's closing
 ; key then reopened it, pausing the game (both long rungs). The wait lets the batch close the console first.
 ;   cgf "FOCC_P9Drive.Shadow" <actor id, signed decimal> <seconds> <behind m>
@@ -170,8 +176,52 @@ Function Shadow(int actorId, float seconds, float behind) global
     float t0 = Utility.GetCurrentRealTime()
     int hops = 0
     q.Trace("p9 shadow start actor=" + a.GetFormID() + " seconds=" + seconds + " behind=" + behind)
+    ObjectReference dest = q.P9Dest
+    float ux = -1.0
+    float uy = 0.0
+    float dx = 0.0
+    float dy = 0.0
+    float adx = 0.0
+    float ady = 0.0
+    float az = 0.0
+    float pz = 0.0
     while Utility.GetCurrentRealTime() - t0 < seconds
-        p.SetPosition(a.GetPositionX() - behind, a.GetPositionY(), a.GetPositionZ() + 5.0)
+        if dest != None
+            dx = a.GetPositionX() - dest.GetPositionX()
+            dy = a.GetPositionY() - dest.GetPositionY()
+            adx = dx
+            if adx < 0.0
+                adx = -dx
+            endif
+            ady = dy
+            if ady < 0.0
+                ady = -dy
+            endif
+            if adx + ady > 1.0
+                ux = 0.0
+                uy = 0.0
+                if adx >= ady
+                    ux = 1.0
+                    if dx < 0.0
+                        ux = -1.0
+                    endif
+                else
+                    uy = 1.0
+                    if dy < 0.0
+                        uy = -1.0
+                    endif
+                endif
+            endif
+        endif
+        az = a.GetPositionZ()
+        pz = p.GetPositionZ()
+        if pz > az
+            if pz > az + 5.0                  ; where the old rule (the actor's height + 5 m) put the player underground
+                q.Trace("p9 shadow rim actor=" + a.GetFormID() + " actor_z=" + az + " player_z=" + pz)
+            endif
+            az = pz
+        endif
+        p.SetPosition(a.GetPositionX() + ux * behind, a.GetPositionY() + uy * behind, az + 5.0)
         hops += 1
         Utility.Wait(5.0)
     endwhile
