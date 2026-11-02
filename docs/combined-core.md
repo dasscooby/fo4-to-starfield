@@ -396,12 +396,12 @@ our GAMMA." New items continue the design's numbering (CC-60 to CC-62 are in the
 
   - Loaded (on the measured route the loaded area reached about 470 m from the player: the 643 m run's actor
     read loaded again from 473 m): it walks the converted navmesh across cells at about 1.2 m/s and arrives (P9 PASS
-    twice: 439 m, 7 cells, 440 s and 443 s). Near the player it may stand still: in the runs that logged the player's
-    distance, stops of 40-92 s came with the player 18-30 m away and none with the player 83 m off; earlier runs,
-    with the follow helper set 25 m behind, had stops of up to 220 s. The package never changed during the logged
-    stops, so their cause is not logged, and a cause at the destination is not excluded (three of the four longest
-    stops were 27-31 m from the marker). The owner's call: stops near the player are acceptable, and P9's stuck rule
-    ignores stops within 35 m.
+    twice: 439 m, 7 cells, 440 s and 443 s). Near the player it may stand still: in the P9 loaded runs that logged
+    the player's distance, stops of 40-92 s came with the player 18-30 m away and none with the player 83 m off;
+    earlier runs, with the follow helper set 25 m behind, had stops of up to 220 s. The package never changed during
+    the logged stops, so their cause is not logged, and a cause at the destination is not excluded (three of the four
+    longest stops were 27-31 m from the marker). The owner's call: stops near the player are acceptable, and P9's
+    stuck rule ignores stops within 35 m.
   - Unloaded, out to somewhere between 643 m and 710 m: the engine still walks it at about 1 m/s (`cell` reads none
     while unloaded, as in every unloaded sample) and hands it back cleanly at the loaded edge (P9u PASS from 643 m).
   - Farther out the engine's handling turns abstract. From 710 m the actor walked 151 m unloaded as before, then, when
