@@ -2007,6 +2007,7 @@ def check_p9u(c: Collection) -> Verdict:
     v.extra["closest_m"] = round(min(r[1] for r in rows), 1)
     hit = next((r for r in rows if r[1] < P["p9_arrive_m"] and r[0] <= P["p9u_seconds"]), None)
     v.extra["arrived_at_s"] = round(hit[0], 1) if hit else None
+    # a rate, as P9's: a jump inside a long gap (a Papyrus delay of 10 s) must exceed 150 m to show (review of 909c43f2)
     jump = next((st for st in steps if st[0] > P["p9_jump_m_per_s"]), None)
     if jump is not None:
         sp, a, b = jump

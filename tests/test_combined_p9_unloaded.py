@@ -129,9 +129,16 @@ class P9UnloadedTests(unittest.TestCase):
         no_flag = [re.sub(r" loaded=\w+", "", ln) if " p9 sample " in ln else ln for ln in passing]
         backwards = [re.sub(r"rt=([\d.]+) p9 sample", lambda m: f"rt={float(m[1]) - 1000:.1f} p9 sample", ln)
                      for ln in passing]
+        rows = [i for i, ln in enumerate(passing) if " p9 sample " in ln]
+        stalled_clock = list(passing)                                       # one sample repeats its predecessor's rt
+        prev_rt = re.search(r"rt=([\d.]+)", passing[rows[40]])[1]
+        stalled_clock[rows[41]] = re.sub(r"rt=[\d.]+", f"rt={prev_rt}", passing[rows[41]])
+        late_back = list(passing)                                           # the clock steps back partway
+        late_back[rows[60]] = re.sub(r"rt=[\d.]+", "rt=50.0", passing[rows[60]])
         for name, lines in {"another actor": other, "another actor after the done": mixed,
                             "samples after the done": early_done, "no loaded flag": no_flag,
-                            "clock before the go": backwards}.items():
+                            "clock before the go": backwards, "clock stands still": stalled_clock,
+                            "clock steps back partway": late_back}.items():
             with self.subTest(name):
                 v = judge(lines)
                 self.assertEqual(v.verdict, INCONCLUSIVE, v.to_dict())
