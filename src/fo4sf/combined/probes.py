@@ -50,7 +50,7 @@ from . import sidecar
 
 PASS, FAIL, INCONCLUSIVE = "PASS", "FAIL", "INCONCLUSIVE"
 _RANK = {PASS: 0, FAIL: 1, INCONCLUSIVE: 2}
-PROBES = ("p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10", "b0")
+PROBES = ("p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p9u", "p10", "b0")
 
 # Placeholder thresholds (plan item 8): labelled in every verdict that uses them, never design numbers.
 PLACEHOLDERS = {
@@ -73,6 +73,9 @@ PLACEHOLDERS = {
     "p9_control_min_m": 15.0,                 # P9: a scripted control's `p9 go` must find the actor at least this far
                                               # out, so the command has 5 m or more to close (an actor already under
                                               # 10 m at the go has arrived on its own; Codex review of #560)
+    "p9u_seconds": 900.0,                     # P9u (the actor comes to a loaded player from beyond the loaded area):
+    "p9u_unloaded_m": 100.0,                  # arrives within 900 s with 100 m (a cell) or more made while unloaded; on
+                                              # 1 Nov an actor 270 m from the player read unloaded, so 440 m leaves ~160
     "p10_start_window_s": 10.0,               # P10: the quest must start within 10 s (rt) of the send
     "float_eq": 1e-3,                         # readback equals value within this
 }
@@ -1929,8 +1932,92 @@ def check_b0(c: Collection) -> Verdict:
     return v
 
 
+def check_p9u(c: Collection) -> Verdict:
+    """P9u, the owner's design (1 Nov 2026): does an actor travel to the player while it is out of the loaded area? The
+    marker is on the ground at the player's feet; the player hops about 440 m out, spawns the actor there, links it to
+    the marker (FOCC_P9Drive.Link, Starfield's DefaultMaster_PatrolPackage) while it is loaded so the package line can
+    show the link took, and hops back. PASS: that package took, the go found the actor p9_start_m or more out, the
+    actor made p9u_unloaded_m or more of progress toward the marker between samples that both read unloaded, and a
+    sample comes under p9_arrive_m (3D) within p9u_seconds of the go. Never FAIL: an actor that does not come is a
+    finding about how the engine treats actors out of the loaded area, not about the converted navmesh (P9 asks that
+    with the actor loaded). Positions read while unloaded may be coarse: the largest step is reported, not judged.
+    The 1 Nov package rung read smooth positions while unloaded, from about 270 m from the player."""
+    v = Verdict("p9u", INCONCLUSIVE)
+    v.extra["settles"] = "whether an actor travels to a loaded player from beyond the loaded area (P9u)"
+    P = PLACEHOLDERS
+    v.extra["placeholders"] = {k: P[k] for k in P if k.startswith(("p9u_", "p9_arrive", "p9_start"))}
+    evs = c.session(1)
+    if evs is None:
+        v.reasons.append("no log (focc.0.log)")
+        return v
+    starts = _by_kind(evs, "p9 start")
+    if not starts:
+        v.reasons.append("no `p9 start` line")
+        return v
+    attempts = _p9_attempts(evs, starts)
+    v.extra["attempts"] = attempts
+    latest = attempts[-1]
+    if latest["driver"] != "link":
+        v.reasons.append(f"the latest rung's driver is {latest['driver'] or 'none logged'}, not FOCC_P9Drive.Link")
+        return v
+    if latest["package_after_go"] != _p9_wanted(latest):
+        v.reasons.append(f"the `p9 package` line of the go names {latest['package_raw'] or 'nothing'}, not "
+                         f"{P9_PACKAGE_NAMES.get(_p9_wanted(latest) or '', 'the driver package')}: the link did not take")
+        return v
+    if not latest["to_dest"]:
+        v.reasons.append("the go does not name the tracked marker (target=dest with the `p9 dest` id)")
+        return v
+    go = latest["go_dist_m"]
+    if go is None or go < P["p9_start_m"] or latest["go_rt"] is None:
+        v.reasons.append(f"the go found the actor {go} m out (want {P['p9_start_m']:g} m or more, with its rt)")
+        return v
+    end = starts[-1].line
+    track = [e for e in evs if e.line > end]
+    done = _by_kind(track, "p9 done")[:1]
+    samples = [e for e in _by_kind(track, "p9 sample") if e.line > latest["go_line"]
+               and (not done or e.line < done[0].line) and e.form("actor") == latest["actor"]]
+    rows = [(e.rt - latest["go_rt"], e.num("dist"), e.flag("loaded"), pos(e), e) for e in samples
+            if e.rt is not None and e.num("dist") is not None]
+    if len(rows) < 2:
+        v.reasons.append(f"{len(rows)} usable samples after the go")
+        return v
+    out = [(a, b) for a, b in zip(rows, rows[1:]) if a[2] is False and b[2] is False]
+    progress = sum(a[1] - b[1] for a, b in out)
+    v.extra["unloaded_share"] = round(sum(r[2] is False for r in rows) / len(rows), 3)
+    v.extra["unloaded_progress_m"] = round(progress, 1)
+    v.extra["unloaded_from_m"] = next((round(r[1], 1) for r in rows if r[2] is False), None)
+    steps = [(((b[3][0] - a[3][0]) ** 2 + (b[3][1] - a[3][1]) ** 2) ** 0.5) / (b[0] - a[0])
+             for a, b in zip(rows, rows[1:]) if a[3] and b[3] and b[0] > a[0]]
+    v.extra["max_step_m_per_s"] = round(max(steps), 1) if steps else None
+    # the tracker asks for a sample every 2 s (P9_SAMPLE): longer gaps are the Papyrus VM running late, the cheap
+    # in-log reading of what the living world costs the scripts (owner, 1 Nov 2026: watch the cost as tests grow)
+    gaps = sorted(b[0] - a[0] for a, b in zip(rows, rows[1:]))
+    v.extra["sample_gap_s"] = {"median": round(gaps[len(gaps) // 2], 2), "max": round(gaps[-1], 2)}
+    v.extra["closest_m"] = round(min(r[1] for r in rows), 1)
+    hit = next((r for r in rows if r[1] < P["p9_arrive_m"] and r[0] <= P["p9u_seconds"]), None)
+    v.extra["arrived_at_s"] = round(hit[0], 1) if hit else None
+    if progress < P["p9u_unloaded_m"]:
+        v.reasons.append(f"{progress:.0f} m of progress while unloaded (want {P['p9u_unloaded_m']:g} m; unloaded in "
+                         f"{v.extra['unloaded_share']:.0%} of the samples"
+                         + (f", arrived after {hit[0]:.0f} s" if hit else "") + "): this does not show travel beyond "
+                         "the loaded area")
+        return v
+    if hit is None:
+        v.reasons.append(f"no sample under {P['p9_arrive_m']:g} m within {P['p9u_seconds']:g} s (closest "
+                         f"{v.extra['closest_m']} m after {progress:.0f} m of progress while unloaded): the actor did "
+                         "not arrive in time, which is the engine's handling of actors out of the loaded area, not a "
+                         "navmesh verdict")
+        return v
+    v.cite(hit[4])
+    v.reasons.append(f"came from {go:.0f} m with {progress:.0f} m of the way made while unloaded, to {hit[1]:.1f} m of "
+                     f"the marker in {hit[0]:.0f} s")
+    v.verdict = PASS
+    return v
+
+
 CHECKS = {"p1": check_p1, "p2": check_p2, "p3": check_p3, "p4": check_p4, "p5": check_p5,
-          "p6": check_p6, "p7": check_p7, "p8": check_p8, "p9": check_p9, "p10": check_p10, "b0": check_b0}
+          "p6": check_p6, "p7": check_p7, "p8": check_p8, "p9": check_p9, "p9u": check_p9u, "p10": check_p10,
+          "b0": check_b0}
 
 
 def check(probe: str, c: Collection) -> Verdict:
@@ -1971,7 +2058,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="python -m fo4sf.combined.probes",
                                  description="judge a combined-core probe from its collected text; exit 0 PASS, "
                                              "1 FAIL, 2 INCONCLUSIVE")
-    ap.add_argument("check", help="p1..p10, b0, all, hex2dec, dec2hex")
+    ap.add_argument("check", help="p1..p10, p9u, b0, all, hex2dec, dec2hex")
     ap.add_argument("path", nargs="?", help="collection folder or a single log file (or the id to convert)")
     ap.add_argument("--collect", help="collection folder (same as the positional path)")
     a = ap.parse_args(argv)
