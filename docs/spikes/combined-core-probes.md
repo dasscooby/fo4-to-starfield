@@ -610,27 +610,31 @@ Run it after the loaded walk (P9 with `Shadow`) passes on the same kit. Each new
 first, then unloaded (owner, 1 Nov 2026).
 
 The player stays at the start. `P9Dest 0.0 0.0` puts the marker on the ground at the player's feet, where the cell is
-loaded and the snap works. The player then hops about 440 m east, 220 m at a time with `tgm`, spawns the actor there
-and reads its id. `P9Track <id> 900` and `FOCC_P9Drive.Link <id> 0` run while the actor is still loaded, so its
-`p9 package` line can name `DefaultMaster_PatrolPackage`. Then the player hops back and waits, with no `Shadow`. The kit
-is P9's; only the judge and the session change.
+loaded and the snap works. The player then hops 660 m east, 220 m at a time with `tgm` (up to z 250 and a fall:
+z 140 was checked to 440 m out on 1 Nov, the ground farther out was not), spawns the actor there and reads its id. `P9Track <id> 900` and `FOCC_P9Drive.Link <id> 0` run while the actor is still loaded, so its
+`p9 package` line can name `DefaultMaster_PatrolPackage`; without that line the session skips the wait. Then the
+player hops back and waits, with no `Shadow`. The kit is P9's; only the judge and the session change.
 
 Judge `probes p9u`, which never says FAIL:
-- PASS: a link driver whose package took, a go to the tracked marker 400 m or more out, 100 m or more of progress
-  toward the marker between samples that both read unloaded (`p9u_unloaded_m`), and a sample under 10 m within 900 s
-  of the go (`p9u_seconds`).
-- INCONCLUSIVE otherwise, with the reason. The reason may be positions that froze while unloaded (an engine that moves
-  the actor only when it loads again), too little travel while unloaded, or no arrival in time. None of these is about
-  the converted navmesh, which P9 judges with the actor loaded.
+- PASS: a link driver whose package took, a go to the tracked marker 400 m or more out, samples that run forward in
+  time with no step faster than 15 m/s (`p9_jump_m_per_s`, as P9), 100 m or more of progress toward the marker
+  between samples that both read unloaded (`p9u_unloaded_m`), and a sample under 10 m within 900 s of the go
+  (`p9u_seconds`).
+- INCONCLUSIVE otherwise, with the reason. The reason may be jumps (an engine that moves an unloaded actor abstractly,
+  or only when it loads again, which is what positions that froze while unloaded end in), too little travel while
+  unloaded, or no arrival in time. None of these is about the converted navmesh, which P9 judges with the actor
+  loaded.
 
-Why 100 m: on 1 Nov the package rung's actor read unloaded from about 270 m from the player, and its positions kept
-moving smoothly while unloaded. A 440 m start therefore leaves about 160 m of the way outside the loaded area. A
-longer unloaded stretch needs a farther start: 660 m hops three times, and 900 s still covers it at the 1 Nov pace of
-about 1.1 m/s.
+Why 100 m and 660 m: on 1 Nov the package rung's actor read unloaded from about 270 m from the player, and its
+positions kept moving smoothly while unloaded. The actor also walks while the player hops back (about 53 s a hop on
+1 Nov), and stays loaded until the player is two hops away: about 55-80 m. A 440 m start would leave about 100 m
+unloaded, right at the bar (review of 861714e0); 660 m leaves about 300 m, and 900 s still covers the walk at the
+1 Nov pace of about 1.1 m/s.
 
 Cost: the session also logs the game's CPU and memory by phase (a read-only sampler beside the session). The judge
-reports the tracker's sample gaps (`sample_gap_s`): the tracker asks for a sample every 2 s, so longer gaps are Papyrus
-running late. Quote both with the result and compare them with the loaded run. What an off-screen world costs is the
+reports the tracker's sample gaps (`sample_gap_s`: median, p90, max): the tracker asks for a sample every 2 s, so
+longer gaps are Papyrus running late. The console pauses during the hops back stretch a few gaps; read the median and
+p90. Quote both with the result and compare them with the loaded run. What an off-screen world costs is the
 next question as the tests grow (owner, 1 Nov 2026).
 
 ## P1: SFSE sidecar on save and load (last)

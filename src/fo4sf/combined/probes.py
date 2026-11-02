@@ -1934,14 +1934,15 @@ def check_b0(c: Collection) -> Verdict:
 
 def check_p9u(c: Collection) -> Verdict:
     """P9u, the owner's design (1 Nov 2026): does an actor travel to the player while it is out of the loaded area? The
-    marker is on the ground at the player's feet; the player hops about 440 m out, spawns the actor there, links it to
-    the marker (FOCC_P9Drive.Link, Starfield's DefaultMaster_PatrolPackage) while it is loaded so the package line can
-    show the link took, and hops back. PASS: that package took, the go found the actor p9_start_m or more out, the
-    actor made p9u_unloaded_m or more of progress toward the marker between samples that both read unloaded, and a
-    sample comes under p9_arrive_m (3D) within p9u_seconds of the go. Never FAIL: an actor that does not come is a
-    finding about how the engine treats actors out of the loaded area, not about the converted navmesh (P9 asks that
-    with the actor loaded). Positions read while unloaded may be coarse: the largest step is reported, not judged.
-    The 1 Nov package rung read smooth positions while unloaded, from about 270 m from the player."""
+    marker is on the ground at the player's feet; the player hops out (660 m by default), spawns the actor there, links
+    it to the marker (FOCC_P9Drive.Link, Starfield's DefaultMaster_PatrolPackage) while it is loaded so the package line
+    can show the link took, and hops back. PASS: that package took, the go found the actor p9_start_m or more out, the
+    samples after the go run forward in time with no step faster than p9_jump_m_per_s (an actor the engine moves in
+    jumps, loaded or not, is abstract travel, not a walk: review of 861714e0), the actor made p9u_unloaded_m or more of
+    progress toward the marker between samples that both read unloaded, and a sample comes under p9_arrive_m (3D)
+    within p9u_seconds of the go. Never FAIL: an actor that does not come is a finding about how the engine treats
+    actors out of the loaded area, not about the converted navmesh (P9 asks that with the actor loaded). The 1 Nov
+    package rung read smooth positions while unloaded, from about 270 m from the player."""
     v = Verdict("p9u", INCONCLUSIVE)
     v.extra["settles"] = "whether an actor travels to a loaded player from beyond the loaded area (P9u)"
     P = PLACEHOLDERS
@@ -1981,21 +1982,39 @@ def check_p9u(c: Collection) -> Verdict:
     if len(rows) < 2:
         v.reasons.append(f"{len(rows)} usable samples after the go")
         return v
+    if rows[0][0] < 0 or any(b[0] <= a[0] for a, b in zip(rows, rows[1:])):
+        v.reasons.append("the samples' real time does not run forward from the go: the track cannot be timed")
+        return v
+
+    def speed(a, b):            # 3D between positions as P9 measures it; |change of dist| (a floor) without them
+        if a[3] and b[3]:
+            return sum((x - y) ** 2 for x, y in zip(a[3], b[3])) ** 0.5 / (b[0] - a[0])
+        return abs(b[1] - a[1]) / (b[0] - a[0])
+    steps = [(speed(a, b), a, b) for a, b in zip(rows, rows[1:])]
+    v.extra["max_step_m_per_s"] = round(max(st[0] for st in steps), 1)
     out = [(a, b) for a, b in zip(rows, rows[1:]) if a[2] is False and b[2] is False]
     progress = sum(a[1] - b[1] for a, b in out)
     v.extra["unloaded_share"] = round(sum(r[2] is False for r in rows) / len(rows), 3)
     v.extra["unloaded_progress_m"] = round(progress, 1)
     v.extra["unloaded_from_m"] = next((round(r[1], 1) for r in rows if r[2] is False), None)
-    steps = [(((b[3][0] - a[3][0]) ** 2 + (b[3][1] - a[3][1]) ** 2) ** 0.5) / (b[0] - a[0])
-             for a, b in zip(rows, rows[1:]) if a[3] and b[3] and b[0] > a[0]]
-    v.extra["max_step_m_per_s"] = round(max(steps), 1) if steps else None
     # the tracker asks for a sample every 2 s (P9_SAMPLE): longer gaps are the Papyrus VM running late, the cheap
-    # in-log reading of what the living world costs the scripts (owner, 1 Nov 2026: watch the cost as tests grow)
+    # in-log reading of what the living world costs the scripts (owner, 1 Nov 2026: watch the cost as tests grow).
+    # The session's console pauses during the hops back stretch a few gaps too: the median and p90 are the reading.
     gaps = sorted(b[0] - a[0] for a, b in zip(rows, rows[1:]))
-    v.extra["sample_gap_s"] = {"median": round(gaps[len(gaps) // 2], 2), "max": round(gaps[-1], 2)}
+    v.extra["sample_gap_s"] = {"median": round(gaps[len(gaps) // 2], 2),
+                               "p90": round(gaps[min(len(gaps) - 1, int(len(gaps) * 0.9))], 2),
+                               "max": round(gaps[-1], 2)}
     v.extra["closest_m"] = round(min(r[1] for r in rows), 1)
     hit = next((r for r in rows if r[1] < P["p9_arrive_m"] and r[0] <= P["p9u_seconds"]), None)
     v.extra["arrived_at_s"] = round(hit[0], 1) if hit else None
+    jump = next((st for st in steps if st[0] > P["p9_jump_m_per_s"]), None)
+    if jump is not None:
+        sp, a, b = jump
+        state = {True: "loaded", False: "unloaded", None: "unread"}
+        v.reasons.append(f"moved in jumps: {sp:.0f} m/s between {a[0]:.0f} s and {b[0]:.0f} s after the go "
+                         f"({state[a[2]]} to {state[b[2]]}; over {P['p9_jump_m_per_s']:g} m/s reads as a teleport): "
+                         "abstract travel, not a walk out of the loaded area")
+        return v
     if progress < P["p9u_unloaded_m"]:
         v.reasons.append(f"{progress:.0f} m of progress while unloaded (want {P['p9u_unloaded_m']:g} m; unloaded in "
                          f"{v.extra['unloaded_share']:.0%} of the samples"
