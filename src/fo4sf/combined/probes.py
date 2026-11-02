@@ -2001,7 +2001,8 @@ def check_p9u(c: Collection) -> Verdict:
         return v
     if latest["package_after_go"] != _p9_wanted(latest):
         v.reasons.append(f"the `p9 package` line of the go names {latest['package_raw'] or 'nothing'}, not "
-                         f"{P9_PACKAGE_NAMES.get(_p9_wanted(latest) or '', 'the driver package')}: the link did not take")
+                         f"{P9_PACKAGE_NAMES.get(_p9_wanted(latest) or '', 'the driver package')}: "
+                         "the link did not take")
         return v
     if not latest["to_dest"]:
         v.reasons.append("the go does not name the tracked marker (target=dest with the `p9 dest` id)")
