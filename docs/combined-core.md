@@ -394,14 +394,14 @@ our GAMMA." New items continue the design's numbering (CC-60 to CC-62 are in the
   player's start to the spawn point (the session logs 643.1, 710 and 898.5 m; the judges print the distance to the
   marker at the go: 652, 712 and 898 m). One run per distance.
 
-  - Loaded (on the measured route the loaded area reached about 470 m from the player: the 643 m run's actor read
-    loaded again from 473 m): it walks the converted navmesh across cells at about 1.2 m/s and arrives (P9 PASS twice:
-    439 m, 7 cells, 440 s and 443 s). Near the player it may stand still: 40 s and 78 s with the player logged 18-30 m
-    away during the stops (package DefaultMaster_PatrolPackage throughout, so their cause is not logged), and up to
-    220 s in earlier runs whose follow helper was set 25 m behind (those runs log no player distance or package, and
-    their long stops were all 27-31 m from the marker, so a cause at the marker is not excluded); with the player 83 m
-    off it never stopped. The owner's call: stops near the player are acceptable, and P9's stuck rule ignores stops
-    within 35 m.
+  - Loaded (on the measured route the loaded area reached about 470 m from the player: the 643 m run's actor
+    read loaded again from 473 m): it walks the converted navmesh across cells at about 1.2 m/s and arrives (P9 PASS
+    twice: 439 m, 7 cells, 440 s and 443 s). Near the player it may stand still: in the runs that logged the player's
+    distance, stops of 40-92 s came with the player 18-30 m away and none with the player 83 m off; earlier runs,
+    with the follow helper set 25 m behind, had stops of up to 220 s. The package never changed during the logged
+    stops, so their cause is not logged, and a cause at the destination is not excluded (three of the four longest
+    stops were 27-31 m from the marker). The owner's call: stops near the player are acceptable, and P9's stuck rule
+    ignores stops within 35 m.
   - Unloaded, out to somewhere between 643 m and 710 m: the engine still walks it at about 1 m/s (`cell` reads none
     while unloaded, as in every unloaded sample) and hands it back cleanly at the loaded edge (P9u PASS from 643 m).
   - Farther out the engine's handling turns abstract. From 710 m the actor walked 151 m unloaded as before, then, when
@@ -410,10 +410,10 @@ our GAMMA." New items continue the design's numbering (CC-60 to CC-62 are in the
 
   So the L2/L3 split is set by measurement, not by the engine's unloaded handling: L2 owns a travelling actor's
   position while it is outside the loaded area; L3 materializes the real actor only inside it (a conservative 400 m)
-  at the simulated position and hands over with the linked-ref walk. Cost: with one walking actor the game averaged 5-7% of
-  the machine's CPU per phase (peaks 13-15% while loading, 8.5-10% while walking) and stayed under 8.6 GB in every run
-  (no run without an actor was measured as a baseline); how
-  many actors a cell carries is still the open load-scaling probe.
+  at the simulated position and hands over with the linked-ref walk. Cost: with one walking actor the game
+  averaged 5-7% of the machine's CPU per phase (peaks 13-15% while loading, under 10% while walking) and stayed under
+  8.6 GB in every run (no run without an actor was measured as a baseline); how many actors a cell carries is still
+  the open load-scaling probe.
 - **CC-64. Travel between areas without walking paths.** The converted worlds (L0) will be separate worldspaces or
   interiors, not one continuous map, so the core needs a travel layer between them: the player moves area to area,
   and the sim moves squads, caravans and news along the same links. Open: how the player travels (map, vertibird or
