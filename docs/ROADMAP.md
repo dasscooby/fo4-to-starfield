@@ -7,6 +7,39 @@ comes after the current testing, and it is the brief Codex and Grok work from. S
 Two independent reviews of this document (17 Oct) are folded in; their corrections are the reason several claims
 below are narrower than the first draft.
 
+## Update, 1 November 2026: since phase 0 closed (24 October)
+
+Only an in-game PASS on the installed build counts as in game; everything else says offline, in review or next.
+
+- **Living world (combined core).** The 28 Oct calls are in [decisions.md](ai/decisions.md): the whole Commonwealth
+  runs offline in the Python reference model, a 20-place slice goes in game first, and in game the simulation is a
+  C++ port inside our SFSE plugin with the same results as the Python model. Probes on the PC (28 Oct,
+  [results](spikes/combined-core-probes.md)): P2, P3's keyword half, P4 to P8 (P7 minimal, its vendor half
+  deferred) and P10 **done** (PASS); P3's cell half and P9 (one actor walking 450 m) INCONCLUSIVE; no P1 verdict yet
+  (the SFSE sidecar). The C++ port, steps 1 to C5 (#649, #651 to #654, held to byte-identical output after every
+  tick), and its Windows build (#656, byte parity at C5) are **in review**.
+- **New game.** Our own start (the new game's quest is Starfield's startup quest) passed run 4 on 31 Oct: newgame_v12
+  booted and ran from Vault 111 to the surface (stage 200); MQ101 was not running when checked, and the owner reported "v12 worked fine"
+  ([vault111-start.md section 13b](newgame/vault111-start.md)). v11's boot crash came from a script doc comment over
+  4 KB (supported hypothesis, section 13a; v12's clean boot with the comment short fits it; the 3 KB rule in
+  decisions.md). **Next** (the owner's start picks, decisions.md 1 Nov): the start picked in the launcher, with two
+  test starts; the pre-war vault after that, built only once the owner has seen its design.
+- **Map markers.** One reload once every marker is in (#624) and a dark screen until the reload is back (#626), so the
+  Commonwealth's icons are on the first map the player opens. The owner's play test on 31 Oct: "ok everything worked
+  only issue left will be solved with the pipboy"; its log shows the hold ending with the reload
+  ([map-markers.md](terrain/map-markers.md), Dark hold). Which issue is left for the Pip-Boy was not said.
+- **Strip Starfield down** (the owner, 29 Oct: "too many things are breaking because we are forcing ourselves into the Starfield system").
+  Decided (decisions.md, 29 Oct and 1 Nov): our own planet inside Sol, in Earth's orbit in the end, with no other
+  planets and those hidden from the star map by our own overrides; our own start (above); the quieting switches go
+  straight into the mod; the landing pad and its ship records go; a vanilla baseline New Game tells our errors from
+  Starfield's ([baseline.md](testing/baseline.md)). The planet probe's run 1 (29 Oct,
+  [planet-probe.md section 8](planet/planet-probe.md)) loaded our planet from our records, but our persistent test
+  references stayed in the base world, our biome map was not read (supported) and the location-chain check asked one
+  way only (version 2 asks both). **Next**: probe run 2, the vanilla baseline run, hiding the other planets, dropping
+  the pad.
+- **Launcher.** It can update its own checkout from main, opt-in (#637). **In review**: an FO4SF game folder beside the
+  player's Starfield that the launcher installs into and plays from (issue #645; #647 with #657 and #660).
+
 ## Update, 22 October 2026: the current phase, what closes it, and what is left
 
 The owner approved the next phases and their order on 19 October (the roadmap page, "yes to all"). The roadmap
@@ -186,8 +219,8 @@ or moves to the next phase without blocking it. Items 1 to 6 below carry the det
   start ([section 13](newgame/vault111-start.md)). Installed, newgame_v11 crashed the game on every launch while it
   loaded its data files (29 to 31 Oct): its quest script's doc comment had grown past 4 KB, and the crash dump points
   at Starfield's script loader copying it into a 4 KB buffer (supported hypothesis); newgame_v10 boots and played to
-  stage 200 on 31 Oct ([section 13a](newgame/vault111-start.md)). Next: restage newgame_v12 (v11 with that comment
-  short) from main, reinstall on the owner's line, new game from the main menu.
+  stage 200 on 31 Oct ([section 13a](newgame/vault111-start.md)). newgame_v12 (v11 with that comment short, #623)
+  booted and passed run 4 to stage 200 on 31 Oct, our own start end to end ([section 13b](newgame/vault111-start.md)).
 - **The animated doors port, phase 2** (DoorAnim): #489 merged (main f48d340); the PC cards (compile5, the
   doors_anim_b00 port build, the read-only elevator read) are queued after cards J, K and L and had not run at 00:15
   UTC 23 Oct; the owner's line "Install the animated doors port." follows a passing build. Step C (the exterior side)
@@ -228,8 +261,8 @@ a phase 0 gate.
 - "Install the quest probe plugin.": not needed; the probe went in on the owner's 00:14 UTC word (23 Oct)
 - "Install the new game." (**done 28 Oct, FAIL twice, then PASS to stage 200 with newgame_v9**: the pirate-fight
   developer start, a load that never finished, then run 3, vault111-start.md sections 10 to 12; newgame_v11 crashed
-  at every launch, section 13a; the next line, after the newgame_v12 restage from main, our own start with v10's fixes:
-  "Reinstall the new game.")
+  at every launch, section 13a; "Reinstall the new game." (**done 31 Oct, PASS to stage 200 with newgame_v12**, our
+  own start, section 13b))
 - "Install the animated doors port." (after the port build passes)
 - "Turn off FO4SFMission and install the combined-core probe for one test session." (after the restage from main; #431 is merged)
 - the b10 line: Interiors words it after card 1b passes
