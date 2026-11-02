@@ -388,12 +388,28 @@ our GAMMA." New items continue the design's numbering (CC-60 to CC-62 are in the
   near the player. Open: where its state lives in the save (probes P1 to P3, CC-02); the tick in game (P5); how far
   out actors are real (the design's L2/L3 split); how many squads a cell can carry, which no probe measures yet (P4
   only spawns and removes three actors, judging spawn reliability and save growth; a load-scaling probe is needed).
+  **How far out actors are real, measured (P9 and P9u, 2 Nov 2026, #644; judges in #663 and #669).** One citizen on
+  the converted Commonwealth was sent by its linked ref alone (`SetLinkedRef` and `EvaluatePackage`; Starfield's
+  `DefaultMaster_PatrolPackage` then walks it; no alias package, no `PathToReference`):
+  - Loaded (on the measured route the loaded area reached about 450 m from the player): it walks the converted navmesh
+    across cells at about 1.2 m/s and arrives (P9 PASS twice: 439 m, 7 cells, 440 s). Within about 30 m of the player
+    its own behaviour may stop it for up to minutes; the owner's call is that this is fine near the player (reactions,
+    combat), and P9's stuck rule ignores such stops.
+  - Unloaded, out to somewhere between 643 m and 710 m: the engine still walks it at about 1 m/s and hands it back
+    cleanly at the loaded edge (P9u PASS from 643 m).
+  - Farther out the engine fakes the travel: from 710 m it placed the actor 41 m from the player in one 437 m step;
+    from 899 m it parked it outside the world (no cell) for good. One run per distance.
+  So the L2/L3 split is set by measurement, not by the engine's unloaded handling: L2 owns a travelling actor's
+  position while it is outside the loaded area; L3 materializes the real actor only inside it (a conservative 400 m)
+  at the simulated position and hands over with the linked-ref walk. Cost of one walking actor: nothing measurable
+  (the game at about 7% of the machine's CPU and 8.5 GB in every run); how many actors a cell carries is still the
+  open load-scaling probe.
 - **CC-64. Travel between areas without walking paths.** The converted worlds (L0) will be separate worldspaces or
   interiors, not one continuous map, so the core needs a travel layer between them: the player moves area to area,
   and the sim moves squads, caravans and news along the same links. Open: how the player travels (map, vertibird or
   ship (CC-61), a scripted transition (NG-9), doors); how much time passes and what can happen on the way; how
-  off-screen movement between worldspaces is shown. P9 does not answer this: it drives one console actor with
-  `PathToRef` across one converted exterior (actor pathing only, the travel-package variant deferred).
+  off-screen movement between worldspaces is shown. P9 does not answer this: it drives one actor by its linked ref
+  across one converted exterior (actor pathing within one worldspace; CC-63 has the measured numbers).
   Building note (owner): a large place may be better built as an interior than as an exterior; check how Starfield
   and its mods build their big city spaces (the owner named Cydonia and the city people compare to Cyberpunk) before
   choosing, place by place.

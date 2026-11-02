@@ -1368,3 +1368,17 @@ decided the import path); keeping the order as a parameter (two orders in the co
   swap at play, journaled, which works whether or not the game follows the `LOCALAPPDATA` variable (H2). The
   folder-INI saves and Papyrus keys rely on the game reading its folder's Starfield.ini (H3). Whether the copied folder
   starts at all (H1) is the first PC check, docs/ai/fo4sf-instance.md section 4.
+## 2026-11-02: travelling actors are real only inside the loaded area; near the player their own behaviour may rule (owner and Claude)
+- **Decision:** the A-Life layer (CC-63) moves a travelling actor itself (L2) whenever the actor is outside the loaded
+  area, and makes it a real actor (L3) only inside it, at a conservative 400 m, handing over with the linked-ref walk
+  (`SetLinkedRef`, Starfield's `DefaultMaster_PatrolPackage`). Within about 30 m of the player the actor's own
+  behaviour (reactions, combat) may stop or redirect it; the travel layer only owes progress outside that.
+- **Why:** P9 and P9u on the converted Commonwealth (#644): loaded walks arrive across 7 cells (PASS twice); the engine
+  walks an unloaded actor only out to somewhere between 643 m and 710 m, and beyond that it pops the actor in near the
+  player (710 m) or parks it outside the world (899 m). The owner, on the 30 m stops seen in the loaded runs: "within
+  that distance the [NPC] and being able to take over for the combat stuff would be fine"; and on the next step: "Do
+  what you think is best" (2 Nov 2026).
+- **Alternatives:**
+  - Rely on the engine's unloaded movement out to its limit (about 650 m): rejected; one run per distance, and the
+    failures (pop-in, parking) are silent.
+  - Keep every travelling actor real and loaded (Shadow-like tricks): rejected; the loaded area follows the player.
