@@ -152,6 +152,49 @@ class FolderPlayTests(unittest.TestCase):
                                  "crash_watch.procdump": procdump}), sys_)
         self.assertEqual(at_wait, [PLAYER])                                 # already back while the dump is awaited
 
+    def test_a_failed_put_back_at_the_games_end_keeps_the_crash_record(self):
+        # third review of the stack, P3: the put-back moved before the log; its failure must not cost the log
+        dumps, procdump = os.path.join(self.root, "dumps"), os.path.join(self.root, "procdump64.exe")
+        write(self.root, "procdump64.exe", b"")
+        real, calls = instance.swap_out, []
+
+        def busy_once(*a, **k):
+            calls.append(1)
+            if len(calls) == 1:
+                raise OSError("Plugins.txt is busy")
+            return real(*a, **k)
+        with mock.patch.object(instance, "swap_out", side_effect=busy_once):
+            r = self.play(self.values(**{"crash_watch.enabled": True, "crash_watch.folder": dumps,
+                                         "crash_watch.procdump": procdump}), self.game())
+        self.assertTrue(r["started"])
+        with open(os.path.join(dumps, "crashwatch.log"), encoding="utf-8") as f:
+            log = f.read()
+        self.assertIn("after the game ended: Plugins.txt is busy", log)
+        self.assertIn("ended: process", log)                                # the crash record is still written
+        self.assertEqual(self.read(self.player), PLAYER)                    # and the after-path put the list back
+
+    def test_an_unreadable_process_list_after_the_game_says_where_the_players_list_is(self):
+        # review of 66c353dd, P3: tasklist failing after the game ended made the put-back fail quietly, then raised out
+        # of play from the after-path, and STILL_SWAPPED was never said; now it is, and the journal waits for recover()
+        sys_ = self.game()
+        pids, seen = sys_.pids, []
+
+        def pids_until_the_end(*a, **k):
+            out = pids(*a, **k)
+            if out:
+                seen.append(1)
+            elif seen:                              # the game came and went: from here on tasklist fails
+                raise ValueError("Cannot check the running processes")
+            return out
+        sys_.pids = pids_until_the_end
+        r = self.play(self.values(), sys_)
+        self.assertTrue(r["started"])
+        self.assertTrue(any("after the game ended: Cannot check" in s for s in self.said), self.said)
+        self.assertTrue(any("still in your place" in s for s in self.said), self.said)
+        self.assertTrue(instance.pending(self.player))                      # the journal stays for recover()
+        self.assertTrue(instance.recover(self.player, lambda: False, self.said.append))
+        self.assertEqual(self.read(self.player), PLAYER)
+
     def test_a_stop_under_a_running_game_says_where_the_players_list_is(self):
         sys_ = self.game()
         start = sys_.start_game
