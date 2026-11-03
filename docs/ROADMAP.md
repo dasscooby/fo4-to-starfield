@@ -7,6 +7,23 @@ comes after the current testing, and it is the brief Codex and Grok work from. S
 Two independent reviews of this document (17 Oct) are folded in; their corrections are the reason several claims
 below are narrower than the first draft.
 
+## Current update, 3 November 2026
+
+The conversion is the Commonwealth-first foundation for the broader GAMMA-style framework. The detailed phase
+ledgers below retain their dated results; use this summary for changes since the 1 November update.
+
+| Track | Current state | Evidence or next gate |
+|---|---|---|
+| Vault 111 start and map reload | Run 4 passed to the surface on 31 Oct; the marker reload/dark hold also has the owner's play-test acknowledgement | [New game](newgame/vault111-start.md), [map markers](terrain/map-markers.md); additional start choices and the remaining Pip-Boy issue are separate |
+| Loaded and unloaded NPC travel | Claude reports P9 PASS twice and one P9u PASS on the tested Commonwealth route; longer unloaded starts jumped or parked | [#644](https://github.com/fo4sf/fo4-to-starfield/issues/644), including its corrected distances; one actor/route does not establish a general distance or population limit |
+| Travel judges and design | [#663](https://github.com/fo4sf/fo4-to-starfield/pull/663#pullrequestreview-5733485009) has a same-cell near-player timeout finding; [#669](https://github.com/fo4sf/fo4-to-starfield/pull/669#pullrequestreview-5746648639) has four evidence-gate findings. The resulting design write-up [#670](https://github.com/fo4sf/fo4-to-starfield/pull/670) is still a draft | Correct and independently review the changed source; the synthetic findings do not by themselves invalidate the recorded native runs |
+| Combined core | C1 through C5 and the selected Windows build/parity proof are written, in [#649](https://github.com/fo4sf/fo4-to-starfield/pull/649), [#651](https://github.com/fo4sf/fo4-to-starfield/pull/651), [#652](https://github.com/fo4sf/fo4-to-starfield/pull/652), [#653](https://github.com/fo4sf/fo4-to-starfield/pull/653), [#654](https://github.com/fo4sf/fo4-to-starfield/pull/654) and [#656](https://github.com/fo4sf/fo4-to-starfield/pull/656) | Integration and the engine bridge remain; the 20-place in-game slice is not complete. Creature reconciliation, death-event deduplication, save generation and tick timing still need native acceptance |
+| Launcher and recovery | Checkout updates, restore machinery and the separate FO4SF folder are on main; [#668](https://github.com/fo4sf/fo4-to-starfield/pull/668#issuecomment-6594047022) has scoped source/Windows recovery clearance | Lead/owner integration of the follow-up; native Steam-update and whole-install recovery remain separate tests |
+| Own Fallout world | The first planet probe is partial; reversible stripping and multi-game pilots are prepared in [#665](https://github.com/fo4sf/fo4-to-starfield/pull/665) and [#667](https://github.com/fo4sf/fo4-to-starfield/pull/667) | Review the plans before a separately coordinated stage/install; they do not establish that the test world has moved off the current overlay |
+
+This updates status, not the owner's phase approvals. Source reviews, offline checks, installed builds and native
+results keep their own gates. The repository is public; no playable pack or game assets are distributed.
+
 ## Update, 1 November 2026: since phase 0 closed (24 October)
 
 Only an in-game PASS on the installed build counts as in game; everything else says offline, in review or next.
