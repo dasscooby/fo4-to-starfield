@@ -388,12 +388,38 @@ our GAMMA." New items continue the design's numbering (CC-60 to CC-62 are in the
   near the player. Open: where its state lives in the save (probes P1 to P3, CC-02); the tick in game (P5); how far
   out actors are real (the design's L2/L3 split); how many squads a cell can carry, which no probe measures yet (P4
   only spawns and removes three actors, judging spawn reliability and save growth; a load-scaling probe is needed).
+  **How far out actors are real, measured (P9 and P9u, 2 Nov 2026, #644; judges in #663 and #669).** One citizen on
+  the converted Commonwealth was sent by its linked ref alone (`SetLinkedRef` and `EvaluatePackage`; Starfield's
+  `DefaultMaster_PatrolPackage` then walks it; no alias package, no `PathToReference`). Distances below are from the
+  player's start to the spawn point (the session logs 643.1, 710 and 898.5 m; the judges print the distance to the
+  marker at the go: 652, 712 and 898 m). One run per distance.
+
+  - Loaded (on the measured route the loaded area reached about 470 m from the player: the 643 m run's actor
+    read loaded again from 473 m): it walks the converted navmesh across cells at about 1.2 m/s and arrives (P9 PASS
+    twice: 439 m, 7 cells, 440 s and 443 s). Near the player it may stand still: in the P9 loaded runs that logged
+    the player's distance, stops of 40-92 s came with the player 18-30 m away and none with the player 83 m off;
+    earlier runs, with the follow helper set 25 m behind, had stops of up to 220 s. The package never changed during
+    the logged stops, so their cause is not logged, and a cause at the destination is not excluded (three of the four
+    longest stops were 27-31 m from the marker). The owner's call: stops near the player are acceptable, and P9's
+    stuck rule ignores stops within 35 m.
+  - Unloaded, out to somewhere between 643 m and 710 m: the engine still walks it at about 1 m/s (`cell` reads none
+    while unloaded, as in every unloaded sample) and hands it back cleanly at the loaded edge (P9u PASS from 643 m).
+  - Farther out the engine's handling turns abstract. From 710 m the actor walked 151 m unloaded as before, then, when
+    it was loaded again, it was placed 41 m from the player in one step of about 420 m. From 899 m its position jumped
+    to a point 6.5 km from the player, outside the world, and stayed there.
+
+  So the L2/L3 split is set by measurement, not by the engine's unloaded handling: L2 owns a travelling actor's
+  position while it is outside the loaded area; L3 materializes the real actor only inside it (a conservative 400 m)
+  at the simulated position and hands over with the linked-ref walk. Cost: with one walking actor the game
+  averaged 5-7% of the machine's CPU per phase (peaks 13-15% while loading, under 10% while walking) and stayed under
+  8.6 GB in every run (no run without an actor was measured as a baseline); how many actors a cell carries is still
+  the open load-scaling probe.
 - **CC-64. Travel between areas without walking paths.** The converted worlds (L0) will be separate worldspaces or
   interiors, not one continuous map, so the core needs a travel layer between them: the player moves area to area,
   and the sim moves squads, caravans and news along the same links. Open: how the player travels (map, vertibird or
   ship (CC-61), a scripted transition (NG-9), doors); how much time passes and what can happen on the way; how
-  off-screen movement between worldspaces is shown. P9 does not answer this: it drives one console actor with
-  `PathToRef` across one converted exterior (actor pathing only, the travel-package variant deferred).
+  off-screen movement between worldspaces is shown. P9 does not answer this: it drives one actor by its linked ref
+  across one converted exterior (actor pathing within one worldspace; CC-63 has the measured numbers).
   Building note (owner): a large place may be better built as an interior than as an exterior; check how Starfield
   and its mods build their big city spaces (the owner named Cydonia and the city people compare to Cyberpunk) before
   choosing, place by place.
