@@ -671,7 +671,11 @@ def play(values, starfield, system=None, say=print, start_timeout_s=180.0, dump_
                 say(STILL_SWAPPED)
         raise
     if folder:
-        if inst.pending(player) and system.pids():
+        try:
+            running = bool(system.pids())
+        except ValueError:                          # unknown (review of 66c353dd): leave the journal and say so, as above
+            running = True
+        if inst.pending(player) and running:
             # a game that came up after the watch gave up still reads the list in place: the player's comes back at
             # the next `play` (with or without the setting) or `instance recover` once Starfield is closed
             say(STILL_SWAPPED)
@@ -773,7 +777,12 @@ def _follow(values, system, say, t0, log_path, start_timeout_s, dump_wait_s, onl
         if log_path:
             _log(log_path, f"load order changed while the game ran: {moved}")
     if on_exit is not None:
-        on_exit()
+        try:
+            on_exit()
+        except Exception as e:     # never at the cost of the crash record: the caller's own path or recover() retries
+            say(f"after the game ended: {e}; the rest of the watch goes on")
+            if log_path:
+                _log(log_path, f"after the game ended: {e}")
     if proc is not None:
         try:
             result["procdump_exit"] = proc.wait(timeout=dump_wait_s)
