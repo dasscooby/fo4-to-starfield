@@ -138,9 +138,9 @@ class ResupplyLifecycleTests(unittest.TestCase):
         repeating job should be refused once an outcome for its id was logged after the instance was read (by
         event-log position, as _last_loss orders losses, so a need back within the same hour is still new work;
         offers() would apply the same rule): the need it described was settled or given up after it, and handing
-        it in would pay by its own, stale, amount. jobs.valid accepts such an instance today, because its checks are the world's need and the
-        outcome log keyed by the instance's own offered hour. Both shapes from superseded() must be refused; a
-        "newer offered hour wins" rule would miss the second (review of bfb6a142)."""
+        it in would pay by its own, stale, amount. jobs.valid accepts such an instance today, because its checks
+        are the world's need and the outcome log keyed by the instance's own offered hour. Both shapes from
+        superseded() must be refused; a "newer offered hour wins" rule would miss the second (review of bfb6a142)."""
         reasons = [jobs.valid(ws, stale) for ws, stale, _ in self.superseded()]
         self.assertTrue(all(r is not None for r in reasons), reasons)
 

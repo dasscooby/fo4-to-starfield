@@ -454,10 +454,12 @@ written against what `jobs.py`, `present.py` and `sim.py` do today:
   own, stale, amount. SSaW ignores a result whose token is not the live one. The rule to add is "an instance is
   refused once an outcome for its id was logged after the instance was read", ordered by position in the
   append-only event log as `_last_loss` already orders losses, so a need that comes back within the hour of a
-  hand-in is still new work; `offers()` applies the same rule so it never lists a superseded instance. Not "the
-  newer offered hour wins": the handed-in instance can be the older one. The case is in the fixture as an expected failure, in
-  both shapes, with its preconditions in a passing test of their own; implementing the rule turns the mark into
-  an unexpected success, which fails the run until the mark is removed.
+  hand-in is still new work; `offers()` would apply the same rule so it never lists a superseded instance. Not
+  "the newer offered hour wins": the handed-in instance can be the older one. `Offer` would need a new field
+  for where in the log it was read (as retake ids already carry `seq`), which changes `to_dict` and the save
+  format. The case is in the fixture as an expected failure, in both shapes, with its preconditions in a
+  passing test of their own; implementing the rule turns the mark into an unexpected success, which fails the
+  run until the mark is removed.
 - Acceptance: nothing in the world state says the player is on a job (SSaW keeps one accepted operation at a
   time). Offers are read on demand and only outcomes are logged.
 - Engine acknowledgement: a slot has no applied/failed channel back from the adapter (StarSim's package-to-task
