@@ -428,6 +428,43 @@ our GAMMA." New items continue the design's numbering (CC-60 to CC-62 are in the
   what the player works toward. Open: what a run's goal is, and which systems are on by default.
 - **CC-62 deferred.** Starfield world generation stays later, after CC-63 to CC-65 work.
 
+## Lifecycle fixture (3 Nov 2026)
+
+`tests/test_combined_lifecycle.py` follows one resupply job from its offer to its one outcome through every way it
+can go wrong, and checks three cross-module properties. The cases are the rules the reference mods describe
+(the review on #32: SSaW's encounter tokens and load recovery, StarSim's reservation and elapsed-time catch-up),
+written against what `jobs.py`, `present.py` and `sim.py` do today:
+
+- one outcome per job: a hand-in pays once; a replay, a cancel after a hand-in or a hand-in after a cancel is
+  refused and leaves no trace; a late hand-in is refused without a trace;
+- stale ownership: a holder change under an open job refuses the hand-in while it lasts, and the giver getting the
+  place back makes the same need work again;
+- the save is the acknowledgement: a save made after the hand-in refuses it again; a save made before it is a world
+  where the job is still open, where the hand-in happens exactly once and ends in the same world;
+- catch-up: 48 hours as one call, two or eight give one world and one offer list;
+- reservation: a caravan's cargo leaves its source's stock at dispatch, so no second job can carry it, and one
+  caravan per source is out at a time;
+- materialize once: a plan names each group once by the L2 entity's own id, replanning the same world spawns and
+  dissolves nothing, and every slot names a place, faction and squad the world still has.
+
+**Contracts the modules do not have yet** (found by the fixture; recorded, not built):
+
+- A stale offer instance: the same need offered twice (same id, a newer offered hour), the newer one handed in,
+  the need back; handing in the older one is accepted today and pays by its stale amount. SSaW ignores a result
+  whose token is not the live one. The case is in the fixture as an expected failure; implementing the rule turns
+  it into an unexpected success, which fails the run until the mark is removed.
+- Acceptance: nothing in the world state says the player is on a job (SSaW keeps one accepted operation at a
+  time). Offers are read on demand and only outcomes are logged.
+- Engine acknowledgement: a slot has no applied/failed channel back from the adapter (StarSim's package-to-task
+  handshake); the planner's diff is the whole contract.
+- A live encounter at save time: L2 has no mid-encounter state, so there is nothing to recover on load (SSaW
+  cleans up a battle or patrol that a save left live). This becomes real once L3 stages fights.
+- Single-fire staging: `present.plan` lists everything in radius within the budget; there is no ordered chain that
+  stages at most one encounter on arrival with exclusions (indoors, in a scene, a live fight).
+
+One thing the modules have that SSaW does not: place-based protection of story places (`Place.story_lock`,
+`sim._story_shielded`), which the review found SSaW approximates by the player's own state.
+
 ## Not implemented (and not claimed)
 
 No game runtime, no Papyrus or SFSE plugin outside the probe kit (docs/spikes/combined-core-probes.md, not run yet), no plugin records written (the adapter is a plan), nothing installed or
