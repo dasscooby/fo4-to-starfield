@@ -2,8 +2,8 @@
 to its one outcome through every way it can go wrong, plus the planner's materialize-once rule and the simulation's
 reservation and catch-up properties. The cases are the rules the reference mods describe (SSaW's encounter tokens
 and load recovery, StarSim's reservation and elapsed-time catch-up), written against what jobs.py, present.py and
-sim.py do today. A case the modules do not yet honour is marked expectedFailure with the missing contract named:
-implementing it later turns the mark into an unexpected success, which fails the run until the mark is removed.
+sim.py do today. A case the modules did not honour was marked expectedFailure with the missing contract named; the
+superseded-instance case was built from its mark on 4 Nov 2026 (Offer.read_at), so no mark is left.
 Some cases restate tests of the module suites on purpose: the fixture reads as one story. Synthetic REGION packs;
 placeholder names, not game facts."""
 import unittest
@@ -71,7 +71,7 @@ class ResupplyLifecycleTests(unittest.TestCase):
         short(ws)
         self.assertIsNone(resupply(ws))
         rebuilt = jobs.Offer(**{**o.to_dict(), "offered_hour": ws.hour})
-        self.assertIn("already handed in or given up", jobs.valid(ws, rebuilt))
+        self.assertIn("superseded", jobs.valid(ws, rebuilt))   # read before the give-up, by another hour
         with self.assertRaises(ValueError):
             jobs.fail(ws, rebuilt)
         ws.hour = o.expires_hour
@@ -132,17 +132,108 @@ class ResupplyLifecycleTests(unittest.TestCase):
             self.assertNotEqual(live.detail["amount"], stale.detail["amount"])    # the stale amount differs
             self.assertEqual(len(done_events(ws, stale.id)), 1)
 
-    @unittest.expectedFailure
     def test_a_superseded_instance_is_refused(self):
-        """Contract gap, SSaW's rule: a result for a token that is not the live one is ignored. An instance of a
-        repeating job should be refused once an outcome for its id was logged after the instance was read (by
-        event-log position, as _last_loss orders losses, so a need back within the same hour is still new work;
-        offers() would apply the same rule): the need it described was settled or given up after it, and handing
-        it in would pay by its own, stale, amount. jobs.valid accepts such an instance today, because its checks
-        are the world's need and the outcome log keyed by the instance's own offered hour. Both shapes from
-        superseded() must be refused; a "newer offered hour wins" rule would miss the second (review of bfb6a142)."""
-        reasons = [jobs.valid(ws, stale) for ws, stale, _ in self.superseded()]
-        self.assertTrue(all(r is not None for r in reasons), reasons)
+        """SSaW's rule: a result for a token that is not the live one is ignored. An instance of a repeating job is
+        refused once an outcome for its id was logged after the instance was read (Offer.read_at, by event-log
+        position): the need it described was settled or given up after it, and handing it in would pay by its
+        own, stale, amount. Both shapes from superseded() are refused without a trace while the live instance is
+        good; a "newer offered hour wins" rule would miss the second shape (review of bfb6a142). Built on 4 Nov
+        2026 from the expected failure the fixture recorded."""
+        for ws, stale, live in self.superseded():
+            fame = ws.reputation["settlers"].fame
+            self.assertIn("superseded", jobs.valid(ws, stale))
+            with self.assertRaises(ValueError):
+                jobs.complete(ws, stale)
+            self.assertEqual((len(done_events(ws, stale.id)), ws.reputation["settlers"].fame), (1, fame))
+            self.assertIsNone(jobs.valid(ws, live))
+
+    def test_a_need_back_within_the_hour_waits_for_the_next_hour(self):
+        """A repeating id handed in is not offered again for the rest of the hour, whatever the stock does (the
+        once-per-hour cap of #431, kept by the review of 084f68cc: it is the only limit on handing in, taking the
+        goods back and handing in again). The next hour the need is a new instance with a later read_at."""
+        ws, o = self.ws, self.offer
+        jobs.complete(ws, o)
+        short(ws)                                            # the farm is short again within the hour
+        self.assertIsNone(resupply(ws))
+        self.assertIn("already handed in", jobs.valid(ws, o))
+        ws.hour += 1
+        again = resupply(ws)
+        self.assertEqual((again.id, again.offered_hour), (o.id, o.offered_hour + 1))
+        self.assertGreater(again.read_at, o.read_at)
+        self.assertIsNone(jobs.valid(ws, again))
+        jobs.complete(ws, again)
+        self.assertEqual(len(done_events(ws, o.id)), 2)
+        with self.assertRaises(ValueError):
+            jobs.complete(ws, again)
+
+    def test_an_instance_read_after_the_save_pays_once_on_the_reloaded_world(self):
+        """Review of 084f68cc (P1): the log grew after the save, then the instance was read, then the game went back
+        to the save. Its own hand-in now lands below read_at, so the position rule alone would pay it again on every
+        shortage; the offered-hour rule refuses it at any position."""
+        ws = self.ws
+        before = ws.to_json()
+        lose(ws, "farm_a", "raiders")                        # unrelated events after the save
+        later = resupply(ws)
+        ws = WorldState.from_json(before)                    # the game reloaded the earlier save
+        self.assertGreater(later.read_at, len(ws.events))
+        jobs.complete(ws, later)
+        short(ws)                                            # short again: the same instance must not pay twice
+        self.assertIn("already handed in", jobs.valid(ws, later))
+        with self.assertRaises(ValueError):
+            jobs.complete(ws, later)
+        self.assertEqual(len(done_events(ws, later.id)), 1)
+
+    def test_a_give_up_logged_right_after_the_read_supersedes(self):
+        """The position rule is inclusive: the first event after an instance was read can be an earlier instance's
+        outcome (a give-up logs nothing else), and it supersedes the later-read instance, which only the position
+        can tell (the earlier instance's offered hour is older); the window rule would refuse it too, so the reason
+        says which (review of 084f68cc: an off-by-one here was caught by one test)."""
+        ws, z = self.ws, self.offer                          # z read at hour 0
+        ws.hour += 1
+        a = resupply(ws)                                     # a read at hour 1
+        self.assertEqual(len(ws.events), a.read_at)         # nothing logged since a was read
+        jobs.fail(ws, z)                                     # z given up: the first event after a's read
+        self.assertIn("superseded", jobs.valid(ws, a))
+
+    def test_a_stale_instance_is_superseded_on_the_reloaded_world_too(self):
+        """Delta review of bda0d0e3: a stale instance read from a longer log than the reloaded world's, and the live
+        instance's hand-in an hour later landing below its read_at. The position rule cannot see it; the later
+        offered hour on the outcome does (logged at that hour or after, so after the stale instance)."""
+        ws = self.ws
+        before = ws.to_json()
+        for _ in range(4):                                   # the log grows well past the save
+            lose(ws, "farm_a", "raiders")
+        stale = resupply(ws)                                 # read at hour 0 from the longer log
+        ws = WorldState.from_json(before)                    # back to the save
+        ws.hour += 1
+        short(ws, stock=2)                                   # the live need, by another amount
+        live = resupply(ws)
+        self.assertNotEqual(live.detail["amount"], stale.detail["amount"])
+        jobs.complete(ws, live)
+        done = [i for i, e in enumerate(ws.events) if e["kind"] == "job_done"]
+        self.assertLess(done[-1], stale.read_at)            # the hand-in sits below the stale read
+        short(ws)
+        self.assertIn("superseded", jobs.valid(ws, stale))
+        with self.assertRaises(ValueError):
+            jobs.complete(ws, stale)
+        self.assertEqual(len(done_events(ws, stale.id)), 1)
+
+    def test_an_instance_from_a_later_hour_is_refused_on_an_earlier_world(self):
+        """The mirror reload: the game went back to a save from before the instance was read, so the world has not
+        reached the instance's offered hour. The giver has not made that offer here: neither door opens and nothing
+        is logged, while the instance of this hour is still good."""
+        ws = self.ws
+        before = ws.to_json()
+        ws.hour += 3
+        future = resupply(ws)
+        ws = WorldState.from_json(before)
+        self.assertIn("later than the world", jobs.valid(ws, future))
+        with self.assertRaises(ValueError):
+            jobs.complete(ws, future)
+        with self.assertRaises(ValueError):
+            jobs.fail(ws, future)
+        self.assertEqual(ws.to_json(), before)
+        self.assertIsNone(jobs.valid(ws, self.offer))
 
     def test_a_hand_in_is_acknowledged_by_the_save(self):
         """Restart before acknowledgement: the save is the acknowledgement. A save made after the hand-in refuses

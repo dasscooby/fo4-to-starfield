@@ -447,19 +447,27 @@ written against what `jobs.py`, `present.py` and `sim.py` do today:
 - materialize once: a plan names each group once by the L2 entity's own id, replanning the same world spawns and
   dissolves nothing, and every slot names a place, faction and squad the world still has.
 
+**Built from the fixture (4 Nov 2026): the superseded offer instance.** A repeating job read twice (same id,
+different offered hours), one instance handed in, the need back by a different amount, used to accept the other
+instance and pay by its own, stale, amount. `Offer` now carries `read_at`, the event log's length when the
+instance was read, and another instance's outcome for its id logged at or after that position refuses it
+(superseded; SSaW ignores a result whose token is not the live one). Its own outcome, any outcome carrying its
+offered hour, refuses it at any position as before (#431): that holds an instance read after a save against the
+world reloaded from that save, where its own hand-in lands below `read_at` (review of 084f68cc), and it keeps the
+once-per-hour cap on a repeating id, the only limit on handing in, taking the goods back and handing in again;
+that cap is a design knob this change leaves alone. Ordered by log position, as `_last_loss` orders losses and
+retake ids carry `seq`, not only "the newer offered hour wins", which alone would miss the shape where the handed-in
+instance is the older one. `read_at` is in `to_dict`; an offer record without it reads as 0, so any outcome for
+its id counts against an instance rebuilt from such a record. A reload can also put a later instance's hand-in
+below a stale instance's `read_at` (the stale one read from a longer log): an outcome carrying a later offered
+hour supersedes too, since it was logged at that hour or after; and an instance whose offered hour the world has
+not reached is refused outright by `valid()` and `fail()`, the game having gone back to a save from before it
+was read (delta review of bda0d0e3). The case is in the fixture as a passing test in both shapes, with its
+preconditions in a test of their own, beside the reloaded-save (three shapes), same-hour and inclusive-position
+cases.
+
 **Contracts the modules do not have yet** (found by the fixture; recorded, not built):
 
-- A superseded offer instance: a repeating job read twice (same id, different offered hours), one instance
-  handed in, the need back by a different amount; handing in the other instance is accepted today and pays by its
-  own, stale, amount. SSaW ignores a result whose token is not the live one. The rule to add is "an instance is
-  refused once an outcome for its id was logged after the instance was read", ordered by position in the
-  append-only event log as `_last_loss` already orders losses, so a need that comes back within the hour of a
-  hand-in is still new work; `offers()` would apply the same rule so it never lists a superseded instance. Not
-  "the newer offered hour wins": the handed-in instance can be the older one. `Offer` would need a new field
-  for where in the log it was read (as retake ids already carry `seq`), which changes `to_dict` and the save
-  format. The case is in the fixture as an expected failure, in both shapes, with its preconditions in a
-  passing test of their own; implementing the rule turns the mark into an unexpected success, which fails the
-  run until the mark is removed.
 - Acceptance: nothing in the world state says the player is on a job (SSaW keeps one accepted operation at a
   time). Offers are read on demand and only outcomes are logged.
 - Engine acknowledgement: a slot has no applied/failed channel back from the adapter (StarSim's package-to-task
