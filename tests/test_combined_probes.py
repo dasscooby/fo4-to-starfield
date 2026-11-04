@@ -1188,10 +1188,9 @@ class P9Tests(unittest.TestCase):
             return out
         came = p9_log(start=20.0, speed=2.0, seconds=60)[1:]
         never = p9_log(speed=0.0, seconds=600)[1:]
-        # A qualifying short control succeeds; the later long request is Stopped.
+        # A qualifying short control succeeds; a Stopped long request is not a navmesh failure.
         v = probes.check_p9(col(log=BASE + go(came, "player", 12.0, result=0) + go(never, "dest", 0.0)))
-        self.assertEqual(v.verdict, FAIL, v.reasons)
-        self.assertTrue(any("scripted commanded rung" in r for r in v.reasons), v.reasons)
+        self.assertEqual(v.verdict, INCONCLUSIVE, v.reasons)
         self.assertTrue(any("PathToReference returned after 0.0 s with result 2 (Stopped)" in r for r in v.reasons), v.reasons)
         self.assertIn("FOCC_P9Drive.Go", v.extra["driver"])
         rungs = v.extra["attempts"]
@@ -1307,7 +1306,7 @@ class P9Tests(unittest.TestCase):
         v = probes.check_p9(col(log=far))
         self.assertEqual(v.verdict, INCONCLUSIVE, v.reasons)
         self.assertTrue(any("disagrees with the first sample" in r for r in v.reasons), v.reasons)
-        for label, log in (("a console control does not stand for the script", LADDER + go(never, "dest", 0.0)),
+        for label, log in (("a console control does not stand for the script", LADDER + go(never, "dest")),
                            ("a scripted control does not stand for the console", BASE + go(came, "player") + never),
                            ("a baseline with a go is no baseline", go(BASE[:1] + BASE[1:], "player")
                             + go(came, "player") + go(never, "dest"))):
