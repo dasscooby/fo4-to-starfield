@@ -190,7 +190,8 @@ class P9UnloadedTests(unittest.TestCase):
         cuts = {"no pos": (r" pos=\S+ \S+ \S+", ""), "no dist": (r" dist=[\d.]+", ""), "no rt": (r"rt=[\d.]+ ", ""),
                 "torn pos": (r" pos=(\S+) \S+ \S+", r" pos=\1"), "unreadable rt": (r"rt=[\d.]+", "rt=late"),
                 "unreadable dist": (r"dist=[\d.]+", "dist=nan"), "no actor": (r" actor=\S+", ""),
-                "torn before the actor": (r" actor=.*$", "")}      # review of 3d116e23: the actor filter dropped it
+                "torn before the actor": (r" actor=.*$", ""),      # review of 3d116e23: the actor filter dropped it
+                "torn after the kind": (r" t=.*$", "")}           # review of 61b18cad: a fieldless sample was a gap
         for name, (pattern, repl) in cuts.items():
             with self.subTest(name):
                 hidden = list(lines)
