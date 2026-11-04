@@ -490,7 +490,8 @@ line's `rt=` from the start's (real seconds; late timers do not stretch the dead
 (samples before it show an actor not yet commanded). A failure requires a loaded stall (dist within 2 m for 120 s)
 or a timeout in the first cell. A sample with the player closer than 35 m breaks the stall window and makes
 the first-cell timeout inconclusive on its own, however brief the proximity (one near sample is enough; the
-reason counts the near samples and seconds: a knob for the owner, review of 10b58dd1). An unloaded sample breaks
+reason counts the near samples and seconds inside those 600 s; a near sample after them excuses nothing: a knob for
+the owner, reviews of 10b58dd1 and 5f0dd2b0). An unloaded sample breaks
 the stall window too, and the window starts again at the next loaded, far sample. Either failure also requires proof that the command moves this
 actor: it came at least 20 m closer on
 that route, or the first rung within 30 m (the baseline, with no `p9 go`) stayed away and a later rung that the script
