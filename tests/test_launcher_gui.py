@@ -152,6 +152,12 @@ class GuiModelTests(unittest.TestCase):
             self.assertEqual(argv[4:], ["play", "--settings", str(self.path), "--starfield", self.game])
             # Do NOT execute this command: the existing play handler owns routes, process checks and the watcher.
 
+    def test_play_starts_the_fo4sf_game_folder_when_one_is_set(self):
+        self.path.write_text(json.dumps({"route": "sfse", "instance": "D:/FO4SF/Starfield"}), encoding="utf-8")
+        self.model.reload()
+        argv = self.model.command("play", self.model.saved, starfield=self.game, pids=[], windows=True)
+        self.assertEqual(argv[-2:], ["--starfield", "D:/FO4SF/Starfield"])
+
     def test_play_refuses_a_stale_view_of_the_saved_settings(self):
         raw = dict(self.model.saved)
         self.path.write_text(json.dumps({"route": "exe"}), encoding="utf-8")
