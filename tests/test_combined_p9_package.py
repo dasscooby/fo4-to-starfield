@@ -233,14 +233,12 @@ class P9PackageDriverTests(unittest.TestCase):
     def test_one_near_sample_excuses_the_first_cell_timeout_and_says_so(self):
         # review of 10b58dd1: the actor paces in one cell for 600 s with the player 80 m off on every sample but one;
         # the timeout is excused all the same (an owner knob), and the reason counts the near samples
-        stuck = drive(driver="link", package=PATROL, stuck_from=20)
-
-        def with_player(near_at):
+        def with_player(near_at, seconds=600, stuck_from=20):
             out = []
-            for line in stuck:
+            for line in drive(driver="link", package=PATROL, stuck_from=stuck_from, seconds=seconds):
                 if " p9 sample " in line:
                     elapsed = float(re.search(r" t=([\d.]+)", line)[1])
-                    if elapsed >= 20.0:        # pacing: dist wobbles 3 m every other sample, never still for 120 s
+                    if elapsed >= stuck_from:  # pacing: dist wobbles 3 m every other sample, never still for 120 s
                         line = re.sub(r"dist=([\d.]+)",
                                       lambda m: f"dist={float(m[1]) + 3.0 * (int(elapsed) % 4 == 0):.6f}", line)
                     line = line.replace(" dist=", f" player_m={20.0 if elapsed == near_at else 80.0} dist=")
@@ -249,7 +247,17 @@ class P9PackageDriverTests(unittest.TestCase):
         self.assertEqual(probes.check_p9(col(log=with_player(None))).verdict, probes.FAIL)    # far throughout
         v = probes.check_p9(col(log=with_player(300.0)))
         self.assertEqual(v.verdict, probes.INCONCLUSIVE, v.to_dict())
-        self.assertTrue(any(re.search(r"in 1 of \d+ samples \(4 s\)", r) for r in v.reasons), v.reasons)
+        self.assertTrue(any(re.search(r"in 1 of 301 samples \(4 s\)", r) for r in v.reasons), v.reasons)
+        # proximity after the 600 s the timeout names excuses nothing, and is not counted (review of 5f0dd2b0)
+        self.assertEqual(probes.check_p9(col(log=with_player(650.0, seconds=700))).verdict, probes.FAIL)
+        v = probes.check_p9(col(log=with_player(300.0, seconds=700)))
+        self.assertEqual(v.verdict, probes.INCONCLUSIVE, v.to_dict())
+        self.assertTrue(any(re.search(r"in 1 of 301 samples \(4 s\)", r) for r in v.reasons), v.reasons)
+        # the excuse belongs to the first-cell timeout alone: a track that crossed cells, then paced, never prints it
+        v = probes.check_p9(col(log=with_player(300.0, stuck_from=100)))
+        self.assertEqual(v.verdict, probes.INCONCLUSIVE, v.to_dict())
+        self.assertGreater(v.extra["distinct_cells"], 1)
+        self.assertFalse(any("where its own behaviour may hold it" in r for r in v.reasons), v.reasons)
 
     def test_an_unloaded_sample_ends_the_stall_window(self):
         # review of 10b58dd1: an unloaded sample is no evidence of a loaded stall, so the window starts again at the

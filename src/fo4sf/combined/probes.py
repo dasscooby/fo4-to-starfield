@@ -1710,8 +1710,11 @@ def check_p9(c: Collection) -> Verdict:
     failed = None
     player_near = {r[5].line for r in rows if (distance := r[5].num("player_m")) is not None
                    and distance < P["p9_player_near_m"]}
+    # the timeout names the first p9_seconds, so only proximity inside them can excuse it (review of 5f0dd2b0)
+    timed = [r for r in rows if r[0] <= P["p9_seconds"]]
+    near_timed = [r for r in timed if r[5].line in player_near]
     first_cell_timeout = len(cells) <= 1 and rows[-1][0] >= P["p9_seconds"]
-    if first_cell_timeout and not player_near:
+    if first_cell_timeout and not near_timed:
         failed = ([], f"the actor never left its first cell {first_cell} within {P['p9_seconds']} s")
     else:
         # Stuck: dist within 2 m of a value for 120 s while loaded and the player is not near. Near the player the NPC's
@@ -1755,15 +1758,16 @@ def check_p9(c: Collection) -> Verdict:
                          "commanded route")
         return v
     if not arrived:
-        if first_cell_timeout and player_near:
+        if first_cell_timeout and near_timed:
             # one near sample is enough to excuse the timeout (review of 10b58dd1): a knob for the owner, so the
-            # reason counts the near samples and seconds
-            near_s = sum(b[0] - a[0] for a, b in zip(rows, rows[1:])
+            # reason counts the near samples and seconds inside the p9_seconds
+            near_s = sum(b[0] - a[0] for a, b in zip(timed, timed[1:])
                          if a[5].line in player_near or b[5].line in player_near)
             v.reasons.append(f"the actor never left its first cell {first_cell} in {P['p9_seconds']:g} s, but the "
-                             f"player was within {P['p9_player_near_m']:g} m in {len(player_near)} of {len(rows)} "
+                             f"player was within {P['p9_player_near_m']:g} m in {len(near_timed)} of {len(timed)} "
                              f"samples ({near_s:.0f} s), where its own behaviour may hold it (#644), and it never "
-                             f"stood still {P['p9_stuck_s']:g} s away from the player: not a route failure")
+                             f"stood still {P['p9_stuck_s']:g} s while loaded and away from the player: not a "
+                             f"route failure")
         v.reasons.append(f"dist never fell below {P['p9_arrive_m']} m within {P['p9_seconds']} s (last {rows[-1][1]} m)")
         return v
     if len(cells) < P["p9_min_cells"]:
