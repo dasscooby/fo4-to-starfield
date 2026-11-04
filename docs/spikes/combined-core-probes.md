@@ -627,8 +627,9 @@ player hops back and waits, with no `Shadow`. The kit is P9's; only the judge an
 
 Judge `probes p9u`, which never says FAIL:
 - PASS: a link driver whose package took, a go to the tracked marker (the probe's own FOCC_P9_Dest) 400 m or more
-  out, complete samples (rt, dist and pos on every one: a torn or unreadable reading refuses the judgement, since
-  the skipped row may be the jump) that run forward in time, the first within 2 m plus 15 m/s of the go's distance
+  out, complete samples (rt, dist, pos and actor on every one: a sample missing or garbling one refuses the
+  judgement, since the skipped row may be the jump; a line torn ahead of its kind is a gap, which the rate gate
+  takes as a gap) that run forward in time, the first within 2 m plus 15 m/s of the go's distance
   for the time since the go, with no step faster than 15 m/s (`p9_jump_m_per_s`, as P9), 100 m or more of progress
   toward the marker between samples that both read unloaded (`p9u_unloaded_m`) up to the arrival, and a sample
   under 10 m within 900 s of the go (`p9u_seconds`), or 2 s per metre of the go's distance when that is longer

@@ -2026,12 +2026,12 @@ def check_p9u(c: Collection) -> Verdict:
     can show the link took, and hops back. PASS: that package took, the go found the actor p9_start_m or more out, the
     samples after the go are complete readings (rt, dist, pos) that run forward in time, the first within reach of the
     go's distance, with no step faster than p9_jump_m_per_s (an actor the engine moves in jumps, loaded or not, is
-    abstract travel, not a walk: review of 861714e0; a missing reading hides a jump: review of eada2c28), the actor
-    made p9u_unloaded_m or more of progress toward the probe's own marker between samples that both read unloaded, up
-    to its arrival, and a sample comes under p9_arrive_m (3D) within max(p9u_seconds, p9u_s_per_m x the go's distance)
-    of the go (a 900 m start: 1800 s). Never FAIL: an
-    actor that does not come is a finding about how the engine treats actors out of the loaded area, not about the
-    converted navmesh (P9 asks that with the actor loaded). On 2 Nov the actor walked unloaded from 643 m and was
+    abstract travel, not a walk: review of 861714e0; a missing reading hides a jump: review of eada2c28; a line torn
+    ahead of its kind is a gap, as the rate gate reads gaps), the actor made p9u_unloaded_m or more of progress toward
+    the probe's own marker between samples that both read unloaded, up to its arrival, and a sample comes under
+    p9_arrive_m (3D) within max(p9u_seconds, p9u_s_per_m x the go's distance) of the go (a 900 m start: 1800 s). Never
+    FAIL: an actor that does not come is a finding about how the engine treats actors out of the loaded area, not about
+    the converted navmesh (P9 asks that with the actor loaded). On 2 Nov the actor walked unloaded from 643 m and was
     loaded again from about 470 m; from 710 m and 899 m the engine moved it in one step (#644, #670)."""
     v = Verdict("p9u", INCONCLUSIVE)
     v.extra["settles"] = "whether an actor travels to a loaded player from beyond the loaded area (P9u)"
@@ -2074,9 +2074,12 @@ def check_p9u(c: Collection) -> Verdict:
                and (not done or e.line < done[0].line) and e.form("actor") == latest["actor"]]
     # Every reading must be whole: a sample without its rt=, dist= or pos=, or torn so that it no longer parses as a
     # sample, cannot be skipped, since the skipped row may be the jump, and |change of dist| is a floor on the speed,
-    # not a reading of it (review of eada2c28: dropping the jumping sample's pos= turned a teleport into a PASS)
-    torn = [e for e in track if e.kind != "p9 sample" and " p9 sample " in e.text and e.line > latest["go_line"]
-            and (not done or e.line < done[0].line)]
+    # not a reading of it (review of eada2c28: dropping the jumping sample's pos= turned a teleport into a PASS). A
+    # sample without a readable actor= is torn too, not another actor's (review of 3d116e23); one torn ahead of its
+    # kind (`p9 samp`) is a gap, and the rate gate takes gaps as gaps: nothing in the log tells the two apart.
+    torn = [e for e in track if " p9 sample " in e.text and e.line > latest["go_line"]
+            and (not done or e.line < done[0].line) and e.form("actor") in (None, latest["actor"])
+            and (e.kind != "p9 sample" or e.form("actor") is None)]
     short = [e for e in samples if e.rt is None or e.num("dist") is None or pos(e) is None]
     if torn or short:
         v.cite(*(torn + short)[:3])

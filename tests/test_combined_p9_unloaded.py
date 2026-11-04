@@ -189,7 +189,8 @@ class P9UnloadedTests(unittest.TestCase):
         self.assertTrue(any("moved in jumps" in r for r in judge(lines).reasons))
         cuts = {"no pos": (r" pos=\S+ \S+ \S+", ""), "no dist": (r" dist=[\d.]+", ""), "no rt": (r"rt=[\d.]+ ", ""),
                 "torn pos": (r" pos=(\S+) \S+ \S+", r" pos=\1"), "unreadable rt": (r"rt=[\d.]+", "rt=late"),
-                "unreadable dist": (r"dist=[\d.]+", "dist=nan")}
+                "unreadable dist": (r"dist=[\d.]+", "dist=nan"), "no actor": (r" actor=\S+", ""),
+                "torn before the actor": (r" actor=.*$", "")}      # review of 3d116e23: the actor filter dropped it
         for name, (pattern, repl) in cuts.items():
             with self.subTest(name):
                 hidden = list(lines)
@@ -197,6 +198,23 @@ class P9UnloadedTests(unittest.TestCase):
                 v = judge(hidden)
                 self.assertEqual(v.verdict, INCONCLUSIVE, v.to_dict())
                 self.assertTrue(any("incomplete readings" in r for r in v.reasons), v.reasons)
+        # another actor's torn line is not this track's: the jump still shows, and nothing is refused for it
+        other = lines[jumping].replace("rt=", "rt=late ", 1).replace("actor=-16711680", "actor=-16711681")
+        v = judge(lines[:jumping] + [other] + lines[jumping:])
+        self.assertTrue(any("moved in jumps" in r for r in v.reasons), v.reasons)
+
+    def test_the_arriving_pair_counts_and_the_window_edge_is_inside(self):
+        # review of 3d116e23: the pair that arrives counts when both samples read unloaded (rows[:hit_k + 1]), and a
+        # sample at the window's last second is inside it (<= window), with and without an arrival
+        v = judge(track([(0, 0.0, "True"), (30, 346.0, "False"), (90, 446.0, "False")]))
+        self.assertEqual(v.verdict, PASS, v.to_dict())
+        self.assertEqual((v.extra["unloaded_progress_m"], v.extra["arrived_at_s"]), (100.0, 90.0))
+        v = judge(track([(0, 0.0, "True"), (300, 100.0, "False"), (600, 200.0, "False"), (900, 446.0, "True")]))
+        self.assertEqual(v.verdict, PASS, v.to_dict())
+        self.assertEqual(v.extra["arrived_at_s"], 900.0)
+        v = judge(track([(0, 0.0, "True"), (800, 100.0, "False"), (900, 200.0, "False")]))
+        self.assertEqual(v.verdict, INCONCLUSIVE, v.to_dict())
+        self.assertEqual(v.extra["unloaded_progress_m"], 100.0)
 
     def test_unloaded_progress_counts_only_up_to_the_arrival(self):
         # review of eada2c28: an actor that arrived loaded at 100 s, then wandered out and back unloaded after 1000 s,
