@@ -20,8 +20,9 @@ news.display_name). Ids are built from the state (squad ids, place ids, event ho
 so two calls on the same state give the same list. An offer expires at `expires_hour`; complete() refuses an expired
 offer or one the world has since made moot, so a stale save or a double hand-in fails loudly. An instance also
 records where in the event log it was read (`read_at`): another instance's outcome for its job logged from there
-on refuses it too, so a stale instance never pays by its own amount (the live-token rule from the reference
-review on #32). Every number is a placeholder to tune. Nothing here is a Fallout or Starfield rule.
+on, or carrying a later offered hour, refuses it too, and a world behind its offered hour (a reload) refuses it
+outright, so a stale instance does not pay by its own amount (the live-token rule, reference review on #32).
+Every number is a placeholder to tune. Nothing here is a Fallout or Starfield rule.
 """
 from __future__ import annotations
 
@@ -261,17 +262,27 @@ def _outcome(ws: WorldState, offer: Offer) -> str | None:
     outcome carrying this instance's offered hour, at any log position (handed in or given up this hour, Codex
     review of #431; at any position so that it also holds against a world reloaded from a save made before the
     instance was read, review of 084f68cc), another instance's outcome logged at or after the position where this
-    instance was read (Offer.read_at), which supersedes it (the live-token rule, reference review on #32), or a
-    give-up still inside its window. Ordered by log position, as _last_loss orders losses."""
+    instance was read (Offer.read_at) or carrying a later offered hour (logged at that hour or after, so after
+    this instance even when a reload put it below read_at, review of bda0d0e3), which supersedes it (the live-token
+    rule, reference review on #32), or a give-up still inside its window. Ordered by log position, as _last_loss
+    orders losses."""
     for i, e in enumerate(ws.events):
         if e["kind"] not in ("job_done", "job_failed") or e.get("offer") != offer.id:
             continue
         if offer.kind in _ONE_TIME or e.get("offered") == offer.offered_hour:
             return "this offer was already handed in or given up"
-        if i >= offer.read_at:
+        if i >= offer.read_at or e.get("offered", -1) > offer.offered_hour:
             return "this offer was superseded: an outcome for the job was logged after it was read"
         if e["kind"] == "job_failed" and ws.hour < e.get("until", -1):
             return "this job was given up and its window has not ended"
+    return None
+
+
+def _from_later(ws: WorldState, offer: Offer) -> str | None:
+    """Why an instance cannot belong to this world: it was read at an hour the world has not reached, so the game
+    went back to a save from before the read (review of bda0d0e3). The giver has not made this offer here yet."""
+    if offer.offered_hour > ws.hour:
+        return f"this offer was read at hour {offer.offered_hour}, later than the world's hour {ws.hour}"
     return None
 
 
@@ -283,7 +294,7 @@ def valid(ws: WorldState, offer: Offer) -> str | None:
         return "giver or target no longer exists"
     if ws.hour >= offer.expires_hour:
         return f"offer expired at hour {offer.expires_hour}"
-    why = _outcome(ws, offer)                       # one outcome per offer (Codex review of #431)
+    why = _outcome(ws, offer) or _from_later(ws, offer)     # one outcome per offer (Codex review of #431)
     if why is not None:
         return why
     pl, d = ws.places[offer.target], offer.detail
@@ -367,8 +378,9 @@ def complete(ws: WorldState, offer: Offer) -> dict:
 
 def fail(ws: WorldState, offer: Offer) -> int:
     """The player gave the job up or let it lapse: FAIL_INFAMY[kind] infamy with the giver, logged. Allowed on an
-    expired offer, once per offer: one already handed in or given up is a ValueError. Returns the infamy applied."""
-    why = _outcome(ws, offer)                       # one outcome per offer, done or failed (Codex review of #431)
+    expired offer, once per offer: one already handed in, given up or superseded, or read at an hour this world has
+    not reached, is a ValueError. Returns the infamy applied."""
+    why = _outcome(ws, offer) or _from_later(ws, offer)     # one outcome per offer, done or failed (#431)
     if why is not None:
         raise ValueError(f"cannot fail {offer.id}: {why}")
     infamy = FAIL_INFAMY.get(offer.kind, 0)

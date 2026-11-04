@@ -458,9 +458,13 @@ once-per-hour cap on a repeating id, the only limit on handing in, taking the go
 that cap is a design knob this change leaves alone. Ordered by log position, as `_last_loss` orders losses and
 retake ids carry `seq`, not "the newer offered hour wins", which would miss the shape where the handed-in
 instance is the older one. `read_at` is in `to_dict`; an offer record without it reads as 0, so any outcome for
-its id counts against an instance rebuilt from such a record. The case is in the fixture as a passing test in
-both shapes, with its preconditions in a test of their own, beside the reloaded-save, same-hour and
-inclusive-position cases.
+its id counts against an instance rebuilt from such a record. A reload can also put a later instance's hand-in
+below a stale instance's `read_at` (the stale one read from a longer log): an outcome carrying a later offered
+hour supersedes too, since it was logged at that hour or after; and an instance whose offered hour the world has
+not reached is refused outright by `valid()` and `fail()`, the game having gone back to a save from before it
+was read (delta review of bda0d0e3). The case is in the fixture as a passing test in both shapes, with its
+preconditions in a test of their own, beside the reloaded-save (three shapes), same-hour and inclusive-position
+cases.
 
 **Contracts the modules do not have yet** (found by the fixture; recorded, not built):
 

@@ -184,15 +184,56 @@ class ResupplyLifecycleTests(unittest.TestCase):
         self.assertEqual(len(done_events(ws, later.id)), 1)
 
     def test_a_give_up_logged_right_after_the_read_supersedes(self):
-        """The position rule is inclusive: the first event after an instance was read can be another instance's
-        outcome (a give-up logs nothing else), and it supersedes the earlier instance; the window rule would refuse
-        it too, so the reason says which (review of 084f68cc: an off-by-one here was caught by one test)."""
-        ws, a = self.ws, self.offer
+        """The position rule is inclusive: the first event after an instance was read can be an earlier instance's
+        outcome (a give-up logs nothing else), and it supersedes the later-read instance, which only the position
+        can tell (the earlier instance's offered hour is older); the window rule would refuse it too, so the reason
+        says which (review of 084f68cc: an off-by-one here was caught by one test)."""
+        ws, z = self.ws, self.offer                          # z read at hour 0
         ws.hour += 1
-        b = resupply(ws)
+        a = resupply(ws)                                     # a read at hour 1
         self.assertEqual(len(ws.events), a.read_at)         # nothing logged since a was read
-        jobs.fail(ws, b)
+        jobs.fail(ws, z)                                     # z given up: the first event after a's read
         self.assertIn("superseded", jobs.valid(ws, a))
+
+    def test_a_stale_instance_is_superseded_on_the_reloaded_world_too(self):
+        """Delta review of bda0d0e3: a stale instance read from a longer log than the reloaded world's, and the live
+        instance's hand-in an hour later landing below its read_at. The position rule cannot see it; the later
+        offered hour on the outcome does (logged at that hour or after, so after the stale instance)."""
+        ws = self.ws
+        before = ws.to_json()
+        for _ in range(4):                                   # the log grows well past the save
+            lose(ws, "farm_a", "raiders")
+        stale = resupply(ws)                                 # read at hour 0 from the longer log
+        ws = WorldState.from_json(before)                    # back to the save
+        ws.hour += 1
+        short(ws, stock=2)                                   # the live need, by another amount
+        live = resupply(ws)
+        self.assertNotEqual(live.detail["amount"], stale.detail["amount"])
+        jobs.complete(ws, live)
+        done = [i for i, e in enumerate(ws.events) if e["kind"] == "job_done"]
+        self.assertLess(done[-1], stale.read_at)            # the hand-in sits below the stale read
+        short(ws)
+        self.assertIn("superseded", jobs.valid(ws, stale))
+        with self.assertRaises(ValueError):
+            jobs.complete(ws, stale)
+        self.assertEqual(len(done_events(ws, stale.id)), 1)
+
+    def test_an_instance_from_a_later_hour_is_refused_on_an_earlier_world(self):
+        """The mirror reload: the game went back to a save from before the instance was read, so the world has not
+        reached the instance's offered hour. The giver has not made that offer here: neither door opens and nothing
+        is logged, while the instance of this hour is still good."""
+        ws = self.ws
+        before = ws.to_json()
+        ws.hour += 3
+        future = resupply(ws)
+        ws = WorldState.from_json(before)
+        self.assertIn("later than the world", jobs.valid(ws, future))
+        with self.assertRaises(ValueError):
+            jobs.complete(ws, future)
+        with self.assertRaises(ValueError):
+            jobs.fail(ws, future)
+        self.assertEqual(ws.to_json(), before)
+        self.assertIsNone(jobs.valid(ws, self.offer))
 
     def test_a_hand_in_is_acknowledged_by_the_save(self):
         """Restart before acknowledgement: the save is the acknowledgement. A save made after the hand-in refuses
