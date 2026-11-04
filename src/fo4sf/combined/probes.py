@@ -1713,7 +1713,9 @@ def check_p9(c: Collection) -> Verdict:
         # Stuck: dist within 2 m of a value for 120 s while loaded and the player is not near. Near the player the NPC's
         # own behaviour may take over (reactions, combat): on 1 Nov loaded actors stood 40-220 s only with the player
         # within about 30 m, and walked straight through with the player 83 m off (#644). Samples before 1 Nov carry no
-        # player_m= and count as before.
+        # player_m= and count as far. A near or unloaded sample ends a window and the next loaded, far sample starts
+        # the next one (one sample later than before 10b58dd1, when the unloaded sample itself started it: an
+        # unloaded sample is no evidence of a loaded stall).
         anchor = None
         for r in rows:
             if r[4] is not True or r[5].line in player_near:
@@ -1750,8 +1752,14 @@ def check_p9(c: Collection) -> Verdict:
         return v
     if not arrived:
         if first_cell_timeout and player_near:
-            v.reasons.append("the actor stayed in its first cell with the player nearby during part of the track "
-                             "and no qualifying stall away from the player")
+            # one near sample is enough to excuse the timeout (review of 10b58dd1): a knob for the owner, so the
+            # reason counts the near samples and seconds
+            near_s = sum(b[0] - a[0] for a, b in zip(rows, rows[1:])
+                         if a[5].line in player_near or b[5].line in player_near)
+            v.reasons.append(f"the actor never left its first cell {first_cell} in {P['p9_seconds']:g} s, but the "
+                             f"player was within {P['p9_player_near_m']:g} m in {len(player_near)} of {len(rows)} "
+                             f"samples ({near_s:.0f} s), where its own behaviour may hold it (#644), and it never "
+                             f"stood still {P['p9_stuck_s']:g} s away from the player: not a route failure")
         v.reasons.append(f"dist never fell below {P['p9_arrive_m']} m within {P['p9_seconds']} s (last {rows[-1][1]} m)")
         return v
     if len(cells) < P["p9_min_cells"]:

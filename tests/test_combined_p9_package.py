@@ -226,6 +226,44 @@ class P9PackageDriverTests(unittest.TestCase):
                 verdict = probes.check_p9(col(log=log))
                 self.assertEqual(verdict.extra["distinct_cells"], 1)
                 self.assertEqual(verdict.verdict, expected, verdict.reasons)
+                # the excuse is named and counted whenever it applies (review of 10b58dd1)
+                self.assertEqual(any("where its own behaviour may hold it" in r for r in verdict.reasons),
+                                 expected == probes.INCONCLUSIVE, verdict.reasons)
+
+    def test_one_near_sample_excuses_the_first_cell_timeout_and_says_so(self):
+        # review of 10b58dd1: the actor paces in one cell for 600 s with the player 80 m off on every sample but one;
+        # the timeout is excused all the same (an owner knob), and the reason counts the near samples
+        stuck = drive(driver="link", package=PATROL, stuck_from=20)
+
+        def with_player(near_at):
+            out = []
+            for line in stuck:
+                if " p9 sample " in line:
+                    elapsed = float(re.search(r" t=([\d.]+)", line)[1])
+                    if elapsed >= 20.0:        # pacing: dist wobbles 3 m every other sample, never still for 120 s
+                        line = re.sub(r"dist=([\d.]+)",
+                                      lambda m: f"dist={float(m[1]) + 3.0 * (int(elapsed) % 4 == 0):.6f}", line)
+                    line = line.replace(" dist=", f" player_m={20.0 if elapsed == near_at else 80.0} dist=")
+                out.append(line)
+            return out
+        self.assertEqual(probes.check_p9(col(log=with_player(None))).verdict, probes.FAIL)    # far throughout
+        v = probes.check_p9(col(log=with_player(300.0)))
+        self.assertEqual(v.verdict, probes.INCONCLUSIVE, v.to_dict())
+        self.assertTrue(any(re.search(r"in 1 of \d+ samples \(4 s\)", r) for r in v.reasons), v.reasons)
+
+    def test_an_unloaded_sample_ends_the_stall_window(self):
+        # review of 10b58dd1: an unloaded sample is no evidence of a loaded stall, so the window starts again at the
+        # next loaded sample, one sample later than before (the unloaded sample itself used to start it)
+        stuck = drive(driver="link", package=PATROL, stuck_from=100)      # several cells, then still to 600 s
+
+        def unloaded_at(*whens):           # unloaded samples every 100 s keep each window under 120 s until the last
+            return [ln.replace("loaded=True", "loaded=False")
+                    if " p9 sample " in ln and float(re.search(r" t=([\d.]+)", ln)[1]) in whens else ln for ln in stuck]
+        self.assertEqual(probes.check_p9(col(log=stuck)).verdict, probes.FAIL)
+        v = probes.check_p9(col(log=unloaded_at(200.0, 300.0, 400.0, 478.0)))                 # 480 to 600: 120 s
+        self.assertEqual(v.verdict, probes.FAIL, v.to_dict())
+        v = probes.check_p9(col(log=unloaded_at(200.0, 300.0, 400.0, 480.0)))                 # 482 to 600: 118 s
+        self.assertEqual(v.verdict, probes.INCONCLUSIVE, v.to_dict())
 
 
 if __name__ == "__main__":
