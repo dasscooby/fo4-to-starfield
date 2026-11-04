@@ -616,10 +616,14 @@ z 140 was checked to 440 m out on 1 Nov, the ground farther out was not), spawns
 player hops back and waits, with no `Shadow`. The kit is P9's; only the judge and the session change.
 
 Judge `probes p9u`, which never says FAIL:
-- PASS: a link driver whose package took, a go to the tracked marker 400 m or more out, samples that run forward in
-  time with no step faster than 15 m/s (`p9_jump_m_per_s`, as P9), 100 m or more of progress toward the marker
-  between samples that both read unloaded (`p9u_unloaded_m`), and a sample under 10 m within 900 s of the go
-  (`p9u_seconds`), or 2 s per metre of the go's distance when that is longer (`p9u_s_per_m`: 1800 s from 900 m).
+- PASS: a link driver whose package took, a go to the tracked marker (the probe's own FOCC_P9_Dest) 400 m or more
+  out, complete samples (rt, dist and pos on every one: a torn or unreadable reading refuses the judgement, since
+  the skipped row may be the jump) that run forward in time, the first within 2 m plus 15 m/s of the go's distance
+  for the time since the go, with no step faster than 15 m/s (`p9_jump_m_per_s`, as P9), 100 m or more of progress
+  toward the marker between samples that both read unloaded (`p9u_unloaded_m`) up to the arrival, and a sample
+  under 10 m within 900 s of the go (`p9u_seconds`), or 2 s per metre of the go's distance when that is longer
+  (`p9u_s_per_m`: 1800 s from 900 m). Progress after the arrival, or outside the window, is the actor's later
+  behaviour, not this travel (review of eada2c28: four gaps found by synthetic tracks, each now a test).
 - INCONCLUSIVE otherwise, with the reason. The reason may be jumps (an engine that moves an unloaded actor abstractly,
   or only when it loads again, which is what positions that froze while unloaded end in), too little travel while
   unloaded, or no arrival in time. None of these is about the converted navmesh, which P9 judges with the actor

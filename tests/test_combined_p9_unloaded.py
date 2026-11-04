@@ -170,6 +170,58 @@ class P9UnloadedTests(unittest.TestCase):
                 v = judge(out_of_range(lines))
                 self.assertEqual(v.verdict, INCONCLUSIVE, v.to_dict())
 
+    def test_the_first_sample_must_follow_from_the_go(self):
+        # review of eada2c28: only the steps between samples were checked, so a track whose first sample read 200 m
+        # nearer than the go found the actor, 4 s later (50 m/s), passed on the rest
+        v = judge(track([(4, 200.0, "False"), (24, 300.0, "False"), (44, 446.0, "True")]))
+        self.assertEqual(v.verdict, INCONCLUSIVE, v.to_dict())
+        self.assertTrue(any("is a jump, not a walk" in r for r in v.reasons), v.reasons)
+        # the slack is the P9 judge's: 2 m plus 15 m/s for the time since the go (62 m after 4 s)
+        v = judge(track([(4, 60.0, "False"), (24, 100.0, "False"), (44, 200.0, "False"), (64, 300.0, "False"),
+                         (84, 446.0, "True")]))
+        self.assertEqual(v.verdict, PASS, v.to_dict())
+
+    def test_incomplete_readings_refuse_the_judgement(self):
+        # review of eada2c28: the teleport-on-reload track read INCONCLUSIVE whole, PASS once the jumping sample lost
+        # its pos= (the fallback measured |change of dist|, a floor), its dist= or its rt= (the row was dropped)
+        lines = track([(t, 2.0 * t, "False") for t in range(0, 152, 2)] + [(152, 444.0, "True")])
+        jumping = [i for i, ln in enumerate(lines) if " p9 sample " in ln][-1]
+        self.assertTrue(any("moved in jumps" in r for r in judge(lines).reasons))
+        cuts = {"no pos": (r" pos=\S+ \S+ \S+", ""), "no dist": (r" dist=[\d.]+", ""), "no rt": (r"rt=[\d.]+ ", ""),
+                "torn pos": (r" pos=(\S+) \S+ \S+", r" pos=\1"), "unreadable rt": (r"rt=[\d.]+", "rt=late"),
+                "unreadable dist": (r"dist=[\d.]+", "dist=nan")}
+        for name, (pattern, repl) in cuts.items():
+            with self.subTest(name):
+                hidden = list(lines)
+                hidden[jumping] = re.sub(pattern, repl, hidden[jumping])
+                v = judge(hidden)
+                self.assertEqual(v.verdict, INCONCLUSIVE, v.to_dict())
+                self.assertTrue(any("incomplete readings" in r for r in v.reasons), v.reasons)
+
+    def test_unloaded_progress_counts_only_up_to_the_arrival(self):
+        # review of eada2c28: an actor that arrived loaded at 100 s, then wandered out and back unloaded after 1000 s,
+        # read PASS on progress made after its arrival and outside the 900 s window
+        points = [(4, 0.0, "True"), (100, 446.0, "True"), (1000, 100.0, "False"), (1100, 200.0, "False"),
+                  (1200, 300.0, "False"), (1400, 446.0, "True")]
+        v = judge(track(points))
+        self.assertEqual(v.verdict, INCONCLUSIVE, v.to_dict())
+        self.assertEqual(v.extra["arrived_at_s"], 100.0)
+        self.assertEqual(v.extra["unloaded_progress_m"], 0.0)
+        # no arrival: progress counts inside the window only (100 m unloaded at 950-1050 s is past 900 s)
+        late = [(4, 0.0, "True"), (400, 40.0, "True"), (950, 100.0, "False"), (1050, 200.0, "False"),
+                (1150, 200.0, "False")]
+        v = judge(track(late))
+        self.assertEqual(v.verdict, INCONCLUSIVE, v.to_dict())
+        self.assertEqual(v.extra["unloaded_progress_m"], 0.0)
+
+    def test_the_marker_must_be_the_probes_own(self):
+        # review of eada2c28: to_dest matched the go's id against the `p9 dest` line's, whatever that line named
+        lines = [ln.replace("50333723", "50333724") for ln in out_of_range(walk())]
+        v = judge(lines)
+        self.assertEqual(v.verdict, INCONCLUSIVE, v.to_dict())
+        self.assertFalse(v.extra["attempts"][-1]["dest_ok"])
+        self.assertTrue(any("probe's own marker" in r for r in v.reasons), v.reasons)
+
 
 if __name__ == "__main__":
     unittest.main()
