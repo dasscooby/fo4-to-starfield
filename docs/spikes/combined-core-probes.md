@@ -178,7 +178,7 @@ Second session (28 Oct, after #557's restage; `focc_probe_20261028b`, plugin e2e
 | P10 | PASS | the check printed the branch's new condition (GetEventData GetIsID Keyword1, record 00081F, equal to 1, the shape of 80 of the 82 vanilla keyword filters); `SendStoryEvent` ran, FOCC_P10_Quest's OnQuestInit came after it, `running=True` |
 | P3 (cell half) | INCONCLUSIVE; run again after the restage | both `where` lines are in the log (Red Rocket cell 117449528, loc 167774215 = local 0x807; Super Duper Mart cell 117468230, loc 167774216 = local 0x808), but `cellname=` came back empty on both, and the judge named cells only by cellname. It now names them by the stage's form ids in offline_check.txt, bound to FO4Port.esm by the script's `port=True` (P3b card); the 28 Oct log has no `port=`, so P3b runs again with the restaged kit |
 | P9 (ladder) | INCONCLUSIVE | rung b (`PathToRef player`, start 16.7 m): the actor ended about 22 m away, so the ladder stopped there as the card says. Next: the scripted driver (P9 card) |
-| P9 (scripted ladder, kit d after #566; evidence `focc_P9_20261028_1043`) | INCONCLUSIVE | rung a (baseline, 60 s): 16.7 m to 21.7 m. Rung b (`FOCC_P9Drive.Go <actor> 1`, 24.43 m): `PathToReference(player, 1.0, 1.0)` returned after 2.89 s with the actor 24 to 28 m away (26.70 m at the end), so the ladder stopped. The driver did not log the return then; Starfield's Actor.psc (line 490) declares it `int`, latent, with PathingResult_Success 0, Failure 1, Stopped 2, Cleared 3, Timeout 4, and the driver now logs it as `result=` (1 = no path, the navmesh; 2 or 4 = the walk stopped or ran out of time). Next: rung b again with the code, before any new driver (a Travel package on a quest alias, or Cassiopeia's PathToPoint) |
+| P9 (scripted ladder, kit d after #566; evidence `focc_P9_20261028_1043`) | INCONCLUSIVE | rung a (baseline, 60 s): 16.7 m to 21.7 m. Rung b (`FOCC_P9Drive.Go <actor> 1`, 24.43 m): `PathToReference(player, 1.0, 1.0)` returned after 2.89 s with the actor 24 to 28 m away (26.70 m at the end), so the ladder stopped. The driver did not log the return then; Starfield's Actor.psc (line 490) declares it `int`, latent, with PathingResult_Success 0, Failure 1, Stopped 2, Cleared 3, Timeout 4, and the driver now logs it as `result=` (1 = unsuccessful request; 2 or 4 = stopped or timed out; none alone identifies the cause). Next: rung b again with the code, before any new driver (a Travel package on a quest alias, or Cassiopeia's PathToPoint) |
 
 **The load order trap.** Loading a save made while FO4SFMission.esm was active silently switched Starfield to that
 save's load order: Mission came back on and the probe plugin went off, with no dialog. The cgf calls then failed with
@@ -465,10 +465,10 @@ cgf "FOCC_P9Drive.Go" <actor id as signed decimal> 1
 The log then has `p9 go actor=<id> call=<t> target=player ...` and, when the call returns, `p9 path returned ...
 result=<code> after=<s> dist=<m>`. The code is Starfield's `PathingResult` (Actor.psc lines 476 to 480: 0 Success,
 1 Failure, 2 Stopped, 3 Cleared, 4 Timeout; the judge names it). If the actor did not come within 10 m of you, stop
-here and send the log: `result=1` says the navmesh carries no path from the actor to you (the next rung is then this
-driver in a vanilla exterior as the control, and the converted NAVM at Red Rocket looked at offline, not a new
-driver); `2` or `4` says the walk was commanded and cut short, which points at the actor's AI and makes a Travel
-package on a quest alias (or Cassiopeia's PathToPoint) the next driver. Otherwise go on.
+here and send the log: `result=1` reports an unsuccessful request, while `2` or `4` reports a stopped or timed-out
+walk. None of these codes alone identifies a NAVM or AI fault. Compare a vanilla-area control and the actor/target
+state before attributing a cause; a Travel package on a quest alias (or Cassiopeia's PathToPoint) is a separate
+driver to test. Otherwise go on.
 
 **Rungs c, d and e (20 m for 120 s, 120 m for 180 s, 450 m for 600 s).** Start each only after the previous rung's
 `p9 done` and its `p9 path returned` (or 30 s after `p9 done` if no return came: note that). For each, with the dx
@@ -487,8 +487,10 @@ loaded=<bool> dist=<m>` every 2 s.
 
 The verdict is the latest rung's: dist from >= 400 to < 10 within 600 s through >= 4 distinct cell ids, timed by each
 line's `rt=` from the start's (real seconds; late timers do not stretch the deadline). When the script sent the actor, the walk and its clock start at its `p9 go`
-(samples before it show an actor not yet commanded). FAIL = stuck (dist within 2 m for 120 s while loaded) or never
-leaving the first cell, and only when the log shows the command moving this actor: it came at least 20 m closer on
+(samples before it show an actor not yet commanded). A failure requires a loaded stall (dist within 2 m for 120 s)
+or a timeout in the first cell. A sample with the player closer than 35 m breaks the stall window and makes
+the first-cell timeout inconclusive on its own. Either failure also requires proof that the command moves this
+actor: it came at least 20 m closer on
 that route, or the first rung within 30 m (the baseline, with no `p9 go`) stayed away and a later rung that the script
 sent (its `p9 go` inside its track, after the start and before its `p9 done`) was found by that go 15 to 30 m out and
 came under 10 m after it through continuous samples (the walk's own checks: readings complete, time increasing, no
@@ -507,11 +509,17 @@ actor id.
 
 **Unsuccessful native requests (1 November 2026).** The judge retains each matched return code and reports it even
 when a short control cannot judge the 400 m route. A request returning Failure, Stopped, Cleared, Timeout or an unknown
-code cannot earn PASS from later wandering, and cannot qualify as the successful short control. For a stall finding,
-only approach sampled before an unsuccessful request returned can prove that request moved the actor; a separate
-qualified control can still establish the driver. Legacy logs without a result code retain their existing rules.
+code cannot earn PASS from later wandering, and cannot qualify as the successful short control. Every explicit
+return, including Success, ends the request's evidence window: arrival, approach, cell crossings and any stall must
+be sampled by that return's real time. A missing or malformed return timestamp supplies no such window. A Success
+code alone is not arrival evidence; the samples must show arrival before or at the return. Stopped, Cleared, Timeout,
+unknown and malformed codes, or a Success code conflicting with a stall, remain INCONCLUSIVE rather than a navmesh
+FAIL. Failure (1) still needs a sustained in-request stall and proof the driver moves the actor; it is a failed route
+test, not an isolated root cause. Legacy logs without a result code retain their existing rules, including missing
+returns; they cannot prove that a modern latent request completed.
 The driver now logs actor/target cells and actor load/death/disable/current-package state before the call. These
-are diagnostic reads, with no AI, package or navmesh changes. The owner's same-profile Commonwealth and QASmoke
+are diagnostic reads, with no AI, package or navmesh changes. If a state line is present, an unloaded, dead or disabled
+actor, a disabled target or an unreadable state makes the rung INCONCLUSIVE and excludes it as a control. The owner's same-profile Commonwealth and QASmoke
 requests both returned Failure; their cause remains unresolved, and the longer route stays held pending a working
 control. QASmoke under the same installed profile is not an unmodded-profile control.
 

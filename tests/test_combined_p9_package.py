@@ -206,6 +206,27 @@ class P9PackageDriverTests(unittest.TestCase):
         self.assertEqual(v.extra["attempts"][-1]["driver"], "script")
         self.assertIsNone(v.extra["attempts"][-1]["package_after_go"])
 
+    def test_same_cell_timeout_respects_player_proximity(self):
+        stuck = drive(driver="link", package=PATROL, stuck_from=20)
+        for distance, far_from, expected in (
+            (20.0, None, probes.INCONCLUSIVE),
+            (35.0, None, probes.FAIL),
+            (None, None, probes.FAIL),
+            (20.0, 480, probes.FAIL),
+            (20.0, 482, probes.INCONCLUSIVE),
+        ):
+            with self.subTest(distance=distance, far_from=far_from):
+                log = []
+                for line in stuck:
+                    if distance is not None and " p9 sample " in line:
+                        elapsed = float(re.search(r" t=([\d.]+)", line)[1])
+                        player_m = 80.0 if far_from is not None and elapsed >= far_from else distance
+                        line = line.replace(" dist=", f" player_m={player_m} dist=")
+                    log.append(line)
+                verdict = probes.check_p9(col(log=log))
+                self.assertEqual(verdict.extra["distinct_cells"], 1)
+                self.assertEqual(verdict.verdict, expected, verdict.reasons)
+
 
 if __name__ == "__main__":
     unittest.main()
