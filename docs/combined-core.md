@@ -456,7 +456,7 @@ offered hour, refuses it at any position as before (#431): that holds an instanc
 world reloaded from that save, where its own hand-in lands below `read_at` (review of 084f68cc), and it keeps the
 once-per-hour cap on a repeating id, the only limit on handing in, taking the goods back and handing in again;
 that cap is a design knob this change leaves alone. Ordered by log position, as `_last_loss` orders losses and
-retake ids carry `seq`, not "the newer offered hour wins", which would miss the shape where the handed-in
+retake ids carry `seq`, not only "the newer offered hour wins", which alone would miss the shape where the handed-in
 instance is the older one. `read_at` is in `to_dict`; an offer record without it reads as 0, so any outcome for
 its id counts against an instance rebuilt from such a record. A reload can also put a later instance's hand-in
 below a stale instance's `read_at` (the stale one read from a longer log): an outcome carrying a later offered
