@@ -450,14 +450,17 @@ written against what `jobs.py`, `present.py` and `sim.py` do today:
 **Built from the fixture (4 Nov 2026): the superseded offer instance.** A repeating job read twice (same id,
 different offered hours), one instance handed in, the need back by a different amount, used to accept the other
 instance and pay by its own, stale, amount. `Offer` now carries `read_at`, the event log's length when the
-instance was read, and an outcome for its id logged at or after that position refuses it: its own (the same
-offered hour: handed in or given up) or a later instance's (superseded; SSaW ignores a result whose token is not
-the live one). Ordered by log position, as `_last_loss` orders losses and retake ids carry `seq`, not "the newer
-offered hour wins", which would miss the shape where the handed-in instance is the older one. The instances
-`offers()` builds are read now, so a need back within the hour of a hand-in is new work (before, a repeating id
-handed in was not offered again until the next hour). `read_at` is in `to_dict`; an offer record without it reads
-as 0, so any outcome for its id counts against an instance rebuilt from such a record. The case is in the
-fixture as a passing test in both shapes, with its preconditions in a test of their own.
+instance was read, and another instance's outcome for its id logged at or after that position refuses it
+(superseded; SSaW ignores a result whose token is not the live one). Its own outcome, any outcome carrying its
+offered hour, refuses it at any position as before (#431): that holds an instance read after a save against the
+world reloaded from that save, where its own hand-in lands below `read_at` (review of 084f68cc), and it keeps the
+once-per-hour cap on a repeating id, the only limit on handing in, taking the goods back and handing in again;
+that cap is a design knob this change leaves alone. Ordered by log position, as `_last_loss` orders losses and
+retake ids carry `seq`, not "the newer offered hour wins", which would miss the shape where the handed-in
+instance is the older one. `read_at` is in `to_dict`; an offer record without it reads as 0, so any outcome for
+its id counts against an instance rebuilt from such a record. The case is in the fixture as a passing test in
+both shapes, with its preconditions in a test of their own, beside the reloaded-save, same-hour and
+inclusive-position cases.
 
 **Contracts the modules do not have yet** (found by the fixture; recorded, not built):
 

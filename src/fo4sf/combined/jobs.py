@@ -19,9 +19,9 @@ Offers are data only: no quest records, no engine calls, text from our own neutr
 news.display_name). Ids are built from the state (squad ids, place ids, event hours), never from a counter or clock,
 so two calls on the same state give the same list. An offer expires at `expires_hour`; complete() refuses an expired
 offer or one the world has since made moot, so a stale save or a double hand-in fails loudly. An instance also
-records where in the event log it was read (`read_at`): an outcome for its job logged from there on, its own or a
-later instance's, refuses it, so a stale instance never pays by its own amount (the live-token rule from the
-reference review on #32). Every number is a placeholder to tune. Nothing here is a Fallout or Starfield rule.
+records where in the event log it was read (`read_at`): another instance's outcome for its job logged from there
+on refuses it too, so a stale instance never pays by its own amount (the live-token rule from the reference
+review on #32). Every number is a placeholder to tune. Nothing here is a Fallout or Starfield rule.
 """
 from __future__ import annotations
 
@@ -68,9 +68,10 @@ TEMPLATES = {
 @dataclass(frozen=True)
 class Offer:
     """One piece of work on offer. `detail` carries the kind's specifics (squad id, good, amount, holder) and is
-    what complete() re-checks against the world. `read_at` is the instance's token: an outcome for its id logged at
-    or after that position in the event log refuses it (_outcome). A record without the field reads as 0, so any
-    outcome for its id counts against an instance rebuilt from it."""
+    what complete() re-checks against the world. `read_at` is the instance's token: another instance's outcome for
+    its id logged at or after that position in the event log refuses it, as its own does at any position
+    (_outcome). A record without the field reads as 0, so any outcome for its id counts against an instance
+    rebuilt from it."""
     id: str                        # stable: from squad ids, place ids and event hours in the save
     kind: str                      # one of KINDS
     giver: str                     # faction id making the offer
@@ -241,8 +242,8 @@ def offers(ws: WorldState, place: str, limit: int = OFFER_LIMIT,
     found: list[Offer] = []
     for kind in KINDS:
         found.extend(_BUILDERS[kind](ws, giver, place, names))
-    # a one-time id with an outcome, or a give-up inside its window, is not offered again; the instances built
-    # here are read now, so a repeating need back after a hand-in is new work, even within the same hour
+    # a handed-in or given-up job is not offered again: a one-time id for good, a repeating id for the rest of
+    # the hour or of the give-up's window
     found = [o for o in found if _outcome(ws, o) is None]
     found.sort(key=lambda o: (o.expires_hour, o.kind, o.id))
     return found[:limit]
@@ -257,18 +258,17 @@ _ONE_TIME = ("defend", "escort", "retake")
 
 def _outcome(ws: WorldState, offer: Offer) -> str | None:
     """Why this job's outcome is already decided, or None: any outcome for a one-time id; for a repeating id an
-    outcome logged at or after the position where this instance was read (Offer.read_at), either its own (the same
-    offered hour: handed in or given up, Codex review of #431) or a later instance's, which supersedes it (the
-    live-token rule, reference review on #32); or a give-up still inside its window. Ordered by log position, as
-    _last_loss orders losses, so an instance read after a hand-in is new work even within the same hour."""
+    outcome carrying this instance's offered hour, at any log position (handed in or given up this hour, Codex
+    review of #431; at any position so that it also holds against a world reloaded from a save made before the
+    instance was read, review of 084f68cc), another instance's outcome logged at or after the position where this
+    instance was read (Offer.read_at), which supersedes it (the live-token rule, reference review on #32), or a
+    give-up still inside its window. Ordered by log position, as _last_loss orders losses."""
     for i, e in enumerate(ws.events):
         if e["kind"] not in ("job_done", "job_failed") or e.get("offer") != offer.id:
             continue
-        if offer.kind in _ONE_TIME:
+        if offer.kind in _ONE_TIME or e.get("offered") == offer.offered_hour:
             return "this offer was already handed in or given up"
         if i >= offer.read_at:
-            if e.get("offered") == offer.offered_hour:
-                return "this offer was already handed in or given up"
             return "this offer was superseded: an outcome for the job was logged after it was read"
         if e["kind"] == "job_failed" and ws.hour < e.get("until", -1):
             return "this job was given up and its window has not ended"

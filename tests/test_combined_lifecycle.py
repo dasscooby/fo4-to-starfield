@@ -147,22 +147,52 @@ class ResupplyLifecycleTests(unittest.TestCase):
             self.assertEqual((len(done_events(ws, stale.id)), ws.reputation["settlers"].fame), (1, fame))
             self.assertIsNone(jobs.valid(ws, live))
 
-    def test_a_need_back_within_the_hour_of_a_hand_in_is_new_work(self):
-        """The token is a log position, not an hour: an instance read after the hand-in is new work even in the
-        same hour (before read_at, a repeating id handed in was not offered again until the next hour), while the
-        handed-in instance stays refused. It pays again only for goods delivered again."""
+    def test_a_need_back_within_the_hour_waits_for_the_next_hour(self):
+        """A repeating id handed in is not offered again for the rest of the hour, whatever the stock does (the
+        once-per-hour cap of #431, kept by the review of 084f68cc: it is the only limit on handing in, taking the
+        goods back and handing in again). The next hour the need is a new instance with a later read_at."""
         ws, o = self.ws, self.offer
         jobs.complete(ws, o)
         short(ws)                                            # the farm is short again within the hour
-        again = resupply(ws)
-        self.assertEqual((again.id, again.offered_hour), (o.id, o.offered_hour))
-        self.assertGreater(again.read_at, o.read_at)
+        self.assertIsNone(resupply(ws))
         self.assertIn("already handed in", jobs.valid(ws, o))
+        ws.hour += 1
+        again = resupply(ws)
+        self.assertEqual((again.id, again.offered_hour), (o.id, o.offered_hour + 1))
+        self.assertGreater(again.read_at, o.read_at)
         self.assertIsNone(jobs.valid(ws, again))
         jobs.complete(ws, again)
         self.assertEqual(len(done_events(ws, o.id)), 2)
         with self.assertRaises(ValueError):
             jobs.complete(ws, again)
+
+    def test_an_instance_read_after_the_save_pays_once_on_the_reloaded_world(self):
+        """Review of 084f68cc (P1): the log grew after the save, then the instance was read, then the game went back
+        to the save. Its own hand-in now lands below read_at, so the position rule alone would pay it again on every
+        shortage; the offered-hour rule refuses it at any position."""
+        ws = self.ws
+        before = ws.to_json()
+        lose(ws, "farm_a", "raiders")                        # unrelated events after the save
+        later = resupply(ws)
+        ws = WorldState.from_json(before)                    # the game reloaded the earlier save
+        self.assertGreater(later.read_at, len(ws.events))
+        jobs.complete(ws, later)
+        short(ws)                                            # short again: the same instance must not pay twice
+        self.assertIn("already handed in", jobs.valid(ws, later))
+        with self.assertRaises(ValueError):
+            jobs.complete(ws, later)
+        self.assertEqual(len(done_events(ws, later.id)), 1)
+
+    def test_a_give_up_logged_right_after_the_read_supersedes(self):
+        """The position rule is inclusive: the first event after an instance was read can be another instance's
+        outcome (a give-up logs nothing else), and it supersedes the earlier instance; the window rule would refuse
+        it too, so the reason says which (review of 084f68cc: an off-by-one here was caught by one test)."""
+        ws, a = self.ws, self.offer
+        ws.hour += 1
+        b = resupply(ws)
+        self.assertEqual(len(ws.events), a.read_at)         # nothing logged since a was read
+        jobs.fail(ws, b)
+        self.assertIn("superseded", jobs.valid(ws, a))
 
     def test_a_hand_in_is_acknowledged_by_the_save(self):
         """Restart before acknowledgement: the save is the acknowledgement. A save made after the hand-in refuses
