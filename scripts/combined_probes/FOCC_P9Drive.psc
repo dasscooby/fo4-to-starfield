@@ -36,6 +36,10 @@ Function Go(int actorId, int toPlayer) global
         q.Trace("p9 go refused actor=" + actorId + " target=" + what)
         return
     endif
+    ; Diagnostic reads only: never change packages, enable AI or move the actor to force a pass.
+    ; A vanilla-room failure needs these bindings before it can implicate the converted navmesh.
+    q.Trace("p9 context actor=" + a.GetFormID() + " target=" + what + " id=" + target.GetFormID() + " actorcell=" + q.Id(a.GetParentCell()) + " targetcell=" + q.Id(target.GetParentCell()))
+    q.Trace("p9 state actor=" + a.GetFormID() + " loaded=" + a.Is3DLoaded() + " dead=" + a.IsDead() + " disabled=" + a.IsDisabled() + " targetdisabled=" + target.IsDisabled() + " package=" + q.Id(a.GetCurrentPackage()))
     float t0 = Utility.GetCurrentRealTime()
     q.Trace("p9 go actor=" + a.GetFormID() + " call=" + t0 + " target=" + what + " id=" + target.GetFormID() + " dist=" + a.GetDistance(target))
     int r = a.PathToReference(target, 1.0, 1.0)

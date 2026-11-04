@@ -45,7 +45,7 @@ PROPERTIES = {"Holder": "Keyword", "Route": "Keyword", "P2Loc": "Location", "P3L
               "P6BaseB": "Form", "P7Rep": "GlobalVariable", "P7List": "Form", "P8Parents": "ObjectReference[]",
               "P8Children": "ObjectReference[]", "P9Dest": "ObjectReference", "P10Event": "Keyword", "P10Quest": "Quest"}
 # every Papyrus base type a script of the kit names (declarations, casts, static calls)
-PAPYRUS_TYPES = ("Actor", "Cell", "Debug", "Form", "Game", "GlobalVariable", "Keyword", "Location", "ObjectReference", "Quest",
+PAPYRUS_TYPES = ("Actor", "Cell", "Debug", "Form", "Game", "GlobalVariable", "Keyword", "Location", "ObjectReference", "Package", "Quest",
                  "Utility", "WorldSpace", "ScriptObject")
 
 
@@ -572,7 +572,7 @@ class StageTests(unittest.TestCase):
     def test_compile_commands_name_the_flags_and_both_include_folders(self):
         cmd = mcp.compile_cmd("PapyrusCompiler.exe", "FOCC_Probe", "SRC", "OUT")
         self.assertEqual(cmd, ["PapyrusCompiler.exe", "FOCC_Probe.psc", "-f=Starfield_Papyrus_Flags.flg", f"-i={mcp.HERE};SRC", "-o=OUT"])
-        self.assertEqual(set(mcp.IMPORTS) - set(mcp.make_bridge.IMPORTS), {"Keyword"})       # the bridge's set plus Keyword
+        self.assertEqual(set(mcp.IMPORTS) - set(mcp.make_bridge.IMPORTS), {"Keyword", "Package"})
 
 
 if __name__ == "__main__":

@@ -43,7 +43,7 @@ LOG = "<My Games>/Starfield/Logs/Script/User/focc.0.log"
 # the base scripts the probe scripts use (make_bridge.IMPORTS is a module constant, so this is its own superset:
 # Keyword for Holder / Route / P10Event and SendStoryEvent; Form for the list and base properties). ActorBase and
 # LeveledActor are not needed: the scripts declare those properties as Form (PlaceAtMe takes a Form).
-IMPORTS = ("Actor", "Cell", "Debug", "Form", "Game", "GlobalVariable", "Keyword", "Location", "ObjectReference", "Quest",
+IMPORTS = ("Actor", "Cell", "Debug", "Form", "Game", "GlobalVariable", "Keyword", "Location", "ObjectReference", "Package", "Quest",
            "ScriptObject", "Utility", "WorldSpace")
 PACKED = ("FOCC_ProbeQuest", "FOCC_Probe", "FOCC_P10Quest")       # compiled into Data/Scripts and packed
 COMPILE_ONLY = "FOCC_P5_Array129"                                  # compiled on its own; its result is the finding
