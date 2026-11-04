@@ -18,8 +18,10 @@ Five kinds, all from the giver's point of view (the faction holding the place th
 Offers are data only: no quest records, no engine calls, text from our own neutral templates (display names via
 news.display_name). Ids are built from the state (squad ids, place ids, event hours), never from a counter or clock,
 so two calls on the same state give the same list. An offer expires at `expires_hour`; complete() refuses an expired
-offer or one the world has since made moot, so a stale save or a double hand-in fails loudly. Every number is a
-placeholder to tune. Nothing here is a Fallout or Starfield rule.
+offer or one the world has since made moot, so a stale save or a double hand-in fails loudly. An instance also
+records where in the event log it was read (`read_at`): an outcome for its job logged from there on, its own or a
+later instance's, refuses it, so a stale instance never pays by its own amount (the live-token rule from the
+reference review on #32). Every number is a placeholder to tune. Nothing here is a Fallout or Starfield rule.
 """
 from __future__ import annotations
 
@@ -66,7 +68,9 @@ TEMPLATES = {
 @dataclass(frozen=True)
 class Offer:
     """One piece of work on offer. `detail` carries the kind's specifics (squad id, good, amount, holder) and is
-    what complete() re-checks against the world."""
+    what complete() re-checks against the world. `read_at` is the instance's token: an outcome for its id logged at
+    or after that position in the event log refuses it (_outcome). A record without the field reads as 0, so any
+    outcome for its id counts against an instance rebuilt from it."""
     id: str                        # stable: from squad ids, place ids and event hours in the save
     kind: str                      # one of KINDS
     giver: str                     # faction id making the offer
@@ -77,6 +81,7 @@ class Offer:
     expires_hour: int              # the offer is gone from this hour on
     text: str
     detail: dict = field(default_factory=dict)
+    read_at: int = 0               # len(ws.events) when the instance was read: outcomes from there on decide it
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -90,6 +95,11 @@ def _held(ws: WorldState, fid: str) -> list[str]:
 
 def _homes(ws: WorldState) -> set[str]:
     return {f.home for f in ws.factions.values()}
+
+
+def _read_at(ws: WorldState) -> int:
+    """The token of an instance read now: the event log's length, so every later outcome is logged after it."""
+    return len(ws.events)
 
 
 def _text(kind: str, names, **fields) -> str:
@@ -108,7 +118,7 @@ def _defend(ws, giver, place, names) -> list[Offer]:
         tier = reputation.tier_number(q.size, DEFEND_SIZE_PER_TIER)
         text = _text("defend", names, giver=giver, target=q.goal, attacker=q.faction, due=news._stamp(q.eta))
         out.append(Offer(f"defend:{qid}", "defend", giver, place, q.goal, tier, ws.hour, q.eta, text,
-                         {"squad": qid, "attacker": q.faction}))
+                         {"squad": qid, "attacker": q.faction}, _read_at(ws)))
     return out
 
 
@@ -122,7 +132,7 @@ def _escort(ws, giver, place, names) -> list[Offer]:
         tier = reputation.tier_number(total, ESCORT_GOODS_PER_TIER)
         text = _text("escort", names, giver=giver, place=place, target=q.goal, cargo=news._cargo(q.cargo))
         out.append(Offer(f"escort:{qid}", "escort", giver, place, q.goal, tier, ws.hour, q.eta, text,
-                         {"squad": qid, "cargo": dict(sorted(q.cargo.items()))}))
+                         {"squad": qid, "cargo": dict(sorted(q.cargo.items()))}, _read_at(ws)))
     return out
 
 
@@ -153,7 +163,7 @@ def _retake(ws, giver, place, names) -> list[Offer]:
             continue
         text = _text("retake", names, giver=giver, target=target, holder=pl.holder)
         out.append(Offer(f"retake:{giver}:{target}:{taken}:{seq}", "retake", giver, place, target, RETAKE_TIER,
-                         ws.hour, expires, text, {"holder": pl.holder, "taken_hour": taken}))
+                         ws.hour, expires, text, {"holder": pl.holder, "taken_hour": taken}, _read_at(ws)))
     return out
 
 
@@ -177,7 +187,8 @@ def _resupply(ws, giver, place, names) -> list[Offer]:
             tier = reputation.tier_number(amount, RESUPPLY_GOODS_PER_TIER)
             text = _text("resupply", names, giver=giver, target=sid, good=good, amount=amount)
             out.append(Offer(f"resupply:{giver}:{sid}:{good}", "resupply", giver, place, sid, tier, ws.hour,
-                             ws.hour + RESUPPLY_OFFER_HOURS, text, {"good": good, "amount": amount}))
+                             ws.hour + RESUPPLY_OFFER_HOURS, text, {"good": good, "amount": amount},
+                             _read_at(ws)))
     return out
 
 
@@ -211,7 +222,7 @@ def _clear(ws, giver, place, names) -> list[Offer]:
         holder = ws.places[target].holder
         text = _text("clear", names, giver=giver, target=target, holder=holder, near=near)
         out.append(Offer(_clear_id(ws, giver, target), "clear", giver, place, target, CLEAR_TIER, ws.hour,
-                         ws.hour + CLEAR_OFFER_HOURS, text, {"holder": holder, "near": near}))
+                         ws.hour + CLEAR_OFFER_HOURS, text, {"holder": holder, "near": near}, _read_at(ws)))
     return out
 
 
@@ -230,7 +241,9 @@ def offers(ws: WorldState, place: str, limit: int = OFFER_LIMIT,
     found: list[Offer] = []
     for kind in KINDS:
         found.extend(_BUILDERS[kind](ws, giver, place, names))
-    found = [o for o in found if not _outcome(ws, o)]   # a handed-in or given-up job is not offered again
+    # a one-time id with an outcome, or a give-up inside its window, is not offered again; the instances built
+    # here are read now, so a repeating need back after a hand-in is new work, even within the same hour
+    found = [o for o in found if _outcome(ws, o) is None]
     found.sort(key=lambda o: (o.expires_hour, o.kind, o.id))
     return found[:limit]
 
@@ -242,16 +255,24 @@ def offers(ws: WorldState, place: str, limit: int = OFFER_LIMIT,
 _ONE_TIME = ("defend", "escort", "retake")
 
 
-def _outcome(ws: WorldState, offer: Offer) -> bool:
-    """Whether this job already has a job_done or job_failed event: any earlier outcome for a one-time id, or for a
-    repeating id the same offer instance, or a give-up still inside its window (Codex review of #431)."""
-    for e in ws.events:
+def _outcome(ws: WorldState, offer: Offer) -> str | None:
+    """Why this job's outcome is already decided, or None: any outcome for a one-time id; for a repeating id an
+    outcome logged at or after the position where this instance was read (Offer.read_at), either its own (the same
+    offered hour: handed in or given up, Codex review of #431) or a later instance's, which supersedes it (the
+    live-token rule, reference review on #32); or a give-up still inside its window. Ordered by log position, as
+    _last_loss orders losses, so an instance read after a hand-in is new work even within the same hour."""
+    for i, e in enumerate(ws.events):
         if e["kind"] not in ("job_done", "job_failed") or e.get("offer") != offer.id:
             continue
-        if offer.kind in _ONE_TIME or e.get("offered") == offer.offered_hour or \
-                (e["kind"] == "job_failed" and ws.hour < e.get("until", -1)):
-            return True
-    return False
+        if offer.kind in _ONE_TIME:
+            return "this offer was already handed in or given up"
+        if i >= offer.read_at:
+            if e.get("offered") == offer.offered_hour:
+                return "this offer was already handed in or given up"
+            return "this offer was superseded: an outcome for the job was logged after it was read"
+        if e["kind"] == "job_failed" and ws.hour < e.get("until", -1):
+            return "this job was given up and its window has not ended"
+    return None
 
 
 def valid(ws: WorldState, offer: Offer) -> str | None:
@@ -262,8 +283,9 @@ def valid(ws: WorldState, offer: Offer) -> str | None:
         return "giver or target no longer exists"
     if ws.hour >= offer.expires_hour:
         return f"offer expired at hour {offer.expires_hour}"
-    if _outcome(ws, offer):                         # one outcome per offer (Codex review of #431)
-        return "this offer was already handed in or given up"
+    why = _outcome(ws, offer)                       # one outcome per offer (Codex review of #431)
+    if why is not None:
+        return why
     pl, d = ws.places[offer.target], offer.detail
     if offer.kind == "defend":
         q = ws.squads.get(d.get("squad"))
@@ -346,8 +368,9 @@ def complete(ws: WorldState, offer: Offer) -> dict:
 def fail(ws: WorldState, offer: Offer) -> int:
     """The player gave the job up or let it lapse: FAIL_INFAMY[kind] infamy with the giver, logged. Allowed on an
     expired offer, once per offer: one already handed in or given up is a ValueError. Returns the infamy applied."""
-    if _outcome(ws, offer):                         # one outcome per offer, done or failed (Codex review of #431)
-        raise ValueError(f"cannot fail {offer.id}: this offer was already handed in or given up")
+    why = _outcome(ws, offer)                       # one outcome per offer, done or failed (Codex review of #431)
+    if why is not None:
+        raise ValueError(f"cannot fail {offer.id}: {why}")
     infamy = FAIL_INFAMY.get(offer.kind, 0)
     if offer.giver in ws.reputation and infamy:
         reputation.add(ws, offer.giver, infamy=infamy)
