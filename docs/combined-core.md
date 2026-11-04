@@ -449,10 +449,13 @@ written against what `jobs.py`, `present.py` and `sim.py` do today:
 
 **Contracts the modules do not have yet** (found by the fixture; recorded, not built):
 
-- A stale offer instance: the same need offered twice (same id, a newer offered hour), the newer one handed in,
-  the need back; handing in the older one is accepted today and pays by its stale amount. SSaW ignores a result
-  whose token is not the live one. The case is in the fixture as an expected failure; implementing the rule turns
-  it into an unexpected success, which fails the run until the mark is removed.
+- A superseded offer instance: a repeating job read twice (same id, different offered hours), one instance
+  handed in, the need back by a different amount; handing in the other instance is accepted today and pays by its
+  own, stale, amount. SSaW ignores a result whose token is not the live one. The rule to add is "an instance is
+  refused once any outcome for its id was logged at or after the hour it was offered" (not "the newer offered
+  hour wins": the handed-in instance can be the older one). The case is in the fixture as an expected failure, in
+  both shapes, with its preconditions in a passing test of their own; implementing the rule turns the mark into
+  an unexpected success, which fails the run until the mark is removed.
 - Acceptance: nothing in the world state says the player is on a job (SSaW keeps one accepted operation at a
   time). Offers are read on demand and only outcomes are logged.
 - Engine acknowledgement: a slot has no applied/failed channel back from the adapter (StarSim's package-to-task
