@@ -615,6 +615,44 @@ verdict is INCONCLUSIVE and names the height (1 Nov rerun: 420 m, 5 cells, 9.6 m
 and c is the one
 judged.
 
+### P9u: the actor comes to the player from beyond the loaded area (owner's design, 1 Nov 2026)
+
+Run it after the loaded walk (P9 with `Shadow`) passes on the same kit. Each new driver follows the same order: loaded
+first, then unloaded (owner, 1 Nov 2026).
+
+The player stays at the start. `P9Dest 0.0 0.0` puts the marker on the ground at the player's feet, where the cell is
+loaded and the snap works. The player then hops 660 m east, 220 m at a time with `tgm` (up to z 250 and a fall:
+z 140 was checked to 440 m out on 1 Nov, the ground farther out was not), spawns the actor there and reads its id. `P9Track <id> 900` and `FOCC_P9Drive.Link <id> 0` run while the actor is still loaded, so its
+`p9 package` line can name `DefaultMaster_PatrolPackage`; without that line the session skips the wait. Then the
+player hops back and waits, with no `Shadow`. The kit is P9's; only the judge and the session change.
+
+Judge `probes p9u`, which never says FAIL:
+- PASS: a link driver whose package took, a go to the tracked marker (the probe's own FOCC_P9_Dest) 400 m or more
+  out, whole samples (rt, actor, dist and pos on every one: a sample with one missing or unreadable refuses the
+  judgement, since the skipped row may be the jump; a line torn ahead of its kind is a gap, which the rate gate
+  takes as a gap) that run forward in time, the first within 2 m plus 15 m/s of the go's distance
+  for the time since the go, with no step faster than 15 m/s (`p9_jump_m_per_s`, as P9), 100 m or more of progress
+  toward the marker between samples that both read unloaded (`p9u_unloaded_m`) up to the arrival, and a sample
+  under 10 m within 900 s of the go (`p9u_seconds`), or 2 s per metre of the go's distance when that is longer
+  (`p9u_s_per_m`: 1800 s from 900 m). Progress after the arrival, or outside the window, is the actor's later
+  behaviour, not this travel (review of eada2c28: four gaps found by synthetic tracks, each now a test).
+- INCONCLUSIVE otherwise, with the reason. The reason may be jumps (an engine that moves an unloaded actor abstractly,
+  or only when it loads again, which is what positions that froze while unloaded end in), too little travel while
+  unloaded, or no arrival in time. None of these is about the converted navmesh, which P9 judges with the actor
+  loaded.
+
+Why 100 m and 660 m: on 1 Nov the package rung's actor read unloaded from about 270 m from the player, and its
+positions kept moving smoothly while unloaded. The actor also walks while the player hops back (about 53 s a hop on
+1 Nov), and stays loaded until the player is two hops away: about 55-80 m. A 440 m start would leave about 100 m
+unloaded, right at the bar (review of 861714e0); 660 m leaves about 300 m, and 900 s still covers the walk at the
+1 Nov pace of about 1.1 m/s.
+
+Cost: the session also logs the game's CPU and memory by phase (a read-only sampler beside the session). The judge
+reports the tracker's sample gaps (`sample_gap_s`: median, p90, max): the tracker asks for a sample every 2 s, so
+longer gaps are Papyrus running late. The console pauses during the hops back stretch a few gaps; read the median and
+p90. Quote both with the result and compare them with the loaded run. What an off-screen world costs is the
+next question as the tests grow (owner, 1 Nov 2026).
+
 ## P1: SFSE sidecar on save and load (last)
 
 Settles: **CC-02** option C' / B: whether an SFSE plugin can keep a file per save keyed to the save name through
@@ -796,6 +834,7 @@ value and is INCONCLUSIVE, never a PASS; on a rerun in the same launch pick a ne
 | P7 | Do conditions read our reputation GLOB? (vendor refusal deferred) | FAIL = reputation effects need scripts |
 | P8 | Settlement build stages by enable parent, and their save cost | FAIL = stage swaps by script-placed refs |
 | P9 | Long-route pathing on the converted navmesh | FAIL = caravans move abstractly and materialize near the player only |
+| P9u | Does a linked actor travel to the player from beyond the loaded area? | never FAIL; INCONCLUSIVE with frozen positions = actors move only once loaded again, so off-screen travel is abstract |
 | P10 | SendStoryEvent + our SM branch for radiant quests | FAIL = quests started from script directly |
 | B0 | Can Papyrus call our SFSE plugin and read its answer on 1.16.244 (the C++ port's bridge)? | PASS on stack A = CommonLibSF natives; PASS on B only = the setting bridge; FAIL of B0-1 = no return leg for B |
 

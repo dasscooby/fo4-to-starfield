@@ -50,7 +50,7 @@ from . import sidecar
 
 PASS, FAIL, INCONCLUSIVE = "PASS", "FAIL", "INCONCLUSIVE"
 _RANK = {PASS: 0, FAIL: 1, INCONCLUSIVE: 2}
-PROBES = ("p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10", "b0")
+PROBES = ("p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p9u", "p10", "b0")
 
 # Placeholder thresholds (plan item 8): labelled in every verdict that uses them, never design numbers.
 PLACEHOLDERS = {
@@ -75,6 +75,10 @@ PLACEHOLDERS = {
     "p9_control_min_m": 15.0,                 # P9: a scripted control's `p9 go` must find the actor at least this far
                                               # out, so the command has 5 m or more to close (an actor already under
                                               # 10 m at the go has arrived on its own; Codex review of #560)
+    "p9u_seconds": 900.0,                     # P9u (the actor comes to a loaded player from beyond the loaded area):
+    "p9u_s_per_m": 2.0,                       # within max(900 s, 2 s per metre of the go's distance: 0.5 m/s)
+    "p9u_unloaded_m": 100.0,                  # arrives within 900 s with 100 m (a cell) or more made while unloaded; on
+                                              # 1 Nov an actor 270 m from the player read unloaded, so 440 m leaves ~160
     "p10_start_window_s": 10.0,               # P10: the quest must start within 10 s (rt) of the send
     "float_eq": 1e-3,                         # readback equals value within this
 }
@@ -2019,8 +2023,147 @@ def check_b0(c: Collection) -> Verdict:
     return v
 
 
+def check_p9u(c: Collection) -> Verdict:
+    """P9u, the owner's design (1 Nov 2026): does an actor travel to the player while it is out of the loaded area? The
+    marker is on the ground at the player's feet; the player hops out (660 m by default), spawns the actor there, links
+    it to the marker (FOCC_P9Drive.Link, Starfield's DefaultMaster_PatrolPackage) while it is loaded so the package line
+    can show the link took, and hops back. PASS: that package took, the go found the actor p9_start_m or more out, the
+    samples after the go are whole readings (rt, actor, dist, pos) that run forward in time, the first within reach of the
+    go's distance, with no step faster than p9_jump_m_per_s (an actor the engine moves in jumps, loaded or not, is
+    abstract travel, not a walk: review of 861714e0; a missing reading hides a jump: review of eada2c28; a line torn
+    ahead of its kind is a gap, as the rate gate reads gaps), the actor made p9u_unloaded_m or more of progress toward
+    the probe's own marker between samples that both read unloaded, up to its arrival, and a sample comes under
+    p9_arrive_m (3D) within max(p9u_seconds, p9u_s_per_m x the go's distance) of the go (a 900 m start: 1800 s). Never
+    FAIL: an actor that does not come is a finding about how the engine treats actors out of the loaded area, not about
+    the converted navmesh (P9 asks that with the actor loaded). On 2 Nov the actor walked unloaded from 643 m and was
+    loaded again from about 470 m; from 710 m and 899 m the engine moved it in one step (#644, #670)."""
+    v = Verdict("p9u", INCONCLUSIVE)
+    v.extra["settles"] = "whether an actor travels to a loaded player from beyond the loaded area (P9u)"
+    P = PLACEHOLDERS
+    v.extra["placeholders"] = {k: P[k] for k in P if k.startswith(("p9u_", "p9_arrive", "p9_start"))}
+    evs = c.session(1)
+    if evs is None:
+        v.reasons.append("no log (focc.0.log)")
+        return v
+    starts = _by_kind(evs, "p9 start")
+    if not starts:
+        v.reasons.append("no `p9 start` line")
+        return v
+    attempts = _p9_attempts(evs, starts)
+    v.extra["attempts"] = attempts
+    latest = attempts[-1]
+    if latest["driver"] != "link":
+        v.reasons.append(f"the latest rung's driver is {latest['driver'] or 'none logged'}, not FOCC_P9Drive.Link")
+        return v
+    if latest["package_after_go"] != _p9_wanted(latest):
+        v.reasons.append(f"the `p9 package` line of the go names {latest['package_raw'] or 'nothing'}, not "
+                         f"{P9_PACKAGE_NAMES.get(_p9_wanted(latest) or '', 'the driver package')}: "
+                         "the link did not take")
+        return v
+    if not latest["to_dest"]:
+        v.reasons.append("the go does not name the tracked marker (target=dest with the `p9 dest` id)")
+        return v
+    if not latest["dest_ok"]:                   # the probe's own destination, as check_p9 asks (review of eada2c28)
+        v.reasons.append("the `p9 dest` line does not name the probe's own marker FOCC_P9_Dest: the tracked distance "
+                         "is to something else")
+        return v
+    go = latest["go_dist_m"]
+    if go is None or go < P["p9_start_m"] or latest["go_rt"] is None:
+        v.reasons.append(f"the go found the actor {go} m out (want {P['p9_start_m']:g} m or more, with its rt)")
+        return v
+    end = starts[-1].line
+    track = [e for e in evs if e.line > end]
+    done = _by_kind(track, "p9 done")[:1]
+    samples = [e for e in _by_kind(track, "p9 sample") if e.line > latest["go_line"]
+               and (not done or e.line < done[0].line) and e.form("actor") == latest["actor"]]
+    # Every reading must be whole: a sample without its rt=, dist= or pos=, or torn so that it no longer parses as a
+    # sample, cannot be skipped, since the skipped row may be the jump, and |change of dist| is a floor on the speed,
+    # not a reading of it (review of eada2c28: dropping the jumping sample's pos= turned a teleport into a PASS). A
+    # sample without a readable actor= is torn too, not another actor's (review of 3d116e23); one torn ahead of its
+    # kind (`p9 samp`) is a gap, and the rate gate takes gaps as gaps: nothing in the log tells the two apart.
+    torn = [e for e in track if (e.kind == "p9 sample" or " p9 sample " in e.text) and e.line > latest["go_line"]
+            and (not done or e.line < done[0].line) and e.form("actor") in (None, latest["actor"])
+            and (e.kind != "p9 sample" or e.form("actor") is None)]
+    short = [e for e in samples if e.rt is None or e.num("dist") is None or pos(e) is None]
+    if torn or short:
+        v.cite(*(torn + short)[:3])
+        v.reasons.append(f"{len(torn) + len(short)} of {len(samples) + len(torn)} samples after the go are incomplete "
+                         "readings (rt=, actor=, dist= or pos= missing or unreadable): the track's continuity cannot be "
+                         "judged")
+        return v
+    rows = [(e.rt - latest["go_rt"], e.num("dist"), e.flag("loaded"), pos(e), e) for e in samples]
+    if len(rows) < 2:
+        v.reasons.append(f"{len(rows)} usable samples after the go")
+        return v
+    if rows[0][0] < 0 or any(b[0] <= a[0] for a, b in zip(rows, rows[1:])):
+        v.reasons.append("the samples' real time does not run forward from the go: the track cannot be timed")
+        return v
+    # The first sample must follow from the go, as check_p9 asks: the go found the actor `go` m out at its rt, so by
+    # the first sample the dist may have changed by the jump rate times the time between, at most (review of eada2c28)
+    slack = P["p9_stuck_m"] + P["p9_jump_m_per_s"] * rows[0][0]
+    if abs(go - rows[0][1]) > slack:
+        v.cite(rows[0][4])
+        v.reasons.append(f"the first sample reads {rows[0][1]:.0f} m {rows[0][0]:.0f} s after a go that found the actor "
+                         f"{go:.0f} m out: {abs(go - rows[0][1]):.0f} m in that time is a jump, not a walk (over "
+                         f"{P['p9_jump_m_per_s']:g} m/s)")
+        return v
+
+    def speed(a, b):            # 3D between positions, as P9 measures it (every row has one: checked above)
+        return sum((x - y) ** 2 for x, y in zip(a[3], b[3])) ** 0.5 / (b[0] - a[0])
+    steps = [(speed(a, b), a, b) for a, b in zip(rows, rows[1:])]
+    v.extra["max_step_m_per_s"] = round(max(st[0] for st in steps), 1)
+    window = max(P["p9u_seconds"], P["p9u_s_per_m"] * go)  # 2 Nov 2026: a 900 m start walks ~1100 m at ~1 m/s
+    v.extra["window_s"] = round(window, 1)
+    hit_k = next((k for k, r in enumerate(rows) if r[1] < P["p9_arrive_m"] and r[0] <= window), None)
+    hit = rows[hit_k] if hit_k is not None else None
+    v.extra["arrived_at_s"] = round(hit[0], 1) if hit else None
+    # The travel judged ends at its arrival, or where the window ends: what the actor does after either is its later
+    # behaviour, not this travel (review of eada2c28; the P9 judge bounds a request by its return the same way, #661)
+    judged = rows[:hit_k + 1] if hit is not None else [r for r in rows if r[0] <= window]
+    out = [(a, b) for a, b in zip(judged, judged[1:]) if a[2] is False and b[2] is False]
+    progress = sum(a[1] - b[1] for a, b in out)
+    v.extra["unloaded_share"] = round(sum(r[2] is False for r in rows) / len(rows), 3)
+    v.extra["unloaded_progress_m"] = round(progress, 1)
+    v.extra["unloaded_from_m"] = next((round(r[1], 1) for r in judged if r[2] is False), None)
+    # the tracker asks for a sample every 2 s (P9_SAMPLE): longer gaps are the Papyrus VM running late, the cheap
+    # in-log reading of what the living world costs the scripts (owner, 1 Nov 2026: watch the cost as tests grow).
+    # The session's console pauses during the hops back stretch a few gaps too: the median and p90 are the reading.
+    gaps = sorted(b[0] - a[0] for a, b in zip(rows, rows[1:]))
+    v.extra["sample_gap_s"] = {"median": round(gaps[len(gaps) // 2], 2),
+                               "p90": round(gaps[min(len(gaps) - 1, int(len(gaps) * 0.9))], 2),
+                               "max": round(gaps[-1], 2)}
+    v.extra["closest_m"] = round(min(r[1] for r in rows), 1)
+    # a rate, as P9's: a jump inside a long gap (a Papyrus delay of 10 s) must exceed 150 m to show (review of 909c43f2)
+    jump = next((st for st in steps if st[0] > P["p9_jump_m_per_s"]), None)
+    if jump is not None:
+        sp, a, b = jump
+        state = {True: "loaded", False: "unloaded", None: "unread"}
+        v.reasons.append(f"moved in jumps: {sp:.0f} m/s between {a[0]:.0f} s and {b[0]:.0f} s after the go "
+                         f"({state[a[2]]} to {state[b[2]]}; over {P['p9_jump_m_per_s']:g} m/s reads as a teleport): "
+                         "abstract travel, not a walk out of the loaded area")
+        return v
+    if progress < P["p9u_unloaded_m"]:
+        v.reasons.append(f"{progress:.0f} m of progress while unloaded (want {P['p9u_unloaded_m']:g} m; unloaded in "
+                         f"{v.extra['unloaded_share']:.0%} of the samples"
+                         + (f", arrived after {hit[0]:.0f} s" if hit else "") + "): this does not show travel beyond "
+                         "the loaded area")
+        return v
+    if hit is None:
+        v.reasons.append(f"no sample under {P['p9_arrive_m']:g} m within {window:g} s (closest "
+                         f"{v.extra['closest_m']} m after {progress:.0f} m of progress while unloaded): the actor did "
+                         "not arrive in time, which is the engine's handling of actors out of the loaded area, not a "
+                         "navmesh verdict")
+        return v
+    v.cite(hit[4])
+    v.reasons.append(f"came from {go:.0f} m with {progress:.0f} m of the way made while unloaded, to {hit[1]:.1f} m of "
+                     f"the marker in {hit[0]:.0f} s")
+    v.verdict = PASS
+    return v
+
+
 CHECKS = {"p1": check_p1, "p2": check_p2, "p3": check_p3, "p4": check_p4, "p5": check_p5,
-          "p6": check_p6, "p7": check_p7, "p8": check_p8, "p9": check_p9, "p10": check_p10, "b0": check_b0}
+          "p6": check_p6, "p7": check_p7, "p8": check_p8, "p9": check_p9, "p9u": check_p9u, "p10": check_p10,
+          "b0": check_b0}
 
 
 def check(probe: str, c: Collection) -> Verdict:
@@ -2061,7 +2204,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="python -m fo4sf.combined.probes",
                                  description="judge a combined-core probe from its collected text; exit 0 PASS, "
                                              "1 FAIL, 2 INCONCLUSIVE")
-    ap.add_argument("check", help="p1..p10, b0, all, hex2dec, dec2hex")
+    ap.add_argument("check", help="p1..p10, p9u, b0, all, hex2dec, dec2hex")
     ap.add_argument("path", nargs="?", help="collection folder or a single log file (or the id to convert)")
     ap.add_argument("--collect", help="collection folder (same as the positional path)")
     a = ap.parse_args(argv)
