@@ -2028,7 +2028,7 @@ def check_p9u(c: Collection) -> Verdict:
     marker is on the ground at the player's feet; the player hops out (660 m by default), spawns the actor there, links
     it to the marker (FOCC_P9Drive.Link, Starfield's DefaultMaster_PatrolPackage) while it is loaded so the package line
     can show the link took, and hops back. PASS: that package took, the go found the actor p9_start_m or more out, the
-    samples after the go are complete readings (rt, dist, pos) that run forward in time, the first within reach of the
+    samples after the go are whole readings (rt, actor, dist, pos) that run forward in time, the first within reach of the
     go's distance, with no step faster than p9_jump_m_per_s (an actor the engine moves in jumps, loaded or not, is
     abstract travel, not a walk: review of 861714e0; a missing reading hides a jump: review of eada2c28; a line torn
     ahead of its kind is a gap, as the rate gate reads gaps), the actor made p9u_unloaded_m or more of progress toward
@@ -2081,14 +2081,15 @@ def check_p9u(c: Collection) -> Verdict:
     # not a reading of it (review of eada2c28: dropping the jumping sample's pos= turned a teleport into a PASS). A
     # sample without a readable actor= is torn too, not another actor's (review of 3d116e23); one torn ahead of its
     # kind (`p9 samp`) is a gap, and the rate gate takes gaps as gaps: nothing in the log tells the two apart.
-    torn = [e for e in track if " p9 sample " in e.text and e.line > latest["go_line"]
+    torn = [e for e in track if (e.kind == "p9 sample" or " p9 sample " in e.text) and e.line > latest["go_line"]
             and (not done or e.line < done[0].line) and e.form("actor") in (None, latest["actor"])
             and (e.kind != "p9 sample" or e.form("actor") is None)]
     short = [e for e in samples if e.rt is None or e.num("dist") is None or pos(e) is None]
     if torn or short:
         v.cite(*(torn + short)[:3])
         v.reasons.append(f"{len(torn) + len(short)} of {len(samples) + len(torn)} samples after the go are incomplete "
-                         "readings (rt=, dist= or pos= missing or unreadable): the track's continuity cannot be judged")
+                         "readings (rt=, actor=, dist= or pos= missing or unreadable): the track's continuity cannot be "
+                         "judged")
         return v
     rows = [(e.rt - latest["go_rt"], e.num("dist"), e.flag("loaded"), pos(e), e) for e in samples]
     if len(rows) < 2:
