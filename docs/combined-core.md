@@ -452,8 +452,10 @@ written against what `jobs.py`, `present.py` and `sim.py` do today:
 - A superseded offer instance: a repeating job read twice (same id, different offered hours), one instance
   handed in, the need back by a different amount; handing in the other instance is accepted today and pays by its
   own, stale, amount. SSaW ignores a result whose token is not the live one. The rule to add is "an instance is
-  refused once any outcome for its id was logged at or after the hour it was offered" (not "the newer offered
-  hour wins": the handed-in instance can be the older one). The case is in the fixture as an expected failure, in
+  refused once an outcome for its id was logged after the instance was read", ordered by position in the
+  append-only event log as `_last_loss` already orders losses, so a need that comes back within the hour of a
+  hand-in is still new work; `offers()` applies the same rule so it never lists a superseded instance. Not "the
+  newer offered hour wins": the handed-in instance can be the older one. The case is in the fixture as an expected failure, in
   both shapes, with its preconditions in a passing test of their own; implementing the rule turns the mark into
   an unexpected success, which fails the run until the mark is removed.
 - Acceptance: nothing in the world state says the player is on a job (SSaW keeps one accepted operation at a
