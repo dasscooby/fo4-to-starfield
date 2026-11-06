@@ -109,6 +109,22 @@ class HandBackTests(unittest.TestCase):
         self.assertEqual(travel.eta_from_progress(hour=100, hours=6, f=1.0), 100)
         self.assertEqual(travel.eta_from_progress(hour=100, hours=6, f=0.0), 106)
 
+    def test_eta_keeps_whole_hours_whole(self):
+        # review of d8aea375: (1 - 6/7) * 7 is a hair above 1.0 in floats, and ceil made it two hours
+        for hours in range(1, 13):
+            for k in range(hours + 1):
+                self.assertEqual(travel.eta_from_progress(100, hours, k / hours), 100 + hours - k, (hours, k))
+        self.assertEqual(travel.eta_from_progress(100, 7, 0.3), 105)        # 4.9 hours to go rounds up to 5
+
+    def test_eta_clamps_progress(self):
+        self.assertEqual(travel.eta_from_progress(100, 6, -0.5), 106)
+        self.assertEqual(travel.eta_from_progress(100, 6, 1.5), 100)
+
+    def test_missing_at_anchor_raises_even_without_a_goal(self):
+        with self.assertRaises(ValueError) as cm:
+            travel.simulated_position(world(), squad(goal=None), {"B": (600.0, 0.0)})
+        self.assertIn("A", str(cm.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

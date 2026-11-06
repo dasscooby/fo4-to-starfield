@@ -85,7 +85,8 @@ def materialization(dists: list[float]) -> list[bool]:
 
 def progress_from_position(a: tuple[float, float], b: tuple[float, float], pos: tuple[float, float]) -> float:
     """Hand-back: when a live actor dissolves, L2 would take the real actor's position as its progress. The
-    fraction along a->b of pos's projection onto the segment, clamped to [0.0, 1.0]; a == b gives 0.0."""
+    fraction along a->b of pos's projection onto the straight line between the two anchors, clamped to
+    [0.0, 1.0]; a == b gives 0.0. An approximation: a multi-hop route and the navmesh path are not that line."""
     dx, dy = b[0] - a[0], b[1] - a[1]
     length2 = dx * dx + dy * dy
     if length2 == 0:
@@ -95,6 +96,9 @@ def progress_from_position(a: tuple[float, float], b: tuple[float, float], pos: 
 
 
 def eta_from_progress(hour: int, hours: int, f: float) -> int:
-    """The eta L2 would hold for progress `f` on a route of `hours`: hour + ceil((1 - f) * hours), at least
-    hour. Proposed for the future integration; this module never writes a squad."""
-    return max(hour, hour + math.ceil((1.0 - f) * hours))
+    """The eta L2 would hold for progress `f` (clamped to [0.0, 1.0]) on a route of `hours`: hour plus the whole
+    hours still to go, at least hour. A remainder that is a whole number of hours stays whole: a tolerance absorbs
+    the float error of (1 - f) * hours (review of d8aea375: 6/7 of a 7-hour route came back one hour late).
+    Proposed for the future integration; this module never writes a squad."""
+    f = min(1.0, max(0.0, f))
+    return hour + max(0, math.ceil((1.0 - f) * hours - 1e-9))
