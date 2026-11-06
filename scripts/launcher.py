@@ -25,6 +25,10 @@ r"""Launcher backbone CLI (docs/ai/launcher-backbone.md). Offline except `restor
     python scripts/launcher.py play --starfield <game dir> [--settings <json>] [--dry-run]
     python scripts/launcher.py watch [--pid N] [--repeat] [--timeout S] [--settings <json>] [--dry-run]
     python scripts/launcher.py update [--check]
+    python scripts/launcher.py instance plan|create --starfield <Steam's game folder> --at <new folder>
+                                        [--keep-data-dir <name> ...] [--min-free-gb 40]
+    python scripts/launcher.py instance run [--at <folder>] -- <installer command with --starfield <folder>>
+    python scripts/launcher.py instance recover
 
 manifest   what a build was made from and what it made (read only).
 build      runs a recipe of the repo's make scripts with resumable, recorded steps (src/fo4sf/launcher/driver.py).
@@ -55,6 +59,13 @@ watch      the same watcher for a game something else starts (the test runner): 
 update     brings this checkout up to GitHub's main now (a fast-forward only, src/fo4sf/launcher/selfupdate.py);
            --check only says how far behind it is. With the setting update=pull, play and gui do it first by themselves
            and start again on the new code (update=check: they only say it; off, the default: nothing is fetched).
+instance   the FO4SF game folder, separate from the player's own Starfield and its mods (docs/ai/fo4sf-instance.md):
+           plan (read only) says what would be hard-linked, copied and left out of Data, and the disk it costs; create
+           makes it (Data's game files and Tools hard-linked on the same drive, the rest copied, the player's mods
+           and add-ons left out), never writing in the Steam install. run: one of our installers on the folder, with its own Plugins.txt (LOCALAPPDATA =
+           <folder>\FO4SF-local; the command must name the folder once as --starfield). With the setting
+           instance=<folder>, play starts the game from it and puts FO4SF's Plugins.txt in the player's place only
+           while it runs; recover (and every play) puts the player's back after a crash.
 """
 import argparse
 import json
@@ -63,8 +74,8 @@ import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "src"))
-from fo4sf.launcher import (bundle, crashwatch, detect, driver, files, locate, manifest, paths,  # noqa: E402
-                            plugin_checks, restore, runtimes, same_ids, selfupdate, settings)
+from fo4sf.launcher import (bundle, crashwatch, detect, driver, files, instance, locate, manifest,  # noqa: E402
+                            paths, plugin_checks, restore, runtimes, same_ids, selfupdate, settings)
 
 SOURCES = os.path.join(REPO, "scripts", "launcher_recipes", "known_sources.json")
 
@@ -314,11 +325,35 @@ def updated(mode):
     return selfupdate.update(REPO, mode, running=restore.game_running) if mode != "off" else False
 
 
+def put_back_left_swap(dry_run):
+    """A Plugins.txt swap left by an FO4SF folder start that did not see its end: the player's list comes back before
+    any start (a dry run only says so). Its journal sits beside the launcher's settings, never in the folder."""
+    try:
+        player = instance.player_plugins_txt()
+    except instance.InstanceRefused:                   # no LOCALAPPDATA: no player's list, and no journal for one
+        return
+    if dry_run:
+        if instance.pending(player):
+            print(f"Plugins.txt: a swap is left from an earlier FO4SF start ({instance.journal_path(player)}); "
+                  "play puts yours back first (a dry run changes nothing)")
+        return
+    instance.recover(player, restore.game_running)
+
+
 def cmd_play(a):
+    put_back_left_swap(a.dry_run)                      # every play, before anything that could refuse (the settings)
     values = settings.load(a.settings or default_settings_path())
     # a dry run only looks: it says how far behind it is, and never moves the checkout
     if updated("check" if a.dry_run and values["update"] != "off" else values["update"]):
         return selfupdate.restart(a.argv)
+    folder = values["instance"]
+    norm = lambda p: os.path.normcase(os.path.abspath(p))   # noqa: E731
+    if folder and a.starfield and norm(a.starfield) != norm(folder):
+        raise ValueError(f"--starfield {a.starfield} is not the FO4SF game folder {folder} (setting instance); "
+                         "pass that folder or none")
+    if folder:                                        # the FO4SF game folder: always FO4SF, the player's left alone
+        r = crashwatch.play(values, folder, dry_run=a.dry_run, folder=folder)
+        return 0 if r.get("dry_run") or r.get("started") else 1
     starfield = a.starfield or values["starfield"]
     if not starfield:
         raise ValueError("no Starfield folder: confirm it in the window's Locations tab, run `launcher.py paths "
@@ -366,6 +401,29 @@ def cmd_watch(a):
 def cmd_update(a):
     if selfupdate.update(REPO, "check" if a.check else "pull", running=restore.game_running):
         print("updated: the next launcher command runs the new code")
+    return 0
+
+
+def cmd_instance(a):
+    if a.action == "recover":                          # found without the folder or the settings (instance.journal_path)
+        done = instance.recover(instance.player_plugins_txt(), restore.game_running)
+        print("done" if done else "nothing to put back")
+        return 0
+    folder = a.at or settings.load(a.settings or default_settings_path())["instance"]
+    if a.action == "run":
+        if not folder:
+            raise ValueError("no FO4SF game folder: pass --at or set the setting instance")
+        return instance.run(folder, a.command, running=restore.game_running, cwd=REPO)
+    if not a.starfield or not a.at:
+        raise ValueError(f"instance {a.action} needs --starfield <Steam's game folder> and --at <new folder>")
+    if a.action == "plan":
+        p = instance.plan(a.starfield, a.at, a.keep_data_dir)
+        instance.check_target(a.starfield, a.at, a.min_free_gb, p["copy_bytes"])
+        for line in instance.summary(p):
+            print(line)
+        print(f"plan only: `launcher.py instance create` makes {a.at}")
+        return 0
+    instance.create(a.starfield, a.at, a.keep_data_dir, a.min_free_gb)
     return 0
 
 
@@ -490,7 +548,20 @@ def main(argv=None):
     s.add_argument("--dry-run", action="store_true", help="print what watch would do; attach nothing")
     s = sub.add_parser("update", help="bring this checkout up to GitHub's main now (fast-forward only)")
     s.add_argument("--check", action="store_true", help="only say how far behind GitHub's main this checkout is")
-    a = ap.parse_args(argv)
+    s = sub.add_parser("instance", help="the FO4SF game folder beside the player's own Starfield")
+    s.add_argument("action", choices=("plan", "create", "run", "recover"))
+    s.add_argument("--starfield", default="", help="plan/create: the Steam Starfield folder it is made from (read only)")
+    s.add_argument("--at", default="", help="the FO4SF game folder (default for run/recover: the setting instance)")
+    s.add_argument("--settings", default="")
+    s.add_argument("--keep-data-dir", action="append", default=[], help="a Data folder to keep (repeatable)")
+    s.add_argument("--min-free-gb", type=float, default=40.0, help="free space the drive keeps (default 40)")
+    given = list(sys.argv[1:] if argv is None else argv)
+    command = []
+    if given[:1] == ["instance"] and "--" in given:            # instance run -- <command>: everything after -- is it
+        cut = given.index("--")
+        given, command = given[:cut], given[cut + 1:]
+    a = ap.parse_args(given)
+    a.command = command
     a.argv = [os.path.abspath(__file__), *(sys.argv[1:] if argv is None else argv)]   # the command, to start it again
     try:
         return {"manifest": cmd_manifest, "manifest-diff": cmd_manifest_diff, "build": cmd_build,
@@ -498,7 +569,8 @@ def main(argv=None):
                 "detect": cmd_detect, "sources-add": cmd_sources_add, "runtimes-add": cmd_runtimes_add,
                 "check-plugins": cmd_check_plugins, "find": cmd_find, "bundle": cmd_bundle, "measure": cmd_measure,
                 "status": cmd_status, "settings": cmd_settings, "play": cmd_play,
-                "watch": cmd_watch, "gui": cmd_gui, "paths": cmd_paths, "update": cmd_update}[a.cmd](a)
+                "watch": cmd_watch, "gui": cmd_gui, "paths": cmd_paths, "update": cmd_update,
+                "instance": cmd_instance}[a.cmd](a)
     except driver.RecipeError as e:
         print(f"recipe: {e}")
         return 2
