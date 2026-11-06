@@ -48,7 +48,7 @@ Breadth before polish. A launcher that ships no assets; the player owns both gam
 | Asset pipeline | [asset-pipeline.md](asset-pipeline.md) | AP | meshes, collision, animation, textures, sound, voice files, facegen, clothing, LOD, build time and disk, tool licences |
 | Versions and maintenance | [versions-and-maintenance.md](versions-and-maintenance.md) | VM | FO4 and Starfield versions and stores, patch days, SFSE lag, engine ceilings, hardware, long-term cost |
 | Multi-game future | [multi-game-future.md](multi-game-future.md) | MG | FO3 and New Vegas on the same core, one rule set, ObScript, creatures, world placement, what to reserve now |
-| Background-game audio (owner, 2026-11-01) | [background-game-audio.md](background-game-audio.md) | | the original games run in the background and play their own voice lines and music on Starfield's cue: no audio ripped or converted; protocol draft, risks, stages S0 to S4 |
+| Background-game audio (owner, 2026-11-01) | [background-game-audio.md](background-game-audio.md) | BGA | design on paper under [REL-61](release-community-legal.md) (do not build now) and A1 (subtitles only), building on [findings/original-engine-audio.md](findings/original-engine-audio.md): the original game in the background plays radio and music (voice only if A1 is reopened) on Starfield's cue; protocol draft, risks, stages S0 to S4 |
 | **Dependencies across all files** | [dependencies.md](dependencies.md) | | critical path per phase, about 90 duplicate topics with an owner file, 16 conflicting recommendations, 29 experiments ranked by questions closed, 47 owner decisions by phase |
 
 Raw findings (one per research agent, all sources): [precedents](findings/precedents.md),
