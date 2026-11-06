@@ -563,6 +563,59 @@ class CppParityTests(unittest.TestCase):
                 got = self.same_actions(why, copy.deepcopy(base), [{"do": "complete", "offer": bad}])
                 self.assertIn(why, got[0]["error"])
 
+    def test_the_jobs_refuse_superseded_later_and_given_up_instances(self):
+        """#673's rules on the market's resupply job, read at hour 0 (a0, with its read_at), each refused by both doors
+        with Python's reason: a0 after another instance read at hour 1 was handed in (superseded by the later
+        offered hour); an instance read at hour 1 after a0 was given up right after the read (superseded by log
+        position alone); an instance from an hour the world has not reached (from later); and an instance read after
+        a0's give-up inside its window, by another hour (the window reason). The offers' read_at is compared too."""
+        base, offers = self.jobs_world()
+        a0 = offers["resupply"].to_dict()
+        self.assertEqual(a0["read_at"], len(base.events))
+        cannot = "cannot {} " + a0["id"] + ": "
+        superseded = "this offer was superseded: an outcome for the job was logged after it was read"
+
+        def at_hour_1(ws):
+            ws.hour = 1
+            return [o.kind for o in jobs.offers(ws, "market", limit=10)].index("resupply")
+
+        with self.subTest(why="superseded by a later instance's hand-in"):
+            ws = copy.deepcopy(base)
+            pick = at_hour_1(ws)
+            got = self.same_actions("superseded by hour", ws, [
+                {"do": "offers", "place": "market", "limit": 10}, {"do": "complete", "pick": pick},
+                {"do": "complete", "offer": a0}, {"do": "fail", "offer": a0}])
+            self.assertIn("ok", got[1])
+            self.assertEqual(got[2]["error"], cannot.format("complete") + superseded)
+            self.assertEqual(got[3]["error"], cannot.format("fail") + superseded)
+        with self.subTest(why="superseded by a give-up logged right after the read"):
+            ws = copy.deepcopy(base)
+            pick = at_hour_1(ws)
+            got = self.same_actions("superseded by position", ws, [
+                {"do": "offers", "place": "market", "limit": 10}, {"do": "fail", "offer": a0},
+                {"do": "complete", "pick": pick}, {"do": "fail", "pick": pick}])
+            self.assertIn("ok", got[1])
+            self.assertEqual(got[2]["error"], cannot.format("complete") + superseded)
+            self.assertEqual(got[3]["error"], cannot.format("fail") + superseded)
+        with self.subTest(why="from a later hour"):
+            later = dict(a0, offered_hour=base.hour + 5)
+            got = self.same_actions("from later", copy.deepcopy(base), [{"do": "complete", "offer": later},
+                                                                        {"do": "fail", "offer": later}])
+            why = f"this offer was read at hour {base.hour + 5}, later than the world's hour {base.hour}"
+            self.assertEqual(got[0]["error"], cannot.format("complete") + why)
+            self.assertEqual(got[1]["error"], cannot.format("fail") + why)
+        with self.subTest(why="given up and inside its window"):
+            ws = copy.deepcopy(base)
+            jobs.fail(ws, jobs.Offer(**a0))
+            ws.hour = 1
+            again = dict(a0, offered_hour=1, read_at=len(ws.events))
+            got = self.same_actions("window", ws, [{"do": "offers", "place": "market", "limit": 10},
+                                                   {"do": "complete", "offer": again}, {"do": "fail", "offer": again}])
+            self.assertNotIn("resupply", [o["kind"] for o in got[0]["ok"]])
+            why = "this job was given up and its window has not ended"
+            self.assertEqual(got[1]["error"], cannot.format("complete") + why)
+            self.assertEqual(got[2]["error"], cannot.format("fail") + why)
+
     def test_manage_at_its_limits_and_a_long_defence(self):
         """Each manage action exactly at its limit and one past it; and a defence whose attack is due after the usual
         72 hours, so the garrison stays until then."""
