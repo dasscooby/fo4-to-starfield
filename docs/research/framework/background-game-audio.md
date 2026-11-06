@@ -26,7 +26,7 @@ it.
 
 The precedents behind that record, from the same quests-dialogue-voice.md ("Precedents and lessons" and its sources):
 - Capital Wasteland (Fallout 3 in Fallout 4) stopped after talking with Bethesda; letting players extract from their
-  own copies of Fallout 3 was also judged unworkable, because the voice acting is licensed, not owned. **verified**
+  own copies of Fallout 3 was also judged unworkable; the voice acting is licensed, not owned. **verified**
   ([PCGamesN](https://pcgamesn.com/fallout-4/fallout-4-fallout-3-capital-wasteland-mod))
 - Fallout 4: New Vegas recast every voice. Its own stated reasons differ: ripping needs decompiling, which the EULA
   forbids, and the voice contracts would need renegotiating. **verified**
@@ -38,8 +38,8 @@ the player's own copies was judged untenable. What it suggests, as the record re
 performances in another game, not to the conversion method (**unresolved**; REL-61 and original-engine-audio.md
 label this reading inferred). What it does not test: whether Bethesda would treat "the original game plays its own
 file on another game's cue" differently. So this note makes no claim that the route is legally different. Under the
-record's reading, voice and Bethesda's own score are the same use whichever program plays them (the score "sits with
-the voice question", original-engine-audio.md section 4); only the licensed radio songs plausibly differ. That is
+record, Bethesda's own score "sits with the voice question" and its ownership is unresolved (original-engine-audio.md
+section 4), so this document gates it with voice; only the licensed radio songs plausibly differ. That is
 why the stages below lead with radio alone.
 
 ## 2. What it looks like
@@ -77,7 +77,7 @@ why the stages below lead with radio alone.
 | Score music (only with voice, BGA-2) | Papyrus `MusicType.Add()` / `Remove()` push and pop the original music types; Starfield's own music is silenced in our worlds | **unresolved**: function names from memory; the Creation Kit wiki page (falloutck.uesp.net, MusicType Script) returned 403 on 6 November and was not read |
 | The host plays one specific voice line (only if A1 is reopened) | (a) Papyrus `ObjectReference.Say(Topic, akActorToSpeakAs, ...)` makes a hidden speaker say a topic "as if it were the specified actor"; the engine picks the response, so the line's conditions must pass in the audio room. (b) An engine call that plays a given file: the Skyrim library has `BSAudioManager::BuildSoundDataFromFile` (used by AudioUtil); the Fallout 4 library has `BSAudioManager`, this call unchecked | (a) **verified** that the function exists: Fallout 4's Papyrus source `ObjectReference.psc` declares `Function Say(Topic akTopicToSay, Actor akActorToSpeakAs = None, bool abSpeakInPlayersHead = false, ObjectReference akTarget = None) native` (read 6 November; the quoted description is the Creation Kit wiki's, read 1 November); that it plays a chosen line out of its quest is **unresolved**. (b) **unresolved** |
 | Spatial sound | Either mirror the speaker's offset and heading inside the host, or play flat and set volume and balance ourselves (original-engine-audio.md's simpler option) | **unresolved**: unmeasured reasoning (original-engine-audio.md, section 2); neither tried |
-| Timing | The host reports duration and end; Starfield holds the subtitle until then, as Starfield Silent Voice does for unvoiced lines. PS-39's length-cut silent files give the same pacing without a round trip | **supported hypothesis** (Silent Voice: quests-dialogue-voice.md, "Starfield Silent Voice") |
+| Timing | The host reports duration and end; Starfield holds the subtitle until then, as Starfield Silent Voice does for unvoiced lines. PS-39's length-cut silent files give the same pacing without a round trip | **unresolved**: unmeasured reasoning (original-engine-audio.md section 2, "Timing"); Silent Voice only supplies silent files and turns subtitles on (quests-dialogue-voice.md, "Starfield Silent Voice") |
 | Moving mouths (voice only) | The host streams the line's loudness (about 100 samples a second) and our SFSE plugin opens and closes the speaker's mouth by it, as Skyrim's AudioUtil does from a wav's amplitude envelope | technique: **supported hypothesis** (AudioUtil repository, read 1 November); on Starfield's faces **unresolved**. Rights: the envelope is data derived from the voice line; original-engine-audio.md (section 2) reads lip data made from the original audio as a converted derivative and raises the same question for line length, so the same reading may cover the envelope: **unresolved**, part of A1 |
 | Latency | a pipe message plus one frame in the host: tens of milliseconds | **unresolved**: unmeasured reasoning (original-engine-audio.md, section 2); S1 measures it |
 
@@ -90,7 +90,7 @@ why the stages below lead with radio alone.
   must do the same, or the player's clicks in Starfield fire guns in Fallout 4.
 - **Cost.** Two Creation Engine games at once: a second game's memory (likely a few GB for Fallout 4, less for the
   32-bit New Vegas and Fallout 3) and some GPU time. **unresolved**: unmeasured reasoning (original-engine-audio.md,
-  section 2). The host must run in an empty cell, at minimum settings, in a tiny window, with a low frame cap.
+  section 2). The host must run in an empty cell, at minimum settings, in a small window off-screen, with a low frame cap.
   S0 measures it.
 - **Alt-tab behaviour.** Bethesda games may misbehave when they lose focus: **unresolved**, no thread read for it.
   The host never takes focus: the launcher starts its small window off-screen and never brings it forward.
@@ -110,7 +110,7 @@ One line per message, UTF-8, fields separated by a single tab, over a named pipe
 
 | From Starfield | Meaning |
 |---|---|
-| `hello 1 <game>` | protocol version, the source game expected (`fo4`, `fnv`, `fo3`; Fallout 3 content through Tale of Two Wastelands runs in New Vegas, so it uses `fnv`) |
+| `hello 1 <game>` | protocol version, the source game expected (`fo4`, `fnv`, `fo3`; Fallout 3 content through Tale of Two Wastelands runs in New Vegas, so it would use `fnv`; draft, one host for both is unresolved in section 6) |
 | `radio <station>` / `radio off` | the radio |
 | `music <plugin>:<MUSC form id>` / `music off` | score only with voice (BGA-2): the music context |
 | `combat on` / `combat off` | score only with voice (BGA-2): combat music |
