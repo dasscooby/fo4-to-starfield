@@ -40,6 +40,21 @@ def tes4(name, masters=("Starfield.esm",)):
 class Base(unittest.TestCase):
     def setUp(self):
         self.d = tempfile.mkdtemp()
+        # Keep the real interpreter-existence check: positive campaigns need an
+        # existing, synthetically named file. Runner calls themselves are faked.
+        python = os.path.join(self.d, "runtime", "python.exe")
+        os.makedirs(os.path.dirname(python))
+        with open(python, "wb") as f:
+            f.write(b"synthetic interpreter fixture; never executed")
+        self.checkout = os.path.join(self.d, "checkout-without-runner-features")
+        os.makedirs(self.checkout)
+        default_game = os.path.join(self.d, "default-Starfield")
+        for target, name, value in ((sys.modules[__name__], "PY", python),
+                                    (sys.modules[__name__], "STARFIELD_T", default_game),
+                                    (ca, "STARFIELD", default_game)):
+            patch = mock.patch.object(target, name, value)
+            patch.start()
+            self.addCleanup(patch.stop)
         self.staging = os.path.join(self.d, "integ_v6")
         os.makedirs(self.staging)
         with open(os.path.join(self.staging, "FO4Port.esm"), "wb") as f:
@@ -108,7 +123,7 @@ class Base(unittest.TestCase):
         return q
 
     def camp(self, queues, **over):
-        c = {"name": "v6e", "checkout": "D:\\Modding\\wt_nightrun", "python": PY,
+        c = {"name": "v6e", "checkout": self.checkout, "python": PY,
              "staging": self.staging, "installed_exp": self.exp, "installed_plugins": PLUGINS, "caps": dict(CAPS),
              "starfield": self.sf,
              "holds": {"red_rocket": ["FO4Core_RedRocketSpawn"]},
@@ -544,7 +559,9 @@ class PlanTerrainHoldTests(Base):
         self.assertIn("not found on PATH", ca.python_why("python-not-installed-here"))
         q = self.queue("a", [{"coc": "FO4Port_X"}])
         with mock.patch.object(ca.os, "name", "nt"):
-            self.assertIn(f"python {PY!r} does not exist", " ".join(self.check(self.camp([("a", q)]))[1]))
+            missing = os.path.join(self.d, "missing", "python.exe")
+            self.assertIn(f"python {missing!r} does not exist",
+                          " ".join(self.check(self.camp([("a", q)], python=missing))[1]))
 
     def test_relative_checkout_staging_and_bridge_are_refused(self):
         # Codex on #391: the chain and the runner resolve a relative path where they are started, not where checked
@@ -772,7 +789,7 @@ class ScriptAndGateTests(Base):
         with open(out) as f:
             text = f.read()
         self.assertEqual(set(re.findall(r"'--sha256', '([0-9a-f]{64})'", text)), {parsed})
-        self.assertIn("D:\\Modding\\wt_nightrun", text)
+        self.assertIn(self.checkout, text)
 
     def test_a_refused_campaign_writes_no_chain(self):
         q = self.queue("walk", [{"coc": "FO4Core_RedRocketSpawn"}])
@@ -956,7 +973,7 @@ class ScriptAndGateTests(Base):
                 texts.append(f.read())
         self.assertEqual(texts[0], texts[1])
         # Codex on #391: a missing checkout stops the chain before the first Python step
-        self.assertIn("try { Set-Location -LiteralPath 'D:\\Modding\\wt_nightrun' -ErrorAction Stop } catch {", texts[0])
+        self.assertIn(f"try {{ Set-Location -LiteralPath {ca.ps(self.checkout)} -ErrorAction Stop }} catch {{", texts[0])
         self.assertLess(texts[0].index("Set-Location"), texts[0].index("(Py @("))
         self.assertNotRegex(texts[0], r"\d{4}-\d\d-\d\dT")
 
@@ -1035,7 +1052,7 @@ class RunChainTests(Base):
             argv = argv[:1] + argv[2:]
             self.calls.append((argv[1:3], env.get("FO4SF_LAUNCH")))
             self.envpy.append(env.get("FO4SF_PYTHON"))
-            self.assertTrue(env["PATH"].startswith("C:\\py" + os.pathsep))     # Codex on #391: cycle.ps1's python
+            self.assertTrue(env["PATH"].startswith(os.path.dirname(PY) + os.pathsep))  # cycle.ps1's python
             if state is not None and "testqueue.py" in argv[1]:
                 q = argv[argv.index("--queue") + 1]
                 with open(os.path.join(q, "state.json"), "w") as f:
@@ -1422,7 +1439,7 @@ class RunChainTests(Base):
         finally:
             subprocess.run = old
         self.assertEqual(rc, 0)
-        self.assertEqual(seen, [("C:\\py\\python.exe", self.d)])
+        self.assertEqual(seen, [(PY, self.d)])
 
     def test_holds_launch_and_released_come_from_the_campaign(self):
         q = self.queue("walk", [{"coc": "FO4Core_RedRocketSpawn"}])
