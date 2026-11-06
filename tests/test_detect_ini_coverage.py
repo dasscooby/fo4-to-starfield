@@ -69,11 +69,23 @@ class IniCoverageTests(unittest.TestCase):
     def test_actual_cli_reports_coverage_and_preserves_inputs(self):
         table = Path(self.root) / "sources.json"
         table.write_text(json.dumps(self.table), encoding="utf-8")
+        settings = Path(self.root) / "settings.json"
+        settings.write_text(json.dumps({"my_games": ""}), encoding="utf-8")
+        # Poison only the synthetic default profile. The explicit settings file above must win.
+        default_profile = Path(self.root) / "synthetic-default/My Games/Starfield"
+        default_profile.mkdir(parents=True)
+        (default_profile / "StarfieldCustom.ini").write_bytes(b"[General]\nsTestFile1=Default.esm\n")
+        local_app_data = Path(self.root) / "local-app-data"
+        default_settings = local_app_data / "FO4SF/launcher_settings.json"
+        default_settings.parent.mkdir(parents=True)
+        default_settings.write_text(json.dumps({"my_games": str(default_profile)}), encoding="utf-8")
         def inputs():
             return {str(p): hashlib.sha256(p.read_bytes()).hexdigest()
-                    for folder in (Path(self.fo4), Path(self.sf), self.profile)
+                    for folder in (Path(self.fo4), Path(self.sf), self.profile, default_profile)
                     for p in folder.rglob("*") if p.is_file()} | {
-                        str(table): hashlib.sha256(table.read_bytes()).hexdigest()}
+                        str(table): hashlib.sha256(table.read_bytes()).hexdigest(),
+                        str(settings): hashlib.sha256(settings.read_bytes()).hexdigest(),
+                        str(default_settings): hashlib.sha256(default_settings.read_bytes()).hexdigest()}
         before = inputs()
         for kind, profile, expected in (("omitted", None, 0), ("missing", self.profile / "absent", 0),
                                         ("clean", self.profile, 0), ("blocked", self.profile, 1)):
@@ -84,10 +96,12 @@ class IniCoverageTests(unittest.TestCase):
                 report = Path(self.root) / f"{kind}.json"
                 argv = [sys.executable, "-I", "-B", os.path.join(fixture.ROOT, "scripts", "launcher.py"),
                         "detect", "--fo4-data", self.fo4, "--starfield", self.sf, "--table", str(table),
-                        "--report", str(report), "--allow-unknown-runtime"]   # runtime gate tested elsewhere
+                        "--report", str(report), "--allow-unknown-runtime", "--settings", str(settings)]
                 if profile is not None:
                     argv.extend(["--my-games", str(profile)])
-                child = subprocess.run(argv, capture_output=True, text=True, check=False)
+                child_env = os.environ.copy()
+                child_env["LOCALAPPDATA"] = str(local_app_data)
+                child = subprocess.run(argv, capture_output=True, text=True, check=False, env=child_env)
                 self.assertEqual(child.returncode, expected, child.stderr + child.stdout)
                 result = json.loads(report.read_text(encoding="utf-8"))
                 self.assertEqual(result["ready"], expected == 0)
@@ -99,7 +113,22 @@ class IniCoverageTests(unittest.TestCase):
                 if kind == "blocked":
                     self.assertIn("sTestFile1=Hidden.esm", child.stdout)
                     self.assertIn("NOT READY", child.stdout)
+                if kind == "omitted":
+                    self.assertNotIn("Default.esm", child.stdout)
                 self.assertEqual(inputs(), before)
+
+        # Negative control: without the explicit file, the real CLI sees the synthetic default and refuses.
+        report = Path(self.root) / "poisoned-default.json"
+        argv = [sys.executable, "-I", "-B", os.path.join(fixture.ROOT, "scripts", "launcher.py"),
+                "detect", "--fo4-data", self.fo4, "--starfield", self.sf, "--table", str(table),
+                "--report", str(report), "--allow-unknown-runtime"]
+        child_env = os.environ.copy()
+        child_env["LOCALAPPDATA"] = str(local_app_data)
+        child = subprocess.run(argv, capture_output=True, text=True, check=False, env=child_env)
+        self.assertEqual(child.returncode, 1, child.stderr + child.stdout)
+        self.assertIn("sTestFile1=Default.esm", child.stdout)
+        self.assertIn("NOT READY", child.stdout)
+        self.assertEqual(inputs(), before)
 
 
 if __name__ == "__main__":
