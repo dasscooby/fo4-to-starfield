@@ -1,8 +1,8 @@
 // Header-only, platform-neutral part of the FOCCSidecar probe plugin: the sidecar file-name rule, the canonical JSON
 // text and the envelope reader. It mirrors src/fo4sf/combined/sidecar.py byte for byte for ASCII save names (see
 // README.md "Name and checksum rule" for the non-ASCII caveat) and was compiled on Linux and checked against sidecar.py by hand
-// on 2026-10-21 (README.md "Verified offline"); no repo test compiles it, so re-check after changing either side; FOCCSidecar.cpp adds the Windows
-// file I/O and the SFSE glue around it.
+// on 2026-10-21 (README.md "Verified offline"). tests/test_sfse_sidecar_codec.py compiles it against the Python
+// reference and malformed inputs; FOCCSidecar.cpp adds the Windows file I/O and the SFSE glue around it.
 //
 // Python reference (sidecar.py):
 //   sidecar_name(n) = re.sub(r"[^A-Za-z0-9_.-]", "_", n)[:80].strip(".") or "save"  +  "-"  +  sha256(n)[:8]  +  ".focc"
@@ -15,7 +15,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <charconv>
 #include <string>
+#include <system_error>
 
 #include "sha256.h"
 
@@ -131,7 +133,19 @@ inline Decoded decode_sidecar(const std::string& text, const std::string& saveNa
     std::size_t e = p;
     while (e < state.size() && (state[e] == '-' || (state[e] >= '0' && state[e] <= '9'))) ++e;
     if (e == p) { d.error = "counter is not a number"; return d; }
-    d.counter = std::stoll(state.substr(p, e - p));
+    long long counter = 0;
+    const auto parsed = std::from_chars(state.data() + p, state.data() + e, counter);
+    if (parsed.ec != std::errc{} || parsed.ptr != state.data() + e) {
+        d.error = "counter is not a signed 64-bit integer";
+        return d;
+    }
+    // This probe reads only its own canonical writer's shape. A checksum alone does not establish valid JSON,
+    // the P1 marker, unique fields or an integer token (e.g. 1.5 must not silently become counter 1).
+    if (text != encode_sidecar(saveName, counter)) {
+        d.error = "not a canonical P1 sidecar body";
+        return d;
+    }
+    d.counter = counter;
     d.valid = true;
     return d;
 }
