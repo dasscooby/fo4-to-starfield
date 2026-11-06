@@ -162,6 +162,7 @@ class FindPrestonTests(unittest.TestCase):
         self.assertRegex(tick, r"if stage < 20 && dp < FindRadius\s+FoundPreston\(")
         self.assertLess(tick.index("FoundPreston("), tick.index("while i < Raiders.Length"))   # before the raiders' loop
         num = lambda name: float(re.search(r"float Property %s = (-?[\d.]+) Auto Const" % name, self.psc).group(1))
+        self.assertEqual(num("FindRadius"), 20.0)                                          # the documented 20 m
         self.assertGreater(num("FindRadius"), num("TalkRadius"))
         self.assertNotIn("FindRadius", make_mission.mandatory_properties(self.psc))         # the plugin never fills it
 
@@ -169,10 +170,21 @@ class FindPrestonTests(unittest.TestCase):
         tick = self.block("Event OnTimer(", "EndEvent")
         self.assertIn("bool everyone = prestonFound || stage >= 20", tick)
         self.assertIn("elseif stage < 30 && (everyone || d < EngageRadius) && r.Is3DLoaded()", tick)
+        # the raider itself is put into combat, with the player as its target
+        self.assertRegex(tick, r"r\.Is3DLoaded\(\)\s+(;[^\n]*\s+)*r\.StartCombat\(player\)")
+        self.assertEqual(re.findall(r"\b(\w+)\.StartCombat\((\w+)\)", self.psc), [("r", "player")])
+
+    def test_dead_raiders_are_skipped(self):
+        """A dead raider is counted and never put into combat: the loop's first test on each raider is IsDead."""
+        tick = self.block("Event OnTimer(", "EndEvent")
+        self.assertRegex(tick, r"Actor r = Raiders\[i\]\s+if r\.IsDead\(\)\s+dead \+= 1\s+else\s")
+        loop = tick[tick.index("Actor r = Raiders[i]"):]
+        self.assertLess(loop.index("if r.IsDead()"), loop.index("r.StartCombat(player)"))
 
     def test_found_is_set_and_logged_once(self):
         found = self.block("Function FoundPreston(string how)", "EndFunction")
-        self.assertRegex(found, r"if !prestonFound\s+prestonFound = True\s+Trace\(\"found preston \" \+ how\)")
+        self.assertRegex(found, r"if !prestonFound && !Preston\.IsDead\(\)\s+prestonFound = True\s+"
+                                r"Trace\(\"found preston \" \+ how\)")
         self.assertRegex(self.psc, r"(?m)^bool prestonFound = False$")
 
 

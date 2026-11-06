@@ -164,8 +164,9 @@ EndEvent
 
 Function FoundPreston(string how)
 {The player reached Preston before the fight (activated him, or came within FindRadius): the fight starts at the next
- check, with every raider put into combat with the player. Logged once.}
-    if !prestonFound
+ check, with every raider put into combat with the player. Logged once. A dead Preston is never found (his death is
+ the quest's failure path).}
+    if !prestonFound && !Preston.IsDead()
         prestonFound = True
         Trace("found preston " + how)
     endif

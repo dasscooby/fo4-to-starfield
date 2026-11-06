@@ -185,6 +185,10 @@ marker never starts the fight. On 18 Oct the fight started from the 60 m rule (r
 finds him (`found preston activated` or `found preston near d=<m>`, logged once): stage 20 at the next check, and from
 then on every living raider whose 3D is loaded and that is not fighting is put into combat with the player
 (`startcombat raider <i> d=<m>`), whatever the distance. The 60 m rule stays for a player who meets a raider first.
+A dead Preston is never found: activating his body or standing near it starts nothing (his death stays the quest's
+failure path). **Unverified hypothesis:** raiders 91 to 129 m away may not have their 3D loaded (`Is3DLoaded()`
+false) when Preston is found, so those raiders are put into combat only as they load, on a later check, not at once.
+This is the owner's playtest row 44.
 `make_mission.py log` reports `found`. Only `FO4SF_Min00Quest.pex` changes: `FindRadius` has a default in the script,
 so the plugin's records are the same. **Supported hypothesis:** the new .pex also applies to the run 3 save, where the
 quest is running at stage 10 (a script's new variables start at their defaults on a loaded save). Check in game: walk
