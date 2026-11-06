@@ -55,6 +55,11 @@ SPEC = (
      "how play starts the game: sfse (sfse_loader.exe in the game folder, which starts Starfield.exe with SFSE "
      "loaded; SFSE is required, NG-1), steam (steam://rungameid/1716740, as the test runner does) or exe "
      "(Starfield.exe directly). steam and exe start the game without SFSE."),
+    ("instance", "", str,
+     "the FO4SF game folder (launcher.py instance create; docs/ai/fo4sf-instance.md). Set: play starts the game from "
+     "it, our tools use its own Plugins.txt, its own Starfield.ini takes the saves path (Saves\\FO4SF) and the "
+     "Papyrus keys, and its Plugins.txt stands in yours only while it runs. Empty (the default): your Starfield folder, "
+     "as before."),
     ("update", "off", ("off", "check", "pull"),
      "keep the launcher's own code up to date with GitHub's main (src/fo4sf/launcher/selfupdate.py): pull fetches "
      "main before play and before the window opens, fast-forwards this checkout when it is on main with nothing of "
@@ -79,6 +84,7 @@ LABELS = {
     "load_order": "Load order of our plugins",
     "my_games": "My Games folder",
     "route": "How the game starts",
+    "instance": "FO4SF game folder",
     "update": "Update the launcher from GitHub",
 }
 
@@ -179,7 +185,7 @@ def problems(values):
         out.append("papyrus_logging=off needs bridge=off: an active bridge would be left blind")
     if values["bridge"] == "on" and values["papyrus_logging"] != "on":
         out.append("bridge=on needs papyrus_logging=on: the bridge only sees what Papyrus logs")
-    if values["papyrus_logging"] != "unchanged" and not values["my_games"]:
+    if values["papyrus_logging"] != "unchanged" and not values["my_games"] and not values["instance"]:
         out.append("my_games is not set (needed to change Papyrus logging)")
     return out
 

@@ -388,12 +388,38 @@ our GAMMA." New items continue the design's numbering (CC-60 to CC-62 are in the
   near the player. Open: where its state lives in the save (probes P1 to P3, CC-02); the tick in game (P5); how far
   out actors are real (the design's L2/L3 split); how many squads a cell can carry, which no probe measures yet (P4
   only spawns and removes three actors, judging spawn reliability and save growth; a load-scaling probe is needed).
+  **How far out actors are real, measured (P9 and P9u, 2 Nov 2026, #644; judges in #663 and #669).** One citizen on
+  the converted Commonwealth was sent by its linked ref alone (`SetLinkedRef` and `EvaluatePackage`; Starfield's
+  `DefaultMaster_PatrolPackage` then walks it; no alias package, no `PathToReference`). Distances below are from the
+  player's start to the spawn point (the session logs 643.1, 710 and 898.5 m; the judges print the distance to the
+  marker at the go: 652, 712 and 898 m). One run per distance.
+
+  - Loaded (on the measured route the loaded area reached about 470 m from the player: the 643 m run's actor
+    read loaded again from 473 m): it walks the converted navmesh across cells at about 1.2 m/s and arrives (P9 PASS
+    twice: 439 m, 7 cells, 440 s and 443 s). Near the player it may stand still: in the P9 loaded runs that logged
+    the player's distance, stops of 40-92 s came with the player 18-30 m away and none with the player 83 m off;
+    earlier runs, with the follow helper set 25 m behind, had stops of up to 220 s. The package never changed during
+    the logged stops, so their cause is not logged, and a cause at the destination is not excluded (three of the four
+    longest stops were 27-31 m from the marker). The owner's call: stops near the player are acceptable, and P9's
+    stuck rule ignores stops within 35 m.
+  - Unloaded, out to somewhere between 643 m and 710 m: the engine still walks it at about 1 m/s (`cell` reads none
+    while unloaded, as in every unloaded sample) and hands it back cleanly at the loaded edge (P9u PASS from 643 m).
+  - Farther out the engine's handling turns abstract. From 710 m the actor walked 151 m unloaded as before, then, when
+    it was loaded again, it was placed 41 m from the player in one step of about 420 m. From 899 m its position jumped
+    to a point 6.5 km from the player, outside the world, and stayed there.
+
+  So the L2/L3 split is set by measurement, not by the engine's unloaded handling: L2 owns a travelling actor's
+  position while it is outside the loaded area; L3 materializes the real actor only inside it (a conservative 400 m)
+  at the simulated position and hands over with the linked-ref walk. Cost: with one walking actor the game
+  averaged 5-7% of the machine's CPU per phase (peaks 13-15% while loading, under 10% while walking) and stayed under
+  8.6 GB in every run (no run without an actor was measured as a baseline); how many actors a cell carries is still
+  the open load-scaling probe.
 - **CC-64. Travel between areas without walking paths.** The converted worlds (L0) will be separate worldspaces or
   interiors, not one continuous map, so the core needs a travel layer between them: the player moves area to area,
   and the sim moves squads, caravans and news along the same links. Open: how the player travels (map, vertibird or
   ship (CC-61), a scripted transition (NG-9), doors); how much time passes and what can happen on the way; how
-  off-screen movement between worldspaces is shown. P9 does not answer this: it drives one console actor with
-  `PathToRef` across one converted exterior (actor pathing only, the travel-package variant deferred).
+  off-screen movement between worldspaces is shown. P9 does not answer this: it drives one actor by its linked ref
+  across one converted exterior (actor pathing within one worldspace; CC-63 has the measured numbers).
   Building note (owner): a large place may be better built as an interior than as an exterior; check how Starfield
   and its mods build their big city spaces (the owner named Cydonia and the city people compare to Cyberpunk) before
   choosing, place by place.
@@ -401,6 +427,58 @@ our GAMMA." New items continue the design's numbering (CC-60 to CC-62 are in the
   survival, stories) into one way to play: start options, difficulty and mode presets (`modes.py`), progression and
   what the player works toward. Open: what a run's goal is, and which systems are on by default.
 - **CC-62 deferred.** Starfield world generation stays later, after CC-63 to CC-65 work.
+
+## Lifecycle fixture (3 Nov 2026)
+
+`tests/test_combined_lifecycle.py` follows one resupply job from its offer to its one outcome through every way it
+can go wrong, and checks three cross-module properties. The cases are the rules the reference mods describe
+(the review on #32: SSaW's encounter tokens and load recovery, StarSim's reservation and elapsed-time catch-up),
+written against what `jobs.py`, `present.py` and `sim.py` do today:
+
+- one outcome per job: a hand-in pays once; a replay, a cancel after a hand-in or a hand-in after a cancel is
+  refused and leaves no trace; a late hand-in is refused without a trace;
+- stale ownership: a holder change under an open job refuses the hand-in while it lasts, and the giver getting the
+  place back makes the same need work again;
+- the save is the acknowledgement: a save made after the hand-in refuses it again; a save made before it is a world
+  where the job is still open, where the hand-in happens exactly once and ends in the same world;
+- catch-up: 48 hours as one call, two or eight give one world and one offer list;
+- reservation: a caravan's cargo leaves its source's stock at dispatch, so no second job can carry it, and one
+  caravan per source is out at a time;
+- materialize once: a plan names each group once by the L2 entity's own id, replanning the same world spawns and
+  dissolves nothing, and every slot names a place, faction and squad the world still has.
+
+**Built from the fixture (4 Nov 2026): the superseded offer instance.** A repeating job read twice (same id,
+different offered hours), one instance handed in, the need back by a different amount, used to accept the other
+instance and pay by its own, stale, amount. `Offer` now carries `read_at`, the event log's length when the
+instance was read, and another instance's outcome for its id logged at or after that position refuses it
+(superseded; SSaW ignores a result whose token is not the live one). Its own outcome, any outcome carrying its
+offered hour, refuses it at any position as before (#431): that holds an instance read after a save against the
+world reloaded from that save, where its own hand-in lands below `read_at` (review of 084f68cc), and it keeps the
+once-per-hour cap on a repeating id, the only limit on handing in, taking the goods back and handing in again;
+that cap is a design knob this change leaves alone. Ordered by log position, as `_last_loss` orders losses and
+retake ids carry `seq`, not only "the newer offered hour wins", which alone would miss the shape where the handed-in
+instance is the older one. `read_at` is in `to_dict`; an offer record without it reads as 0, so any outcome for
+its id counts against an instance rebuilt from such a record. A reload can also put a later instance's hand-in
+below a stale instance's `read_at` (the stale one read from a longer log): an outcome carrying a later offered
+hour supersedes too, since it was logged at that hour or after; and an instance whose offered hour the world has
+not reached is refused outright by `valid()` and `fail()`, the game having gone back to a save from before it
+was read (delta review of bda0d0e3). The case is in the fixture as a passing test in both shapes, with its
+preconditions in a test of their own, beside the reloaded-save (three shapes), same-hour and inclusive-position
+cases.
+
+**Contracts the modules do not have yet** (found by the fixture; recorded, not built):
+
+- Acceptance: nothing in the world state says the player is on a job (SSaW keeps one accepted operation at a
+  time). Offers are read on demand and only outcomes are logged.
+- Engine acknowledgement: a slot has no applied/failed channel back from the adapter (StarSim's package-to-task
+  handshake); the planner's diff is the whole contract.
+- A live encounter at save time: L2 has no mid-encounter state, so there is nothing to recover on load (SSaW
+  cleans up a battle or patrol that a save left live). This becomes real once L3 stages fights.
+- Single-fire staging: `present.plan` lists everything in radius within the budget; there is no ordered chain that
+  stages at most one encounter on arrival with exclusions (indoors, in a scene, a live fight).
+
+One thing the modules have that SSaW does not: place-based protection of story places (`Place.story_lock`,
+`sim._story_shielded`), which the review found SSaW approximates by the player's own state.
 
 ## Not implemented (and not claimed)
 
