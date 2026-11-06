@@ -1345,3 +1345,77 @@ decided the import path); keeping the order as a parameter (two orders in the co
   running keeps its old code until it starts again (the restart covers play and the window; the window's own Play
   button runs `play`, which updates too). Not tested on Windows yet: the PC's first `launcher.py update --check`
   shows it.
+
+## 2026-11-01: FO4SF runs from a game folder of its own; the player's Starfield is never switched (owner, built by Claude-cloud-2)
+
+- Decision: the owner answered the 29 Oct launcher question (switch the one install to FO4SF and back, or always
+  FO4SF): "stay FO4SF all the time make a separate area then actual starfield so people can keep their own mod packs
+  for that". So the launcher makes an FO4SF game folder beside the Steam install, with hard links on the same drive
+  (no extra disk), the game folder's INIs copied, and only the game's own files in Data
+  (`launcher.py instance plan|create`, `src/fo4sf/launcher/instance.py`). Our installers run against that folder,
+  with `LOCALAPPDATA` pointed at the folder's own Plugins.txt; saves and our INI writes go to the folder's own
+  `Starfield.ini`. Design, steps and PC checks: docs/ai/fo4sf-instance.md.
+- Why: players keep their own Starfield mod packs untouched, and FO4SF never has to be switched in and out of the
+  player's install (restore stays the tool for tests and recovery).
+- Alternatives:
+  - Switch the one install at start and back at quit with restore: what the owner did not pick.
+  - A full copy ("Stock Game", as the MO2 and Wabbajack guides do): about 100+ GB that the D: 40 GB rule cannot
+    spare; hard links cost nothing on the same drive.
+  - A virtual file system (MO2's USVFS): a large dependency, and Plugins.txt still needs its own handling.
+  - `sTestFile` in the folder's INI: since 1.16.236 the game writes those plugins into the shared Plugins.txt and drops
+    the player's plugins it cannot find, and it caps at 10.
+- Boundary: all four steps are built, behind the setting `instance` (empty by default). That includes the Plugins.txt
+  swap at play, journaled, which works whether or not the game follows the `LOCALAPPDATA` variable (H2). The
+  folder-INI saves and Papyrus keys rely on the game reading its folder's Starfield.ini (H3). Whether the copied folder
+  starts at all (H1) is the first PC check, docs/ai/fo4sf-instance.md section 4.
+
+## 2026-11-01: one Claude session on the PC holds every Claude role; the cloud sessions pause (owner)
+- **Decision:** the handoff the owner gave a new Claude Code session on the PC on 1 Nov (written by Claude, given by
+  the owner) says: "The owner ended that setup. You take over all of Claude's roles: integration, the live game on the
+  PC, in-game checks, the written records, and getting PRs reviewed and merged" (that setup: many Claude project
+  threads, the PC session "Install" and Claude-cloud-2). Claude-cloud-2 is paused and is
+  used for research and other help; its open drafts (#647 and #660, the C++ port #649 and #651 to #654, the audio
+  design #650) pass to that session. Codex finishes what it is working on (its P9 live test, #639, #641, #643, #656,
+  #657, #659) and both lines of work converge for testing afterwards. The merge rule is unchanged: CI green plus an
+  independent review of the exact head.
+- **Why:** the owner's words, 1 Nov (fixed for typos): "Do what you think is best; let Codex finish what it's working
+  on, pick your own tasks and we will converge and test both, and we will keep the cloud paused and use it for
+  research and other help." (Claude's reading: many threads cost credits and left work split across sessions that
+  could not see each other.)
+- **Alternatives:**
+  - Keep the cloud session as the author of the C++ port: rejected by the owner (paused).
+  - The PC session waits for Codex before picking work: rejected; the owner said to pick our own tasks.
+
+## 2026-11-01: the owner's strip-down and start picks, recorded (owner, 29 and 31 Oct)
+- **Decision:** the owner's answers on the strip-down and next-steps plan pages (private pages; copied into the 1 Nov
+  handoff), recorded here so the repo has them. Strip-down, 29 Oct (the owner: "too many things are breaking because
+  we are forcing ourselves into the Starfield system"; the handoff names Fallout: London, own plugins over an
+  untouched master with its own start, menu and intro, as the model): **B** our planet inside Sol, and in the end no other planets; **X** the other planets
+  gone from the star map too, by overrides in our plugin; **F** our own start overriding `StartupQuest_DO` (done,
+  #588); **I** the quieting switches go straight into the mod, no test profile; **N** drop the landing pad and its ship
+  records; **T** a vanilla baseline New Game for comparison (`docs/testing/baseline.md`); **V** keep going on Claude's
+  picks and redo what the owner changes; orbit **A**, the final planet in Earth's orbit. **K** (Claude's pick under V,
+  changeable): the probe planet is a Jemison clone without alien life. The start, 31 Oct: **a** the start is chosen in
+  the launcher; **f** two separate test starts, D skipping character creation only (today's quick start) and E outside
+  at the Vault 111 elevator; **g** the pre-war Vault 111 (into the cryo pod, out post-war, the vault door and the
+  elevator) comes after the start picker and the launcher profile work, and is not built before the owner has seen
+  its design. The owner would like the GAMMA start picked in the new-game options, if the game allows it (unchecked).
+- **Why:** the owner's picks; the entries of 29 Oct above already carry B, the orbit, I and T in their own words.
+- **Alternatives:** keep them only on the private pages: rejected, the repo is where the team reads decisions.
+
+## 2026-11-02: travelling actors are real only inside the loaded area; stops near the player are acceptable (owner and Claude)
+
+- Decision: the A-Life layer (CC-63) moves a travelling actor itself (L2) whenever the actor is outside the loaded area,
+  and makes it a real actor (L3) only inside it, at a conservative 400 m, handing over with the linked-ref walk
+  (`SetLinkedRef`, Starfield's `DefaultMaster_PatrolPackage`). Within about 30 m of the player the actor may stand
+  still or be taken over by its own behaviour (combat); the travel layer only owes progress outside that.
+- Why: P9 and P9u on the converted Commonwealth (#644): loaded walks arrive across 7 cells (PASS twice); the engine
+  walks an unloaded actor only out to somewhere between 643 m and 710 m, and beyond that it placed the actor near the
+  player in one step (710 m) or moved it outside the world for good (899 m). On the stops seen near the player the
+  owner asked: "don't you think within that distance the AI and being able to take over for the combat stuff would be
+  fine?", then corrected: "Not the AI I should say the NPC"; on the next step: "Do what you think is best" (2 Nov 2026).
+- Alternatives:
+  - Rely on the engine's unloaded movement out to its limit (about 650 m): rejected; one run per distance, and the
+    failures (a jump near the player, an actor moved out of the world) are silent.
+  - Keep every travelling actor near the player and loaded (as P9's follow helper, Shadow, does for one test actor):
+    rejected; the loaded area follows the player.
