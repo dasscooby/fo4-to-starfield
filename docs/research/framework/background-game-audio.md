@@ -28,8 +28,10 @@ The precedents behind that record, from the same quests-dialogue-voice.md ("Prec
 - Capital Wasteland (Fallout 3 in Fallout 4) stopped after talking with Bethesda; letting players extract from their
   own copies of Fallout 3 was also judged unworkable, because the voice acting is licensed, not owned. **verified**
   ([PCGamesN](https://pcgamesn.com/fallout-4/fallout-4-fallout-3-capital-wasteland-mod))
-- Fallout 4: New Vegas recast every voice for the same reason.
-  **verified** ([Kotaku](https://kotaku.com/fallout-4-modders-cant-use-new-vegas-voice-acting-so-t-1829149325))
+- Fallout 4: New Vegas recast every voice. Its own stated reasons differ: ripping needs decompiling, which the EULA
+  forbids, and the voice contracts would need renegotiating. **verified**
+  ([Kotaku](https://kotaku.com/fallout-4-modders-cant-use-new-vegas-voice-acting-so-t-1829149325), as quoted in
+  quests-dialogue-voice.md)
 
 What the precedent establishes: the objection is to using the performances in another game, and the player owning the
 original does not cure it. What it does not establish: whether Bethesda would treat "the original game plays its own
@@ -65,15 +67,15 @@ For radio it may differ, which is why the stages below lead with radio and music
 
 | Need | How | Label and source |
 |---|---|---|
-| The host keeps running and playing sound while Starfield has focus | `[General] bAlwaysActive=1` in `Fallout4Custom.ini` | **unresolved**: Steam threads report it working, original-engine-audio.md found conflicting reports and none on audio; S0 settles it |
-| Two games at once | Steam runs several different games at once on one PC | **supported hypothesis** (Steam community posts; no Valve statement read) |
+| The host keeps running and playing sound while Starfield has focus | `[General] bAlwaysActive=1` in `Fallout4Custom.ini` | **unresolved**: two Steam threads (in Sources) report it working, original-engine-audio.md found conflicting reports and none on audio; S0 settles it |
+| Two games at once | Steam runs several different games at once on one PC | **supported hypothesis** (Steam community posts, listed in Sources; no Valve statement read) |
 | Radio | The host turns an original radio station on and off | **unresolved**: no function or approach checked |
-| Music | Papyrus `MusicType.Add()` / `Remove()` push and pop the original music types; Starfield's own music is silenced in our worlds | **unresolved**: function names from memory; the Creation Kit wiki page (falloutck.uesp.net, MusicType Script) returned 403 on 6 November and was not read |
-| The host plays one specific voice line (only if A1 is reopened) | (a) Papyrus `ObjectReference.Say(Topic, akActorToSpeakAs, ...)` makes a hidden speaker say a topic "as if it were the specified actor"; the engine picks the response, so the line's conditions must pass in the audio room. (b) An engine call that plays a given file: the Skyrim library has `BSAudioManager::BuildSoundDataFromFile` (used by AudioUtil); the Fallout 4 library has `BSAudioManager`, this call unchecked | (a) **verified** that the function exists (Creation Kit wiki); that it plays a chosen line out of its quest is **unresolved**. (b) **unresolved** |
-| Spatial sound | Either mirror the speaker's offset and heading inside the host, or play flat and set volume and balance ourselves (original-engine-audio.md's simpler option) | **supported hypothesis** for the idea; neither tried |
+| Music | Papyrus `MusicType.Add()` / `Remove()` push and pop the original music types; Starfield's own music is silenced in our worlds | **unresolved**: function names from memory; the Creation Kit wiki page (falloutck.uesp.net, MusicType Script) returned 403 on 6 November, and no `MusicType.psc` is among Fallout 4's installed script sources |
+| The host plays one specific voice line (only if A1 is reopened) | (a) Papyrus `ObjectReference.Say(Topic, akActorToSpeakAs, ...)` makes a hidden speaker say a topic "as if it were the specified actor"; the engine picks the response, so the line's conditions must pass in the audio room. (b) An engine call that plays a given file: the Skyrim library has `BSAudioManager::BuildSoundDataFromFile` (used by AudioUtil); the Fallout 4 library has `BSAudioManager`, this call unchecked | (a) **verified** that the function exists: Fallout 4's Papyrus source `ObjectReference.psc` declares `Function Say(Topic akTopicToSay, Actor akActorToSpeakAs = None, bool abSpeakInPlayersHead = false, ObjectReference akTarget = None) native` (read 6 November; the quoted description is the Creation Kit wiki's, read 1 November); that it plays a chosen line out of its quest is **unresolved**. (b) **unresolved** |
+| Spatial sound | Either mirror the speaker's offset and heading inside the host, or play flat and set volume and balance ourselves (original-engine-audio.md's simpler option) | **unresolved**: unmeasured reasoning (original-engine-audio.md, section 2); neither tried |
 | Timing | The host reports duration and end; Starfield holds the subtitle until then, as Starfield Silent Voice does for unvoiced lines. PS-39's length-cut silent files give the same pacing without a round trip | **supported hypothesis** (Silent Voice: quests-dialogue-voice.md, "Starfield Silent Voice") |
-| Moving mouths (voice only) | The host streams the line's loudness (about 100 samples a second) and our SFSE plugin opens and closes the speaker's mouth by it, as Skyrim's AudioUtil does from a wav's amplitude envelope; no lip file leaves the host | **supported hypothesis** for the idea (AudioUtil repository, read 1 November); on Starfield's faces **unresolved** |
-| Latency | a pipe message plus one frame in the host: tens of milliseconds | **supported hypothesis** (original-engine-audio.md, inferred, not measured); S1 measures it |
+| Moving mouths (voice only) | The host streams the line's loudness (about 100 samples a second) and our SFSE plugin opens and closes the speaker's mouth by it, as Skyrim's AudioUtil does from a wav's amplitude envelope | technique: **supported hypothesis** (AudioUtil repository, read 1 November); on Starfield's faces **unresolved**. Rights: the envelope is data derived from the voice line; original-engine-audio.md (section 2) reads lip data made from the original audio as a converted derivative and raises the same question for line length, so the same reading may cover the envelope: **unresolved**, part of A1 |
+| Latency | a pipe message plus one frame in the host: tens of milliseconds | **unresolved**: unmeasured reasoning (original-engine-audio.md, section 2); S1 measures it |
 
 ## 4. Risks we already know
 
@@ -83,12 +85,12 @@ For radio it may differ, which is why the stages below lead with radio and music
   **supported hypothesis**: that project's reading, not reproduced here; S0 checks it. If it holds, the host plugin
   must do the same, or the player's clicks in Starfield fire guns in Fallout 4.
 - **Cost.** Two Creation Engine games at once: a second game's memory (likely a few GB for Fallout 4, less for the
-  32-bit New Vegas and Fallout 3) and some GPU time. **supported hypothesis** (original-engine-audio.md, inferred,
-  needs a measurement). The host must run in an empty cell, at minimum settings, in a tiny window, with a low frame cap.
+  32-bit New Vegas and Fallout 3) and some GPU time. **unresolved**: unmeasured reasoning (original-engine-audio.md,
+  section 2). The host must run in an empty cell, at minimum settings, in a tiny window, with a low frame cap.
   S0 measures it.
-- **Alt-tab behaviour.** Bethesda games are known to misbehave when they lose focus (Steam threads). The host never
-  takes focus: the launcher starts it minimised or off-screen and never brings it forward. **unresolved** how well
-  that holds.
+- **Alt-tab behaviour.** Bethesda games may misbehave when they lose focus: **unresolved**, no thread read for it.
+  The host never takes focus: the launcher starts it minimised or off-screen and never brings it forward.
+  **unresolved** how well that holds.
 - **Versions.** The host plugin is a second script-extender plugin per game and must match the runtime the player
   has installed, not the one we read data from. F4SE's home page lists 1.11.240 (F4SE 0.7.9), 1.10.984 (0.7.2) and
   1.10.163 (0.6.23) **verified** ([launcher-sources/fo4source.md](launcher-sources/fo4source.md)); the project reads
@@ -104,11 +106,11 @@ One line per message, UTF-8, fields separated by a single tab, over a named pipe
 
 | From Starfield | Meaning |
 |---|---|
-| `hello 1 <game>` | protocol version, the source game expected (`fo4`, `fnv`, `fo3`) |
+| `hello 1 <game>` | protocol version, the source game expected (`fo4`, `fnv`, `fo3`; Fallout 3 content through Tale of Two Wastelands runs in New Vegas, so it uses `fnv`) |
 | `radio <station>` / `radio off` | the radio |
 | `music <plugin>:<MUSC form id>` / `music off` | the music context |
 | `combat on` / `combat off` | combat music |
-| `volume <music 0..1> <voice 0..1>` | follows Starfield's own sliders |
+| `volume <music 0..1> <voice 0..1>` | follows Starfield's own sliders (whether our SFSE plugin can read them: **unresolved**) |
 | `say <cue id> <speaker id> <plugin>:<INFO form id> <voice type editor id> <dx> <dy> <dz> <heading>` | voice only, if A1 is reopened: play this response as this voice type, at this offset from the listener (metres, Starfield axes) |
 | `move <speaker id> <dx> <dy> <dz> <heading>` / `stop <speaker id>` | voice only: the speaker moved; cut the line |
 
@@ -125,15 +127,16 @@ line id map.
 
 | Game | Engine and extender | Host | Notes and labels |
 |---|---|---|---|
-| Fallout 4 | Creation Engine, F4SE, CommonLibF4 | first: F4SE plugin, a tiny `FO4SF_AudioHost.esp` (the audio room, a hidden speaker, one quest) | voice `.fuz`, music and radio `.xwm` **verified** (original-engine-audio.md section 3). Everything above is written for it |
-| Fallout: New Vegas | Gamebryo, xNVSE | second | voice `.ogg` with `.lip` **verified** (original-engine-audio.md section 3, from findings/asset-conversion.md); music `.ogg` per the same note, which the earlier draft gave as `.mp3`: **unresolved** until checked in an install. 32-bit: **supported hypothesis** (original-engine-audio.md). Sound functions in JIP LN NVSE: **unresolved**, not checked |
-| Fallout 3 | Gamebryo, FOSE | own FOSE host; or through New Vegas when the player has Tale of Two Wastelands, which builds a merged Fallout 3 and New Vegas game from the player's own files ([multi-game-future.md](multi-game-future.md)) | same formats as New Vegas (original-engine-audio.md). One host serving both through TTW: **supported hypothesis** |
+| Fallout 4 | Creation Engine; F4SE **verified** (F4SE runtime list, launcher-sources/fo4source.md); CommonLibF4 **supported hypothesis** (its BSAudioManager PR, in Sources; library not otherwise read) | first: F4SE plugin, a tiny `FO4SF_AudioHost.esp` (the audio room, a hidden speaker, one quest) | voice `.fuz`, music and radio `.xwm` **verified** (original-engine-audio.md section 3). Everything above is written for it |
+| Fallout: New Vegas | Gamebryo, xNVSE: **supported hypothesis** (original-engine-audio.md section 3; TTW's own page names xNVSE, findings/precedents.md section 1) | second | voice `.ogg` with `.lip` **verified** (original-engine-audio.md section 3, from findings/asset-conversion.md); music `.ogg` per the same note, which the earlier draft gave as `.mp3`: **unresolved** until checked in an install. 32-bit: **supported hypothesis** (original-engine-audio.md). Sound functions in JIP LN NVSE: **unresolved**, not checked |
+| Fallout 3 | Gamebryo, FOSE: **supported hypothesis** (original-engine-audio.md section 3, "yes in principle") | own FOSE host; or through New Vegas when the player has Tale of Two Wastelands, whose installer needs the player's own English Fallout 3 and New Vegas and builds Fallout 3 into New Vegas **verified** ([findings/precedents.md](findings/precedents.md) section 1; [multi-game-future.md](multi-game-future.md) TTW rows) | same formats as New Vegas (original-engine-audio.md). One host serving both through TTW: **supported hypothesis** |
 | Fallout 1 and 2 | Interplay's 2D engine | last, maybe never | little speech (the talking heads) and no Creation Engine dialogue to map to. Their audio formats, sfall, and engine reimplementations (fallout1-ce / fallout2-ce) as a host: **unresolved**, no source read for this note |
 | Fallout 76 | | none | closed: online only, ban risk, Terms of Service (original-engine-audio.md, REL-60) |
 
 ## 7. Stages, each with a go/no-go
 
-The record says do not build it now (REL-61). These stages run only if the owner reopens REL-61. Radio and music
+The record says do not build it now (REL-61). These stages run only if the owner reopens REL-61, after Bethesda's
+answer (BGA-1). Radio and music
 lead, because they are the case the record says might differ; voice stages need A1 reopened as well.
 
 - **S0, PC, no code, about an hour of the owner's time:**
@@ -154,15 +157,17 @@ lead, because they are the case the record says might differ; voice stages need 
 - **S4, New Vegas (xNVSE), then Fallout 3** through Tale of Two Wastelands or FOSE: radio and music; voice only on
   the same terms as S3.
 
-Offline work possible now, all of it already covered by PS-38 and PS-39: the protocol as code with its tests, the
-converter's record of each line's source INFO and voice type, and a launcher setting (off by default) that starts and
-stops the host.
+Work possible now is only what PS-38 and PS-39 already cover: one swappable source per voice line and music track,
+the converter's record of each line's source INFO and voice type, and each silent file cut to the original line's
+length. The pipe protocol in code and a launcher setting that starts and stops the host are part of the host, and
+wait for REL-61 to be reopened like the rest.
 
 ## 8. What the owner would need to decide
 
-- **BGA-1. To reopen REL-61** (build any of this): the owner would choose REL-61 option (b), prototype the radio case,
-  and decide whether a radio question goes to Bethesda first, as original-engine-audio.md section 5 suggests (the owner
-  approves any text; nothing is sent by a thread).
+- **BGA-1. To reopen REL-61** (build any of this): REL-61 option (b) is "prototype the radio case after Bethesda
+  answers", and original-engine-audio.md says radio would need Bethesda's word before any release. So Bethesda's
+  answer comes first: the owner would decide whether to ask Bethesda about the radio case (the owner approves any
+  text; nothing is sent by a thread), and only after an answer that allows it would S0 onward start.
 - **BGA-2. To reopen A1 for voice through a host:** the owner would need to reverse the RE-1 decision, and under the
   record's reading would need Bethesda's written word that "played by the original game" differs from conversion.
   Without that, Fallout 3 and New Vegas voice stay no and Fallout 4 voice stays subtitles only.
@@ -181,7 +186,10 @@ stops the host.
 - Playing audio files directly through `BSAudioManager::BuildSoundDataFromFile`, and an amplitude envelope driving the
   mouth (Skyrim): https://github.com/crajjjj/AudioUtil
 - `BSAudioManager` member functions in CommonLibF4: https://github.com/Dear-Modding-FO4/commonlibf4/pull/28
-- Several Steam games at once on one PC: https://steamcommunity.com/discussions/forum/0/1735465524697733891/
+- Several Steam games at once on one PC: https://steamcommunity.com/discussions/forum/0/1735465524697733891/ (read
+  for the first draft, 1 November) and https://steamcommunity.com/discussions/forum/10/2270319347573688560 (read
+  for original-engine-audio.md, 19 October)
+- `Say` declaration: Fallout 4's Papyrus source `Data\Scripts\Source\ObjectReference.psc` (read 6 November)
 - Capital Wasteland: https://pcgamesn.com/fallout-4/fallout-4-fallout-3-capital-wasteland-mod ; Fallout 4: New Vegas
   recast: https://kotaku.com/fallout-4-modders-cant-use-new-vegas-voice-acting-so-t-1829149325
 - Project record: findings/original-engine-audio.md; release-community-legal.md (REL-26, REL-60, REL-61);
