@@ -346,6 +346,30 @@ class CppParityTests(unittest.TestCase):
         self.assertEqual(r.returncode, 2, r.stdout)
         self.assertIn("unknown place 'nowhere'", r.stderr)
 
+    def test_the_presentation_planner_escapes_garrison_id_components(self):
+        """#641: places and holders whose ids hold the separator (the AMBIGUOUS pairs of test_combined_present_ids)
+        and a place literally named region%3Acamp, walked from region and its neighbours on budgets that keep, drop
+        and respawn slots; the plans and diffs match line by line, so the escaped garrison ids match too.
+
+        diff()'s duplicate-id refusal (ValueError in Python, std::invalid_argument and exit 2 in the core) has no
+        parity case: foccsim only diffs plans that plan() built, and plan() cannot give two slots one id (garrison
+        ids are escaped, a settler's role holds no ':', squad ids are the squads' keys), so the walk cannot feed
+        the core a plan with duplicate ids. test_combined_present_ids covers the refusal on the Python side."""
+        from test_combined_present_ids import AMBIGUOUS, world as id_world
+        ws = id_world(AMBIGUOUS + [("region%3Acamp", "raiders")])
+        walk = [{"tick": 0, "place": p, "radius": r, "max_actors": m}
+                for p, r, m in (("region", 6, 100), ("region", 2, 3), ("region:camp", 2, 9), ("region%3Acamp", 2, 6),
+                                ("region", 2, 0), ("region", 2, 100), ("region:camp", 1, 100))]
+        want = []
+        present_lines(ws, walk, 0, None, want)
+        self.assertIn("garrison:region%3Acamp:raiders", want[0])
+        self.assertIn("garrison:region:camp%3Araiders", want[0])
+        self.assertIn("garrison:region%253Acamp:raiders", want[0])
+        r, d, _state = self.native(ws, 0, walk=walk)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.same_lines("escaped ids", "the presentation planner", want, self.lines(d, "present.jsonl"),
+                        lambda k: f"walk entry {k}")
+
 
 if __name__ == "__main__":
     unittest.main()
