@@ -80,3 +80,30 @@ On CI, with the compiler on PATH (`tests/test_combined_cpp_parity.py`):
 Commonwealth-scale draft for 90 days.
 
 Not here yet (later steps of the plan): the SFSE plugin around the core; the event-log indexes that would let the log be trimmed.
+
+## Building with MSVC (Windows)
+
+`build.ps1` builds the portable command-line core, not an SFSE DLL. Run it from
+an x64 MSVC developer shell, or pass `-Env` with an existing x64 environment
+script. It can also discover installed Visual Studio tools through vswhere.
+
+```powershell
+powershell -File sfse\FOCCSim\build.ps1 -Out D:\Builds\foccsim-new
+$env:FOCCSIM_EXE = 'D:\Builds\foccsim-new\foccsim.exe'
+$env:PYTHONUTF8 = '1'
+$env:PYTHONIOENCODING = 'utf-8'
+python -m unittest tests.test_combined_cpp_parity
+$env:FO4SF_PARITY_FULL = '1'
+python -m unittest tests.test_combined_cpp_parity
+```
+
+The output folder must be new. The script globs every local `.cpp`, links the
+sidecar SHA-256 implementation, and uses `/W4 /WX /fp:precise /utf-8` without
+floating-point contraction. `build.json` records source/header and executable
+hashes, the compiler banner, Git commit and compiler line. Failed builds retain
+their partial outputs. Nothing is installed or copied to the game.
+
+The build suppresses only C4127: the core deliberately tests the constexpr
+`FARM_SLOTS_PER_BEDS` and `ARRIVAL_SLOWDOWN_POP` tuning values for their disabled
+case. All other level-four warnings remain errors. The unsuppressed warning
+must not be mistaken for a successful build or parity result.
