@@ -320,12 +320,13 @@ def fold(a):
     return 0
 
 
-def next_stage(stage, dead, total, fighting, at_preston):
+def next_stage(stage, dead, total, fighting, at_preston, found=False):
     """The script's NextStage (FO4SF_Min00Quest.psc), the same rule in Python so it can be tested: the fight counts as
-    started when a raider fights or is dead (whoever started it, a reload mid-fight included), all dead is 30,
-    standing at Preston after that is 40; it never goes back."""
+    started when a raider fights or is dead (whoever started it, a reload mid-fight included) or the player has found
+    Preston (activated him or came within FindRadius before the fight), all dead is 30, standing at Preston after that
+    is 40; it never goes back."""
     s = stage
-    if s < 20 and (fighting or dead > 0):
+    if s < 20 and (fighting or dead > 0 or found):
         s = 20
     if s < 30 and total > 0 and dead == total:
         s = 30
@@ -336,8 +337,9 @@ def next_stage(stage, dead, total, fighting, at_preston):
 
 def summarize(lines):
     """The mission log's lines as {"stages": [...], "status": <last status line or None>, "reward": int or None,
-    "startcombat": n, "activated": n}; lines of other logs are ignored."""
-    s = {"stages": [], "status": None, "reward": None, "startcombat": 0, "activated": 0}
+    "startcombat": n, "activated": n, "found": <how the player found Preston before the fight, or None>}; lines of
+    other logs are ignored."""
+    s = {"stages": [], "status": None, "reward": None, "startcombat": 0, "activated": 0, "found": None}
     for line in lines:
         m = LINE.search(line)
         if not m:
@@ -353,6 +355,8 @@ def summarize(lines):
             s["startcombat"] += 1
         elif msg.startswith("preston activated"):
             s["activated"] += 1
+        elif msg.startswith("found preston ") and s["found"] is None:
+            s["found"] = msg[len("found preston "):]
     return s
 
 

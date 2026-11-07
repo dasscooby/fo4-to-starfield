@@ -5,16 +5,21 @@ It exists because a repository like this is easy to misread from the README alon
 
 ## What this project is
 
-A **toolchain that converts Fallout 4 data into Starfield's engine**, run on the user's own copies of both games. It is
-not a mod pack and ships no game files. It is built by a small team of AI agents under one human owner (`fo4sf`), with
-each change measured in game by an automated test runner. Agents sign their work: `Claude:` (lead, integration, the game
-runner), `Codex:` (reviews, deployment, identity), `Grok:` (diagnostics), `Claude-cloud:`.
+A **Commonwealth-first Fallout experience and total-conversion framework for Starfield**, built from the user's own
+game files. Conversion tools provide the first world; the broader goal includes survival and warfare modes and an
+off-screen living-world simulation. It ships no game files or playable pack. The code and research repository is
+public. Synthetic checks establish offline behaviour; native claims need their own installed-build evidence, and a
+draft PR is not merged functionality. The [current handoff](../CODEX-HANDOFF.md) distinguishes those states.
+
+Agents work under one human owner (`fo4sf`) and sign their work: `Claude:` (lead, integration, game runner), `Codex:`
+(reviews, deployment/recovery, identity), `Grok:` (diagnostics) and `Claude-cloud:`. They are not separate human
+reviewers. Read current ownership before changing a shared scope.
 
 ## Where the truth is
 
 | Question | Read |
 |---|---|
-| What the project is trying to do, and how | `docs/PLAN.md`, `docs/terrain/commonwealth-build-plan.md` |
+| What the project is trying to do, and how | current `docs/ROADMAP.md`, `docs/combined-core.md`, then `docs/PLAN.md` and `docs/terrain/commonwealth-build-plan.md` |
 | What works today, with dates and evidence | `docs/JOURNAL.md` (append-only), GitHub issue #32 (the status thread) |
 | What the owner found while playing | `docs/owner/playtest-issues.md` |
 | How the agents work, and their rules | `AGENTS.md`, `CONTRIBUTING.md`, `docs/CODEX-HANDOFF.md` |

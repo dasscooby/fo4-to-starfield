@@ -1171,7 +1171,7 @@ class P9Tests(unittest.TestCase):
         console's PathToRef never brought the actor 17 m to the player). Its FAIL needs a scripted control."""
         calls = iter(range(100, 200))
 
-        def go(rung, target, after=None, at=None, dist=None):
+        def go(rung, target, after=None, at=None, dist=None, result=2):
             """The rung with a `p9 go` right after its start (the card's order), or at line index `at`; the go's rt=
             is the line before it's (P9Track's first sample shares the start's instant in these fixtures) and its dist=
             is the start's unless given (the distance the command found)."""
@@ -1183,20 +1183,20 @@ class P9Tests(unittest.TestCase):
             out = rung[:k + 1] + [f"FOCC rt={rt:.1f} p9 go actor=-16711680 call={call}.000000 target={target} "
                                   f"id={0x0300081B if target == 'dest' else 20} dist={dist:.6f}"] + rung[k + 1:]
             if after is not None:
-                out.append(f"FOCC rt=9.0 p9 path returned actor=-16711680 call={call}.000000 target={target} result=2 "
+                out.append(f"FOCC rt=9.0 p9 path returned actor=-16711680 call={call}.000000 target={target} result={result} "
                            f"after={after:.6f} dist=3.000000")
             return out
         came = p9_log(start=20.0, speed=2.0, seconds=60)[1:]
         never = p9_log(speed=0.0, seconds=600)[1:]
-        v = probes.check_p9(col(log=BASE + go(came, "player", 12.0) + go(never, "dest", 0.0)))
-        self.assertEqual(v.verdict, FAIL, v.reasons)
-        self.assertTrue(any("scripted commanded rung" in r for r in v.reasons), v.reasons)
+        # A qualifying short control succeeds; a Stopped long request is not a navmesh failure.
+        v = probes.check_p9(col(log=BASE + go(came, "player", 12.0, result=0) + go(never, "dest", 0.0)))
+        self.assertEqual(v.verdict, INCONCLUSIVE, v.reasons)
         self.assertTrue(any("PathToReference returned after 0.0 s with result 2 (Stopped)" in r for r in v.reasons), v.reasons)
         self.assertIn("FOCC_P9Drive.Go", v.extra["driver"])
         rungs = v.extra["attempts"]
         self.assertEqual([(a["driver"], a["target"], a["path_returned_s"]) for a in rungs],
                          [(None, None, None), ("script", "player", 12.0), ("script", "dest", 0.0)])
-        self.assertEqual([a["path_result"] for a in rungs], [None, 2, 2])     # Actor.psc PathingResult_Stopped
+        self.assertEqual([a["path_result"] for a in rungs], [None, 0, 2])     # Success control, Stopped long request
         self.assertEqual(probes._p9_result_note({}), " (no result= on the line: a driver from before 28 Oct 2026)")
         self.assertEqual(probes._p9_result_note({"path_result": 1}), " with result 1 (Failure)")
         self.assertEqual(probes._p9_result_note({"path_result": 9}), " with result 9 (unknown code)")
@@ -1306,7 +1306,7 @@ class P9Tests(unittest.TestCase):
         v = probes.check_p9(col(log=far))
         self.assertEqual(v.verdict, INCONCLUSIVE, v.reasons)
         self.assertTrue(any("disagrees with the first sample" in r for r in v.reasons), v.reasons)
-        for label, log in (("a console control does not stand for the script", LADDER + go(never, "dest", 0.0)),
+        for label, log in (("a console control does not stand for the script", LADDER + go(never, "dest")),
                            ("a scripted control does not stand for the console", BASE + go(came, "player") + never),
                            ("a baseline with a go is no baseline", go(BASE[:1] + BASE[1:], "player")
                             + go(came, "player") + go(never, "dest"))):
