@@ -653,6 +653,51 @@ longer gaps are Papyrus running late. The console pauses during the hops back st
 p90. Quote both with the result and compare them with the loaded run. What an off-screen world costs is the
 next question as the tests grow (owner, 1 Nov 2026).
 
+### P11: far travel, materialize and hand back with continuity (card, 7 Nov 2026; nothing written or run)
+
+Settles: **CC-63**'s far-travel layer (`src/fo4sf/combined/travel.py`, #674). L2 owns a travelling squad's position
+outside the loaded area; L3 creates the real actor at that position inside 400 m (`MATERIALIZE_M`), hands it to the
+P9 link walk, removes it only beyond 500 m (`DISSOLVE_M`) and takes its progress back. P11 asks whether that loop
+keeps one squad as one actor on one line, with no jump, no second copy and no progress lost or gained, in the game.
+
+Status: a card only. No kit script, session or judge exists for it yet, and none is in this PR. The native run
+needs a fresh owner release and runs on the PC (Claude PC). P9 and P9u passes do not stand in for it. P11 is not
+a gate for port steps 4 or 6 (FAL-9); it gates using `travel.py` in game. Straight line only: the hand-back projects
+onto the line between the two anchors, an approximation CC-63 records (a multi-hop route and the navmesh path are
+not that line). Travel between worldspaces is CC-64, not P11.
+
+Kit, P9's with two additions (both to write): a marker the session can place at given world x/y and snap to the
+ground (P9Dest already does this relative to the player), and a dissolve command that deletes the tracked actor and
+logs its last position (P4's Delete). The driver stays `FOCC_P9Drive.Link`; no alias package, no `PathToReference`.
+L2 is played offline by the session: a two-place atlas (A and B, on the measured P9 route east of Red Rocket, so the
+navmesh is known to walk), one travelling squad, and `travel.simulated_position` for the game hour the session reads.
+
+Legs, in one launch, at Red Rocket, `tgm`:
+1. **Out of band.** The player stands more than 500 m from the squad's simulated position. Nothing is spawned.
+2. **Materialize.** The player hops toward the simulated position. At the first hop that leaves the player within
+   400 m of it, the session places the marker there and spawns the actor (`p11 spawn` with the simulated x/y, the
+   actor's x/y/z and the player distance), then `P9Track` and `Link` toward B's marker.
+3. **Hand-over.** The loaded walk, judged as P9's samples: forward in time, whole, no step faster than 15 m/s.
+4. **Dissolve.** The player hops away. At the first sample with the player more than 500 m from the actor, the
+   session dissolves it (`p11 dissolve` with its last x/y). Offline: `progress_from_position(A, B, last)` gives f,
+   and `eta_from_progress` the new eta.
+5. **Re-materialize.** After a wait of at least one game hour the player hops back inside 400 m. The session recomputes
+   the simulated position from the new eta and spawns again (step 2's line).
+
+Judge `probes p11` (to write), proposed bars for review:
+- PASS: every spawn within 400 m of the player and within 5 m (x/y) of the simulated position; the dissolve beyond
+  500 m and only there; P9's sample rules through the walk; never two live actors for the squad (the first id
+  reads deleted before the second spawn); the second spawn's progress at least the dissolve's f, and within one
+  game hour's travel of f plus the elapsed hours over the route hours.
+- FAIL: two live actors for one squad at any sample; a spawn more than 5 m from the simulated position after the
+  snap; progress going backwards at the re-materialize; a spawn outside 400 m or a dissolve inside 500 m.
+- INCONCLUSIVE: a spawn that never loads, a torn or missing sample, a dissolve line missing, or the walk stopped by
+  the near-player stops P9 already allows (within 35 m).
+
+Out of P11 (each its own card): a save and a load while the squad is dissolved (P1, and the save-identity card W8);
+the materialized actor's death or despawn reaching L2 once (the encounter-conservation card W7); more than one squad,
+which is the open load-scaling probe; routes with more than one hop.
+
 ## P1: SFSE sidecar on save and load (last)
 
 Settles: **CC-02** option C' / B: whether an SFSE plugin can keep a file per save keyed to the save name through
@@ -835,6 +880,7 @@ value and is INCONCLUSIVE, never a PASS; on a rerun in the same launch pick a ne
 | P8 | Settlement build stages by enable parent, and their save cost | FAIL = stage swaps by script-placed refs |
 | P9 | Long-route pathing on the converted navmesh | FAIL = caravans move abstractly and materialize near the player only |
 | P9u | Does a linked actor travel to the player from beyond the loaded area? | never FAIL; INCONCLUSIVE with frozen positions = actors move only once loaded again, so off-screen travel is abstract |
+| P11 | Does the far-travel loop keep one squad as one actor on one line (materialize inside 400 m, dissolve beyond 500 m, re-materialize with continuity)? | FAIL = `travel.py` stays offline; a second copy or lost progress needs its fix before any in-game use |
 | P10 | SendStoryEvent + our SM branch for radiant quests | FAIL = quests started from script directly |
 | B0 | Can Papyrus call our SFSE plugin and read its answer on 1.16.244 (the C++ port's bridge)? | PASS on stack A = CommonLibSF natives; PASS on B only = the setting bridge; FAIL of B0-1 = no return leg for B |
 
