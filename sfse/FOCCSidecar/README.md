@@ -147,6 +147,19 @@ Game closed. The repo checked out on the PC; `$sf` = the Starfield folder (the o
   `SFSEInterface::QueryInterface`/`GetPluginHandle`, `SFSEMessagingInterface::RegisterListener`, `Message`,
   `kMessage_*`) are used as declared; it proves nothing about the Win32 calls (stub signatures are mine).
 
+## Automated portable-codec coverage
+
+From the repository root, `python -m unittest tests.test_sfse_sidecar_codec -v` compiles `codec.h` and `sha256.cpp`
+into a temporary console program with a C++20 compiler (GCC/Clang, or MSVC from a loaded compiler environment).
+CI requires a compiler; a local environment without one reports a skip. No DLL or game API is built or loaded.
+
+The tests compare ASCII names and canonical envelopes with Python, check SHA-256 block boundaries and valid signed
+counter limits, and exercise malformed envelopes, duplicate fields, wrong probe state, and non-integer/out-of-range
+counters with matching checksums. The reader accepts only the canonical P1 stub body its own writer produces;
+an invalid body returns `valid=false` rather than truncating a number or throwing a numeric-conversion exception.
+UTF-8 names retain their own writer/readback behavior; the documented non-ASCII filename parity caveat still applies.
+These are portable codec checks, not evidence of SFSE callbacks, Win32 file recovery or in-game save/load behavior.
+
 ## Not verified (first build and first run settle these)
 
 - **The whole dll has never been compiled by MSVC** (no Windows SDK here). Likely trouble spots: `/W4` warnings
