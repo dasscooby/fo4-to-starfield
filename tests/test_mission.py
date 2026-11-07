@@ -85,6 +85,17 @@ class LogTests(unittest.TestCase):
     def test_other_log_lines_ignored(self):
         self.assertEqual(make_mission.summarize(["FO4SF rt=1 pos=1 2 3 n=1", "noise"])["stages"], [])
 
+    def test_found_preston_is_reported_once(self):
+        s = make_mission.summarize(self.LINES)
+        self.assertIsNone(s["found"])
+        lines = ["[10/28/2026 - 06:12:45PM] FO4SF_MISSION rt=200.0 preston activated at stage 10",
+                 "[10/28/2026 - 06:12:45PM] FO4SF_MISSION rt=200.0 found preston activated",
+                 "[10/28/2026 - 06:12:46PM] FO4SF_MISSION rt=201.0 found preston near d=2.5",
+                 "[10/28/2026 - 06:12:46PM] FO4SF_MISSION rt=201.0 startcombat raider 0 d=91.3",
+                 "[10/28/2026 - 06:12:46PM] FO4SF_MISSION rt=201.0 stage 20"]
+        s = make_mission.summarize(lines)
+        self.assertEqual((s["found"], s["activated"], s["startcombat"], s["stages"]), ("activated", 1, 1, [20]))
+
 
 class NextStageTests(unittest.TestCase):
     """make_mission.next_stage mirrors the script's NextStage (Codex review 5563368986: progress must not depend on
@@ -107,11 +118,74 @@ class NextStageTests(unittest.TestCase):
         self.assertEqual(make_mission.next_stage(40, 0, 5, False, False), 40)
         self.assertEqual(make_mission.next_stage(10, 0, 0, False, False), 10)
 
+    def test_finding_preston_starts_the_fight(self):
+        # in game 28 Oct (new game run 3): Preston activated five times at stage 10, every raider 91 to 129 m away and
+        # none fighting; the stage stayed 10. Found, it is 20 even before a raider's 3D is loaded.
+        self.assertEqual(make_mission.next_stage(10, 0, 5, False, False), 10)
+        self.assertEqual(make_mission.next_stage(10, 0, 5, False, False, found=True), 20)
+        self.assertEqual(make_mission.next_stage(10, 0, 5, False, True, found=True), 20)    # not past the fight
+        self.assertEqual(make_mission.next_stage(20, 3, 5, True, True, found=True), 20)
+        self.assertEqual(make_mission.next_stage(10, 5, 5, False, False, found=True), 30)   # all dead is still 30
+        self.assertEqual(make_mission.next_stage(10, 0, 0, False, False, found=True), 20)   # never "cleared"
+
     def test_script_carries_the_same_rule(self):
         psc = read(PSC)
-        for cond in ("s < 20 && (fighting || dead > 0)", "s < 30 && total > 0 && dead == total", "s == 30 && atPreston"):
+        for cond in ("s < 20 && (fighting || dead > 0 || found)", "s < 30 && total > 0 && dead == total",
+                     "s == 30 && atPreston"):
             self.assertIn(cond, psc)
         self.assertNotIn("GetCombatState() == 0\n", psc)
+        self.assertIn("int Function NextStage(int stage, int dead, int total, bool fighting, bool atPreston, bool found)",
+                      psc)
+        self.assertIn("NextStage(stage, dead, Raiders.Length, fighting, dp < TalkRadius, prestonFound)", psc)
+
+
+class FindPrestonTests(unittest.TestCase):
+    """In game 28 Oct (new game run 3, the owner: "the freedoms calls activation didnt work"): OnActivate ran ("preston
+    activated at stage 10" five times) but only stage 30 acted on it, and the fight waited for a raider within
+    EngageRadius while the nearest stayed 91 to 129 m away. Reaching Preston (activation or FindRadius) now starts the
+    fight, and once it is on every loaded raider is put into combat."""
+
+    def setUp(self):
+        self.psc = read(PSC)
+
+    def block(self, start, end):
+        i = self.psc.index(start)
+        return self.psc[i:self.psc.index(end, i)]
+
+    def test_activation_before_the_fight_finds_preston(self):
+        act = self.block("Event ObjectReference.OnActivate(", "EndEvent")
+        self.assertRegex(act, r"if stage < 20\s+FoundPreston\(\"activated\"\)")
+        self.assertRegex(act, r"elseif stage == 30\s+AdvanceTo\(40\)")
+
+    def test_standing_near_preston_before_the_fight_finds_him(self):
+        tick = self.block("Event OnTimer(", "EndEvent")
+        self.assertRegex(tick, r"if stage < 20 && dp < FindRadius\s+FoundPreston\(")
+        self.assertLess(tick.index("FoundPreston("), tick.index("while i < Raiders.Length"))   # before the raiders' loop
+        num = lambda name: float(re.search(r"float Property %s = (-?[\d.]+) Auto Const" % name, self.psc).group(1))
+        self.assertEqual(num("FindRadius"), 20.0)                                          # the documented 20 m
+        self.assertGreater(num("FindRadius"), num("TalkRadius"))
+        self.assertNotIn("FindRadius", make_mission.mandatory_properties(self.psc))         # the plugin never fills it
+
+    def test_once_the_fight_is_on_every_loaded_raider_is_put_into_combat(self):
+        tick = self.block("Event OnTimer(", "EndEvent")
+        self.assertIn("bool everyone = prestonFound || stage >= 20", tick)
+        self.assertIn("elseif stage < 30 && (everyone || d < EngageRadius) && r.Is3DLoaded()", tick)
+        # the raider itself is put into combat, with the player as its target
+        self.assertRegex(tick, r"r\.Is3DLoaded\(\)\s+(;[^\n]*\s+)*r\.StartCombat\(player\)")
+        self.assertEqual(re.findall(r"\b(\w+)\.StartCombat\((\w+)\)", self.psc), [("r", "player")])
+
+    def test_dead_raiders_are_skipped(self):
+        """A dead raider is counted and never put into combat: the loop's first test on each raider is IsDead."""
+        tick = self.block("Event OnTimer(", "EndEvent")
+        self.assertRegex(tick, r"Actor r = Raiders\[i\]\s+if r\.IsDead\(\)\s+dead \+= 1\s+else\s")
+        loop = tick[tick.index("Actor r = Raiders[i]"):]
+        self.assertLess(loop.index("if r.IsDead()"), loop.index("r.StartCombat(player)"))
+
+    def test_found_is_set_and_logged_once(self):
+        found = self.block("Function FoundPreston(string how)", "EndFunction")
+        self.assertRegex(found, r"if !prestonFound && !Preston\.IsDead\(\)\s+prestonFound = True\s+"
+                                r"Trace\(\"found preston \" \+ how\)")
+        self.assertRegex(self.psc, r"(?m)^bool prestonFound = False$")
 
 
 def _write(path, data):

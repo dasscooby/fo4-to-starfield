@@ -178,7 +178,7 @@ Second session (28 Oct, after #557's restage; `focc_probe_20261028b`, plugin e2e
 | P10 | PASS | the check printed the branch's new condition (GetEventData GetIsID Keyword1, record 00081F, equal to 1, the shape of 80 of the 82 vanilla keyword filters); `SendStoryEvent` ran, FOCC_P10_Quest's OnQuestInit came after it, `running=True` |
 | P3 (cell half) | INCONCLUSIVE; run again after the restage | both `where` lines are in the log (Red Rocket cell 117449528, loc 167774215 = local 0x807; Super Duper Mart cell 117468230, loc 167774216 = local 0x808), but `cellname=` came back empty on both, and the judge named cells only by cellname. It now names them by the stage's form ids in offline_check.txt, bound to FO4Port.esm by the script's `port=True` (P3b card); the 28 Oct log has no `port=`, so P3b runs again with the restaged kit |
 | P9 (ladder) | INCONCLUSIVE | rung b (`PathToRef player`, start 16.7 m): the actor ended about 22 m away, so the ladder stopped there as the card says. Next: the scripted driver (P9 card) |
-| P9 (scripted ladder, kit d after #566; evidence `focc_P9_20261028_1043`) | INCONCLUSIVE | rung a (baseline, 60 s): 16.7 m to 21.7 m. Rung b (`FOCC_P9Drive.Go <actor> 1`, 24.43 m): `PathToReference(player, 1.0, 1.0)` returned after 2.89 s with the actor 24 to 28 m away (26.70 m at the end), so the ladder stopped. The driver did not log the return then; Starfield's Actor.psc (line 490) declares it `int`, latent, with PathingResult_Success 0, Failure 1, Stopped 2, Cleared 3, Timeout 4, and the driver now logs it as `result=` (1 = no path, the navmesh; 2 or 4 = the walk stopped or ran out of time). Next: rung b again with the code, before any new driver (a Travel package on a quest alias, or Cassiopeia's PathToPoint) |
+| P9 (scripted ladder, kit d after #566; evidence `focc_P9_20261028_1043`) | INCONCLUSIVE | rung a (baseline, 60 s): 16.7 m to 21.7 m. Rung b (`FOCC_P9Drive.Go <actor> 1`, 24.43 m): `PathToReference(player, 1.0, 1.0)` returned after 2.89 s with the actor 24 to 28 m away (26.70 m at the end), so the ladder stopped. The driver did not log the return then; Starfield's Actor.psc (line 490) declares it `int`, latent, with PathingResult_Success 0, Failure 1, Stopped 2, Cleared 3, Timeout 4, and the driver now logs it as `result=` (1 = unsuccessful request; 2 or 4 = stopped or timed out; none alone identifies the cause). Next: rung b again with the code, before any new driver (a Travel package on a quest alias, or Cassiopeia's PathToPoint) |
 
 **The load order trap.** Loading a save made while FO4SFMission.esm was active silently switched Starfield to that
 save's load order: Mission came back on and the probe plugin went off, with no dialog. The cgf calls then failed with
@@ -465,10 +465,10 @@ cgf "FOCC_P9Drive.Go" <actor id as signed decimal> 1
 The log then has `p9 go actor=<id> call=<t> target=player ...` and, when the call returns, `p9 path returned ...
 result=<code> after=<s> dist=<m>`. The code is Starfield's `PathingResult` (Actor.psc lines 476 to 480: 0 Success,
 1 Failure, 2 Stopped, 3 Cleared, 4 Timeout; the judge names it). If the actor did not come within 10 m of you, stop
-here and send the log: `result=1` says the navmesh carries no path from the actor to you (the next rung is then this
-driver in a vanilla exterior as the control, and the converted NAVM at Red Rocket looked at offline, not a new
-driver); `2` or `4` says the walk was commanded and cut short, which points at the actor's AI and makes a Travel
-package on a quest alias (or Cassiopeia's PathToPoint) the next driver. Otherwise go on.
+here and send the log: `result=1` reports an unsuccessful request, while `2` or `4` reports a stopped or timed-out
+walk. None of these codes alone identifies a NAVM or AI fault. Compare a vanilla-area control and the actor/target
+state before attributing a cause; a Travel package on a quest alias (or Cassiopeia's PathToPoint) is a separate
+driver to test. Otherwise go on.
 
 **Rungs c, d and e (20 m for 120 s, 120 m for 180 s, 450 m for 600 s).** Start each only after the previous rung's
 `p9 done` and its `p9 path returned` (or 30 s after `p9 done` if no return came: note that). For each, with the dx
@@ -487,8 +487,13 @@ loaded=<bool> dist=<m>` every 2 s.
 
 The verdict is the latest rung's: dist from >= 400 to < 10 within 600 s through >= 4 distinct cell ids, timed by each
 line's `rt=` from the start's (real seconds; late timers do not stretch the deadline). When the script sent the actor, the walk and its clock start at its `p9 go`
-(samples before it show an actor not yet commanded). FAIL = stuck (dist within 2 m for 120 s while loaded) or never
-leaving the first cell, and only when the log shows the command moving this actor: it came at least 20 m closer on
+(samples before it show an actor not yet commanded). A failure requires a loaded stall (dist within 2 m for 120 s)
+or a timeout in the first cell. A sample with the player closer than 35 m breaks the stall window and makes
+the first-cell timeout inconclusive on its own, however brief the proximity (one near sample is enough; the
+reason counts the near samples and seconds inside those 600 s; a near sample after them excuses nothing: a knob for
+the owner, reviews of 10b58dd1 and 5f0dd2b0). An unloaded sample breaks
+the stall window too, and the window starts again at the next loaded, far sample. Either failure also requires proof that the command moves this
+actor: it came at least 20 m closer on
 that route, or the first rung within 30 m (the baseline, with no `p9 go`) stayed away and a later rung that the script
 sent (its `p9 go` inside its track, after the start and before its `p9 done`) was found by that go 15 to 30 m out and
 came under 10 m after it through continuous samples (the walk's own checks: readings complete, time increasing, no
@@ -504,6 +509,149 @@ from a navmesh with no path. Every rung is summarised in the verdict's `extra.at
 distance, how far the actor moved, cells, whether it arrived, its driver, target and whether that was the tracked destination, the line of its go, and after how
 many seconds its PathToReference returned, paired by `call=`). Send back: the log, the verdict, the dx dy used and the
 actor id.
+
+**Unsuccessful native requests (1 November 2026).** The judge retains each matched return code and reports it even
+when a short control cannot judge the 400 m route. A request returning Failure, Stopped, Cleared, Timeout or an unknown
+code cannot earn PASS from later wandering, and cannot qualify as the successful short control. Every explicit
+return, including Success, ends the request's evidence window: arrival, approach, cell crossings and any stall must
+be sampled by that return's real time. A missing or malformed return timestamp supplies no such window. A Success
+code alone is not arrival evidence; the samples must show arrival before or at the return. Stopped, Cleared, Timeout,
+unknown and malformed codes, or a Success code conflicting with a stall, remain INCONCLUSIVE rather than a navmesh
+FAIL. Failure (1) still needs a sustained in-request stall and proof the driver moves the actor; it is a failed route
+test, not an isolated root cause. Legacy logs without a result code retain their existing rules, including missing
+returns; they cannot prove that a modern latent request completed.
+The driver now logs actor/target cells and actor load/death/disable/current-package state before the call. These
+are diagnostic reads, with no AI, package or navmesh changes. If a state line is present, an unloaded, dead or disabled
+actor, a disabled target or an unreadable state makes the rung INCONCLUSIVE and excludes it as a control. The owner's same-profile Commonwealth and QASmoke
+requests both returned Failure; their cause remains unresolved, and the longer route stays held pending a working
+control. QASmoke under the same installed profile is not an unmodded-profile control.
+
+**The package driver (job focc-P9p, Claude, 1 Nov 2026).** The next driver the card named: a package on a quest alias,
+the way the game moves its own actors. Building a PACK record is not needed. Starfield.esm already has
+`DefaultTraveltoLinkedRef` (`212FDB`): on the Travel template (`2CB0`, 1,023 of the master's 3,548 packages use it),
+its location is "near linked ref" with no keyword, and it has no conditions (read from Starfield.esm 1.16.244 on the
+PC; xEdit's TES5/FO4 meaning of PLDT type 6, **supported**). The probe quest gets alias 0, `P9Walker`: empty, optional,
+allow reserved, with that package as its only one. `FOCC_P9Drive.Travel <id> <toPlayer>` logs `p9 go ... driver=package`
+first, then sets the actor's linked ref to the target, forces the actor into the alias and calls `EvaluatePackage`.
+Two seconds later it logs `p9 package ... package=<id>`: `2174939` (`212FDB`) when the alias package took.
+`FOCC_P9Drive.TravelEnd <id>` clears the alias and the link. All five script calls are declared in Starfield's own
+sources (ContentResources.zip on the PC). Whether an alias package outranks the citizen's own packages in game is
+**unverified**: that is what this rung tests.
+
+The ladder is the same as the card's, with Travel in place of Go:
+
+```
+rung a   cgf "FOCC_Probe.P9Dest" 0.0 0.0 ; cgf "FOCC_Probe.P9Track" <id> 60                        (no command)
+rung b   cgf "FOCC_Probe.P9Track" <id> 60 ; cgf "FOCC_P9Drive.Travel" <id> 1                         (to the player)
+rung c+  cgf "FOCC_Probe.P9Dest" <dx> 0.0 ; cgf "FOCC_Probe.P9Track" <id> <T> ; cgf "FOCC_P9Drive.Travel" <id> 0
+end      cgf "FOCC_P9Drive.TravelEnd" <id>
+```
+
+How the judge reads it:
+- A package rung has no return line. A `p9 path returned` line is never paired with its go, even when it carries the
+  same call=.
+- Unless that go's own `p9 package` line (same actor and call=) names `212FDB`, the rung is INCONCLUSIVE whatever
+  the samples show. The reason says which case it is: no such line, `package=none` (the actor ran no package), an
+  unreadable id, or another package (the alias did not take).
+- Only a package rung whose own `p9 package` line names `212FDB` can stand as a package rung's control. A scripted
+  PathToReference control proves nothing about a package, and the reverse holds too.
+- Everything else is as for Go: the walk's clock and distance start at the go, samples must be continuous, and the
+  verdict is the latest rung's.
+
+`tests/test_combined_p9_package.py` covers these rules on synthetic logs.
+
+Run it in a session whose probe quest was started with this plugin installed: a `coc` from the main menu (as the PC's
+P9 session scripts do), or a save made after the install. In a save from before, the quest is already running
+without alias 0. Then `Travel` logs `p9 go refused ... walker=False`, a clean refusal rather than a verdict
+(**unverified** how the engine treats an alias added to a running quest; #663 review).
+
+**In game, 1 Nov 2026 (kit `70159f58`, test folder `focc_P9p_20261101_1334`, #644):** INCONCLUSIVE. Two seconds after
+each `Travel` go, `GetCurrentPackage` named Starfield's default master packages, never `212FDB`:
+`DefaultMaster_FollowPackage` (`301C5`) to the player, `DefaultMaster_PatrolPackage` (`301C3`) to the marker
+(`DefaultMaster_FallbackPackage`, `4FB2B`, before the first go). Yet the actor walked every rung: 18 m in 5 s, 21 m in
+18 s, 100 m in 75 s, and 330 m in 294 s, unloaded in 79 of 130 samples. Supported hypothesis: the linked ref alone
+starts those default packages, and the alias package never ran.
+
+**The linked-ref driver (job focc-P9l).** That reading, tested on its own. `FOCC_P9Drive.Link <id> <toPlayer>` logs
+`p9 go ... driver=link`, then sets the actor's linked ref to the target and calls `EvaluatePackage`, with no alias.
+Two seconds later it logs `p9 package`. `LinkEnd <id>` clears the link. The ladder:
+
+```
+rung a   cgf "FOCC_Probe.P9Dest" 0.0 0.0 ; cgf "FOCC_Probe.P9Track" <id> 60                     (no command)
+rung b   cgf "FOCC_Probe.P9Track" <id> 60 ; cgf "FOCC_P9Drive.Link" <id> 1                         (to the player)
+rung c   cgf "FOCC_Probe.P9Dest" 20.0 0.0 ; cgf "FOCC_Probe.P9Track" <id> 120 ; cgf "FOCC_P9Drive.Link" <id> 0
+rung L   cgf "FOCC_Probe.P9Dest" 440.0 0.0 ; cgf "FOCC_Probe.P9Track" <id> 600 ;
+         cgf "FOCC_P9Drive.Link" <id> 0 ; cgf "FOCC_P9Drive.Shadow" <id> 600 25.0            (about 440 m east)
+end      cgf "FOCC_P9Drive.LinkEnd" <id>
+```
+
+`Shadow` waits 3 s, then sets the player 25 m short of the actor along -X, 5 m up, every 5 s, so the actor stays
+loaded. The first run's hops, typed in the console batch, closed the console, and the batch's closing key reopened it,
+pausing the game (1 Nov, #644): the wait lets the batch close it first. A session should still check that the game's
+scripts run after each batch (the bridge heartbeat moves) and close the console only if they do not. The 330 m
+walk was unloaded in most samples, which the judge's continuity check refuses. Shadow moves only the player.
+
+The judge treats `driver=link` like the package driver:
+- the rung's `p9 package` line must name `DefaultMaster_PatrolPackage` for a go to the marker, or
+  `DefaultMaster_FollowPackage` for a go to the player;
+- the control must be a link rung whose own line names its target's package;
+- go targets are compared without case, since Papyrus logged `target=Player` on the PC.
+
+Rung c is the control the judge can use. Rung b to the player arrives in seconds, and P9Track stops under 10 m, so it
+leaves one sample: too few for continuity (1 Nov run; #663 review). Rung c's 20 m walk to the marker left seven.
+`Shadow` keeps hopping the player until its seconds run out, even after the track ends at arrival; let it finish.
+The long rung starts about 420 m out (the marker 440 m east of the player, the actor about 20 m east after rung c;
+P9 needs 400 m or more). Correction (#663 review): the 1 Nov 435 m link rung did not run out of time. Its actor stood
+1.7 m from the marker across the ground from about 500 s on, 26.8 m under it, because `P9Dest` left the marker at the
+player's height where the land falls, and P9Track measures in 3D. `P9Dest` now calls `MoveToNearestNavmeshLocation`
+after placing the marker and logs `snapped_dz=`. That is **unverified for a far marker**: every long rung's go logged
+`targetcell=None`, so the marker's cell was not loaded when it was placed, and the snap may have no navmesh to find
+(#663 review). Before the track, read `snapped_dz=` on the `p9 dest` line: 0 on a sloped route means the marker still
+floats. A sure fallback is to stand the player at the target (hops of 300 m or less), run `P9Dest 0.0 0.0` there,
+where the cell is loaded and the marker lands on the ground, then hop back. Meanwhile the judge never calls a floating
+marker a FAIL: when the actor came within the arrival distance across the ground and the 3D distance did not, the
+verdict is INCONCLUSIVE and names the height (1 Nov rerun: 420 m, 5 cells, 9.6 m across the ground 442 s in, the marker
+31 m up). The actor that walked rungs b
+and c is the one
+judged.
+
+### P9u: the actor comes to the player from beyond the loaded area (owner's design, 1 Nov 2026)
+
+Run it after the loaded walk (P9 with `Shadow`) passes on the same kit. Each new driver follows the same order: loaded
+first, then unloaded (owner, 1 Nov 2026).
+
+The player stays at the start. `P9Dest 0.0 0.0` puts the marker on the ground at the player's feet, where the cell is
+loaded and the snap works. The player then hops 660 m east, 220 m at a time with `tgm` (up to z 250 and a fall:
+z 140 was checked to 440 m out on 1 Nov, the ground farther out was not), spawns the actor there and reads its id. `P9Track <id> 900` and `FOCC_P9Drive.Link <id> 0` run while the actor is still loaded, so its
+`p9 package` line can name `DefaultMaster_PatrolPackage`; without that line the session skips the wait. Then the
+player hops back and waits, with no `Shadow`. The kit is P9's; only the judge and the session change.
+
+Judge `probes p9u`, which never says FAIL:
+- PASS: a link driver whose package took, a go to the tracked marker (the probe's own FOCC_P9_Dest) 400 m or more
+  out, whole samples (rt, actor, dist and pos on every one: a sample with one missing or unreadable refuses the
+  judgement, since the skipped row may be the jump; a line torn ahead of its kind is a gap, which the rate gate
+  takes as a gap) that run forward in time, the first within 2 m plus 15 m/s of the go's distance
+  for the time since the go, with no step faster than 15 m/s (`p9_jump_m_per_s`, as P9), 100 m or more of progress
+  toward the marker between samples that both read unloaded (`p9u_unloaded_m`) up to the arrival, and a sample
+  under 10 m within 900 s of the go (`p9u_seconds`), or 2 s per metre of the go's distance when that is longer
+  (`p9u_s_per_m`: 1800 s from 900 m). Progress after the arrival, or outside the window, is the actor's later
+  behaviour, not this travel (review of eada2c28: four gaps found by synthetic tracks, each now a test).
+- INCONCLUSIVE otherwise, with the reason. The reason may be jumps (an engine that moves an unloaded actor abstractly,
+  or only when it loads again, which is what positions that froze while unloaded end in), too little travel while
+  unloaded, or no arrival in time. None of these is about the converted navmesh, which P9 judges with the actor
+  loaded.
+
+Why 100 m and 660 m: on 1 Nov the package rung's actor read unloaded from about 270 m from the player, and its
+positions kept moving smoothly while unloaded. The actor also walks while the player hops back (about 53 s a hop on
+1 Nov), and stays loaded until the player is two hops away: about 55-80 m. A 440 m start would leave about 100 m
+unloaded, right at the bar (review of 861714e0); 660 m leaves about 300 m, and 900 s still covers the walk at the
+1 Nov pace of about 1.1 m/s.
+
+Cost: the session also logs the game's CPU and memory by phase (a read-only sampler beside the session). The judge
+reports the tracker's sample gaps (`sample_gap_s`: median, p90, max): the tracker asks for a sample every 2 s, so
+longer gaps are Papyrus running late. The console pauses during the hops back stretch a few gaps; read the median and
+p90. Quote both with the result and compare them with the loaded run. What an off-screen world costs is the
+next question as the tests grow (owner, 1 Nov 2026).
 
 ## P1: SFSE sidecar on save and load (last)
 
@@ -686,6 +834,7 @@ value and is INCONCLUSIVE, never a PASS; on a rerun in the same launch pick a ne
 | P7 | Do conditions read our reputation GLOB? (vendor refusal deferred) | FAIL = reputation effects need scripts |
 | P8 | Settlement build stages by enable parent, and their save cost | FAIL = stage swaps by script-placed refs |
 | P9 | Long-route pathing on the converted navmesh | FAIL = caravans move abstractly and materialize near the player only |
+| P9u | Does a linked actor travel to the player from beyond the loaded area? | never FAIL; INCONCLUSIVE with frozen positions = actors move only once loaded again, so off-screen travel is abstract |
 | P10 | SendStoryEvent + our SM branch for radiant quests | FAIL = quests started from script directly |
 | B0 | Can Papyrus call our SFSE plugin and read its answer on 1.16.244 (the C++ port's bridge)? | PASS on stack A = CommonLibSF natives; PASS on B only = the setting bridge; FAIL of B0-1 = no return leg for B |
 

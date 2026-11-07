@@ -50,6 +50,8 @@ Int garrison_size(const WorldState& ws, const std::string& place);
 // Throws std::out_of_range ("unknown place ...") for a place the world lacks, where Python raises KeyError.
 Plan plan(const WorldState& ws, const std::string& player_place, Int radius_hours = RADIUS_HOURS,
           Int max_actors = MAX_LIVE_ACTORS);
-Diff diff(const Plan* old_plan, const Plan& new_plan);   // nullptr: nothing is shown yet
+// nullptr: nothing is shown yet. Throws std::invalid_argument, where Python raises ValueError, when either plan has
+// duplicate slot ids.
+Diff diff(const Plan* old_plan, const Plan& new_plan);
 
 }  // namespace foccsim::present

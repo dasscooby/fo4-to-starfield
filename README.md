@@ -1,25 +1,23 @@
 # Fallout 4 → Starfield
 
-**Fallout 4, running inside Starfield's engine, built by a toolchain instead of by hand.** The converters read your own
-copies of both games and turn Fallout 4's terrain, buildings, interiors, doors, objects, actors and scripts into
-Creation Engine 2 data that the stock Starfield executable loads as a mod. The playable Commonwealth exterior, a set of
-interiors and the first mission already run in Starfield on the owner's test PC; a Vault 111 start is built and waits
-for its first run. The full game is unfinished, and on top of it a second way to play is taking shape: a living
-Commonwealth where settlements grow and factions fight over the map.
+**A Commonwealth-first Fallout experience and total-conversion framework for Starfield.** The toolchain reads the
+player's own game files and rebuilds terrain, buildings, interiors, doors, objects and supported actors and scripts
+as Creation Engine 2 data. An exterior test world, selected interiors, a reduced mission and a Vault 111 new-game
+start have run on the owner's test PC. The broader goal is a GAMMA-style living world with survival and warfare
+modes, settlements and factions, with other Fallout regions added later. The conversion and the living-world core
+are unfinished; their current evidence and remaining gates are listed below.
 
-**Not offered for download or play for now.** On 19 October 2026 the owner withdrew the play and install guides, for
-legal reasons and so nobody's hopes are raised early; a letter asking Bethesda about the project went out the same
-day, and the repository is private. This page records progress. No game files or conversion pack are distributed:
-everything is generated on the player's own PC from the player's own installs, and the in-game screenshots here depict
-Bethesda-owned visuals, excluded from the project's code license.
+**Public research repository; no playable release or conversion pack is offered.** Generated game content stays on
+the player's PC and requires their own installs. In-game screenshots depict Bethesda-owned visuals and are excluded
+from the project's code license.
 
 Reviewing or forking with an AI assistant? Point it at [docs/ai/for-ai-reviewers.md](docs/ai/for-ai-reviewers.md) first.
 
-[Where it stands](#where-it-stands-28-october-2026) · [Two ways to play](#two-ways-to-play) · [How it works](#how-it-works) ·
+[Where it stands](#where-it-stands-3-november-2026) · [Two ways to play](#two-ways-to-play) · [How it works](#how-it-works) ·
 [Roadmap](docs/ROADMAP.md) · [Journal](docs/JOURNAL.md) · [Status thread #32](https://github.com/fo4sf/fo4-to-starfield/issues/32) ·
-[Progress dashboard](https://claude.ai/artifact/SjY6rgmjtdmN8ryjxAUxAp) · [Contribute](CONTRIBUTING.md)
+[Agent handoff](docs/CODEX-HANDOFF.md) · [Contribute](CONTRIBUTING.md)
 
-## Where it stands (28 October 2026)
+## Where it stands (3 November 2026)
 
 **Phase 0, the Commonwealth test slice, is done by the owner's word (24 October).** Its exit gates were ticked in
 game: the mission's pull request merged after review; the automated door rounds passed (29 of 30 round-trip legs, 0
@@ -35,18 +33,20 @@ offline tests; dates are UTC.
 | **No walls** | an SFSE plugin (`FO4SFBorder`) switches Starfield's landing border off inside our world only; with it on the owner walked west and south of Red Rocket and hit no wall, and the first-load flicker that left the border on is fixed | in game, 24 Oct |
 | **Interiors** | 16 interiors reached in game so far (Vault 111, Vault 81, the Red Rocket cave, Vault 114, the Prydwen, Hotel Rexford, the Boston Public Library, Parsons and more), with working stairs, hinged and sliding doors and posed props; 253 more (the 251 planned base-game interiors and Automatron's 2; 4 odd hook cells are left out) are built in batches and held for install | in game (16), offline (253 more) |
 | **Load doors with animation** | load doors that open before the trip (`FO4SF_AnimatedLoadDoor`); the port carrying them is installed and its automated door rounds are queued | installed 28 Oct, rounds pending |
-| **First mission** | a cut-down "When Freedom Calls" ran to completion: stages 20, 30 (5 of 5 raiders), 40, 200 and complete | in game, 19 Oct |
+| **First mission** | a cut-down "When Freedom Calls" ran to completion: stages 20, 30 (5 of 5 raiders), 40, 200 and complete; this historical test does not establish full quest coverage | in game, 19 Oct |
 | **Codsworth** | a robot stand-in at his Sanctuary spot, rendering with plain shader blocks (the fix that solved the Red Rocket crash); 20 of his voice lines converted from the owner's files; his spawn on an existing save is on the defect list | in game, 22 to 23 Oct |
-| **Map markers** | the four markers (Red Rocket, Sanctuary, Vault 111, Concord) draw on the surface map and fast travel lands on them; the icons that do not load are the owner's named map issue for the next phase | in game, 22 Oct |
-| **New game** | a Vault 111 cryo-pod start that is meant to skip Starfield's intro, built and staged against the installed core; by the record it has not yet run in game | staged 23 Oct, in-game run pending |
-| **Launcher** | a desktop window that finds both games, reports and fixes the load order and starts Starfield through SFSE; it is meant to ship no assets and build the port from the player's own Fallout 4, and it still needs the current Steam build of Fallout 4 added to its version check | started the game, by the owner's word, 22 Oct |
-| **Combined core, offline** | the Commonwealth seeded from the owner's own Fallout 4 and all six DLC: 487 locations read, 243 places kept, 42 settlements, 7 factions; a 90-day, 5-seed balance run passes every scale bound | offline, 28 Oct |
-| **Combined core, in game** | engine probes P2, P3 (keyword half), P4, P6, P7, P8 and P10 passed on the test PC and P5 recorded its timings: keyword data persists across save and load, actors materialize and dissolve without growing the save, leveled lists and conditions read our data, our Story Manager branch starts our quest; P3's cell half and P9 (long-route pathing) run again after a restage; P1 not yet run | in game, 28 Oct |
-| **Tests and CI** | 3,592 synthetic-fixture tests at #560's merge (28 Oct, recorded in the [journal](docs/JOURNAL.md)) and the asset guard run on every pull request | CI |
+| **Map markers** | one reload after marker placement and a dark hold through that reload are merged; the owner reported the 31 Oct test worked, with a remaining issue left for the Pip-Boy whose exact scope was not stated | in game, 31 Oct; [record](docs/terrain/map-markers.md) |
+| **New game** | run 4, newgame_v12, reached the surface at stage 200; MQ101 was not running when checked and the owner reported it worked. Launcher start choices and the pre-war vault remain later work | in game, 31 Oct; [record](docs/newgame/vault111-start.md#13b-in-game-run-4-31-oct-2026-newgame_v12-pass-to-stage-200-our-own-start) |
+| **Launcher** | checkout updating, recorded restore and a separate FO4SF game folder are on main. The follow-up that retains crash evidence when settings restoration fails is still under review in [#668](https://github.com/fo4sf/fo4-to-starfield/pull/668); source-version support remains tied to the checked source/runtime tables | merged machinery; follow-up reviewed offline |
+| **Combined core, offline** | the 28 Oct Commonwealth seed contains 243 places, 42 settlements and 7 factions from 487 locations and all six DLC. The C++ port through C5 is written and has selected Windows byte-parity checks; [#649](https://github.com/fo4sf/fo4-to-starfield/pull/649), [#651–#654](https://github.com/fo4sf/fo4-to-starfield/pull/654) and the Windows build [#656](https://github.com/fo4sf/fo4-to-starfield/pull/656) remain in review | offline; not a game runtime |
+| **Combined core, in game** | P2, P3's keyword half, P4, P6, P7, P8 and P10 passed their scoped probes, and P5 recorded timings. P3's cell half and a complete P1 sidecar verdict remain open | in game, 28 Oct; [probe record](docs/spikes/combined-core-probes.md) |
+| **NPC travel** | Claude reports two loaded walks of 439 m across 7 cells, and an unloaded approach from a 643 m spawn that arrived after 796 s. Longer starts showed a jump or parking; these are route observations, not universal engine distances. Judge corrections remain open in [#663](https://github.com/fo4sf/fo4-to-starfield/pull/663#pullrequestreview-5733485009) and [#669](https://github.com/fo4sf/fo4-to-starfield/pull/669#pullrequestreview-5746648639) | reported in game, 2 Nov; [runs and corrections](https://github.com/fo4sf/fo4-to-starfield/issues/644) |
+| **Own Fallout world** | the first planet probe loaded a planet from project records; persistent-reference placement and biome/location checks still need the next test. Reversible stripping and cross-game staging plans are drafts [#665](https://github.com/fo4sf/fo4-to-starfield/pull/665) and [#667](https://github.com/fo4sf/fo4-to-starfield/pull/667) | partial native probe; further staging pending |
+| **Tests and CI** | fixture tests and the asset guard run in CI. Check each PR's exact head and review; selected offline or hosted passes do not establish a passing full Windows suite or native gameplay | [pull requests](https://github.com/fo4sf/fo4-to-starfield/pulls) |
 
-What is next, in the owner's order: the combined core's simulation ported to C++ inside our SFSE plugin, a 20-place
-slice of it in game, then the map icons, the new game's exit test and the launcher's support for the current Steam
-build of Fallout 4. The full ledger, with evidence for every row, is [docs/ROADMAP.md](docs/ROADMAP.md); the day-by-day
+Current work covers review of the C++ port, the engine gates before a 20-place living-world slice, the separate
+Fallout world and launcher recovery. More start choices, Pip-Boy/map work and verified source-version support remain
+on the roadmap. The full ledger, with evidence for every row, is [docs/ROADMAP.md](docs/ROADMAP.md); the day-by-day
 record is [docs/JOURNAL.md](docs/JOURNAL.md); the owner's own findings are
 [docs/owner/playtest-issues.md](docs/owner/playtest-issues.md). The front page's earlier progress tables are kept in
 [docs/history/readme-progress-2026-10.md](docs/history/readme-progress-2026-10.md).
@@ -70,6 +70,11 @@ faction; ghoul play; and no language model or online service anywhere in gamepla
 [docs/combined-core.md](docs/combined-core.md); the C++ port plan:
 [docs/combined-core-cpp-port.md](docs/combined-core-cpp-port.md); the in-game probes:
 [docs/spikes/combined-core-probes.md](docs/spikes/combined-core-probes.md).
+
+The broader framework is intended to support other authored or converted experiences in Starfield. Small support
+backends may become standalone tools or mods when they can work independently; that is a release goal, not a current
+Nexus download. Other Fallout regions and species-specific creature behaviour still need their own implementation
+and acceptance tests.
 
 ## How it works
 

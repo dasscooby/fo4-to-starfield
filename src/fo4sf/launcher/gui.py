@@ -77,7 +77,8 @@ class SettingsModel:
                 raise ValueError(f"Cannot read saved settings: {e}") from None
             if current != self.saved:
                 raise ValueError("Settings changed outside this window; reload settings before playing")
-            return argv + ["play", "--settings", self.path, "--starfield", starfield]
+            folder = current.get("instance")               # the FO4SF game folder: play starts that one
+            return argv + ["play", "--settings", self.path, "--starfield", folder or starfield]
         raise ValueError(f"Unknown window action {action!r}")
 
     def play_reason(self, raw, starfield, pids, *, windows=None):

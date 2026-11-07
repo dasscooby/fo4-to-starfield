@@ -444,7 +444,11 @@ Function P9PlaceDest(float dx, float dy)
         return
     endif
     P9Dest.MoveTo(Game.GetPlayer(), dx, dy, 0.0, True, False)
-    Trace("p9 dest id=" + P9Dest.GetFormID() + " pos=" + P9Dest.GetPositionX() + " " + P9Dest.GetPositionY() + " " + P9Dest.GetPositionZ())
+    ; On the ground, not at the player's height: P9Track measures the 3D distance, and on 1 Nov the 435 m link rung's
+    ; actor stood 1.7 m from the marker across the ground and 26.8 m under it, where the land falls (#663 review).
+    float before = P9Dest.GetPositionZ()
+    P9Dest.MoveToNearestNavmeshLocation()
+    Trace("p9 dest id=" + P9Dest.GetFormID() + " pos=" + P9Dest.GetPositionX() + " " + P9Dest.GetPositionY() + " " + P9Dest.GetPositionZ() + " snapped_dz=" + (P9Dest.GetPositionZ() - before))
 EndFunction
 
 Function P9Track(int actorId, float seconds)
@@ -465,7 +469,14 @@ Function P9Sample()
     ObjectReference a = p9Actor
     p9Elapsed = Utility.GetCurrentRealTime() - p9StartRT   ; real seconds: a late timer must not stretch the deadline
     float dist = a.GetDistance(P9Dest)
-    Trace("p9 sample t=" + p9Elapsed + " actor=" + a.GetFormID() + " pos=" + a.GetPositionX() + " " + a.GetPositionY() + " " + a.GetPositionZ() + " cell=" + Id(a.GetParentCell()) + " loaded=" + a.Is3DLoaded() + " dist=" + dist)
+    ; package= and player_m=: what the actor ran and how far the player was, every sample (1 Nov 2026: loaded actors
+    ; stood still 95-200 s mid-route with nothing else in the log, #644); dist= stays last (the sessions read it)
+    Actor act = a as Actor
+    Package pk = None
+    if act != None
+        pk = act.GetCurrentPackage()
+    endif
+    Trace("p9 sample t=" + p9Elapsed + " actor=" + a.GetFormID() + " pos=" + a.GetPositionX() + " " + a.GetPositionY() + " " + a.GetPositionZ() + " cell=" + Id(a.GetParentCell()) + " loaded=" + a.Is3DLoaded() + " package=" + Id(pk) + " player_m=" + a.GetDistance(Game.GetPlayer()) + " dist=" + dist)
     if dist < 10.0 || p9Elapsed >= p9Seconds
         Trace("p9 done t=" + p9Elapsed + " dist=" + dist)
         p9Actor = None
