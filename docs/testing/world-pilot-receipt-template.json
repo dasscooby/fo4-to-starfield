@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "kind": "receipt-template-not-evidence",
+  "pilot_id": null,
+  "source": {"game_id": null, "install_path_private": null, "edition_update_language": null, "master_archive_pins": [], "reader_commit": null, "source_world_map_ids": [], "units_transform": null},
+  "candidate": {"source_commit": null, "private_stage_path": null, "output_hashes": {}, "stage_status": "NOT_STAGED", "missing_inputs": []},
+  "campaign": {"era_choices": ["2287", "speculative-later"], "selected_era": null, "later_year": null, "active_region_variants": {}, "save_identity_private": null},
+  "attempt": {"id": null, "started_utc": null, "controller_environment": null, "native_status": "NOT_RUN", "expected_arrivals": [], "observed_arrivals": [], "controls_not_run": [], "evidence_private": []},
+  "checks": [
+    {"id": "source-and-stage-pins", "status": "NOT_RUN", "evidence": []},
+    {"id": "world-frame-and-arrival", "status": "NOT_RUN", "evidence": []},
+    {"id": "reference-identity-and-population", "status": "NOT_RUN", "evidence": []},
+    {"id": "native-navigation-and-door-links", "status": "NOT_RUN", "evidence": []},
+    {"id": "quest-security-era-conditions", "status": "NOT_RUN", "evidence": []},
+    {"id": "save-reload-and-recovery", "status": "NOT_RUN", "evidence": []}
+  ],
+  "recovery": {"fresh_before_snapshot_private": null, "protected_source_bindings_private": null, "port_staging_private": null, "preflight_status": "NOT_RUN", "restoration_status": "NOT_RUN", "remaining_differences": null},
+  "decision": {"independent_review": "PENDING", "owner_acceptance": "NOT_GIVEN", "limitations": ["Template only: no test result, stage readiness, installation or deployment authority is implied."]}
+}

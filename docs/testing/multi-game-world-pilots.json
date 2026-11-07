@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "kind": "non-executable-staging-plan",
+  "issue": 666,
+  "source_baseline": "3cc3977bc30a89758641e8d58980f0dd2f3ab37e",
+  "live_owner": "Claude PC",
+  "commonwealth_first": true,
+  "last_complete_game_integration": "fo76",
+  "tv_implementation": "DEFERRED_OWNER_SEASON_REVIEW",
+  "offline_intake_may_proceed_in_parallel": true,
+  "native_integration_prerequisites": ["own-planet-reference-evidence", "source-intake", "retained-identities", "reviewed-pilot", "authorized-recovery"],
+  "region_identity": ["game_id", "source_plugin", "source_id"],
+  "source_intake_fields": ["install_path", "edition", "update", "language", "masters_sha256", "archives_sha256", "reader_commit", "source_world_ids", "units_and_transform"],
+  "era_policy": {
+    "selected_pair": ["2287", "speculative-later"],
+    "status": "OWNER_CONFIRMED",
+    "speculative_later_year": null,
+    "story_policy_2287": "configurable by mode and region; preserve original source chronology as provenance",
+    "maximum_active_choices": 2,
+    "campaign_year_distinct_from_source_year": true,
+    "source_build_distinct_from_campaign_year": true,
+    "one_active_variant_per_region": true,
+    "selection_at_new_save": true,
+    "future_main_story_campaigns": false,
+    "future_side_missions": "retain after era, NPC and prerequisite review",
+    "future_lore_status": "project speculation, never added as canon",
+    "mid_save_era_or_geometry_swap": false
+  },
+  "pilots": [
+    {"id": "fo3-district-metro", "game_id": "fo3", "inputs": ["Fallout3.esm", "owned archives and selected DLC masters"], "status": "PLANNED_SOURCE_PATH_AND_IDS_PENDING", "source_world_ids": null, "released_control": "two source-verified downtown districts and their metro route", "proposal": "one reviewed surface connection", "acceptance": ["released route graph retained", "no missing geometry", "height and collision", "story encounter and hostility checks", "companion path", "save/reload and recovery"], "sources": ["dc-metro-developer", "fnvfo3-converter"]},
+    {"id": "fnv-open-strip", "game_id": "fnv", "inputs": ["FalloutNV.esm", "owned archives and selected DLC masters"], "status": "PLANNED_SOURCE_PATH_AND_IDS_PENDING", "source_world_ids": null, "released_control": "original internal Strip gates and zones", "proposal": "continuous internal Strip layout", "acceptance": ["NPC identity and density without visible recycling", "zone and promoter triggers from both street edges", "navmesh/door links", "casino security and interiors preserved", "LOD/occlusion", "save/reload and recovery"], "sources": ["nv-developer-interview", "nv-making-of", "open-strip"]},
+    {"id": "fnv-open-freeside", "game_id": "fnv", "inputs": ["FalloutNV.esm", "owned archives and selected DLC masters"], "status": "PLANNED_SOURCE_PATH_AND_IDS_PENDING", "source_world_ids": null, "released_control": "original Freeside sections", "proposal": "continuous Freeside independently of Strip and cut-content changes", "acceptance": ["scenes and package destinations", "alley ambush and door links", "no duplicate population", "compatibility and new-save boundary", "save/reload and recovery"], "sources": ["open-freeside"]},
+    {"id": "fnv-mccarran-access", "game_id": "fnv", "inputs": ["FalloutNV.esm", "owned archives and selected DLC masters"], "status": "HISTORICAL_INTENT_AND_SOURCE_IDS_PENDING", "source_world_ids": null, "released_control": "McCarran approach, restricted gates and monorail", "proposal": "separately review a surface connection; no automatic merger into Strip", "acceptance": ["evidence of original design labelled", "faction/access restrictions", "monorail quest state", "travel route and NPC pathing", "save/reload and recovery"], "sources": ["nv-making-of", "flvjod-author"]},
+    {"id": "fo1-local-greybox", "game_id": "fo1", "inputs": ["owned master.dat", "owned critter.dat", "applicable local patches"], "status": "PLANNED_SOURCE_PATH_AND_IDS_PENDING", "source_world_ids": null, "released_control": "one original local map, entrances, exits and elevations", "proposal": "owner-reviewed 3D outdoor/room/elevation-transition greybox", "acceptance": ["source topology and map script inventory", "explicit scale/layout choice", "new 3D collision/navigation", "overland graph separate from local geometry", "no invented lore labelled canon"], "sources": ["fo1-ce-map"]},
+    {"id": "fo2-local-greybox", "game_id": "fo2", "inputs": ["owned master.dat", "owned critter.dat", "applicable local patches"], "status": "PLANNED_SOURCE_PATH_AND_IDS_PENDING", "source_world_ids": null, "released_control": "one original local map, entrances, exits and elevations", "proposal": "separate owner-reviewed 3D greybox; shared-location era variant", "acceptance": ["source topology and map script inventory", "no overlapping active town versions", "elevation transition", "encounter roles", "save-state identity"], "sources": ["fo2-ce-map"]},
+    {"id": "fo76-terrain-static", "game_id": "fo76", "inputs": ["SeventySix.esm", "owned version-matched archives and terrain"], "status": "PLANNED_SOURCE_PATH_VERSION_AND_IDS_PENDING", "source_world_ids": null, "released_control": "one bounded original terrain rectangle", "proposal": "terrain/water/material/static sample, then exterior-interior and creature pilots", "acceptance": ["update and archive pins", "actual bounds/density census", "water heights and coordinate transform", "no silent intermediate-format losses", "runtime systems enumerated separately", "expanded/expedition regions inventoried separately"], "sources": ["fo76utils-terrain", "bacup-readme", "bacup-registry", "fo76-toolkit", "fo76-expansion"]}
+  ],
+  "not_started": ["no additional-game assets extracted or converted", "no other-game world staged", "no runtime code or installed content changed", "no whole-country walkability requirement reopened"],
+  "source_intake_observation": "The inspected D-drive Steam common library contains Fallout 4 only; other libraries/ownership are not inferred."
+}

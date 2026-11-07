@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "read_date": "2026-11-01",
+  "scope": "engineering/world-staging research; not a full lore read or native validation",
+  "sources": [
+    {"id": "official-timeline", "kind": "publisher-primary", "url": "https://bethesda.net/en-US/news/fallout25-presents-the-fallout-timeline", "scope": "original game years only; later show speculation not inferred"},
+    {"id": "dc-metro-developer", "kind": "direct-developer-interview", "url": "https://gameinformer.com/FalloutOralHistory-PartII", "scope": "Pagliarulo on reducing the sprawling metro; not an exhaustive district connectivity census"},
+    {"id": "dc-open-content-author", "kind": "mod-author-description", "url": "https://www.nexusmods.com/fallout3/mods/26959", "scope": "True Open World DC changes quest access; title alone does not establish geometric continuity"},
+    {"id": "nv-developer-interview", "kind": "direct-developer-interview", "url": "https://feed4gamers.com/game-news/297795/josh-sawyer-reflects-on-design-evolution-from-icewind-dale-to-pentiment.htm", "scope": "Sawyer on18 months, tools, scripting and memory/streaming"},
+    {"id": "nv-making-of", "kind": "direct-developer-interviews", "url": "https://www.pcgamesn.com/fallout-new-vegas/making-of", "scope": "Sawyer/Everts on console constraints, adjusted geography and city partitioning; indexed text read, direct open robots-blocked"},
+    {"id": "open-strip", "kind": "mod-author-description", "url": "https://www.nexusmods.com/newvegas/mods/73127", "scope": "contiguous Strip, trigger fixes, NPC recycling, navigation and occlusion; author claims, not our native validation"},
+    {"id": "open-freeside", "kind": "mod-author-description", "url": "https://www.nexusmods.com/newvegas/mods/73128", "scope": "contiguous Freeside and compatibility/new-save caveats; author claims"},
+    {"id": "flvjod-author", "kind": "mod-author-description", "url": "https://www.nexusmods.com/newvegas/mods/56373", "scope": "fan reconstruction of earlier layout; no verified McCarran continuity mandate"},
+    {"id": "appalachia-recreation-author", "kind": "project-author-account", "url": "https://www.reddit.com/r/FalloutMods/comments/bm4kvi/", "scope": "2019 handmade Fallout4-asset recreation; not a76 asset/terrain import"},
+    {"id": "fo76utils-terrain", "kind": "pinned-author-documentation", "commit": "c52da18cbe0b7529673bb1c373a89ee5efa37260", "url": "https://github.com/fo76utils/fo76utils/blob/c52da18cbe0b7529673bb1c373a89ee5efa37260/doc/btddump.md", "scope": "BTD extraction outputs; not a native CE2 world or tested current-game compatibility"},
+    {"id": "bacup-readme", "kind": "pinned-author-documentation", "commit": "0abb21361ae623e32a655bda5a28ea061efa609c", "url": "https://github.com/Bryant-21/bacup/blob/0abb21361ae623e32a655bda5a28ea061efa609c/README.md", "scope": "conversion claims and declared license; no execution"},
+    {"id": "bacup-registry", "kind": "pinned-source-code", "commit": "0abb21361ae623e32a655bda5a28ea061efa609c", "url": "https://github.com/Bryant-21/bacup/blob/0abb21361ae623e32a655bda5a28ea061efa609c/bacup/py_bacup_lib/python/bacup_lib/source_pairs.py", "scope": "fo76:fo4 registry and world-only Starfield pairs beyond the README's list"},
+    {"id": "fo76-toolkit", "kind": "mod-author-description", "url": "https://www.nexusmods.com/fallout4/mods/108858", "scope": "alpha mesh/material/texture routes; explicitly not full world/quest or native validation"},
+    {"id": "fo76-expansion", "kind": "publisher-primary", "url": "https://bethesda.net/en-US/news/fallout-76-letter-from-the-directors-2025", "scope": "announced expanded region; not an inventory of every current76 location"},
+    {"id": "fnvfo3-converter", "kind": "pinned-author-documentation", "commit": "5740cc90419bf629582f5119f30e9d06faabf110", "url": "https://github.com/terry-haire/fnv-to-fo4/blob/5740cc90419bf629582f5119f30e9d06faabf110/README.md", "scope": "partial plugin/model conversion precedent; not direct Starfield acceptance or complete gameplay port"},
+    {"id": "fo1-ce-map", "kind": "pinned-source-code", "commit": "0609bcfd0ec40ff0571d0f57fab2821eb461dc8b", "url": "https://github.com/alexbatalov/fallout1-ce/blob/0609bcfd0ec40ff0571d0f57fab2821eb461dc8b/src/game/map.h", "scope": "tile/elevation/entry map structures; read-only reference, no engine or implementation adopted"},
+    {"id": "fo2-ce-map", "kind": "pinned-source-code", "commit": "e97087b9582f37075db347a89898887320753f8b", "url": "https://github.com/alexbatalov/fallout2-ce/blob/e97087b9582f37075db347a89898887320753f8b/src/map.h", "scope": "tile/elevation/entry map structures; read-only reference, no engine or implementation adopted"}
+  ],
+  "remaining": ["exhaustive FO3 metro-only district graph", "primary historical design evidence specifically joining McCarran to the Strip", "owned source-path and build inventory for the new games", "native conversion/continuity/collision/navigation validation", "exact later speculative year and TV interpretation after the owner's later season review"]
+}
