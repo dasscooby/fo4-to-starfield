@@ -615,7 +615,7 @@ The owner's play tests of #624 (31 Oct, new game v12, PC logs `mapmarkers_202610
 Open: whether the reload's world stays the same instance in every case (`same=` was true once), and the stop's look
 (nobody saw it lit: the screen is black).
 
-### Dark hold (Claude-cloud, 2026-10-31, option A put to the owner)
+### Dark hold (Claude-cloud, 2026-10-31, option A; owner play test: "everything worked")
 With `HoldDark` (on), the first quest fades to black (staying black) at its first marker that comes in late within
 `HoldWindow` (15 s) of the player entering the world, if a reload can follow (`BorderSignal`, `HopMarker`, one left in
 `HopLimit`, and the player in our world as Border learned it), once per entry; the reload's way back fades in, so the
@@ -626,6 +626,26 @@ GAMMA start and a save loaded outdoors; a player who walks into the Commonwealth
 blink. The hold also ends (fading in) past `HoldMax` (60 s), when the player leaves the map or our world or goes
 indoors, whenever the reload would wait (a fight, dead, seated, in a scene, no movement controls), checked at every
 pass and between moves of a long pass, when the reload is skipped or called off, and at a load. Log lines: `dark hold: markers coming in <s> s after the player entered the
-world`, `dark hold ends with the reload after <s> s`, `dark hold released: <why>`. Offline only: whether the game
-keeps the screen black through the stop's loading screens is open (the loading menu may fade in on its own:
+world`, `dark hold ends with the reload after <s> s`, `dark hold released: <why>`. The offline reading (31 Oct, before
+the play test): whether the game keeps the screen black through the stop's loading screens is open (the loading menu may fade in on its own:
 FO4SF_NewGameQuest.psc FadeIn's note).
+
+Play test (owner, 2026-10-31 22:34Z, #626 installed from main d285a885 on core v6i with newgame_v12): "ok everything
+worked only issue left will be solved with the pipboy". Option A stands; B and C were not built.
+The issue left is for the Pip-Boy map (owner's words above; which issue was not said).
+
+Log reading (Claude, 1 Nov; the game's rotating script logs copied to the PC's test-log folder
+`mapmarkers_20261101_logsnap` before they rotated out). The play test's map log (31 Oct, 16:14 PC time) reads
+`dark hold: markers coming in 0.027000 s after the player entered the world`, then
+`dark hold ends with the reload after 30.750999 s` and `reload 1 back: ... same=true`: the hold ended with the reload,
+as in the retest (**verified, log**). A later session that day (20:56 PC time) held 20.9 s. A `coc
+FO4Core_RedRocketSpawn` session on 1 Nov (11:20 PC time, Codex's P9 probe session, FO4SFMission off) ran to the cap
+instead: the last marker move came at rt 776.8 (23.5 s into the hold), then the log has no map line for 38.8 s of rt
+until `dark hold released: no reload after 62.257996 s` (rt 815.6); the reload went out 3.5 s after that (rt 819.1)
+and was back at rt 824.6 (`same=true`). So the cap works as written when no reload comes; why none came in that gap
+is not known (the 31 Oct pass reported every marker in place 7.4 s after its last move, this one 41 s after). One
+observation, not a cause: across that gap rt ran 38.8 s while the PC clock ran 3 min 3 s (11:21:20 to 11:24:23). Most
+intervals in these logs agree within about a second, but rt also falls behind the PC clock by 8 to 113 s in other
+places (for example 31 Oct, 16:11 to 16:14, just before that play test's hold), so this is the largest such gap, not
+a new kind. No one has said whether the screen stayed black
+through the stop's loading screens; the owner's "everything worked" is all there is, and the logs cannot show it.

@@ -2720,3 +2720,40 @@ the owner with B, the elevator only, and C, messages only): from an
 arrival, the first quest keeps the screen black until the reload is back
 (about 31 s in the retest), with every way out fading back in (60 s at most,
 a fight, going indoors, leaving the map). Offline; waits on a play test.
+
+## 2026-10-31: Map markers: the owner's play test of the dark hold: "everything worked"
+
+The owner played #626 (the screen stays black from an arrival until the
+reload is back) and reported: "ok everything worked only issue left will be
+solved with the pipboy". The owner named neither the icons nor which issue
+is left; the hold was built so the Commonwealth's icons are on the first map
+the player opens, with no trip to Cydonia. Option A stands; B and C were not
+built. The run's log was not read. The issue left is for the Pip-Boy, in the
+owner's words.
+
+## 2026-11-01: Map markers: the dark hold's logs read; one Claude session
+
+The game's own script logs still held the play test's map log, so they were
+copied to the PC's test-log folder before they rotated out. The play test's
+hold ended with the reload after 30.8 s, as in the retest. In a probe
+session on 1 Nov (coc to Red Rocket) the last marker move came 23.5 s into
+the hold, then the map log went quiet for 38.8 s until the 60 s cap released
+the hold; the reload went out 3.5 s later. The cap works as written; why no
+reload came in that gap is not known. The roadmap gains a short "since 24
+October" update. By the owner's 1 Nov handoff (written by Claude, given by the
+owner), one Claude session on the PC
+holds every Claude role and the cloud session pauses (decisions.md, 1 Nov).
+
+## 2026-10-29: Mission: finding Preston starts the fight (new game run 3)
+
+The owner's third new game reached Concord, where "the Freedom Calls
+activation didn't work" (snapshot 18:13 PC time). Install's read of
+fo4sf_mission.0.log: every actor moved (`failed=false`), the stage stayed 10
+with 0 of 5 raiders dead, `preston activated at stage 10` five times, and the
+nearest raider 91 to 129 m away. The script acted on activation only at
+stage 30, and only a raider within 60 m of the player started the fight, so
+walking straight to Preston's marker started nothing. Now activating Preston
+or coming within 20 m of him before the fight starts it (`found preston`),
+and once the fight is on every loaded living raider is put into combat. Only
+FO4SF_Min00Quest.pex changes. Offline only (playtest row 44,
+docs/mission/when-freedom-calls.md); the in-game check is the next mission run.
