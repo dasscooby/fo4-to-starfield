@@ -4,9 +4,9 @@ same ticks and the same player actions give byte-identical canonical JSON after 
 record plan and game view, then every tick's writes), presentation plans (C3: for a player walking the world) and
 results of the player's actions (C4: settlement management and radiant jobs, refusals included; C5: the news and
 its terminal page, with a fuzz test of the textwrap port). The repo's first compiled test: the portable core is
-built with the C++ compiler on PATH (g++ or clang++; CI's ubuntu has g++) into a temporary folder, and the test is
-skipped where there is none. FOCCSIM_EXE=<path> runs the same tests against a core built elsewhere instead (the PC's
-MSVC build).
+built with CXX or a C++ compiler on PATH (c++, g++ or clang++) into a temporary folder. Without a compiler,
+the test fails in CI and skips locally. FOCCSIM_EXE=<path> runs the same tests against a core built elsewhere instead
+(the PC's MSVC build).
 
 By default: the two-region fixture for seeds 0 to 9 over 90 days, its variants (raid pressure low and high, story mode
 with an active story, scripted player actions) for seed 0, and the Commonwealth-scale draft for 30 days, each compared
@@ -44,9 +44,9 @@ ACTIONS = [{"hour": 24, "do": "help", "faction": "settlers", "amount": 15},
 
 
 def compiler():
-    for name in (os.environ.get("CXX"), "g++", "clang++"):
-        if name and shutil.which(name):
-            return shutil.which(name)
+    for name in (os.environ.get("CXX"), "c++", "g++", "clang++"):
+        if name and (path := shutil.which(name)):
+            return path
     return None
 
 
@@ -210,24 +210,26 @@ def script_for(ws, days):
     return sorted(out, key=lambda a: a["hour"])                                # stable: same-hour order kept
 
 
-PREBUILT = os.environ.get("FOCCSIM_EXE")                        # a core built elsewhere, e.g. by MSVC on the PC
-
-
-@unittest.skipUnless(PREBUILT or compiler(),
-                     "no C++ compiler on PATH (g++ or clang++), and FOCCSIM_EXE names no prebuilt core")
 class CppParityTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        prebuilt = os.environ.get("FOCCSIM_EXE")                  # a core built elsewhere, e.g. by MSVC on the PC
+        cxx = None if prebuilt else compiler()
+        if not prebuilt and not cxx:
+            if os.environ.get("CI"):
+                raise RuntimeError("C++ parity tests need a C++17 compiler or FOCCSIM_EXE in CI")
+            raise unittest.SkipTest("no C++ compiler on PATH (CXX, c++, g++ or clang++), "
+                                    "and FOCCSIM_EXE names no prebuilt core")
         cls.tmp = tempfile.mkdtemp(prefix="foccsim-")
-        if PREBUILT:
-            if not os.path.isfile(PREBUILT):
+        if prebuilt:
+            if not os.path.isfile(prebuilt):
                 shutil.rmtree(cls.tmp, ignore_errors=True)
-                raise AssertionError(f"FOCCSIM_EXE={PREBUILT} is not a file")
-            cls.exe = os.path.abspath(PREBUILT)
+                raise AssertionError(f"FOCCSIM_EXE={prebuilt} is not a file")
+            cls.exe = os.path.abspath(prebuilt)
             return
         cls.exe = os.path.join(cls.tmp, "foccsim.exe" if os.name == "nt" else "foccsim")
         # -ffp-contract=off: no fused multiply-add may change a rounding (section 3, "Floats")
-        r = subprocess.run([compiler(), "-std=c++17", "-O2", "-ffp-contract=off", "-Wall", "-Wextra", "-Werror",
+        r = subprocess.run([cxx, "-std=c++17", "-O2", "-ffp-contract=off", "-Wall", "-Wextra", "-Werror",
                             "-o", cls.exe, *SOURCES], capture_output=True, text=True)
         if r.returncode:
             shutil.rmtree(cls.tmp, ignore_errors=True)
