@@ -2,8 +2,10 @@
 
 Author: Claude, 2026-10-13. Branch `claude/walk-redrocket-sanctuary`, stacked on `claude/integration-1013` (PRs #59,
 #68, #73, #75, #76, #77, #78, #79, #66 and Codex's #80, #81, #83, #86, #89, #100 merged there, plus main 3b0bfb7).
-Status: **route planned and checked offline, runner kind built and tested in the sandbox, staged in
-`C:\Modding\staging\walk_core64c`, queue planned in `C:\Modding\testqueue\walk_core64c`. Not run in game.**
+Status (checked 2026-11-06, Mountain): **walk gate PASS recorded on core64c and core64d**
+(254 m Red Rocket <-> Sanctuary, |dz| <= 0.14 m); see
+[commonwealth-build-plan.md, section 0](commonwealth-build-plan.md#0-what-already-exists-so-the-scale-up-is-not-more-cells)
+(2026-10-15). Route and runner checks below retain their original offline evidence.
 Labels: **verified** = checked here (file, command or test named); **supported** = supported hypothesis;
 **unresolved**; **refuted**. Offline checks and sandbox runs are not in-game acceptance.
 

@@ -1,9 +1,11 @@
 # Scripted load doors: exterior FO4 load doors into the converted interiors
 
-Author: Claude, 2026-10-16 (return trip writer side: 2026-10-17). Status: the forward trip of the Super Duper Mart
-door ran in game on 2026-10-16 (see "Return trip"); everything about the return trip below is **offline only**: nothing
-deployed, nothing run in game. Labels as in the other
-terrain docs: **verified** = read from files, **supported** = hypothesis with evidence, **unresolved** = open.
+Author: Claude, 2026-10-16 (return trip writer side: 2026-10-17). Status (checked 2026-11-06, Mountain): **partial
+in-game results**. [Return trip](#return-trip-writer-side-2026-10-17) records the 2026-10-16 forward PASS ARRIVED and
+return EXPECTED-REFUSED on core64k + integ_1018_doors, plus probe (e)'s persistent-anchor move and setpos hops. Later
+Vault 95 exit results are recorded under "Retry on a missed trip" and "One long jump instead of two" below; this
+status does not establish a successful return on every build. Labels as in the other terrain docs: **verified** =
+read from files, **supported** = hypothesis with evidence, **unresolved** = open.
 Records read raw with `src/fo4sf/fo4land.py` and `scripts/terrain/vmad_patch.py`; the design pass (2026-10-16,
 workflow wf_f78e6bf6) read the VMAD layout off `Starfield.esm` 1.16.244 and off a plugin Mutagen 0.55.0-alpha.67
 wrote; this build reproduces its bytes exactly.

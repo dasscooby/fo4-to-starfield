@@ -3,7 +3,9 @@
 Author: Claude, 2026-10-11. Branch `claude/terrain-navmesh`, stacked on PR #66 (`claude/terrain-exterior-statics`, which
 contains #64, #60, #57, #56) and PR #68 (`claude/runner-npc-nav`, which contains #59). Research base: PR #61
 (`docs/actors/npc-navigation.md` there). Starfield 1.16.244, Mutagen 0.55.0-alpha.67.
-Status: **converted, written, checked offline, staged; not deployed, not queued.**
+Status (checked 2026-11-06, Mountain): **converted, written and checked offline; N1a / N1c subsequently ran in game**;
+see [npc-navigation.md, section 5.3](npc-navigation.md#53-how-far-actors-moved-without-a-command-verified-obsjson-of-npc_nav_n0-npc_nav_n1a-npc_nav_n1c)
+(section 5 dated 2026-10-12). No command was shown to walk an actor; these runs do not establish commanded navigation.
 Labels: **verified** = checked here on files, number given; **supported** = supported hypothesis; **unresolved**;
 **refuted**. Offline checks are not in-game acceptance.
 
