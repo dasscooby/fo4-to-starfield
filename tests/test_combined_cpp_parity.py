@@ -1,14 +1,17 @@
 """The combined core's C++ port (sfse/FOCCSim) against the Python reference (src/fo4sf/combined): the same state, the
 same ticks and the same player actions give byte-identical canonical JSON after every tick
-(docs/combined-core-cpp-port.md section 2, the parity contract). The repo's first compiled test: the portable core is
+(docs/combined-core-cpp-port.md section 2, the parity contract), and the same engine adapter output (step C2: the
+record plan and game view, then every tick's writes). The repo's first compiled test: the portable core is
 built with the C++ compiler on PATH (g++ or clang++; CI's ubuntu has g++) into a temporary folder, and the test is
-skipped where there is none (the PC builds with cl.exe through the plugin's own script later).
+skipped where there is none. FOCCSIM_EXE=<path> runs the same tests against a core built elsewhere instead (the PC's
+MSVC build).
 
 By default: the two-region fixture for seeds 0 to 9 over 90 days, its variants (raid pressure low and high, story mode
 with an active story, scripted player actions) for seed 0, and the Commonwealth-scale draft for 30 days, each compared
 once per game day and at the end. With FO4SF_PARITY_FULL=1: after every tick, every variant for seeds 0 to 9, and the
 Commonwealth-scale draft for 90 days, as the plan asks."""
 import copy
+import glob
 import hashlib
 import json
 import os
@@ -21,10 +24,10 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 sys.path.insert(0, os.path.join(ROOT, "tests"))
-from fo4sf.combined import fixtures, model, seedpack, sim  # noqa: E402
+from fo4sf.combined import adapter, fixtures, model, seedpack, sim  # noqa: E402
 from fo4sf.combined.model import WorldState  # noqa: E402
 
-SOURCES = [os.path.join(ROOT, "sfse", "FOCCSim", n) for n in ("foccsim.cpp", "main.cpp")] + \
+SOURCES = sorted(glob.glob(os.path.join(ROOT, "sfse", "FOCCSim", "*.cpp"))) + \
           [os.path.join(ROOT, "sfse", "FOCCSidecar", "sha256.cpp")]
 FULL = os.environ.get("FO4SF_PARITY_FULL") == "1"
 DAY = 4                                                          # ticks per game day (sim.TICK_HOURS = 6)
@@ -51,6 +54,21 @@ def fixture_world(seed, **settings):
     return ws
 
 
+def canonical(value):
+    return json.dumps(value, sort_keys=True)                      # WorldState.to_json's form
+
+
+def diff_at(a, b):
+    """The first index where the two texts differ (the shorter one's length when one is a prefix of the other)."""
+    return next((k for k in range(min(len(a), len(b))) if a[k] != b[k]), min(len(a), len(b)))
+
+
+def adapter_start(ws, plan):
+    """The first line of foccsim --adapter: the writes from nothing, the record plan and the game view."""
+    view = adapter.game_view(ws, plan)
+    return canonical({"changes": adapter.changes(None, view), "plan": plan.to_dict(), "view": view}), view
+
+
 def apply(ws, a):
     """tests' copy of foccsim::apply_action: the same three player hooks, before the tick of that hour."""
     if a["do"] == "help":
@@ -61,11 +79,21 @@ def apply(ws, a):
         sim.player_traded(ws, a["settlement"], a["goods"])
 
 
-@unittest.skipUnless(compiler(), "no C++ compiler on PATH (g++ or clang++); the PC builds the core with cl.exe")
+PREBUILT = os.environ.get("FOCCSIM_EXE")                        # a core built elsewhere, e.g. by MSVC on the PC
+
+
+@unittest.skipUnless(PREBUILT or compiler(),
+                     "no C++ compiler on PATH (g++ or clang++), and FOCCSIM_EXE names no prebuilt core")
 class CppParityTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.mkdtemp(prefix="foccsim-")
+        if PREBUILT:
+            if not os.path.isfile(PREBUILT):
+                shutil.rmtree(cls.tmp, ignore_errors=True)
+                raise AssertionError(f"FOCCSIM_EXE={PREBUILT} is not a file")
+            cls.exe = os.path.abspath(PREBUILT)
+            return
         cls.exe = os.path.join(cls.tmp, "foccsim.exe" if os.name == "nt" else "foccsim")
         # -ffp-contract=off: no fused multiply-add may change a rounding (section 3, "Floats")
         r = subprocess.run([compiler(), "-std=c++17", "-O2", "-ffp-contract=off", "-Wall", "-Wextra", "-Werror",
@@ -79,19 +107,41 @@ class CppParityTests(unittest.TestCase):
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
     def native(self, ws, ticks, actions=(), *extra):
+        """Run the core on `ws`; the engine adapter's lines go to adapter.jsonl beside the state."""
         d = tempfile.mkdtemp(dir=self.tmp)
         state, acts = os.path.join(d, "state.json"), os.path.join(d, "actions.json")
         with open(state, "w", encoding="utf-8") as f:
             f.write(ws.to_json())
         with open(acts, "w", encoding="utf-8") as f:
             json.dump(list(actions), f)
-        r = subprocess.run([self.exe, state, str(ticks), "--actions", acts, *extra], capture_output=True, text=True)
+        r = subprocess.run([self.exe, state, str(ticks), "--actions", acts, "--adapter", os.path.join(d, "adapter.jsonl"),
+                            *extra], capture_output=True, text=True)
         return r, d, state
+
+    def adapter_lines(self, d):
+        with open(os.path.join(d, "adapter.jsonl"), encoding="utf-8") as f:
+            text = f.read()
+        self.assertTrue(text.endswith("\n"))
+        return text[:-1].split("\n")
+
+    def same_adapter_lines(self, name, want, got):
+        for k, (w, g) in enumerate(zip(want, got)):
+            if w != g:
+                at = diff_at(w, g)
+                self.fail(f"{name}: the engine adapter's {'start' if k == 0 else f'tick {k}'} differs at byte {at}:\n"
+                          f"  Python: ...{w[max(0, at - 160):at + 160]}...\n"
+                          f"  C++:    ...{g[max(0, at - 160):at + 160]}...")
+        self.assertEqual(len(got), len(want), name)
 
     def parity(self, name, ws, ticks, actions=(), every=1 if FULL else DAY):
         """Run both and compare the sha256 of the canonical JSON after every `every`-th tick (and the last); at the
-        first that differs, show both texts around the first differing byte."""
+        first that differs, show both texts around the first differing byte. The engine adapter (step C2) is
+        compared after every tick: its record plan and game view at the start, then each tick's writes, which add up
+        to the game view after every tick."""
         start = ws.to_json()
+        plan = adapter.record_plan(ws)
+        first, view = adapter_start(ws, plan)
+        want = [first]
         r, d, state = self.native(ws, ticks, actions)
         self.assertEqual(r.returncode, 0, f"{name}: {r.stderr}")
         lines = r.stdout.splitlines()
@@ -101,6 +151,9 @@ class CppParityTests(unittest.TestCase):
                 if a["hour"] == ws.hour:
                     apply(ws, a)
             sim.tick(ws)
+            new = adapter.game_view(ws, plan)
+            want.append(canonical([t, adapter.changes(view, new)]))
+            view = new
             if t % every and t != ticks:
                 continue
             text = ws.to_json()
@@ -112,12 +165,12 @@ class CppParityTests(unittest.TestCase):
                 subprocess.run([self.exe, state, str(t), "--actions", os.path.join(d, "actions.json"), "--out", out])
                 with open(out, encoding="utf-8") as f:
                     theirs = f.read()
-                at = next((k for k in range(min(len(text), len(theirs))) if text[k] != theirs[k]),
-                          min(len(text), len(theirs)))
+                at = diff_at(text, theirs)
                 self.fail(f"{name}: tick {t} (hour {ws.hour}) differs at byte {at}:\n"
                           f"  Python: ...{text[max(0, at - 160):at + 160]}...\n"
                           f"  C++:    ...{theirs[max(0, at - 160):at + 160]}...")
             self.assertEqual((int(n), int(hour)), (t, ws.hour), name)
+        self.same_adapter_lines(name, want, self.adapter_lines(d))
 
     def test_the_fixture_world_for_ten_seeds_over_90_days(self):
         for seed in range(10):
@@ -174,6 +227,49 @@ class CppParityTests(unittest.TestCase):
                 r = subprocess.run([self.exe, p, "1"], capture_output=True, text=True)
                 self.assertEqual(r.returncode, 2, r.stdout)
                 self.assertIn(why, r.stderr)
+
+    def test_the_engine_adapter_with_other_characters_settings_and_tiers(self):
+        """Editor ids from ids with other characters and one exactly at the length limit, every setting's value, the
+        reputation thresholds, then 30 days of ticks; and the record plan under a second prefix."""
+        ws = fixture_world(2, survival="light", raid_pressure="low", story_mode=True)   # story mode, no story active
+        at_limit = "a" * (adapter.EDITOR_ID_MAX - len("FOCC_Place_"))
+        model.load_pack(ws, {"places": [{"id": "farm-c", "region": "R1", "kind": "landmark"},
+                                        {"id": "ruin.2 x", "region": "R1", "kind": "base", "holder": "raiders"},
+                                        {"id": at_limit, "region": "R1", "kind": "landmark"}],
+                             "routes": [{"a": "farm-c", "b": "market", "hours": 6},
+                                        {"a": "ruin.2 x", "b": "ruins", "hours": 6}]})
+        for fid, (fame, infamy) in {"settlers": (10, 9), "raiders": (49, 50), "order": (-5, 10 ** 12),
+                                    "traders": (25, 24)}.items():
+            ws.reputation[fid].fame, ws.reputation[fid].infamy = fame, infamy
+        r, d, _state = self.native(ws, 0, (), "--prefix", "X_")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.same_adapter_lines("prefix X_", [adapter_start(ws, adapter.record_plan(ws, "X_"))[0]],
+                                self.adapter_lines(d))
+        self.parity("other characters", ws, 30 * DAY)
+        for settings in ({"survival": "full", "story_mode": True, "active_stories": ["main_story_1"]},
+                         {"story_mode": False, "active_stories": ["main_story_1"]}):   # a story outside story mode
+            with self.subTest(settings=settings):
+                ws = fixture_world(0, **settings)
+                r, d, _state = self.native(ws, 0)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.same_adapter_lines(str(settings), [adapter_start(ws, adapter.record_plan(ws))[0]],
+                                        self.adapter_lines(d))
+
+    def test_the_engine_adapter_refuses_what_python_refuses(self):
+        clash = fixture_world(1)
+        clash.places["farm-a"] = model.Place(id="farm-a", region="R1", kind="landmark")      # farm_a after sanitising
+        too_long = fixture_world(1)
+        pid = "b" * (adapter.EDITOR_ID_MAX - len("FOCC_Place_") + 1)
+        too_long.places[pid] = model.Place(id=pid, region="R1", kind="landmark")
+        cases = [("collides", clash, adapter.PREFIX), ("longer than 64", too_long, adapter.PREFIX),
+                 ("invalid editor id", fixture_world(1), "1X_")]
+        for why, ws, prefix in cases:
+            with self.subTest(why=why):
+                with self.assertRaisesRegex(ValueError, why) as cm:
+                    adapter.record_plan(ws, prefix)
+                r, _d, _state = self.native(ws, 1, (), "--prefix", prefix)
+                self.assertEqual(r.returncode, 2, r.stdout)
+                self.assertIn(str(cm.exception), r.stderr)                            # Python's message, word for word
 
 
 if __name__ == "__main__":

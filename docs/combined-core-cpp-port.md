@@ -1,12 +1,14 @@
 # Combined core: porting the simulation to C++ (plan, 28 October 2026)
 
-This is a plan. Nothing in it has run in game. **Status, 1 November 2026 (Claude-cloud-2): steps 1 and 2 are done
-offline.**
+This is a plan. Nothing in it has run in game. **Status, 1 November 2026 (Claude-cloud-2): steps 1 and 2 and C2
+are done offline.**
 - Step 1: the Python guards for the seed range and ASCII ids; the event log measured over one game year (section 5).
 - Step 2 (C1): `sfse/FOCCSim/` is the portable core. `tests/test_combined_cpp_parity.py` shows it byte-identical to
   Python after every tick for every world below.
+- C2: `sfse/FOCCSim/adapter.cpp` gives the same record plan, game view and writes as `adapter.py`, after every tick
+  of the same worlds.
 
-C2 to C5 and everything on the PC are still to do. It carries out the 28 October decision in `docs/ai/decisions.md`:
+C3 to C5 and everything on the PC are still to do. It carries out the 28 October decision in `docs/ai/decisions.md`:
 the in-game sim is a C++ port inside our SFSE plugin, and the Python model in `src/fo4sf/combined/` stays the
 reference. The owner's order (28 October): the GAMMA core comes first, with probes P1 to P10, then the seed rerun
 with all DLC, then a 20-place slice in game. The rerun is done ("Real pack, all DLC" in `docs/combined-core.md`).
@@ -236,6 +238,11 @@ Each step is one PR, with green CI and an independent review.
    - The generator was also checked on its own against Python for seeds 0, 1, 2^32 - 1, 2^32 and 2^64 - 1.
    - Not built with cl.exe yet.
 3. **Offline, C2 to C4:** each step with its parity tests.
+   - C2, **done**: `adapter.h` and `adapter.cpp`. The harness compares the record plan and game view at the start,
+     then each tick's writes, after every tick of every world in step 2, so it also proves the game view after
+     every tick. Other checks: ids with other characters and one at the 64-character limit, a second prefix, every
+     setting's value, the reputation thresholds, and Python's messages for a colliding, a too-long and an invalid
+     editor id.
 4. **PC:** probes P2 to P10, then P1 (restaged from main and queued on 28 Oct).
 5. **PC:** bridge spike B0 on stack A (the owner's call, 28 October): B0-1 with the kit alone, then the Address
    Library (on the PC since 24 October), the CommonLibSF build, `sfse/FOCCPing` (the plugin, in the repo) and B0-2
