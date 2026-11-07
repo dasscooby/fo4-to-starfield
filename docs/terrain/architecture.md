@@ -1,11 +1,13 @@
 # Starfield terrain architecture for the Commonwealth (S5 / WP-12)
 
-Author: Claude, 2026-10-11. Branch `claude/terrain-architecture`. Status: **offline research done, in-game test pending**.
+Author: Claude, 2026-10-11. Branch `claude/terrain-architecture`. Status (checked 2026-11-06, Mountain): **offline
+research done; later terrain gate 0 passed in game**; see [commonwealth-scale.md, section 6a](commonwealth-scale.md#6a-core64-one-overlay-of-the-playable-core-staged-not-run)
+(2026-10-11): exp2b / terrain_exp2b3 heights within 0.08 m and FO4 objects aligned within 0.02 m.
 
 Labels used below: **verified** = measured here, command and number given; **supported** = supported hypothesis
 (evidence points one way, not proven in game); **unresolved** = not known yet. Community claims from the web are
-marked **unverified** unless we measured the same thing. Nothing about terrain has been tested in game yet; a terrain
-research handoff the owner mentioned could not be found, so this document assumes nothing works until shown.
+marked **unverified** unless we measured the same thing. The later in-game result is scoped to the gate 0 build and
+measurements linked in the status above; the research and unresolved questions below retain their original scope.
 
 Goal (owner): a faithful conversion with the Commonwealth as the main authored location, exact geography (no
 procedural replacement, no Earth overhaul as the final design). An engine-required planet registration is fine if it
