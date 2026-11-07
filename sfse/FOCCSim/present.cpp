@@ -27,11 +27,6 @@ Int class_rank(const OptStr& cls) {                    // CLASS_RANK.get(cls, ma
     return it == ranks.end() ? 6 : it->second;
 }
 
-Int floordiv(Int a, Int b) {                            // Python's //
-    Int q = a / b;
-    return (a % b != 0 && ((a < 0) != (b < 0))) ? q - 1 : q;
-}
-
 Value opt(const OptStr& s) { return s ? Value::string(*s) : Value::null(); }
 
 Value slots_value(const std::vector<Slot>& slots) {

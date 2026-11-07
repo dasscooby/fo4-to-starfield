@@ -10,6 +10,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "json.h"
@@ -93,8 +94,17 @@ std::string player_defended(WorldState& ws, const std::string& place, Int bonus 
 Counts player_traded(WorldState& ws, const std::string& settlement, const Counts& goods);
 std::map<std::string, Int> distances(const WorldState& ws, const std::string& start);   // sim._distances: route hours
 
-// The harness's scripted player action ({"hour", "do": "help" | "defend" | "trade", ...}), applied when ws.hour equals
-// its hour, before that tick (tests/test_combined_cpp_parity.py applies them the same way in Python).
-void apply_action(WorldState& ws, const Value& action);
+// The simulation's own helpers that the other modules (manage, jobs) call, each named after its Python original.
+void event(WorldState& ws, const std::string& kind, const std::string& place, Object info = {});   // sim._event
+std::string new_id(WorldState& ws, const char* prefix);                                    // sim._new_id
+std::vector<std::pair<std::string, Int>> neighbours(const WorldState& ws, const std::string& place);   // sorted
+std::vector<std::string> garrisons(const WorldState& ws, const std::string& place);         // sim._garrisons
+Int defence(const WorldState& ws, const std::string& place);                                // sim._defence
+bool hostile(const WorldState& ws, const std::string& a, const OptStr& b);                  // sim._hostile
+std::set<std::string> lost_places(const WorldState& ws, const std::string& fid);            // sim._lost_places
+bool is_holder_change(const std::string& kind);                                             // in HOLDER_CHANGE_KINDS
+void rep_add(WorldState& ws, const std::string& faction, Int fame, Int infamy);             // reputation.add
+Int floordiv(Int a, Int b);                                                                 // Python's //
+Value counts_value(const Counts& c);                                                        // a dict[str, int]
 
 }  // namespace foccsim

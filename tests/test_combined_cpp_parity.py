@@ -1,7 +1,8 @@
 """The combined core's C++ port (sfse/FOCCSim) against the Python reference (src/fo4sf/combined): the same state, the
 same ticks and the same player actions give byte-identical canonical JSON after every tick
 (docs/combined-core-cpp-port.md section 2, the parity contract), and the same engine adapter output (step C2: the
-record plan and game view, then every tick's writes). The repo's first compiled test: the portable core is
+record plan and game view, then every tick's writes), presentation plans (C3: for a player walking the world) and
+results of the player's actions (C4: settlement management and radiant jobs, refusals included). The repo's first compiled test: the portable core is
 built with the C++ compiler on PATH (g++ or clang++; CI's ubuntu has g++) into a temporary folder, and the test is
 skipped where there is none. FOCCSIM_EXE=<path> runs the same tests against a core built elsewhere instead (the PC's
 MSVC build).
@@ -25,7 +26,7 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 sys.path.insert(0, os.path.join(ROOT, "tests"))
-from fo4sf.combined import adapter, fixtures, model, present, seedpack, sim  # noqa: E402
+from fo4sf.combined import adapter, fixtures, jobs, manage, model, present, seedpack, sim  # noqa: E402
 from fo4sf.combined.model import WorldState  # noqa: E402
 
 SOURCES = sorted(glob.glob(os.path.join(ROOT, "sfse", "FOCCSim", "*.cpp"))) + \
@@ -104,14 +105,91 @@ def present_lines(ws, walk, t, shown, out):
     return shown
 
 
-def apply(ws, a):
-    """tests' copy of foccsim::apply_action: the same three player hooks, before the tick of that hour."""
-    if a["do"] == "help":
-        sim.player_helped(ws, a["faction"], a.get("amount", 10))
-    elif a["do"] == "defend":
-        sim.player_defended(ws, a["place"], a.get("bonus", 10), a.get("hours", 72))
-    else:
-        sim.player_traded(ws, a["settlement"], a["goods"])
+def run(ws, a, last):
+    """One scripted action, as foccsim's run_action does it: the player hooks (help, defend, trade), manage's
+    settlement actions (assign, beds, priority, send, status, threats) and the radiant jobs (offers; complete or fail
+    one of the last offers by position, nothing past the end, or an offer given in full). Returns the line foccsim --results writes: the result,
+    or the ValueError's message."""
+    do = a["do"]
+    try:
+        if do == "help":
+            r = sim.player_helped(ws, a["faction"], a.get("amount", 10))
+        elif do == "defend":
+            r = sim.player_defended(ws, a["place"], a.get("bonus", 10), a.get("hours", 72))
+        elif do == "trade":
+            r = sim.player_traded(ws, a["settlement"], a["goods"])
+        elif do == "assign":
+            r = manage.assign_role(ws, a["settlement"], a["from"], a["to"], a.get("n", 1))
+        elif do == "beds":
+            r = manage.add_beds(ws, a["settlement"], a.get("n", 1))
+        elif do == "priority":
+            r = manage.set_priority(ws, a["settlement"], a.get("good"))
+        elif do == "send":
+            r = manage.send_supplies(ws, a["from"], a["to"], a["goods"])
+        elif do == "status":
+            r = manage.status(ws, a["settlement"])
+        elif do == "threats":
+            r = manage.threats(ws, a["settlement"], a.get("hours", manage.THREAT_HOURS))
+        elif do == "offers":
+            last[:] = jobs.offers(ws, a["place"], a.get("limit", jobs.OFFER_LIMIT), a.get("names"))
+            r = [o.to_dict() for o in last]
+        elif do in ("complete", "fail"):
+            pick = a.get("pick", 0)
+            offer = jobs.Offer(**a["offer"]) if "offer" in a else last[pick] if 0 <= pick < len(last) else None
+            r = None if offer is None else (jobs.complete if do == "complete" else jobs.fail)(ws, offer)
+        else:
+            raise AssertionError(f"unknown action {do}")
+    except ValueError as e:
+        return canonical([ws.hour, do, {"error": str(e)}])
+    return canonical([ws.hour, do, {"ok": r}])
+
+
+def script_for(ws, days):
+    """Player actions for step C4 on any world, from its sorted settlements and held places: a status, a look at
+    the offers somewhere each day, the first offer done and the second given up a tick later, a stale hand-in now and
+    then, and every 6th day one done at once; settlers moved, beds built, a focus set and cleared, supplies sent (often
+    refused: another holder, no route, too little stock); and on day 2 every refusal manage has. Sorted by hour, so
+    actions at one hour run in the order written here."""
+    setts = sorted(ws.settlements)
+    held = sorted(p for p, pl in ws.places.items() if pl.holder is not None)
+    goods = [None, "food", "water", "scrap", "ammo", "medicine"]
+    out = []
+    for day in range(days):
+        h, s, t = day * 24, setts[day % len(setts)], setts[(day * 3 + 1) % len(setts)]
+        out += [{"hour": h, "do": "status", "settlement": s},
+                {"hour": h, "do": "offers", "place": held[(day * 5) % len(held)], "limit": 4 + day % 3},
+                {"hour": h + 6, "do": "complete", "pick": 0},
+                {"hour": h + 6, "do": "fail", "pick": 1}]
+        if day % 3 == 0:
+            out.append({"hour": h + 12, "do": "assign", "settlement": s, "from": "farmer", "to": "guard"})
+        elif day % 3 == 1:
+            out.append({"hour": h + 12, "do": "beds", "settlement": s, "n": 2})
+        else:
+            out.append({"hour": h + 12, "do": "priority", "settlement": s, "good": goods[day % len(goods)]})
+        if day % 4 == 0:
+            out.append({"hour": h + 12, "do": "send", "from": s, "to": t, "goods": {"food": 3, "water": 2}})
+        if day % 5 == 0:
+            out.append({"hour": h + 18, "do": "threats", "settlement": s, "hours": 24})
+        if day % 7 == 3:
+            out.append({"hour": h + 18, "do": "complete", "pick": 0})        # the same offer again: refused
+        if day % 6 == 5:
+            out.append({"hour": h, "do": "complete", "pick": 0})             # at once, before a caravan leaves
+    s, t, place = setts[0], setts[1 % len(setts)], sorted(set(ws.places) - set(ws.settlements))[0]
+    out += [{"hour": 48, "do": "assign", "settlement": s, "from": "farmer", "to": "pilot"},
+            {"hour": 48, "do": "assign", "settlement": s, "from": "guard", "to": "guard"},
+            {"hour": 48, "do": "assign", "settlement": s, "from": "farmer", "to": "guard", "n": 0},
+            {"hour": 48, "do": "assign", "settlement": s, "from": "doctor", "to": "guard", "n": 50},
+            {"hour": 48, "do": "beds", "settlement": s, "n": 100},
+            {"hour": 48, "do": "beds", "settlement": place},
+            {"hour": 48, "do": "priority", "settlement": s, "good": "gold"},
+            {"hour": 48, "do": "send", "from": s, "to": s, "goods": {"food": 1}},
+            {"hour": 48, "do": "send", "from": s, "to": t, "goods": {}},
+            {"hour": 48, "do": "send", "from": s, "to": t, "goods": {"gold": 1}},
+            {"hour": 48, "do": "send", "from": s, "to": t, "goods": {"food": 0}},
+            {"hour": 48, "do": "send", "from": s, "to": t, "goods": {"food": 10 ** 6}},
+            {"hour": 48, "do": "status", "settlement": place},
+            {"hour": 48, "do": "trade", "settlement": s, "goods": {"gold": 1}}]
+    return sorted(out, key=lambda a: a["hour"])                                # stable: same-hour order kept
 
 
 PREBUILT = os.environ.get("FOCCSIM_EXE")                        # a core built elsewhere, e.g. by MSVC on the PC
@@ -153,7 +231,8 @@ class CppParityTests(unittest.TestCase):
         with open(walk_p, "w", encoding="utf-8") as f:
             json.dump(list(walk), f)
         r = subprocess.run([self.exe, state, str(ticks), "--actions", acts, "--adapter", os.path.join(d, "adapter.jsonl"),
-                            "--walk", walk_p, "--present", os.path.join(d, "present.jsonl"), *extra],
+                            "--walk", walk_p, "--present", os.path.join(d, "present.jsonl"),
+                            "--results", os.path.join(d, "results.jsonl"), *extra],
                            capture_output=True, text=True)
         return r, d, state
 
@@ -190,6 +269,7 @@ class CppParityTests(unittest.TestCase):
         want = [first]
         walk, shown_want = walk_for(ws, ticks), []
         shown = present_lines(ws, walk, 0, None, shown_want)
+        results, last = [], []
         r, d, state = self.native(ws, ticks, actions, walk=walk)
         self.assertEqual(r.returncode, 0, f"{name}: {r.stderr}")
         lines = r.stdout.splitlines()
@@ -197,7 +277,7 @@ class CppParityTests(unittest.TestCase):
         for t in range(1, ticks + 1):
             for a in actions:
                 if a["hour"] == ws.hour:
-                    apply(ws, a)
+                    results.append(run(ws, a, last))
             sim.tick(ws)
             new = adapter.game_view(ws, plan)
             want.append(canonical([t, adapter.changes(view, new)]))
@@ -222,6 +302,8 @@ class CppParityTests(unittest.TestCase):
         self.same_adapter_lines(name, want, self.adapter_lines(d))
         self.same_lines(name, "the presentation planner", shown_want, self.lines(d, "present.jsonl"),
                         lambda k: f"walk entry {k} (tick {walk[k]['tick']}, at {walk[k]['place']})")
+        self.same_lines(name, "the player actions", results, self.lines(d, "results.jsonl"),
+                        lambda k: f"action {k} ({json.loads(results[k])[1]} at hour {json.loads(results[k])[0]})")
 
     def test_the_fixture_world_for_ten_seeds_over_90_days(self):
         for seed in range(10):
@@ -231,11 +313,14 @@ class CppParityTests(unittest.TestCase):
     def test_raid_pressure_story_mode_and_player_actions(self):
         variants = [("raid low", {"raid_pressure": "low"}, ()), ("raid high", {"raid_pressure": "high"}, ()),
                     ("story mode", {"story_mode": True, "active_stories": ["main_story_1"]}, ()),
-                    ("player actions", {}, ACTIONS)]
-        for seed in (range(10) if FULL else (0,)):
+                    ("player actions", {}, ACTIONS), ("settlements and jobs", {}, None)]
+        for seed in (range(10) if FULL else (0, 3)):                    # seed 3 also completes a defence
             for name, settings, actions in variants:
+                if seed == 3 and actions is not None and not FULL:
+                    continue
                 with self.subTest(seed=seed, variant=name):
-                    self.parity(f"{name} seed {seed}", fixture_world(seed, **settings), 90 * DAY, actions)
+                    ws = fixture_world(seed, **settings)
+                    self.parity(f"{name} seed {seed}", ws, 90 * DAY, script_for(ws, 90) if actions is None else actions)
 
     def test_the_commonwealth_scale_draft(self):
         from test_combined_seedpack import commonwealth_scale_draft
@@ -245,7 +330,10 @@ class CppParityTests(unittest.TestCase):
                 ws = WorldState(seed=seed)
                 model.load_pack(ws, copy.deepcopy(pack))
                 self.assertGreater(len(ws.places), 200)
-                self.parity(f"Commonwealth-scale seed {seed}", ws, (90 if FULL else 30) * DAY)
+                days = 90 if FULL else 30
+                self.parity(f"Commonwealth-scale seed {seed}", copy.deepcopy(ws), days * DAY)
+                if seed == 0:
+                    self.parity("Commonwealth-scale with settlements and jobs", ws, days * DAY, script_for(ws, days))
 
     def test_the_state_is_read_and_written_back_byte_for_byte(self):
         ws = fixture_world(3)
@@ -369,6 +457,194 @@ class CppParityTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.same_lines("escaped ids", "the presentation planner", want, self.lines(d, "present.jsonl"),
                         lambda k: f"walk entry {k}")
+
+    def jobs_world(self):
+        """The fixture world at hour 0 with one offer of every kind at the market (the settlers'): raiders bound for
+        farm_a (defend), a caravan leaving for farm_a (escort; the order's caravan there is not offered), farm_b lost
+        to the raiders (retake), the market short of food (resupply), and the raiders at gate_1 next door (clear)."""
+        ws = fixture_world(0)
+        ws.squads["s900"] = model.Squad(id="s900", faction="raiders", size=7, at="raider_camp", goal="farm_a",
+                                        kind="attack", eta=12)
+        ws.squads["c901"] = model.Squad(id="c901", faction="settlers", size=2, at="market", goal="farm_a",
+                                        kind="caravan", cargo={"food": 15, "ammo": 0}, eta=6)
+        ws.squads["c902"] = model.Squad(id="c902", faction="order", size=2, at="market", goal="order_fort",
+                                        kind="caravan", cargo={"ammo": 5}, eta=12)      # not the settlers' to offer
+        ws.places["farm_b"].holder = "raiders"
+        sim._event(ws, "place_taken", "farm_b", faction="raiders", previous="settlers", retaken=False)
+        ws.settlements["market"].stock["food"] = 1
+        ws.places["gate_1"].holder = "raiders"
+        offers = {o.kind: o for o in jobs.offers(ws, "market", limit=10)}
+        self.assertEqual(sorted(offers), sorted(jobs.KINDS))
+        return ws, offers
+
+    def same_actions(self, name, ws, actions):
+        """Run `actions` at the state's hour in Python and in the core, then one tick: the results and the state
+        after the tick must match."""
+        want, last = [], []
+        hour = ws.hour
+        out = os.path.join(tempfile.mkdtemp(dir=self.tmp), "after.json")
+        r, d, _state = self.native(ws, 1, [dict(a, hour=hour) for a in actions], "--out", out)
+        self.assertEqual(r.returncode, 0, f"{name}: {r.stderr}")
+        for a in actions:
+            want.append(run(ws, dict(a, hour=hour), last))
+        sim.tick(ws)
+        self.same_lines(name, "the player actions", want, self.lines(d, "results.jsonl"), lambda k: f"action {k}")
+        with open(out, encoding="utf-8") as f:
+            self.same_lines(name, "the state", [ws.to_json()], [f.read()], lambda k: "after the actions and a tick")
+        return [json.loads(w)[2] for w in want]
+
+    def test_the_jobs_refuse_a_moot_offer_with_pythons_reason(self):
+        """Every reason jobs.valid gives, from an offer made before the world changed; then each kind done, and each
+        given up."""
+        base, offers = self.jobs_world()
+
+        def moved(ws, place, event_kind, **info):
+            sim._event(ws, event_kind, place, **info)
+
+        cases = {
+            "defend": [("the attack is over", lambda ws: ws.squads.pop("s900")),
+                       ("the giver no longer holds the place", lambda ws: setattr(ws.places["farm_a"], "holder", "order")),
+                       ("a garrison already stands there", lambda ws: sim.player_defended(ws, "farm_a"))],
+            "escort": [("the caravan has already arrived or was lost", lambda ws: ws.squads.pop("c901")),
+                       ("the destination is no longer held by the giver",
+                        lambda ws: setattr(ws.places["farm_a"], "holder", "order"))],
+            "retake": [("the giver holds the place again", lambda ws: setattr(ws.places["farm_b"], "holder", "settlers")),
+                       ("the place was lost again since", lambda ws: moved(ws, "farm_b", "place_taken", faction="raiders",
+                                                                           previous="settlers")),
+                       ("the place cannot change hands", lambda ws: setattr(ws.places["farm_b"], "story_lock", "s1")),
+                       ("held by a friend of the giver", lambda ws: setattr(ws.places["farm_b"], "holder", "order"))],
+            "resupply": [("no longer the giver's", lambda ws: setattr(ws.places["market"], "holder", "order")),
+                         ("no longer short", lambda ws: ws.settlements["market"].stock.update(food=100))],
+            "clear": [("no longer a hostile neighbour", lambda ws: setattr(ws.places["gate_1"], "holder", None)),
+                      ("someone else holds the place now", lambda ws: moved(ws, "gate_1", "place_taken",
+                                                                            faction="raiders", previous=None))],
+        }
+        for kind, changes in cases.items():
+            offer = offers[kind].to_dict()
+            for why, change in changes:
+                with self.subTest(kind=kind, why=why):
+                    ws = copy.deepcopy(base)
+                    change(ws)
+                    got = self.same_actions(f"{kind}: {why}", ws, [{"do": "complete", "offer": offer}])
+                    self.assertIn(why, got[0]["error"])
+            with self.subTest(kind=kind, why="done, then done again and given up"):
+                got = self.same_actions(f"{kind} done", copy.deepcopy(base),
+                                        [{"do": "complete", "offer": offer}, {"do": "complete", "offer": offer},
+                                         {"do": "fail", "offer": offer}])
+                self.assertIn("ok", got[0])
+                self.assertIn("already handed in or given up", got[1]["error"])
+                self.assertIn("already handed in or given up", got[2]["error"])
+            with self.subTest(kind=kind, why="given up"):
+                self.same_actions(f"{kind} given up", copy.deepcopy(base), [{"do": "fail", "offer": offer},
+                                                                          {"do": "complete", "offer": offer}])
+        offer = offers["clear"].to_dict()
+        for why, bad in (("offer expired at hour", dict(offer, expires_hour=0)),
+                         ("giver or target no longer exists", dict(offer, giver="nobody")),
+                         ("unknown offer kind 'dance'", dict(offer, kind="dance"))):
+            with self.subTest(why=why):
+                got = self.same_actions(why, copy.deepcopy(base), [{"do": "complete", "offer": bad}])
+                self.assertIn(why, got[0]["error"])
+
+    def test_the_jobs_refuse_superseded_later_and_given_up_instances(self):
+        """#673's rules on the market's resupply job, read at hour 0 (a0, with its read_at), each refused by both doors
+        with Python's reason: a0 after another instance read at hour 1 was handed in (superseded by the later
+        offered hour); an instance read at hour 1 after a0 was given up right after the read (superseded by log
+        position alone); an instance from an hour the world has not reached (from later); and an instance read after
+        a0's give-up inside its window, by another hour (the window reason). The offers' read_at is compared too."""
+        base, offers = self.jobs_world()
+        a0 = offers["resupply"].to_dict()
+        self.assertEqual(a0["read_at"], len(base.events))
+        cannot = "cannot {} " + a0["id"] + ": "
+        superseded = "this offer was superseded: an outcome for the job was logged after it was read"
+
+        def at_hour_1(ws):
+            ws.hour = 1
+            return [o.kind for o in jobs.offers(ws, "market", limit=10)].index("resupply")
+
+        with self.subTest(why="superseded by a later instance's hand-in"):
+            ws = copy.deepcopy(base)
+            pick = at_hour_1(ws)
+            got = self.same_actions("superseded by hour", ws, [
+                {"do": "offers", "place": "market", "limit": 10}, {"do": "complete", "pick": pick},
+                {"do": "complete", "offer": a0}, {"do": "fail", "offer": a0}])
+            self.assertIn("ok", got[1])
+            self.assertEqual(got[2]["error"], cannot.format("complete") + superseded)
+            self.assertEqual(got[3]["error"], cannot.format("fail") + superseded)
+        with self.subTest(why="superseded by a give-up logged right after the read"):
+            ws = copy.deepcopy(base)
+            pick = at_hour_1(ws)
+            got = self.same_actions("superseded by position", ws, [
+                {"do": "offers", "place": "market", "limit": 10}, {"do": "fail", "offer": a0},
+                {"do": "complete", "pick": pick}, {"do": "fail", "pick": pick}])
+            self.assertIn("ok", got[1])
+            self.assertEqual(got[2]["error"], cannot.format("complete") + superseded)
+            self.assertEqual(got[3]["error"], cannot.format("fail") + superseded)
+        with self.subTest(why="from a later hour"):
+            later = dict(a0, offered_hour=base.hour + 5)
+            got = self.same_actions("from later", copy.deepcopy(base), [{"do": "complete", "offer": later},
+                                                                        {"do": "fail", "offer": later}])
+            why = f"this offer was read at hour {base.hour + 5}, later than the world's hour {base.hour}"
+            self.assertEqual(got[0]["error"], cannot.format("complete") + why)
+            self.assertEqual(got[1]["error"], cannot.format("fail") + why)
+        with self.subTest(why="given up and inside its window"):
+            ws = copy.deepcopy(base)
+            jobs.fail(ws, jobs.Offer(**a0))
+            ws.hour = 1
+            again = dict(a0, offered_hour=1, read_at=len(ws.events))
+            got = self.same_actions("window", ws, [{"do": "offers", "place": "market", "limit": 10},
+                                                   {"do": "complete", "offer": again}, {"do": "fail", "offer": again}])
+            self.assertNotIn("resupply", [o["kind"] for o in got[0]["ok"]])
+            why = "this job was given up and its window has not ended"
+            self.assertEqual(got[1]["error"], cannot.format("complete") + why)
+            self.assertEqual(got[2]["error"], cannot.format("fail") + why)
+
+    def test_manage_at_its_limits_and_a_long_defence(self):
+        """Each manage action exactly at its limit and one past it; and a defence whose attack is due after the usual
+        72 hours, so the garrison stays until then."""
+        ws = fixture_world(0)
+        food = ws.settlements["farm_a"].stock["food"]
+        farmers = ws.settlements["farm_a"].roles["farmer"]
+        got = self.same_actions("limits", ws, [
+            {"do": "beds", "settlement": "farm_a", "n": manage.BEDS_MAX - ws.settlements["farm_a"].beds},
+            {"do": "beds", "settlement": "farm_a", "n": 1},
+            {"do": "send", "from": "farm_a", "to": "market", "goods": {"food": food + 1}},
+            {"do": "send", "from": "farm_a", "to": "market", "goods": {"food": food, "water": 1}},
+            {"do": "assign", "settlement": "farm_a", "from": "farmer", "to": "doctor", "n": farmers + 1},
+            {"do": "assign", "settlement": "farm_a", "from": "farmer", "to": "doctor", "n": farmers},
+            {"do": "threats", "settlement": "farm_a", "hours": 12},
+            {"do": "threats", "settlement": "farm_a", "hours": 11},
+            {"do": "priority", "settlement": "farm_a", "good": "medicine"},
+            {"do": "priority", "settlement": "farm_a"},
+            {"do": "status", "settlement": "farm_a"}])
+        self.assertEqual([("ok" in g) for g in got], [True, False, False, True, False, True, True, True, True, True,
+                                                      True])
+        ws = fixture_world(0)
+        ws.squads["s900"] = model.Squad(id="s900", faction="raiders", size=7, at="raider_camp", goal="farm_a",
+                                        kind="attack", eta=100)
+        got = self.same_actions("long defence", ws, [{"do": "offers", "place": "market"},
+                                                     {"do": "complete", "pick": 0}])
+        self.assertEqual(ws.squads[got[1]["ok"]["garrison"]].eta, 100)
+
+    def test_the_jobs_texts_with_display_names_and_limits(self):
+        """The offers' own wording at the market, every kind, plain and with a pack's display names; limits of 0 and -2
+        (a Python slice); offers where nobody holds the place; and an unknown place."""
+        ws, _offers = self.jobs_world()
+        names = {"market": "the Market", "farm_a": "Abernathy-ish Farm", "raiders": "the raiders", "settlers": "",
+                 "Day 1, 12:00": "noon"}                            # display_name also sees the due stamp
+        got = self.same_actions("offers", ws, [{"do": "offers", "place": "market", "limit": 10},
+                                               {"do": "offers", "place": "market", "limit": 10, "names": names},
+                                               {"do": "offers", "place": "market", "limit": 10, "names": {}},
+                                               {"do": "offers", "place": "ruins"},
+                                               {"do": "offers", "place": "market", "limit": 0},
+                                               {"do": "offers", "place": "market", "limit": -2}])
+        self.assertIn("noon", " ".join(o["text"] for o in got[1]["ok"]))
+        self.assertEqual(len(got[5]["ok"]), len(got[0]["ok"]) - 2)            # found[:limit], Python's slice
+        with self.assertRaisesRegex(KeyError, "unknown place 'nowhere'"):
+            jobs.offers(ws, "nowhere")
+        r, _d, _state = self.native(ws, 1, [{"hour": ws.hour, "do": "offers", "place": "nowhere"}])
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("unknown place 'nowhere'", r.stderr)
+
 
 
 if __name__ == "__main__":

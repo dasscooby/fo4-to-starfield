@@ -1,10 +1,12 @@
 # FOCCSim: the combined core's simulation in portable C++
 
-Steps C1 to C3 of `docs/combined-core-cpp-port.md`, as plain C++17 with no Windows and no SFSE:
+Steps C1 to C4 of `docs/combined-core-cpp-port.md`, as plain C++17 with no Windows and no SFSE:
 - the world state and its 6-hour tick, from the Python reference (`src/fo4sf/combined/model.py`, `sim.py`,
   `reputation.py`, `modes.py`);
 - the engine adapter (`adapter.py`): which keyword data and globals Papyrus must write;
-- the presentation planner (`present.py`): what to spawn and dissolve near the player.
+- the presentation planner (`present.py`): what to spawn and dissolve near the player;
+- settlement management (`manage.py`) and the radiant jobs (`jobs.py`): the player's actions on a settlement, and
+  the work a faction offers, done or given up.
 
 The in-game plugin wraps it later.
 
@@ -18,6 +20,9 @@ same number of ticks and the same player actions. `tests/test_combined_cpp_parit
 | `foccsim.h`, `foccsim.cpp` | the state (`WorldState::from_json` / `to_json`, with the reference's checks), `tick`, and the player hooks `player_helped`, `player_defended`, `player_traded` |
 | `adapter.h`, `adapter.cpp` | step C2, the engine adapter (`adapter.py`): the record plan (a keyword per place for its holder, a global per faction for the reputation tier, a global per play setting), the game view for a state, and the fewest writes between two views |
 | `present.h`, `present.cpp` | step C3, the presentation planner (`present.py`): garrisons, settlers, squads and caravans within a route-hour radius of the player, nearest first, within an actor budget (the rest listed as dropped), and the spawn, keep and dissolve lists between two plans |
+| `manage.h`, `manage.cpp` | step C4, `manage.py`: move settlers between roles, build beds, set a production focus, send supplies as a caravan, a settlement's threats and status. Refusals throw `std::invalid_argument` with Python's ValueError message, word for word |
+| `jobs.h`, `jobs.cpp` | step C4, `jobs.py`: the offers (defend, escort, retake, resupply, clear) with their text, why an offer is moot, and completing or giving one up. Known difference: an offer's first letter is capitalised for ASCII only (Python's `str.upper` also does other scripts) |
+| `news.h`, `news.cpp` | so far only the helpers the jobs' text needs (`display_name`, `_cargo`, `_stamp`); the headlines are step C5 |
 | `main.cpp` | the harness's command line: `foccsim <state.json> <ticks> [--actions f] [--dump-at n --dump f] [--out f] [--adapter f] [--prefix p]`, printing `<tick> <hour> <sha256>` per tick; `--adapter` writes the plan and view at the start, then each tick's writes, as canonical JSON lines |
 
 The SHA-256 comes from `../FOCCSidecar/sha256.cpp`, which is already portable.
@@ -25,7 +30,7 @@ The SHA-256 comes from `../FOCCSidecar/sha256.cpp`, which is already portable.
 ## Build
 
 ```
-g++ -std=c++17 -O2 -ffp-contract=off -Wall -Wextra -o foccsim adapter.cpp foccsim.cpp main.cpp present.cpp ../FOCCSidecar/sha256.cpp
+g++ -std=c++17 -O2 -ffp-contract=off -Wall -Wextra -o foccsim *.cpp ../FOCCSidecar/sha256.cpp
 ```
 
 clang++ takes the same flags. `-ffp-contract=off` matters: a fused multiply-add would change the rounding of the three
@@ -53,8 +58,17 @@ On CI, with the compiler on PATH (`tests/test_combined_cpp_parity.py`):
   Each plan and its diff from the plan before are compared as text. Also: the player's own garrison ranked last at
   its distance, a role above the per-role cap, budgets that cut at each slot boundary, and Python's message for an
   unknown place.
+- **Settlements and jobs (C4):** a scripted player on the fixture world (seeds 0 and 3; all ten with
+  `FO4SF_PARITY_FULL=1`) and the Commonwealth-scale draft (seed 0). Each day it asks for a status and the offers
+  somewhere, does the first offer and gives up the second, sometimes at once and sometimes too late. It also moves
+  settlers, builds beds, sets and clears a focus, sends supplies, and on day 2 tries every refusal manage has. Each
+  action's result or Python's refusal message is compared as text, and the state after every tick as before. Also:
+  every reason an offer is moot (taken from a world changed after the offer), each kind done and then done again
+  and given up, the offers' text with a pack's display names, limits of 0 and -2, each manage action exactly at its
+  limit and one past it, and a defence whose attack is due after 72 hours.
 
 `FO4SF_PARITY_FULL=1` compares after every tick, runs every variant for seeds 0 to 9, and runs the
 Commonwealth-scale draft for 90 days.
 
-Not here yet (later steps of the plan): C4 `manage.py` and `jobs.py`, C5 `news.py`; the SFSE plugin around the core; the event-log indexes that would let the log be trimmed.
+Not here yet (later steps of the plan): C5 `news.py` (the headlines and the terminal page); the SFSE plugin around the
+core; the event-log indexes that would let the log be trimmed.

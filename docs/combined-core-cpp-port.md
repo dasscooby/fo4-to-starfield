@@ -1,15 +1,17 @@
 # Combined core: porting the simulation to C++ (plan, 28 October 2026)
 
-This is a plan. Nothing in it has run in game. **Status, 1 November 2026 (Claude-cloud-2): steps 1 and 2, C2 and
-C3 are done offline.**
+This is a plan. Nothing in it has run in game. **Status, 1 November 2026 (Claude-cloud-2): steps 1 and 2 and C2
+to C4 are done offline.**
 - Step 1: the Python guards for the seed range and ASCII ids; the event log measured over one game year (section 5).
 - Step 2 (C1): `sfse/FOCCSim/` is the portable core. `tests/test_combined_cpp_parity.py` shows it byte-identical to
   Python after every tick for every world below.
 - C2: `sfse/FOCCSim/adapter.cpp` gives the same record plan, game view and writes as `adapter.py`, after every tick
   of the same worlds.
 - C3: `sfse/FOCCSim/present.cpp` gives the same plans and diffs as `present.py`, for a player walking those worlds.
+- C4: `sfse/FOCCSim/manage.cpp` and `jobs.cpp` give the same results, refusals and states as `manage.py` and
+  `jobs.py`, for a scripted player on those worlds.
 
-C4, C5 and everything on the PC are still to do. It carries out the 28 October decision in `docs/ai/decisions.md`:
+C5 and everything on the PC are still to do. It carries out the 28 October decision in `docs/ai/decisions.md`:
 the in-game sim is a C++ port inside our SFSE plugin, and the Python model in `src/fo4sf/combined/` stays the
 reference. The owner's order (28 October): the GAMMA core comes first, with probes P1 to P10, then the seed rerun
 with all DLC, then a 20-place slice in game. The rerun is done ("Real pack, all DLC" in `docs/combined-core.md`).
@@ -249,6 +251,15 @@ Each step is one PR, with green CI and an independent review.
      7th. Each plan and its diff are compared as text. Other checks: the player's own garrison's rank, the per-role
      cap, budgets cutting at each slot boundary, an unknown place. `distances` (sim._distances) is now public in
      `foccsim.h`, because the planner uses it.
+   - C4, **done**: `manage.h/.cpp`, `jobs.h/.cpp` and the news helpers the jobs' text needs (`news.h/.cpp`). A
+     scripted player acts on the fixture world and the Commonwealth-scale draft. Each action's result, or Python's
+     refusal message word for word, is compared, and so is the state after every tick. More checks: every reason an
+     offer is moot, each kind done twice and given up, display names, limits.
+     - The sim's helpers that `manage` and `jobs` call (`event`, `new_id`, `garrisons`, `defence`, `hostile`,
+       `lost_places`, `neighbours`, `rep_add`, `floordiv`) are now public in `foccsim.h`.
+     - `player_traded` throws `std::invalid_argument` for an unknown good, as Python raises ValueError.
+     - The harness's actions moved from `foccsim::apply_action` to `main.cpp`.
+     - Known difference: an offer's first letter is capitalised for ASCII only.
 4. **PC:** probes P2 to P10, then P1 (restaged from main and queued on 28 Oct).
 5. **PC:** bridge spike B0 on stack A (the owner's call, 28 October): B0-1 with the kit alone, then the Address
    Library (on the PC since 24 October), the CommonLibSF build, `sfse/FOCCPing` (the plugin, in the repo) and B0-2

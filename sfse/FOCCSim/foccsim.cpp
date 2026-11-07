@@ -62,6 +62,9 @@ bool rng_seed_ok(Int seed, Int hour) {
 }
 
 bool is_attack_event(const std::string& k) { return k == "place_taken" || k == "attack_failed" || k == "place_cleared"; }
+
+}  // namespace
+
 bool is_holder_change(const std::string& k) { return k == "place_taken" || k == "place_cleared"; }
 
 // Python's // (floor); every operand in the sim is non-negative today, so this is a guard as much as a helper.
@@ -70,6 +73,8 @@ Int floordiv(Int a, Int b) {
     if ((a % b != 0) && ((a < 0) != (b < 0))) --q;
     return q;
 }
+
+namespace {
 
 Int& at(Counts& m, const std::string& k) {                    // Python's d[k]: a missing key is an error, not a 0
     auto it = m.find(k);
@@ -89,6 +94,9 @@ template <class M> auto& must(M& m, const std::string& k, const char* what) {
 }
 
 Value str_or_null(const OptStr& s) { return s ? Value::string(*s) : Value::null(); }
+
+}  // namespace
+
 Value counts_value(const Counts& c) {
     Object o;
     for (const auto& kv : c) o[kv.first] = Value::integer(kv.second);
@@ -96,7 +104,7 @@ Value counts_value(const Counts& c) {
 }
 
 // --- events (sim._event, _new_id) ---------------------------------------------------------------------------------
-void event(WorldState& ws, const std::string& kind, const std::string& place, Object info = {}) {
+void event(WorldState& ws, const std::string& kind, const std::string& place, Object info) {
     info["hour"] = Value::integer(ws.hour);
     info["kind"] = Value::string(kind);
     info["place"] = Value::string(place);
@@ -109,19 +117,9 @@ std::string new_id(WorldState& ws, const char* prefix) {
     return std::string(prefix) + std::to_string(i);
 }
 
+namespace {
+
 const std::string& ev_str(const Value& e, const char* key) { return e.o->at(key).s; }
-
-// --- graph (model.WorldState.neighbours, sim._distances) ----------------------------------------------------------
-std::vector<std::pair<std::string, Int>> neighbours(const WorldState& ws, const std::string& place) {
-    std::vector<std::pair<std::string, Int>> out;
-    for (const Route& r : ws.routes) {
-        if (r.a == place) out.emplace_back(r.b, r.hours);
-        else if (r.b == place) out.emplace_back(r.a, r.hours);
-    }
-    std::sort(out.begin(), out.end());
-    return out;
-}
-
 
 std::set<std::string> story_shielded(const WorldState& ws) {  // sim._story_shielded
     std::set<std::string> out;
@@ -131,6 +129,8 @@ std::set<std::string> story_shielded(const WorldState& ws) {  // sim._story_shie
                 if (h <= STORY_SHIELD_HOURS) out.insert(p);
     return out;
 }
+
+}  // namespace
 
 bool hostile(const WorldState& ws, const std::string& a, const OptStr& b) {   // sim._hostile
     if (!b || a == *b) return false;
@@ -151,6 +151,8 @@ std::set<std::string> lost_places(const WorldState& ws, const std::string& fid) 
     }
     return out;
 }
+
+namespace {
 
 // --- settlements --------------------------------------------------------------------------------------------------
 std::optional<Int> farm_slots(const Settlement& s) {
@@ -383,6 +385,8 @@ void faction_tick(WorldState& ws, PyRandom& rng) {
     }
 }
 
+}  // namespace
+
 std::vector<std::string> garrisons(const WorldState& ws, const std::string& place) {
     std::vector<std::string> out;
     for (const auto& [id, q] : ws.squads)
@@ -399,6 +403,8 @@ Int defence(const WorldState& ws, const std::string& place) {
     for (const std::string& g : garrisons(ws, place)) d += ws.squads.at(g).size;
     return d;
 }
+
+namespace {
 
 void resolve_arrivals(WorldState& ws, PyRandom& rng) {
     std::set<std::string> shielded = story_shielded(ws);
@@ -462,6 +468,8 @@ void resolve_arrivals(WorldState& ws, PyRandom& rng) {
     }
 }
 
+}  // namespace
+
 // --- reputation (reputation.add, helped, tier_for) ------------------------------------------------------------------
 void rep_add(WorldState& ws, const std::string& faction, Int fame, Int infamy) {
     std::vector<Reputation*> targets{&must(ws.reputation, faction, "reputation row")};
@@ -474,6 +482,8 @@ void rep_add(WorldState& ws, const std::string& faction, Int fame, Int infamy) {
         r->infamy = std::max<Int>(0, r->infamy + infamy);
     }
 }
+
+namespace {
 
 Int tier_for(Int amount, Int unit) {
     Int k = floordiv(std::max<Int>(0, amount), std::max<Int>(1, unit));
@@ -540,6 +550,17 @@ Reputation get_rep(const Value& v, const std::string& what) {
 }
 
 }  // namespace
+
+// --- graph (model.WorldState.neighbours, sim._distances) ----------------------------------------------------------
+std::vector<std::pair<std::string, Int>> neighbours(const WorldState& ws, const std::string& place) {
+    std::vector<std::pair<std::string, Int>> out;
+    for (const Route& r : ws.routes) {
+        if (r.a == place) out.emplace_back(r.b, r.hours);
+        else if (r.b == place) out.emplace_back(r.a, r.hours);
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
 
 std::map<std::string, Int> distances(const WorldState& ws, const std::string& start) {
     // the shortest route-hours from start; Python's own walk (sort, pop the nearest) settles on the same numbers
@@ -799,7 +820,7 @@ Counts player_traded(WorldState& ws, const std::string& settlement, const Counts
     for (const auto& [g, n] : goods) {
         bool known = false;
         for (const char* x : GOODS) known = known || g == x;
-        if (!known) throw std::runtime_error("unknown good " + g);
+        if (!known) throw std::invalid_argument("unknown good " + g);   // Python: ValueError
     }
     Counts moved;
     for (const auto& [g, want] : goods) {
@@ -812,16 +833,6 @@ Counts player_traded(WorldState& ws, const std::string& settlement, const Counts
     if (given && holder && ws.reputation.count(*holder)) rep_add(ws, *holder, tier_for(given, TRADE_GOODS_PER_TIER), 0);
     event(ws, "player_traded", settlement, {{"goods", counts_value(moved)}});
     return moved;
-}
-
-void apply_action(WorldState& ws, const Value& action) {
-    const Object& a = obj(action, "an action");
-    std::string what = get_str(a, "do", "action");
-    if (what == "help") player_helped(ws, get_str(a, "faction", "action"), get_int(a, "amount", "action", 10));
-    else if (what == "defend")
-        player_defended(ws, get_str(a, "place", "action"), get_int(a, "bonus", "action", 10), get_int(a, "hours", "action", 72));
-    else if (what == "trade") player_traded(ws, get_str(a, "settlement", "action"), get_counts(a, "goods", "action", {}));
-    else throw std::runtime_error("unknown action " + what);
 }
 
 }  // namespace foccsim
