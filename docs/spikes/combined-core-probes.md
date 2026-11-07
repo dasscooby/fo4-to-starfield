@@ -735,7 +735,7 @@ save name SFSE passes does not equal any `.sfs` stem (display name vs file stem 
 lists and leaves the orphan question open rather than guessing). Send back: `focc_sidecar.log`, the `.focc` files,
 `saves.json`, the verdict, the loader output, and which file names the archive used.
 
-### P12: encounter conservation across leave, return, save and load (card, 7 Nov 2026; nothing written or run)
+### P12: encounter conservation across leave, return, save and load (card, 6 Nov 2026; nothing written or run)
 
 Settles: the encounter-conservation contract in [combined-core.md](../combined-core.md) (CC-63, after the module
 contracts list): one live copy per squad member, a death counted once, survivors only on dissolve, and the live

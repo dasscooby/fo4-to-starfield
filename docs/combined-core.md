@@ -490,7 +490,7 @@ cases.
 - Single-fire staging: `present.plan` lists everything in radius within the budget; there is no ordered chain that
   stages at most one encounter on arrival with exclusions (indoors, in a scene, a live fight).
 
-**Encounter conservation (design contract, 7 Nov 2026; not built, nothing run).** The risk register's off-screen
+**Encounter conservation (design contract, 6 Nov 2026; not built, nothing run).** The risk register's off-screen
 factions row (`docs/research/framework/travel-and-runtime-risks-oct25.md`) names two failures: a load spawns a
 second copy of a squad, and an actor's death never reaches the simulation. FO4's Kill Actor story event is gone in
 Starfield, so deaths come from our own `OnDeath` scripts (`combined-core-notes/engine-feasibility.md`). Today a
