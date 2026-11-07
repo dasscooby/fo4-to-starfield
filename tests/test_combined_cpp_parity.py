@@ -452,6 +452,30 @@ class CppParityTests(unittest.TestCase):
         self.assertEqual(r.returncode, 2, r.stdout)
         self.assertIn("unknown place 'nowhere'", r.stderr)
 
+    def test_the_presentation_planner_escapes_garrison_id_components(self):
+        """#641: places and holders whose ids hold the separator (the AMBIGUOUS pairs of test_combined_present_ids)
+        and a place literally named region%3Acamp, walked from region and its neighbours on budgets that keep, drop
+        and respawn slots; the plans and diffs match line by line, so the escaped garrison ids match too.
+
+        diff()'s duplicate-id refusal (ValueError in Python, std::invalid_argument and exit 2 in the core) has no
+        parity case: foccsim only diffs plans that plan() built, and plan() cannot give two slots one id (garrison
+        ids are escaped, a settler's role holds no ':', squad ids are the squads' keys), so the walk cannot feed
+        the core a plan with duplicate ids. test_combined_present_ids covers the refusal on the Python side."""
+        from test_combined_present_ids import AMBIGUOUS, world as id_world
+        ws = id_world(AMBIGUOUS + [("region%3Acamp", "raiders")])
+        walk = [{"tick": 0, "place": p, "radius": r, "max_actors": m}
+                for p, r, m in (("region", 6, 100), ("region", 2, 3), ("region:camp", 2, 9), ("region%3Acamp", 2, 6),
+                                ("region", 2, 0), ("region", 2, 100), ("region:camp", 1, 100))]
+        want = []
+        present_lines(ws, walk, 0, None, want)
+        self.assertIn("garrison:region%3Acamp:raiders", want[0])
+        self.assertIn("garrison:region:camp%3Araiders", want[0])
+        self.assertIn("garrison:region%253Acamp:raiders", want[0])
+        r, d, _state = self.native(ws, 0, walk=walk)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.same_lines("escaped ids", "the presentation planner", want, self.lines(d, "present.jsonl"),
+                        lambda k: f"walk entry {k}")
+
     def jobs_world(self):
         """The fixture world at hour 0 with one offer of every kind at the market (the settlers'): raiders bound for
         farm_a (defend), a caravan leaving for farm_a (escort; the order's caravan there is not offered), farm_b lost
@@ -538,6 +562,59 @@ class CppParityTests(unittest.TestCase):
             with self.subTest(why=why):
                 got = self.same_actions(why, copy.deepcopy(base), [{"do": "complete", "offer": bad}])
                 self.assertIn(why, got[0]["error"])
+
+    def test_the_jobs_refuse_superseded_later_and_given_up_instances(self):
+        """#673's rules on the market's resupply job, read at hour 0 (a0, with its read_at), each refused by both doors
+        with Python's reason: a0 after another instance read at hour 1 was handed in (superseded by the later
+        offered hour); an instance read at hour 1 after a0 was given up right after the read (superseded by log
+        position alone); an instance from an hour the world has not reached (from later); and an instance read after
+        a0's give-up inside its window, by another hour (the window reason). The offers' read_at is compared too."""
+        base, offers = self.jobs_world()
+        a0 = offers["resupply"].to_dict()
+        self.assertEqual(a0["read_at"], len(base.events))
+        cannot = "cannot {} " + a0["id"] + ": "
+        superseded = "this offer was superseded: an outcome for the job was logged after it was read"
+
+        def at_hour_1(ws):
+            ws.hour = 1
+            return [o.kind for o in jobs.offers(ws, "market", limit=10)].index("resupply")
+
+        with self.subTest(why="superseded by a later instance's hand-in"):
+            ws = copy.deepcopy(base)
+            pick = at_hour_1(ws)
+            got = self.same_actions("superseded by hour", ws, [
+                {"do": "offers", "place": "market", "limit": 10}, {"do": "complete", "pick": pick},
+                {"do": "complete", "offer": a0}, {"do": "fail", "offer": a0}])
+            self.assertIn("ok", got[1])
+            self.assertEqual(got[2]["error"], cannot.format("complete") + superseded)
+            self.assertEqual(got[3]["error"], cannot.format("fail") + superseded)
+        with self.subTest(why="superseded by a give-up logged right after the read"):
+            ws = copy.deepcopy(base)
+            pick = at_hour_1(ws)
+            got = self.same_actions("superseded by position", ws, [
+                {"do": "offers", "place": "market", "limit": 10}, {"do": "fail", "offer": a0},
+                {"do": "complete", "pick": pick}, {"do": "fail", "pick": pick}])
+            self.assertIn("ok", got[1])
+            self.assertEqual(got[2]["error"], cannot.format("complete") + superseded)
+            self.assertEqual(got[3]["error"], cannot.format("fail") + superseded)
+        with self.subTest(why="from a later hour"):
+            later = dict(a0, offered_hour=base.hour + 5)
+            got = self.same_actions("from later", copy.deepcopy(base), [{"do": "complete", "offer": later},
+                                                                        {"do": "fail", "offer": later}])
+            why = f"this offer was read at hour {base.hour + 5}, later than the world's hour {base.hour}"
+            self.assertEqual(got[0]["error"], cannot.format("complete") + why)
+            self.assertEqual(got[1]["error"], cannot.format("fail") + why)
+        with self.subTest(why="given up and inside its window"):
+            ws = copy.deepcopy(base)
+            jobs.fail(ws, jobs.Offer(**a0))
+            ws.hour = 1
+            again = dict(a0, offered_hour=1, read_at=len(ws.events))
+            got = self.same_actions("window", ws, [{"do": "offers", "place": "market", "limit": 10},
+                                                   {"do": "complete", "offer": again}, {"do": "fail", "offer": again}])
+            self.assertNotIn("resupply", [o["kind"] for o in got[0]["ok"]])
+            why = "this job was given up and its window has not ended"
+            self.assertEqual(got[1]["error"], cannot.format("complete") + why)
+            self.assertEqual(got[2]["error"], cannot.format("fail") + why)
 
     def test_manage_at_its_limits_and_a_long_defence(self):
         """Each manage action exactly at its limit and one past it; and a defence whose attack is due after the usual
@@ -670,6 +747,7 @@ class CppParityTests(unittest.TestCase):
         self.assertTrue(got[1]["ok"]["items"][0]["text"][0].isupper())
         self.assertIn("error", got[-1])                                             # textwrap: invalid width 0
         self.assertIn("error", got[-2])                                             # the placeholder cannot fit
+
 
 
 if __name__ == "__main__":

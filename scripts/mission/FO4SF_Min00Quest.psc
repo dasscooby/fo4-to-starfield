@@ -48,6 +48,11 @@ float Property CodsworthCheck = 5.0 Auto Const
 float Property EngageRadius = 60.0 Auto Const
 {The fight starts when the player comes this close (m) to a living raider, as FO4's DN092 StartCombat on its ambush.}
 
+float Property FindRadius = 20.0 Auto Const
+{...or, before the fight, comes this close (m) to Preston or activates him: the stage 10 objective ("Find the Last
+ Minutemen") is met. In game 28 Oct (new game run 3) the player walked to Preston's marker and activated him five times
+ at stage 10 with every raider 91 to 129 m away, past EngageRadius, so nothing started the fight. Chosen, not copied.}
+
 float Property TalkRadius = 3.0 Auto Const
 {Standing this close (m) to Preston counts as talking to him once the raiders are dead (no dialogue ported yet).}
 
@@ -57,6 +62,7 @@ int relocateFails = 0
 int codsworthFails = 0
 bool codsworthKept = False
 int applied = 0
+bool prestonFound = False
 
 Event OnQuestInit()
     if KeeperOnly
@@ -146,12 +152,25 @@ EndFunction
 
 Event ObjectReference.OnActivate(ObjectReference akSender, ObjectReference akActionRef)
     if akSender == Preston && akActionRef == Game.GetPlayer()
-        Trace("preston activated at stage " + GetStage())
-        if GetStage() == 30
+        int stage = GetStage()
+        Trace("preston activated at stage " + stage)
+        if stage < 20
+            FoundPreston("activated")                    ; the next check starts the fight
+        elseif stage == 30
             AdvanceTo(40)
         endif
     endif
 EndEvent
+
+Function FoundPreston(string how)
+{The player reached Preston before the fight (activated him, or came within FindRadius): the fight starts at the next
+ check, with every raider put into combat with the player. Logged once. A dead Preston is never found (his death is
+ the quest's failure path).}
+    if !prestonFound && !Preston.IsDead()
+        prestonFound = True
+        Trace("found preston " + how)
+    endif
+EndFunction
 
 Event OnTimer(int aiTimerID)
     if aiTimerID == 2
@@ -166,6 +185,11 @@ Event OnTimer(int aiTimerID)
         Relocate(player)
     endif
     int stage = GetStage()
+    float dp = player.GetDistance(Preston)
+    if stage < 20 && dp < FindRadius
+        FoundPreston("near d=" + dp)
+    endif
+    bool everyone = prestonFound || stage >= 20          ; once the fight is on, no raider stands by
     int dead = 0
     bool fighting = false
     float nearest = -1.0
@@ -181,8 +205,9 @@ Event OnTimer(int aiTimerID)
             endif
             if r.GetCombatState() != 0
                 fighting = true
-            elseif stage < 30 && d < EngageRadius && r.Is3DLoaded()
-                ; FO4's forced fight: a living raider near the player that is not fighting is put into combat
+            elseif stage < 30 && (everyone || d < EngageRadius) && r.Is3DLoaded()
+                ; FO4's forced fight: a living raider that is not fighting is put into combat, near the player or once
+                ; the fight is on (our raider never engages unprompted, npc_combat_c1)
                 r.StartCombat(player)
                 fighting = true
                 Trace("startcombat raider " + i + " d=" + d)
@@ -190,8 +215,7 @@ Event OnTimer(int aiTimerID)
         endif
         i += 1
     endwhile
-    float dp = player.GetDistance(Preston)
-    int target = NextStage(stage, dead, Raiders.Length, fighting, dp < TalkRadius)
+    int target = NextStage(stage, dead, Raiders.Length, fighting, dp < TalkRadius, prestonFound)
     ; every stage on the way is set in order, so each one's objectives and log line happen
     while stage < target && stage < 40
         if stage < 20
@@ -221,13 +245,14 @@ Event OnTimer(int aiTimerID)
     endif
 EndEvent
 
-int Function NextStage(int stage, int dead, int total, bool fighting, bool atPreston)
+int Function NextStage(int stage, int dead, int total, bool fighting, bool atPreston, bool found)
 {The stage the encounter has reached, whoever started the fight (scripts/mission/make_mission.py next_stage is the
  same rule, tested there): the fight counts as started when a raider fights or is dead, so a quest that starts or
- reloads mid-fight, or after the raiders died between two checks, still advances; all raiders dead is stage 30;
- standing at Preston after that is stage 40. Never goes back.}
+ reloads mid-fight, or after the raiders died between two checks, still advances, and when the player has found
+ Preston (FoundPreston), even before a raider's 3D is loaded; all raiders dead is stage 30; standing at Preston after
+ that is stage 40. Never goes back.}
     int s = stage
-    if s < 20 && (fighting || dead > 0)
+    if s < 20 && (fighting || dead > 0 || found)
         s = 20
     endif
     if s < 30 && total > 0 && dead == total

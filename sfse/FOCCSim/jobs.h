@@ -2,8 +2,8 @@
 // src/fo4sf/combined/jobs.py: the offers the holder of a place makes the player there (defend, escort, retake,
 // resupply, clear), each read from what the simulation is doing now, and what completing or giving one up changes.
 // complete() throws std::invalid_argument with Python's ValueError message when the offer is expired or moot, and so
-// does fail() for an offer that already has an outcome. Python stays the reference, and jobs.py's docstring has the
-// design and its placeholders.
+// does fail() for an offer that already has an outcome, was superseded, or was read at an hour the world has not
+// reached. Python stays the reference, and jobs.py's docstring has the design and its placeholders.
 //
 // An offer's first character is upper-cased as news::upper_first does it (Python's str.upper for the scripts it
 // covers). An offer starts with a display name only for resupply, and only a pack's display names can be non-ASCII.
@@ -25,6 +25,7 @@ struct Offer {                                  // jobs.Offer
     Int reward_tier = 1, offered_hour = 0, expires_hour = 0;
     std::string text;
     Object detail;                              // the kind's specifics, re-checked by valid()
+    Int read_at = 0;                            // ws.events.size() when the instance was read (jobs.Offer.read_at)
     Value to_value() const;                     // Offer.to_dict()
 };
 

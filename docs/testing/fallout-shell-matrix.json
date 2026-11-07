@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "kind": "non-executable-test-plan",
+  "issue": 664,
+  "source_baseline": "d07ba1461e529ea02d16160a339f889fb7fd02ab",
+  "live_owner": "Claude PC",
+  "native_results": "NOT_RUN by this preparation",
+  "global_rules": [
+    "No automatic installs, game control, profile edits or deletion",
+    "Keep required masters and assets; header dependencies do not describe runtime dependencies",
+    "Use disposable saves and explicit live releases; retain the old stages and evidence",
+    "One Fallout planet may contain several worldspaces and loaded regions"
+  ],
+  "steps": [
+    {"id": "S0", "name": "Recovery baseline", "depends_on": [], "tools": ["scripts/launcher.py snapshot", "scripts/launcher.py restore"], "acceptance": ["Fresh game-closed snapshot", "Dry-run plan has no conflicts", "Readable pinned recovery sources", "Recovery rehearsal before destructive trials"]},
+    {"id": "S1", "name": "Vanilla error control", "depends_on": ["S0"], "tools": ["scripts/game/baseline.py"], "acceptance": ["Plain New Game Papyrus log", "Exact original profile restored"]},
+    {"id": "S2", "name": "Fallout startup", "depends_on": ["S0", "S1"], "tools": ["scripts/newgame/make_newgame.py"], "acceptance": ["Vault 111 to Sanctuary", "HUD and controls", "Save and reload", "Only reviewed hold list claimed"]},
+    {"id": "S3", "name": "Own-planet reference test", "depends_on": ["S0"], "tools": ["scripts/planet/make_planet_probe.py", "scripts/planet/planet_probe_install.py"], "acceptance": ["Candidate checked against current Data", "Each plan arrival fully recorded", "T1-T6 and vanilla merge controls read", "Missing controls explicitly open", "Original setup restored"]},
+    {"id": "S4", "name": "Content and map restrictions", "depends_on": ["S1", "S2", "S3"], "tools": [], "acceptance": ["Separate reviewed candidate per change", "Retained systems smoke-tested", "Selective planet hiding remains unproved until tested"]},
+    {"id": "S5", "name": "Commonwealth host migration", "depends_on": ["S2", "S3"], "tools": [], "acceptance": ["Host and placement frame", "Persistent actor and marker resolution", "Interior return trips", "Save and reload", "Identity continuity or explicit new-save boundary", "Paired recovery"]}
+  ],
+  "prepared_candidate": {
+    "system": "sol",
+    "offline_build_and_check": "PASS on source_baseline; private exact inputs in the desktop checkpoint",
+    "plugins": ["FO4SFPlanet.esm", "FO4SFPlanetProbe.esm", "FO4SFPlanetProbe_Reg.esm", "FO4SFMergeProbe.esm"],
+    "planned_arrival_labels": ["lc172", "probe"],
+    "missing_full_ladder_controls": ["temp_jemison", "new_atlantis"],
+    "full_four_arrival_ladder": "HOLD",
+    "native_acceptance": "NOT_RUN",
+    "installed": false
+  }
+}

@@ -3,7 +3,10 @@
 // scripts/combined_probes/*.psc; the stage: scripts/combined_probes/make_combined_probe.py).
 //
 // FO4SFCombinedProbe.esm (masters Starfield.esm + the installed FO4TerrainCore.esm; with --p3-cells also FO4Port.esm):
-//   0x804  QUST FOCC_ProbeQuest       start game enabled, no stages, script FOCC_ProbeQuest with every property below
+//   0x804  QUST FOCC_ProbeQuest       start game enabled, no stages, script FOCC_ProbeQuest with every property below;
+//                                     alias 0 P9Walker (optional, allow reserved, empty) with Starfield.esm's
+//                                     DefaultTraveltoLinkedRef 212FDB as its package: P9's package driver
+//                                     (FOCC_P9Drive.Travel forces the actor in after setting its linked ref)
 //   0x805  KYWD FOCC_Holder           the per-location datum key (P2, P3, P6)
 //   0x806  LCTN FOCC_P2_Loc           parent = the core's FO4Core_CommonwealthLocation (resolved by EditorID: its id
 //                                     changes with every core build, so the plugin is rebuilt with the core)
@@ -78,6 +81,11 @@ static class CombinedProbe
     public const int P5Count = 50, P8Stages = 3, P8ChildrenPerStage = 4;
     public const uint XMarker = 0x3B, LocTypeOverlay = 0x2CA99D;                         // Starfield.esm (MergeProbe, TerrainOverlays)
     public const string DefaultNpc = "Starfield.esm:2B211C";                              // EncCitizen01Template (docs/owner/in-game-test-sheet.md)
+    // P9's package driver: Starfield.esm's DefaultTraveltoLinkedRef (Travel template 2CB0, location "near linked ref"
+    // with no keyword, no conditions; read from Starfield.esm 1.16.244 on the PC, 1 Nov 2026), on alias 0 of the quest
+    public const uint TravelToLinkedRef = 0x212FDB, WalkerAliasId = 0;
+    public const string TravelToLinkedRefEdid = "DefaultTraveltoLinkedRef", WalkerAlias = "P9Walker";
+    public const AQuestAlias.Flag WalkerFlags = AQuestAlias.Flag.Optional | AQuestAlias.Flag.AllowReserved;
     public static readonly string[] P3Cells = { "FO4Port_RedRocket01", "FO4Port_SuperDuperMart01" };
     public static readonly uint[] P3CellLocations = { P3NoParentId, P3ChainedId };
     static readonly ModKey SfEsm = ModKey.FromFileName("Starfield.esm");
@@ -187,6 +195,11 @@ static class CombinedProbe
         else warnings.Add($"{what} {key} names a plugin that is not a master here: written as given (the game must load it)");
     }
 
+    /// Why Starfield.esm's 212FDB is not P9's package (DefaultTraveltoLinkedRef), or null when it is.
+    static string? TravelProblem(Masters m) =>
+        m.Cache.TryResolve<IPackageGetter>(new FormKey(SfEsm, TravelToLinkedRef), out var p) && p.EditorID == TravelToLinkedRefEdid
+            ? null : $"Starfield.esm {TravelToLinkedRef:X6} is not the package {TravelToLinkedRefEdid} (P9's package driver)";
+
     // ---------------------------------------------------------------- build
 
     public static int Build(Options o, string outDir)
@@ -204,6 +217,12 @@ static class CombinedProbe
         var coreLoc = FindLocation(m.Core, o.Location);
         CheckBase<INpcGetter>(m, o.Npc, "--npc", warnings);
         CheckBase<IStaticGetter>(m, o.Stat, "--stat", warnings);
+        var travelProblem = TravelProblem(m);
+        if (travelProblem is not null)
+        {
+            if (m.Cache.TryResolve<IStarfieldMajorRecordGetter>(new FormKey(SfEsm, TravelToLinkedRef), out _)) throw new Refusal(travelProblem);
+            warnings.Add(travelProblem + ": not in the Starfield.esm read here, written as given");
+        }
         if (o.Lvln)
         {
             CheckBase<INpcGetter>(m, o.LvlnA, "--lvln-a", warnings);
@@ -368,6 +387,12 @@ static class CombinedProbe
             Script = new ScriptEntry { Name = "", Flags = ScriptEntry.Flag.Local },
         };
         quest.VirtualMachineAdapter.Scripts.Add(script);
+        // P9's package driver: an empty alias the script fills; its package outranks the actor's own (UNVERIFIED in game)
+        (quest.Aliases ??= new ExtendedList<AQuestAlias>()).Add(new QuestReferenceAlias
+        {
+            ID = WalkerAliasId, Name = WalkerAlias, Flags = WalkerFlags,
+            PackageData = { new FormLink<IPackageGetter>(new FormKey(SfEsm, TravelToLinkedRef)) },
+        });
         mod.Quests.Add(quest);
         mod.ModHeader.Stats.NextFormID = NextId;
 
@@ -777,6 +802,21 @@ static class CombinedProbe
                 PropList("P8Parents", Enumerable.Range(0, P8Stages).Select(k => K(P8Parent0Id + (uint)k)));
                 PropList("P8Children", Enumerable.Range(0, P8Stages * P8ChildrenPerStage).Select(i => K(P8Child0Id + (uint)i)));
                 Prop("P9Dest", K(P9DestId)); Prop("P10Event", K(P10EventId)); Prop("P10Quest", K(P10QuestId));
+                // P9's package driver: alias 0, empty, optional and allow reserved, with only DefaultTraveltoLinkedRef
+                var aliases = (q.Aliases ?? new List<IAQuestAliasGetter>()).ToList();
+                var walker = aliases.OfType<IQuestReferenceAliasGetter>().FirstOrDefault(a => a.ID == WalkerAliasId);
+                Console.WriteLine($"  aliases: " + string.Join(", ", aliases.Select(a => a is IQuestReferenceAliasGetter r
+                    ? $"{r.ID} {r.Name} flags {r.Flags} packages [{string.Join(",", r.PackageData.Select(x => x.FormKey.ToString()))}]"
+                    : a.GetType().Name)));
+                var travelKey = new FormKey(SfEsm, TravelToLinkedRef);
+                Need(aliases.Count == 1 && walker is not null && walker.Name == WalkerAlias && walker.Flags == WalkerFlags
+                     && walker.ForcedReference.IsNull && walker.PackageData.Select(x => x.FormKey).SequenceEqual(new[] { travelKey }),
+                     $"alias {WalkerAliasId} {WalkerAlias} (empty, optional, allow reserved, only {TravelToLinkedRefEdid} as its package) missing or different");
+                if (TravelProblem(m) is string tp)
+                {
+                    if (m.Cache.TryResolve<IStarfieldMajorRecordGetter>(travelKey, out _)) problems.Add(tp);
+                    else warnings.Add(tp + ": not in the Starfield.esm read here");
+                }
                 var variant = props.TryGetValue("Variant", out var vp) && vp is IScriptStringPropertyGetter vs ? vs.Data : null;
                 Need(o.P3Cells ? variant == "p3cells" : variant is null, $"property Variant is {variant ?? "unset"}; the build is {(o.P3Cells ? "p3cells" : "default")}");
             }

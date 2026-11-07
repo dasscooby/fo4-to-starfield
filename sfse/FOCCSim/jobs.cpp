@@ -135,10 +135,12 @@ std::map<std::string, std::string> clear_targets(const WorldState& ws, const std
     return out;
 }
 
+Int read_at(const WorldState& ws) { return static_cast<Int>(ws.events.size()); }   // jobs._read_at
+
 Offer make(std::string id, const char* kind, const std::string& giver, const std::string& place, std::string target,
-           Int tier, Int offered, Int expires, std::string words, Object detail) {
+           Int tier, Int offered, Int expires, std::string words, Object detail, Int at) {
     return Offer{std::move(id), kind, giver, place, std::move(target), tier, offered, expires, std::move(words),
-                 std::move(detail)};
+                 std::move(detail), at};
 }
 
 void defend(const WorldState& ws, const std::string& giver, const std::string& place, const news::Names* names,
@@ -152,7 +154,7 @@ void defend(const WorldState& ws, const std::string& giver, const std::string& p
                                                    {"due", news::stamp(q.eta)}});
         out.push_back(make("defend:" + qid, "defend", giver, place, *q.goal, tier_number(q.size, DEFEND_SIZE_PER_TIER),
                            ws.hour, q.eta, words, {{"squad", Value::string(qid)},
-                                                   {"attacker", Value::string(q.faction)}}));
+                                                   {"attacker", Value::string(q.faction)}}, read_at(ws)));
     }
 }
 
@@ -166,7 +168,7 @@ void escort(const WorldState& ws, const std::string& giver, const std::string& p
                                                    {"cargo", news::cargo(q.cargo)}});
         out.push_back(make("escort:" + qid, "escort", giver, place, q.goal.value(),
                            tier_number(total, ESCORT_GOODS_PER_TIER), ws.hour, q.eta, words,
-                           {{"squad", Value::string(qid)}, {"cargo", counts_value(q.cargo)}}));
+                           {{"squad", Value::string(qid)}, {"cargo", counts_value(q.cargo)}}, read_at(ws)));
     }
 }
 
@@ -182,7 +184,7 @@ void retake(const WorldState& ws, const std::string& giver, const std::string& p
         std::string words = text("retake", names, {{"giver", giver}, {"target", target}, {"holder", pl.holder}});
         out.push_back(make("retake:" + giver + ":" + target + ":" + std::to_string(taken) + ":" + std::to_string(seq),
                            "retake", giver, place, target, RETAKE_TIER, ws.hour, expires, words,
-                           {{"holder", opt(pl.holder)}, {"taken_hour", Value::integer(taken)}}));
+                           {{"holder", opt(pl.holder)}, {"taken_hour", Value::integer(taken)}}, read_at(ws)));
     }
 }
 
@@ -197,7 +199,8 @@ void resupply(const WorldState& ws, const std::string& giver, const std::string&
                                      {{"amount", amount}});
             out.push_back(make("resupply:" + giver + ":" + sid + ":" + good, "resupply", giver, place, sid,
                                tier_number(amount, RESUPPLY_GOODS_PER_TIER), ws.hour, ws.hour + RESUPPLY_OFFER_HOURS,
-                               words, {{"good", Value::string(good)}, {"amount", Value::integer(amount)}}));
+                               words, {{"good", Value::string(good)}, {"amount", Value::integer(amount)}},
+                               read_at(ws)));
         }
     }
 }
@@ -209,27 +212,40 @@ void clear(const WorldState& ws, const std::string& giver, const std::string& pl
         std::string words = text("clear", names, {{"giver", giver}, {"target", target}, {"holder", holder},
                                                   {"near", near}});
         out.push_back(make(clear_id(ws, giver, target), "clear", giver, place, target, CLEAR_TIER, ws.hour,
-                           ws.hour + CLEAR_OFFER_HOURS, words, {{"holder", opt(holder)}, {"near", Value::string(near)}}));
+                           ws.hour + CLEAR_OFFER_HOURS, words, {{"holder", opt(holder)}, {"near", Value::string(near)}},
+                           read_at(ws)));
     }
 }
 
-// jobs._outcome: a job_done or job_failed event already names this offer (any for a one-time id; for a repeating id,
-// the same offer instance, or a give-up still inside its window)
-bool outcome(const WorldState& ws, const Offer& offer) {
-    for (const Value& v : ws.events) {
-        const Object& e = *v.o;
+// jobs._outcome: why this job's outcome is already decided, by log position: any job_done or job_failed event for a
+// one-time id, or for a repeating id one carrying this instance's offered hour; another instance's outcome logged at
+// or after read_at or carrying a later offered hour (superseded); or a give-up still inside its window
+std::optional<std::string> outcome(const WorldState& ws, const Offer& offer) {
+    for (std::size_t i = 0; i < ws.events.size(); ++i) {
+        const Object& e = *ws.events[i].o;
         const std::string& kind = e.at("kind").s;
         const std::string* id = str_field(e, "offer");
         if ((kind != "job_done" && kind != "job_failed") || !id || *id != offer.id) continue;
         auto offered = e.find("offered");
+        bool has_offered = offered != e.end() && offered->second.is_int();
         auto until = e.find("until");
         Int until_hour = until != e.end() && until->second.is_int() ? until->second.i : -1;
-        if (one_time(offer.kind) || (offered != e.end() && offered->second.is_int() &&
-                                     offered->second.i == offer.offered_hour) ||
-            (kind == "job_failed" && ws.hour < until_hour))
-            return true;
+        if (one_time(offer.kind) || (has_offered && offered->second.i == offer.offered_hour))
+            return "this offer was already handed in or given up";
+        Int offered_hour = has_offered ? offered->second.i : -1;               // e.get("offered", -1)
+        if (static_cast<Int>(i) >= offer.read_at || offered_hour > offer.offered_hour)
+            return "this offer was superseded: an outcome for the job was logged after it was read";
+        if (kind == "job_failed" && ws.hour < until_hour) return "this job was given up and its window has not ended";
     }
-    return false;
+    return std::nullopt;
+}
+
+// jobs._from_later: an instance read at an hour this world has not reached (the game went back to an earlier save)
+std::optional<std::string> from_later(const WorldState& ws, const Offer& offer) {
+    if (offer.offered_hour > ws.hour)
+        return "this offer was read at hour " + std::to_string(offer.offered_hour) + ", later than the world's hour " +
+               std::to_string(ws.hour);
+    return std::nullopt;
 }
 
 }  // namespace
@@ -238,8 +254,8 @@ Value Offer::to_value() const {
     return Value::object({{"detail", Value::object(detail)}, {"expires_hour", Value::integer(expires_hour)},
                           {"giver", Value::string(giver)}, {"id", Value::string(id)}, {"kind", Value::string(kind)},
                           {"offered_hour", Value::integer(offered_hour)}, {"place", Value::string(place)},
-                          {"reward_tier", Value::integer(reward_tier)}, {"target", Value::string(target)},
-                          {"text", Value::string(text)}});
+                          {"read_at", Value::integer(read_at)}, {"reward_tier", Value::integer(reward_tier)},
+                          {"target", Value::string(target)}, {"text", Value::string(text)}});
 }
 
 std::vector<Offer> offers(const WorldState& ws, const std::string& place, Int limit, const news::Names* names) {
@@ -253,7 +269,8 @@ std::vector<Offer> offers(const WorldState& ws, const std::string& place, Int li
     retake(ws, giver, place, names, found);
     resupply(ws, giver, place, names, found);
     clear(ws, giver, place, names, found);
-    found.erase(std::remove_if(found.begin(), found.end(), [&](const Offer& o) { return outcome(ws, o); }),
+    found.erase(std::remove_if(found.begin(), found.end(),
+                               [&](const Offer& o) { return outcome(ws, o).has_value(); }),
                 found.end());
     std::stable_sort(found.begin(), found.end(), [](const Offer& a, const Offer& b) {
         return std::tie(a.expires_hour, a.kind, a.id) < std::tie(b.expires_hour, b.kind, b.id);
@@ -270,7 +287,9 @@ std::optional<std::string> valid(const WorldState& ws, const Offer& offer) {
         return "unknown offer kind " + manage::py_repr(offer.kind);
     if (!ws.factions.count(offer.giver) || !ws.places.count(offer.target)) return "giver or target no longer exists";
     if (ws.hour >= offer.expires_hour) return "offer expired at hour " + std::to_string(offer.expires_hour);
-    if (outcome(ws, offer)) return "this offer was already handed in or given up";
+    std::optional<std::string> why = outcome(ws, offer);                 // outcome(...) or from_later(...)
+    if (!why) why = from_later(ws, offer);
+    if (why) return why;
     const Place& pl = ws.places.at(offer.target);
     const Object& d = offer.detail;
     auto squad = [&]() -> const Squad* {
@@ -358,8 +377,9 @@ Value complete(WorldState& ws, const Offer& offer) {
 }
 
 Int fail(WorldState& ws, const Offer& offer) {
-    if (outcome(ws, offer))
-        throw std::invalid_argument("cannot fail " + offer.id + ": this offer was already handed in or given up");
+    std::optional<std::string> why = outcome(ws, offer);                 // outcome(...) or from_later(...)
+    if (!why) why = from_later(ws, offer);
+    if (why) throw std::invalid_argument("cannot fail " + offer.id + ": " + *why);
     Int infamy = fail_infamy(offer.kind);
     if (ws.reputation.count(offer.giver) && infamy) rep_add(ws, offer.giver, 0, infamy);
     if (ws.places.count(offer.place))

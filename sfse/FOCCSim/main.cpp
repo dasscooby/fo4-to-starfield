@@ -110,7 +110,7 @@ Value run_action(foccsim::WorldState& ws, const Value& a, std::vector<foccsim::j
         if (const Value* v = field(a, "offer")) {                      // an offer written out earlier, e.g. a stale one
             given = fj::Offer{text(*v, "id"), text(*v, "kind"), text(*v, "giver"), text(*v, "place"), text(*v, "target"),
                               number(*v, "reward_tier", 1), number(*v, "offered_hour", 0), number(*v, "expires_hour", 0),
-                              text(*v, "text"), *field(*v, "detail")->o};
+                              text(*v, "text"), *field(*v, "detail")->o, number(*v, "read_at", 0)};
             o = &given;
         } else {
             Int pick = number(a, "pick", 0);
