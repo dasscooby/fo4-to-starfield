@@ -490,6 +490,29 @@ cases.
 - Single-fire staging: `present.plan` lists everything in radius within the budget; there is no ordered chain that
   stages at most one encounter on arrival with exclusions (indoors, in a scene, a live fight).
 
+**Encounter conservation (design contract, 7 Nov 2026; not built, nothing run).** The risk register's off-screen
+factions row (`docs/research/framework/travel-and-runtime-risks-oct25.md`) names two failures: a load spawns a
+second copy of a squad, and an actor's death never reaches the simulation. FO4's Kill Actor story event is gone in
+Starfield, so deaths come from our own `OnDeath` scripts (`combined-core-notes/engine-feasibility.md`). Today a
+`Squad` has `size` and no per-member state, and the tick never sees a death (`sim.tick`). The contract a port step 6
+encounter must keep:
+1. **One live copy.** Every materialized actor carries a key: squad id, member index (0 to size - 1) and the
+   squad's materialization generation, which goes up by one each time L3 materializes it. L3 spawns a key only if
+   no live actor holds that squad id and member index.
+2. **A death counts once.** A tagged actor's `OnDeath` sends one event (key, game hour, killer's faction if known).
+   L2 applies it once per key: `size` drops by one and the event is logged. A key already applied is ignored, so a
+   repeated or replayed event changes nothing. A squad at size 0 is removed and that is logged.
+3. **Dissolve writes back survivors only.** On dissolve L2 takes `size` = the live tagged members. Dissolving never
+   raises `size`. What happens to a caravan's cargo when members die is open (a design choice, not settled here).
+4. **Saves carry the live encounter.** The sidecar records, per materialized squad, its generation and the live
+   member keys at save time (the mid-encounter state the list above says L2 lacks). On load, actors the save
+   restored are adopted by key, no key is spawned twice, and a tagged actor whose key the sidecar doesn't list is
+   removed. Loading an older save restores that save's `size` along with its actors.
+
+The proof is probe P12 in the [probes runbook](spikes/combined-core-probes.md): the leave, return and save case the
+risk register names. It needs the P1 sidecar and the tagged-death path, so it runs with the 20-place slice, not
+before. Save identity beyond the file name and in-game tick timing are a separate card.
+
 One thing the modules have that SSaW does not: place-based protection of story places (`Place.story_lock`,
 `sim._story_shielded`), which the review found SSaW approximates by the player's own state.
 
