@@ -663,6 +663,32 @@ patch.md: no cl, cmake, Visual Studio), so the first step is a toolchain check a
 Visual Studio Build Tools 2022 with the C++ workload (several GB). The SFSE loader, dll and plugin folder names are
 what the Nexus archive ships and are unverified here; the first card confirms them.
 
+**What P1 does not settle: save identity and the in-game tick (card P1b, 6 Nov 2026; nothing written or run).** P1
+keys a sidecar to the save name (`sidecar.sidecar_name`: safe name, hash of the name, `.focc`). The risk register's
+living-world persistence row (`docs/research/framework/travel-and-runtime-risks-oct25.md`) names the cases a name alone
+can't tell apart: two characters, same-named saves, an overwritten quicksave, a backward load, and missing or corrupt
+state, with no silent reset. The 6-hour tick is verified offline only (`sim.TICK_HOURS`); P5's 2.42 ms per place is a
+latency number, not proof that the game fires one tick per 6 game hours. Port step 6 assumes both. The contract:
+1. **Identity in the envelope.** Each sidecar records, besides the save name, a character id (fixed when the world
+   state is first created for that character), a save generation that rises by one on every save, the world state's
+   game hour, and a content-set id (a hash of the pack and the plugin list the state was built against). On load, a
+   sidecar is used only if the character id matches the loaded character and the game hour matches the save's own
+   game time (within one tick). Otherwise the load is refused loudly: a logged mismatch and no reset to a fresh world.
+2. **Backward and overwritten saves.** Loading an older save uses that save's sidecar, with its lower generation; the
+   newer state is not carried over. An overwritten quicksave replaces its sidecar in the same save message, so a
+   stale file can't be read for the new save. A missing or corrupt sidecar is the same loud refusal as 1.
+3. **One tick per 6 game hours.** The plugin compares the game hour with the state's hour and runs the ticks owed,
+   never more than one per 6 hours of game time and never ahead of it. How ticks owed after a long sleep, wait or
+   fast travel are run (all of them spread over frames, collapsed into one, or capped) is an **owner decision,
+   pending** (FAL-10 card 88e4cdb5, item 4); this card doesn't settle it.
+
+Legs for P1b, once P1 passes and the bridge exists (to write; the native run needs a fresh owner release, on the PC):
+two characters with a save of the same name each; save, play 12 game hours, save again, load the first (backward);
+overwrite a quicksave; remove one sidecar and corrupt another; wait 24 game hours and count the ticks the log shows
+(4 expected, by the rule chosen for item 3). PASS: every load uses the matching sidecar or refuses loudly; the
+generations and game hours read back match; the tick count matches the rule. FAIL: a load that uses another
+character's or a newer sidecar, a silent reset, or ticks running ahead of game time.
+
 **Job focc-P1-0 (toolchain, read-only). Game: CLOSED.**
 
 ```powershell
