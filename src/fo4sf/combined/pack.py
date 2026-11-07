@@ -30,8 +30,10 @@ _FIELDS = {
 
 
 def _is_id(v) -> bool:
-    """A reference to a place or faction: JSON can carry any value, but only a non-empty string can be a key."""
-    return isinstance(v, str) and v != ""
+    """A reference to a place or faction: JSON can carry any value, but only a non-empty string can be a key. ASCII
+    only: the in-game port walks ids in byte order, which matches Python's sort only for ASCII
+    (docs/combined-core-cpp-port.md section 3, "Order")."""
+    return isinstance(v, str) and v != "" and v.isascii()
 
 
 def _is_int(v) -> bool:

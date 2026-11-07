@@ -108,8 +108,20 @@ def new_holder(e: dict) -> str | None:
     return e["faction"] if e["kind"] == "place_taken" else None
 
 
+RNG_SEED_LIMIT = 2 ** 64   # the per-tick seed must fit in 64 unsigned bits, as the C++ port holds it
+
+
+def rng_seed(seed: int, hour: int) -> int:
+    """The per-tick RNG seed, refused outside [0, 2**64): Python would take any integer (its absolute value), the
+    in-game port only an unsigned 64-bit one (docs/combined-core-cpp-port.md section 3, "Seed range")."""
+    n = seed * 1_000_003 + hour
+    if not 0 <= n < RNG_SEED_LIMIT:
+        raise ValueError(f"seed {seed} at hour {hour} gives the RNG seed {n}, outside 0 to 2**64 - 1")
+    return n
+
+
 def _rng(ws: WorldState) -> random.Random:
-    return random.Random(ws.seed * 1_000_003 + ws.hour)
+    return random.Random(rng_seed(ws.seed, ws.hour))
 
 
 def _event(ws: WorldState, kind: str, place: str, **info) -> None:

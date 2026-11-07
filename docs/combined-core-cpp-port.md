@@ -1,6 +1,12 @@
 # Combined core: porting the simulation to C++ (plan, 28 October 2026)
 
-This is a plan. Nothing in it has run in game. It carries out the 28 October decision in `docs/ai/decisions.md`:
+This is a plan. Nothing in it has run in game. **Status, 1 November 2026 (Claude-cloud-2): steps 1 and 2 are done
+offline.**
+- Step 1: the Python guards for the seed range and ASCII ids; the event log measured over one game year (section 5).
+- Step 2 (C1): `sfse/FOCCSim/` is the portable core. `tests/test_combined_cpp_parity.py` shows it byte-identical to
+  Python after every tick for every world below.
+
+C2 to C5 and everything on the PC are still to do. It carries out the 28 October decision in `docs/ai/decisions.md`:
 the in-game sim is a C++ port inside our SFSE plugin, and the Python model in `src/fo4sf/combined/` stays the
 reference. The owner's order (28 October): the GAMMA core comes first, with probes P1 to P10, then the seed rerun
 with all DLC, then a 20-place slice in game. The rerun is done ("Real pack, all DLC" in `docs/combined-core.md`).
@@ -203,9 +209,32 @@ after the VM's own `BindEverythingToScript` is callable from `FOCC.pex`.
 Each step is one PR, with green CI and an independent review.
 
 1. **Offline (Python):** the seed-range and ASCII-id checks; the event-log growth over one game year on a
-   synthetic Commonwealth-scale world.
+   synthetic Commonwealth-scale world. **Done.**
+   - `sim.rng_seed` refuses a per-tick seed outside `[0, 2**64)`, and so does `WorldState.from_json`.
+   - `pack._is_id` and `model._check_state` refuse non-ASCII ids.
+   - Event-log growth: the synthetic Commonwealth-scale draft (234 places, 38 settlements, 7 factions) was measured
+     over 365 game days for seeds 0, 1 and 2.
+
+   | Day | Events | Event JSON | Whole state |
+   |---|---|---|---|
+   | 30 | 1,818 to 1,899 | 0.27 to 0.29 MB | 0.35 to 0.36 MB |
+   | 90 | 3,190 to 3,305 | 0.46 to 0.48 MB | 0.54 to 0.56 MB |
+   | 180 | 5,241 to 5,359 | 0.74 to 0.77 MB | 0.82 to 0.84 MB |
+   | 365 | 9,124 to 9,235 | 1.27 to 1.29 MB | 1.35 to 1.36 MB |
+
+   The state starts at 0.075 MB. So the sidecar holds about 1.3 MB after a game year, almost all of it the event log.
+   That is the number the trimming indexes in section 3 would cut, and that the sidecar's save-time cost should be
+   measured against (P1). Real-pack numbers come from the PC.
 2. **Offline, C1:** a portable core in `sfse/FOCCSim/`, with no Windows or SFSE code. It holds the generator, the
-   state with its JSON reader and writer, and the tick. Plus the parity harness and its unittest.
+   state with its JSON reader and writer, and the tick. Plus the parity harness and its unittest. **Done** (README
+   there).
+   - Byte-identical to Python after every tick (`FO4SF_PARITY_FULL=1`):
+     - the fixture world for seeds 0 to 9 over 90 days, with raid pressure low and high, story mode, and scripted
+       help, defend and trade;
+     - the Commonwealth-scale draft for seeds 0 to 9 over 90 days.
+   - The CI default runs a lighter set, about 19 s.
+   - The generator was also checked on its own against Python for seeds 0, 1, 2^32 - 1, 2^32 and 2^64 - 1.
+   - Not built with cl.exe yet.
 3. **Offline, C2 to C4:** each step with its parity tests.
 4. **PC:** probes P2 to P10, then P1 (restaged from main and queued on 28 Oct).
 5. **PC:** bridge spike B0 on stack A (the owner's call, 28 October): B0-1 with the kit alone, then the Address

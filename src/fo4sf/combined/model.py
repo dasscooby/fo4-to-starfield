@@ -134,6 +134,9 @@ class WorldState:
         for k in ("seed", "hour", "next_id"):           # (Codex review of #431)
             if not isinstance(d.get(k), int) or isinstance(d.get(k), bool):
                 raise ValueError(f"world state {k} must be an integer, not {d.get(k)!r}")
+        if d["seed"] < 0 or d["hour"] < 0 or d["seed"] * 1_000_003 + d["hour"] >= 2 ** 64:
+            raise ValueError(f"world state seed {d['seed']} and hour {d['hour']} are outside the RNG's range "
+                             "(seed * 1000003 + hour must fit in 64 unsigned bits; sim.rng_seed)")
         ws = cls(seed=d["seed"], hour=d["hour"], next_id=d["next_id"])
         ws.places = {k: Place(**v) for k, v in d["places"].items()}
         ws.settlements = {k: Settlement(**v) for k, v in d["settlements"].items()}
@@ -180,6 +183,8 @@ def _check_state(ws: "WorldState") -> None:
     of #431)."""
     for table in ("places", "settlements", "factions", "squads", "reputation"):
         for k, rec in getattr(ws, table).items():
+            if not k.isascii():                   # the in-game port orders ids by byte (pack._is_id)
+                raise ValueError(f"world state {table} id {k!r} must be ASCII")
             _check_record(f"{table}[{k!r}]", rec)
     for region, layer in ws.regional_reputation.items():
         for k, rec in layer.items():
