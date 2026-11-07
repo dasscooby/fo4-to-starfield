@@ -25,6 +25,7 @@
 #include "foccsim.h"
 #include "jobs.h"
 #include "manage.h"
+#include "news.h"
 #include "present.h"
 
 namespace fa = foccsim::adapter;
@@ -69,8 +70,10 @@ foccsim::Counts counts(const Value& a, const char* k) {
     return out;
 }
 // One scripted action, as the test's run() does it in Python: the player hooks (help, defend, trade), the settlement
-// actions of manage (assign, beds, priority, send, status, threats) and the radiant jobs (offers, then complete or fail
-// one of the last offers by its position, where a position past the end does nothing, or an offer given in full).
+// actions of manage (assign, beds, priority, send, status, threats), the radiant jobs (offers, then complete or fail
+// one of the last offers by its position, where a position past the end does nothing, or an offer given in full), the
+// news at a place (its items and terminal page), and textwrap and the capital letter on their own (wrap, shorten,
+// upper) for the fuzz test.
 Value run_action(foccsim::WorldState& ws, const Value& a, std::vector<foccsim::jobs::Offer>& last) {
     namespace fm = foccsim::manage;
     namespace fj = foccsim::jobs;
@@ -116,6 +119,27 @@ Value run_action(foccsim::WorldState& ws, const Value& a, std::vector<foccsim::j
         }
         return what == "complete" ? fj::complete(ws, *o) : Value::integer(fj::fail(ws, *o));
     }
+    if (what == "news") {
+        foccsim::news::Names names;
+        if (const Value* n = field(a, "names"))
+            for (const auto& kv : *n->o) names[kv.first] = kv.second.s;
+        const foccsim::news::Names* np = field(a, "names") ? &names : nullptr;
+        std::string place = text(a, "place");
+        Int since = number(a, "since", 0), limit = number(a, "limit", foccsim::news::HEADLINE_LIMIT);
+        return Value::object({{"items", foccsim::news::items(ws, place, since, limit, np)},
+                              {"page", Value::string(foccsim::news::terminal_page(
+                                           ws, place, since, limit, number(a, "width", foccsim::news::TERMINAL_WIDTH),
+                                           np))}});
+    }
+    if (what == "wrap") {                                              // textwrap itself, for the fuzz test
+        foccsim::Array lines;
+        for (const std::string& l : foccsim::news::wrap(text(a, "text"), number(a, "width", 70), text(a, "indent")))
+            lines.push_back(Value::string(l));
+        return Value::array(std::move(lines));
+    }
+    if (what == "shorten")
+        return Value::string(foccsim::news::shorten(text(a, "text"), number(a, "width", 70), text(a, "placeholder")));
+    if (what == "upper") return Value::string(foccsim::news::upper_first(text(a, "text")));
     throw std::runtime_error("unknown action " + what);
 }
 

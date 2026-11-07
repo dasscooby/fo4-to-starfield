@@ -1,7 +1,7 @@
 # Combined core: porting the simulation to C++ (plan, 28 October 2026)
 
-This is a plan. Nothing in it has run in game. **Status, 1 November 2026 (Claude-cloud-2): steps 1 and 2 and C2
-to C4 are done offline.**
+This is a plan. Nothing in it has run in game. **Status, 1 November 2026 (Claude-cloud-2): steps 1 to 3 (C1 to
+C5) are done offline.**
 - Step 1: the Python guards for the seed range and ASCII ids; the event log measured over one game year (section 5).
 - Step 2 (C1): `sfse/FOCCSim/` is the portable core. `tests/test_combined_cpp_parity.py` shows it byte-identical to
   Python after every tick for every world below.
@@ -10,8 +10,9 @@ to C4 are done offline.**
 - C3: `sfse/FOCCSim/present.cpp` gives the same plans and diffs as `present.py`, for a player walking those worlds.
 - C4: `sfse/FOCCSim/manage.cpp` and `jobs.cpp` give the same results, refusals and states as `manage.py` and
   `jobs.py`, for a scripted player on those worlds.
+- C5: `sfse/FOCCSim/news.cpp` gives the same headlines and terminal pages as `news.py`, textwrap included.
 
-C5 and everything on the PC are still to do. It carries out the 28 October decision in `docs/ai/decisions.md`:
+Everything on the PC is still to do: the MSVC build and parity run, then steps 4 to 7. It carries out the 28 October decision in `docs/ai/decisions.md`:
 the in-game sim is a C++ port inside our SFSE plugin, and the Python model in `src/fo4sf/combined/` stays the
 reference. The owner's order (28 October): the GAMMA core comes first, with probes P1 to P10, then the seed rerun
 with all DLC, then a 20-place slice in game. The rerun is done ("Real pack, all DLC" in `docs/combined-core.md`).
@@ -240,7 +241,7 @@ Each step is one PR, with green CI and an independent review.
    - The CI default runs a lighter set, about 19 s.
    - The generator was also checked on its own against Python for seeds 0, 1, 2^32 - 1, 2^32 and 2^64 - 1.
    - Not built with cl.exe yet.
-3. **Offline, C2 to C4:** each step with its parity tests.
+3. **Offline, C2 to C5:** each step with its parity tests.
    - C2, **done**: `adapter.h` and `adapter.cpp`. The harness compares the record plan and game view at the start,
      then each tick's writes, after every tick of every world in step 2, so it also proves the game view after
      every tick. Other checks: ids with other characters and one at the 64-character limit, a second prefix, every
@@ -259,7 +260,12 @@ Each step is one PR, with green CI and an independent review.
        `lost_places`, `neighbours`, `rep_add`, `floordiv`) are now public in `foccsim.h`.
      - `player_traded` throws `std::invalid_argument` for an unknown good, as Python raises ValueError.
      - The harness's actions moved from `foccsim::apply_action` to `main.cpp`.
-     - Known difference: an offer's first letter is capitalised for ASCII only.
+   - C5, **done** (the plan put it later, but it is offline work): `news.h/.cpp`, with ports of `textwrap.wrap`,
+     `textwrap.shorten` and a first letter's `str.upper`. The scripted player reads the news each day, so the
+     headlines and pages are compared on every world. A fuzz test compares the textwrap port with Python's on
+     3,000 random texts.
+     - Known differences, both outside the common scripts: textwrap's idea of a letter (for hyphen breaks) and a
+       first letter's capital. The details are in `sfse/FOCCSim/README.md`.
 4. **PC:** probes P2 to P10, then P1 (restaged from main and queued on 28 Oct).
 5. **PC:** bridge spike B0 on stack A (the owner's call, 28 October): B0-1 with the kit alone, then the Address
    Library (on the PC since 24 October), the CommonLibSF build, `sfse/FOCCPing` (the plugin, in the repo) and B0-2

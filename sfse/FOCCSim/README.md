@@ -1,12 +1,14 @@
 # FOCCSim: the combined core's simulation in portable C++
 
-Steps C1 to C4 of `docs/combined-core-cpp-port.md`, as plain C++17 with no Windows and no SFSE:
+Steps C1 to C5 of `docs/combined-core-cpp-port.md`, as plain C++17 with no Windows and no SFSE:
 - the world state and its 6-hour tick, from the Python reference (`src/fo4sf/combined/model.py`, `sim.py`,
   `reputation.py`, `modes.py`);
 - the engine adapter (`adapter.py`): which keyword data and globals Papyrus must write;
 - the presentation planner (`present.py`): what to spawn and dissolve near the player;
 - settlement management (`manage.py`) and the radiant jobs (`jobs.py`): the player's actions on a settlement, and
-  the work a faction offers, done or given up.
+  the work a faction offers, done or given up;
+- the news (`news.py`): events as headlines in our own words once they have travelled to a place, and the terminal
+  page, wrapped as Python's `textwrap` wraps it.
 
 The in-game plugin wraps it later.
 
@@ -21,8 +23,8 @@ same number of ticks and the same player actions. `tests/test_combined_cpp_parit
 | `adapter.h`, `adapter.cpp` | step C2, the engine adapter (`adapter.py`): the record plan (a keyword per place for its holder, a global per faction for the reputation tier, a global per play setting), the game view for a state, and the fewest writes between two views |
 | `present.h`, `present.cpp` | step C3, the presentation planner (`present.py`): garrisons, settlers, squads and caravans within a route-hour radius of the player, nearest first, within an actor budget (the rest listed as dropped), and the spawn, keep and dissolve lists between two plans |
 | `manage.h`, `manage.cpp` | step C4, `manage.py`: move settlers between roles, build beds, set a production focus, send supplies as a caravan, a settlement's threats and status. Refusals throw `std::invalid_argument` with Python's ValueError message, word for word |
-| `jobs.h`, `jobs.cpp` | step C4, `jobs.py`: the offers (defend, escort, retake, resupply, clear) with their text, why an offer is moot, and completing or giving one up. Known difference: an offer's first letter is capitalised for ASCII only (Python's `str.upper` also does other scripts) |
-| `news.h`, `news.cpp` | so far only the helpers the jobs' text needs (`display_name`, `_cargo`, `_stamp`); the headlines are step C5 |
+| `jobs.h`, `jobs.cpp` | step C4, `jobs.py`: the offers (defend, escort, retake, resupply, clear) with their text, why an offer is moot, and completing or giving one up |
+| `news.h`, `news.cpp` | step C5, `news.py` and `sim.news_for`: headlines, items, the terminal page; with a port of `textwrap.wrap` and `textwrap.shorten` (textwrap's defaults) and of `str.upper` for a first letter. Known differences, both outside the common scripts: which characters textwrap treats as letters for hyphen breaks (exact for ASCII and Latin-1, common letter blocks beyond), and the capital of a first letter (exact for ASCII, Latin-1, Latin Extended-A, Cyrillic U+0400 to U+045F and modern Greek) |
 | `main.cpp` | the harness's command line: `foccsim <state.json> <ticks> [--actions f] [--dump-at n --dump f] [--out f] [--adapter f] [--prefix p]`, printing `<tick> <hour> <sha256>` per tick; `--adapter` writes the plan and view at the start, then each tick's writes, as canonical JSON lines |
 
 The SHA-256 comes from `../FOCCSidecar/sha256.cpp`, which is already portable.
@@ -66,9 +68,15 @@ On CI, with the compiler on PATH (`tests/test_combined_cpp_parity.py`):
   every reason an offer is moot (taken from a world changed after the offer), each kind done and then done again
   and given up, the offers' text with a pack's display names, limits of 0 and -2, each manage action exactly at its
   limit and one past it, and a defence whose attack is due after 72 hours.
+- **News (C5):** the scripted player also reads the news somewhere each day, at widths from 60 down to 7, with and
+  without display names (some with hyphens and a non-ASCII letter). Items and terminal page are compared. Also: a
+  headline for every template and the variants between them, an unknown kind, exact repeats, news not yet arrived,
+  since and limit, empty pages, and widths too small for the title. And a fuzz test: `wrap` and `shorten` against
+  Python's `textwrap` on 3,000 random texts (hyphens, em-dashes, punctuation, tabs and every other whitespace,
+  a no-break space, non-ASCII letters, widths -1 to 40, indents, placeholders), plus `upper_first` against
+  `str.upper` for every first character it covers.
 
 `FO4SF_PARITY_FULL=1` compares after every tick, runs every variant for seeds 0 to 9, and runs the
 Commonwealth-scale draft for 90 days.
 
-Not here yet (later steps of the plan): C5 `news.py` (the headlines and the terminal page); the SFSE plugin around the
-core; the event-log indexes that would let the log be trimmed.
+Not here yet (later steps of the plan): the SFSE plugin around the core; the event-log indexes that would let the log be trimmed.

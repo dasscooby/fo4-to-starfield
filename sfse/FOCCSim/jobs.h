@@ -5,8 +5,8 @@
 // does fail() for an offer that already has an outcome, was superseded, or was read at an hour the world has not
 // reached. Python stays the reference, and jobs.py's docstring has the design and its placeholders.
 //
-// One known difference: Python capitalises an offer's first character with str.upper(), this port only for ASCII. An
-// offer starts with a display name only for resupply, and only a pack's own display names can be non-ASCII.
+// An offer's first character is upper-cased as news::upper_first does it (Python's str.upper for the scripts it
+// covers). An offer starts with a display name only for resupply, and only a pack's display names can be non-ASCII.
 #pragma once
 
 #include <optional>

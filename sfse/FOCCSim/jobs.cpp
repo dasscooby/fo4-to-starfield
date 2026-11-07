@@ -53,7 +53,7 @@ Int tier_points(Int tier) { return GAIN_TIERS[std::min<Int>(5, std::max<Int>(1, 
 Value opt(const OptStr& s) { return s ? Value::string(*s) : Value::null(); }
 
 // jobs._text: str.format of the kind's template, every str or None field through news.display_name first, then the
-// first character upper-cased (ASCII only; see jobs.h).
+// first character upper-cased (news::upper_first).
 std::string text(const std::string& kind, const news::Names* names,
                  const std::map<std::string, OptStr>& names_of, const std::map<std::string, Int>& numbers = {}) {
     const std::string& t = templates().at(kind);
@@ -66,8 +66,7 @@ std::string text(const std::string& kind, const news::Names* names,
         out += n != names_of.end() ? news::display_name(n->second, names) : std::to_string(numbers.at(key));
         k = end + 1;
     }
-    if (!out.empty() && out[0] >= 'a' && out[0] <= 'z') out[0] = static_cast<char>(out[0] - 'a' + 'A');
-    return out;
+    return news::upper_first(out);
 }
 
 std::vector<std::string> held(const WorldState& ws, const std::string& fid) {   // jobs._held, sorted

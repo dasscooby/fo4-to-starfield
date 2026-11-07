@@ -2,7 +2,8 @@
 same ticks and the same player actions give byte-identical canonical JSON after every tick
 (docs/combined-core-cpp-port.md section 2, the parity contract), and the same engine adapter output (step C2: the
 record plan and game view, then every tick's writes), presentation plans (C3: for a player walking the world) and
-results of the player's actions (C4: settlement management and radiant jobs, refusals included). The repo's first compiled test: the portable core is
+results of the player's actions (C4: settlement management and radiant jobs, refusals included; C5: the news and
+its terminal page, with a fuzz test of the textwrap port). The repo's first compiled test: the portable core is
 built with the C++ compiler on PATH (g++ or clang++; CI's ubuntu has g++) into a temporary folder, and the test is
 skipped where there is none. FOCCSIM_EXE=<path> runs the same tests against a core built elsewhere instead (the PC's
 MSVC build).
@@ -17,16 +18,18 @@ import glob
 import hashlib
 import json
 import os
+import random
 import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 sys.path.insert(0, os.path.join(ROOT, "tests"))
-from fo4sf.combined import adapter, fixtures, jobs, manage, model, present, seedpack, sim  # noqa: E402
+from fo4sf.combined import adapter, fixtures, jobs, manage, model, news, present, seedpack, sim  # noqa: E402
 from fo4sf.combined.model import WorldState  # noqa: E402
 
 SOURCES = sorted(glob.glob(os.path.join(ROOT, "sfse", "FOCCSim", "*.cpp"))) + \
@@ -107,8 +110,9 @@ def present_lines(ws, walk, t, shown, out):
 
 def run(ws, a, last):
     """One scripted action, as foccsim's run_action does it: the player hooks (help, defend, trade), manage's
-    settlement actions (assign, beds, priority, send, status, threats) and the radiant jobs (offers; complete or fail
-    one of the last offers by position, nothing past the end, or an offer given in full). Returns the line foccsim --results writes: the result,
+    settlement actions (assign, beds, priority, send, status, threats), the radiant jobs (offers; complete or fail
+    one of the last offers by position, nothing past the end, or an offer given in full), the news at a place (items
+    and terminal page), and textwrap and str.upper on their own (wrap, shorten, upper). Returns the line foccsim --results writes: the result,
     or the ValueError's message."""
     do = a["do"]
     try:
@@ -137,6 +141,16 @@ def run(ws, a, last):
             pick = a.get("pick", 0)
             offer = jobs.Offer(**a["offer"]) if "offer" in a else last[pick] if 0 <= pick < len(last) else None
             r = None if offer is None else (jobs.complete if do == "complete" else jobs.fail)(ws, offer)
+        elif do == "news":
+            args = (ws, a["place"], a.get("since", 0), a.get("limit", news.HEADLINE_LIMIT))
+            r = {"items": news.items(*args, names=a.get("names")),
+                 "page": news.terminal_page(*args, width=a.get("width", news.TERMINAL_WIDTH), names=a.get("names"))}
+        elif do == "wrap":
+            r = textwrap.wrap(a["text"], a.get("width", 70), subsequent_indent=a["indent"])
+        elif do == "shorten":
+            r = textwrap.shorten(a["text"], a.get("width", 70), placeholder=a["placeholder"])
+        elif do == "upper":
+            r = a["text"][:1].upper() + a["text"][1:]
         else:
             raise AssertionError(f"unknown action {do}")
     except ValueError as e:
@@ -153,6 +167,7 @@ def script_for(ws, days):
     setts = sorted(ws.settlements)
     held = sorted(p for p, pl in ws.places.items() if pl.holder is not None)
     goods = [None, "food", "water", "scrap", "ammo", "medicine"]
+    names = {p: f"{p.replace('_', '-')}-o-ville éa" for p in held[::3]}     # hyphens and a non-ASCII letter to wrap
     out = []
     for day in range(days):
         h, s, t = day * 24, setts[day % len(setts)], setts[(day * 3 + 1) % len(setts)]
@@ -170,6 +185,9 @@ def script_for(ws, days):
             out.append({"hour": h + 12, "do": "send", "from": s, "to": t, "goods": {"food": 3, "water": 2}})
         if day % 5 == 0:
             out.append({"hour": h + 18, "do": "threats", "settlement": s, "hours": 24})
+        out.append({"hour": h + 18, "do": "news", "place": held[(day * 7 + 3) % len(held)],
+                    "since": max(0, h - 24 * (day % 4)), "limit": 3 + day % 12,
+                    "width": (60, 40, 23, 12, 7)[day % 5], **({"names": names} if day % 3 == 0 else {})})
         if day % 7 == 3:
             out.append({"hour": h + 18, "do": "complete", "pick": 0})        # the same offer again: refused
         if day % 6 == 5:
@@ -233,7 +251,7 @@ class CppParityTests(unittest.TestCase):
         r = subprocess.run([self.exe, state, str(ticks), "--actions", acts, "--adapter", os.path.join(d, "adapter.jsonl"),
                             "--walk", walk_p, "--present", os.path.join(d, "present.jsonl"),
                             "--results", os.path.join(d, "results.jsonl"), *extra],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, timeout=300)   # a hang fails instead of stalling CI
         return r, d, state
 
     def lines(self, d, name="adapter.jsonl"):
@@ -644,6 +662,91 @@ class CppParityTests(unittest.TestCase):
         r, _d, _state = self.native(ws, 1, [{"hour": ws.hour, "do": "offers", "place": "nowhere"}])
         self.assertEqual(r.returncode, 2, r.stdout)
         self.assertIn("unknown place 'nowhere'", r.stderr)
+
+    def test_textwrap_and_the_capital_letter_against_python(self):
+        """news.wrap and news.shorten against Python's textwrap on 3,000 random texts: words, hyphenated words,
+        em-dashes, punctuation, every whitespace textwrap knows (tabs too), a no-break space, letters outside ASCII,
+        widths from -1 to 40, indents and placeholders; and news.upper_first against str.upper for every first character
+        it covers."""
+        rnd = random.Random(20261101)
+        pieces = ["a", "b", "word", "Zz", "9", "12", "-", "--", "---", " ", "  ", "\t", "\n", "\r", "\x0b", ".", ",",
+                  "!", "?", '"', "'", "&", "_", "é", "ß", "Ж", "Ω", "✓", "\xa0", "x-y", "ab-cd", "a-b-c", "re-do",
+                  "--x", "é-é", "a--b", "1-2", "end.", "long" * 5]
+        actions = []
+        for k in range(3000):
+            text = "".join(rnd.choice(pieces) for _ in range(rnd.randint(0, 25)))
+            width = rnd.choice([-1, 0, 1, 2, 3, 4, 5, 7, 9, 12, 20, 40])
+            if k % 3 == 0:
+                actions.append({"do": "shorten", "text": text, "width": width,
+                                "placeholder": rnd.choice(["...", " [...]", "", "  ...", "…"])})
+            else:
+                actions.append({"do": "wrap", "text": text, "width": width, "indent": rnd.choice(["", "  ", "    ", "\t"])})
+        firsts = [c for c in range(0x20, 0x180) if c != 0x7F] + list(range(0x386, 0x3D0)) + list(range(0x400, 0x460))
+        actions += [{"do": "upper", "text": chr(c) + "bc"} for c in firsts if c not in (0x390, 0x3B0)]
+        got = self.same_actions("textwrap", fixture_world(0), actions)
+        self.assertGreater(sum("error" in g for g in got), 100)                  # widths below 1, big placeholders
+        self.assertGreater(sum(len(g.get("ok") or []) > 2 for g in got[:3000] if isinstance(g.get("ok"), list)), 500)
+
+    def test_the_news_writes_every_template(self):
+        """A headline for every event kind news.py knows, and the variants it picks between; an unknown kind is
+        skipped; exact repeats collapse; since and limit; a page with nothing on it; and widths down to the one that
+        cannot hold the title's placeholder."""
+        ws = fixture_world(0)
+        ws.hour = 100
+        def ev(kind, place="market", hour=90, **info):
+            ws.events.append({"hour": hour, "kind": kind, "place": place, "region": ws.places[place].region, **info})
+        ev("place_taken", faction="raiders", previous="settlers", retaken=False)
+        ev("place_taken", faction="raiders", previous="settlers", retaken=True)
+        ev("place_taken", faction="raiders", previous=None)
+        ev("attack_launched", "raider_camp", faction="raiders", target="farm_a", size=5)
+        ev("attack_failed", faction="raiders", defender="settlers")
+        ev("attack_called_off", faction="raiders", defender=None)
+        ev("caravan_raided", faction="settlers", raider="raiders", origin="farm_a", cargo={"food": 3, "ammo": 0})
+        ev("caravan_arrived", faction="settlers", cargo={"water": 2, "food": 1})
+        ev("caravan_arrived", faction="settlers", cargo={})
+        ev("caravan_lost", faction="settlers")
+        ev("stage_changed", old=1, new=2)
+        ev("stage_changed", old=2, new=1)
+        ev("stage_changed", "farm_b", old=2, new=2)                                # no change counts as grown
+        ev("settler_left")
+        ev("settler_arrived")
+        ev("settlement_emptied", holder="raiders")
+        ev("settlement_resettled", faction="settlers")
+        ev("player_defended", holder="settlers", bonus=10)
+        ev("player_traded", goods={"food": 5, "ammo": -2})
+        ev("player_traded", goods={"ammo": -2})
+        ev("place_cleared", faction="settlers", previous="raiders", player=True)
+        ev("job_done", faction="settlers", job="clear")
+        ev("job_failed", faction="settlers", job="escort")
+        ev("roles_changed", from_role="farmer", to_role="guard", n=1)
+        ev("beds_added", n=2, beds=22)
+        ev("priority_set", old=None, new="medicine")
+        ev("priority_set", old="medicine", new=None)
+        ev("supplies_sent", target="farm_a", cargo={"food": 3}, squad="c1", eta=96)
+        ev("weather_changed")                                                       # no template: skipped
+        ev("settler_left", hour=95)                                                 # an exact repeat, newer
+        ev("settler_left", "farm_a", hour=99)                                       # not here yet (6 route hours)
+        ev("settler_left", "gate_2", hour=5)                                        # a far place, long since arrived
+        actions = [{"do": "news", "place": "market", "limit": 50},
+                   {"do": "news", "place": "market", "limit": 50, "names": {"market": "the market", "raiders": "Ödland"}},
+                   {"do": "news", "place": "market", "since": 95, "limit": 5, "width": 25},
+                   {"do": "news", "place": "market", "limit": 0},
+                   {"do": "news", "place": "market", "limit": -1},
+                   {"do": "news", "place": "ruins", "since": 1000, "width": 9},
+                   {"do": "news", "place": "nowhere", "width": 14},
+                   {"do": "news", "place": "market", "width": 3},
+                   {"do": "news", "place": "market", "width": 2},
+                   {"do": "news", "place": "market", "width": 0}]
+        got = self.same_actions("news", ws, actions)
+        texts = [i["text"] for i in got[0]["ok"]["items"]]
+        self.assertEqual(len(texts), len(set(texts)))
+        # 32 events: one unknown kind, one exact repeat (settler_left), and two not here yet (farm_a's at hour 99,
+        # and the attack from the raider camp, 12 route hours away, at hour 90)
+        self.assertEqual(len(texts), 28)
+        self.assertIn("Farm b has grown.", texts)
+        self.assertTrue(got[1]["ok"]["items"][0]["text"][0].isupper())
+        self.assertIn("error", got[-1])                                             # textwrap: invalid width 0
+        self.assertIn("error", got[-2])                                             # the placeholder cannot fit
 
 
 

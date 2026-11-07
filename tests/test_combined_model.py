@@ -176,8 +176,8 @@ class PackValidationTests(unittest.TestCase):
     def test_ids_must_be_non_empty_strings(self):
         # Codex P2 on #431: a null id loaded under the key None and broke the save round-trip.
         for bad in (None, "", 7):
-            self.assertProblem(lambda p: p["places"][0].update(id=bad), "must be a non-empty string")
-            self.assertProblem(lambda p: p["factions"][0].update(id=bad), "must be a non-empty string")
+            self.assertProblem(lambda p: p["places"][0].update(id=bad), "must be a non-empty ASCII string")
+            self.assertProblem(lambda p: p["factions"][0].update(id=bad), "must be a non-empty ASCII string")
 
     def test_references_must_be_strings(self):
         # Codex P2 on #431: a list holder raised TypeError instead of a validation problem.
