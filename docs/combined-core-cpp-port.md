@@ -12,7 +12,7 @@ C5) are done offline.**
   `jobs.py`, for a scripted player on those worlds.
 - C5: `sfse/FOCCSim/news.cpp` gives the same headlines and terminal pages as `news.py`, textwrap included.
 
-**Status, 7 November 2026:** C1 to C5 and the MSVC build script (`sfse/FOCCSim/build.ps1`, #656) are merged at
+**Status, 6 November 2026:** C1 to C5 and the MSVC build script (`sfse/FOCCSim/build.ps1`, #656) are merged at
 main `66783a99`. The MSVC parity run in #656 passed (14 tests, default and `FO4SF_PARITY_FULL=1`) on C5 source
 `0ba91c20`; the #641 and #673 rule commits merged after it have Linux CI parity only, so an MSVC rerun at main is
 NOT_RUN. Steps 4 to 7 are still to do. The plan carries out the 28 October decision in `docs/ai/decisions.md`:
@@ -62,8 +62,8 @@ only.
 The harness is a Python unittest. It compiles the portable core (no Windows, no SFSE) with `g++` on CI, which runs
 on ubuntu-24.04, and compares the output against Python. That makes it the repo's first compiled test.
 `sfse/FOCCSidecar/codec.h` was only checked by hand (its README, "Verified offline"); this harness should cover it
-too. On the PC the same core is built with `cl.exe` by the plugin's `build.ps1`, and the parity run is repeated
-there once.
+too. On the PC the same core is built with `cl.exe` by `sfse/FOCCSim/build.ps1` (#656), and the parity run is
+repeated there: once on C5 source `0ba91c20`; a rerun at current main is NOT_RUN.
 
 ## 3. What the port must copy exactly
 

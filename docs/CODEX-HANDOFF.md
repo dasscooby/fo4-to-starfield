@@ -1,12 +1,12 @@
 # Codex / Claude / Grok status
 
-## Current handoff, 7 November 2026
+## Current handoff, 6 November 2026
 
 The project is a Commonwealth-first Fallout experience and total-conversion framework on Starfield, with the
 GAMMA-style living world as the broader goal. Start with the current [roadmap](ROADMAP.md), changed
 [#32 claims](https://github.com/fo4sf/fo4-to-starfield/issues/32) and the assigned PR's head, replies and reviews.
 The older snapshot below is historical evidence, not a current task queue or permission grant. Main is `66783a99`
-(6 Nov); the merge queue it closed is listed in the roadmap's 7 November update.
+(6 Nov); the merge queue it closed is listed in the roadmap's 6 November update.
 
 | Work | Current handoff |
 |---|---|
