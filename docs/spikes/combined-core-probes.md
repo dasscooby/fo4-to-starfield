@@ -672,22 +672,37 @@ latency number, not proof that the game fires one tick per 6 game hours. Port st
 1. **Identity in the envelope.** Each sidecar records, besides the save name, a character id (fixed when the world
    state is first created for that character), a save generation that rises by one on every save, the world state's
    game hour, and a content-set id (a hash of the pack and the plugin list the state was built against). On load, a
-   sidecar is used only if the character id matches the loaded character and the game hour matches the save's own
-   game time (within one tick). Otherwise the load is refused loudly: a logged mismatch and no reset to a fresh world.
-2. **Backward and overwritten saves.** Loading an older save uses that save's sidecar, with its lower generation; the
-   newer state is not carried over. An overwritten quicksave replaces its sidecar in the same save message, so a
-   stale file can't be read for the new save. A missing or corrupt sidecar is the same loud refusal as 1.
-3. **One tick per 6 game hours.** The plugin compares the game hour with the state's hour and runs the ticks owed,
-   never more than one per 6 hours of game time and never ahead of it. How ticks owed after a long sleep, wait or
-   fast travel are run (all of them spread over frames, collapsed into one, or capped) is an **owner decision,
-   pending** (FAL-10 card 88e4cdb5, item 4); this card doesn't settle it.
+   sidecar is used only if all of these hold: the character id matches the loaded character; the content-set id
+   matches the running pack and plugin list; and the state's game hour is not after the save's own game time and less
+   than one tick (6 game hours) before it. The window is one-sided because the game save and the sidecar are written
+   separately, not as one transaction (`travel-and-runtime-risks-oct25.md:73`): a sidecar from a save that didn't land is ahead
+   of the game save, and is refused. Anything else is refused loudly: a logged mismatch naming both values, and no
+   reset to a fresh world. A content-set change is refused, not migrated; migrating state to a new pack is a separate
+   card.
+2. **One file per character and save.** `sidecar.sidecar_name` hashes the save name only, so two characters with a
+   save of the same name share one file and the second write replaces the first. P1b keys the file by the character
+   id as well as the save name, so both worlds survive. That is a code change to `sidecar.py`, not made here.
+3. **Backward and overwritten saves.** Loading an older save uses that save's sidecar, with its lower generation; the
+   newer state is not carried over. An overwritten quicksave replaces its sidecar in the same save message. A missing
+   or corrupt sidecar is the same loud refusal as 1. Generation is recorded only inside the sidecar (SFSE has no
+   co-save, `sidecar.py:1-8`), so it can't be checked against the game save; the hour window in 1 is what catches a
+   stale or too-new file. Still open: a second save inside the same game hour whose game save didn't land leaves a
+   sidecar the window can't tell apart. Whether SFSE's PostSaveGame message (`sidecar.py:4-6`) means the save landed,
+   so the sidecar can be written only then, is a P1 question.
+4. **One tick per 6 game hours.** The plugin compares the game hour with the state's hour and runs at most
+   `floor((game hour - state hour) / 6)` ticks, each +6 hours, so the state never runs ahead of game time. `sim.run`
+   doesn't enforce this (it ticks a fixed count); the plugin does. How ticks owed after a long sleep, wait or fast
+   travel are run (all of them spread over frames, collapsed into one, or capped) is an **owner decision, pending**
+   (FAL-10 card 88e4cdb5, item 4); this card doesn't settle it.
 
 Legs for P1b, once P1 passes and the bridge exists (to write; the native run needs a fresh owner release, on the PC):
-two characters with a save of the same name each; save, play 12 game hours, save again, load the first (backward);
-overwrite a quicksave; remove one sidecar and corrupt another; wait 24 game hours and count the ticks the log shows
-(4 expected, by the rule chosen for item 3). PASS: every load uses the matching sidecar or refuses loudly; the
-generations and game hours read back match; the tick count matches the rule. FAIL: a load that uses another
-character's or a newer sidecar, a silent reset, or ticks running ahead of game time.
+two characters with a save of the same name each, then load each; save, play 12 game hours, save again, load the
+first (backward); overwrite a quicksave; remove one sidecar and corrupt another; change the plugin list and load;
+wait 24 game hours and count the ticks the log shows (4 expected under full catch-up; the count follows the rule
+chosen for item 4). PASS: every load uses the matching sidecar or refuses loudly; both same-named worlds load intact;
+the content-set change is refused; the generations and game hours read back match; the tick count matches the rule.
+FAIL: a load that uses another character's, a newer or a different-content sidecar, a same-named world lost, a
+silent reset, or ticks running ahead of game time.
 
 **Job focc-P1-0 (toolchain, read-only). Game: CLOSED.**
 
