@@ -11,6 +11,7 @@ with an active story, scripted player actions) for seed 0, and the Commonwealth-
 once per game day and at the end. With FO4SF_PARITY_FULL=1: after every tick, every variant for seeds 0 to 9, and the
 Commonwealth-scale draft for 90 days, as the plan asks."""
 import copy
+import dataclasses
 import glob
 import hashlib
 import json
@@ -24,7 +25,7 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 sys.path.insert(0, os.path.join(ROOT, "tests"))
-from fo4sf.combined import adapter, fixtures, model, seedpack, sim  # noqa: E402
+from fo4sf.combined import adapter, fixtures, model, present, seedpack, sim  # noqa: E402
 from fo4sf.combined.model import WorldState  # noqa: E402
 
 SOURCES = sorted(glob.glob(os.path.join(ROOT, "sfse", "FOCCSim", "*.cpp"))) + \
@@ -69,6 +70,40 @@ def adapter_start(ws, plan):
     return canonical({"changes": adapter.changes(None, view), "plan": plan.to_dict(), "view": view}), view
 
 
+def walk_for(ws, ticks):
+    """Where the player stands for the presentation planner (step C3): a start, then one route step along the sorted
+    neighbours each tick; every 5th tick a wide view on a small budget (so slots are dropped), and every 7th tick a
+    second look from somewhere else (a fast travel) at the same tick. Routes never change, so the walk is fixed up
+    front."""
+    places = sorted(ws.places)
+    here = sorted(ws.settlements)[0] if ws.settlements else places[0]
+    out = [{"tick": 0, "place": here, "radius": present.RADIUS_HOURS, "max_actors": present.MAX_LIVE_ACTORS}]
+    for t in range(1, ticks + 1):
+        near = ws.neighbours(here)
+        if near:
+            here = near[t % len(near)][0]
+        wide = t % 5 == 0
+        out.append({"tick": t, "place": here, "radius": 24 if wide else present.RADIUS_HOURS,
+                    "max_actors": 15 if wide else present.MAX_LIVE_ACTORS})
+        if t % 7 == 0:
+            out.append({"tick": t, "place": places[t % len(places)], "radius": 12, "max_actors": 40})
+    return out
+
+
+def present_lines(ws, walk, t, shown, out):
+    """present.plan and present.diff for the walk's entries at tick t, as foccsim --present writes them; returns the
+    plan shown last."""
+    for w in walk:
+        if w["tick"] != t:
+            continue
+        new = present.plan(ws, w["place"], w["radius"], w["max_actors"])
+        d = present.diff(shown, new)
+        out.append(canonical([t, new.to_dict(), {k: [dataclasses.asdict(x) for x in getattr(d, k)]
+                                                 for k in ("spawn", "keep", "dissolve")}]))
+        shown = new
+    return shown
+
+
 def apply(ws, a):
     """tests' copy of foccsim::apply_action: the same three player hooks, before the tick of that hour."""
     if a["do"] == "help":
@@ -106,32 +141,43 @@ class CppParityTests(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
-    def native(self, ws, ticks, actions=(), *extra):
-        """Run the core on `ws`; the engine adapter's lines go to adapter.jsonl beside the state."""
+    def native(self, ws, ticks, actions=(), *extra, walk=()):
+        """Run the core on `ws`; the engine adapter's lines go to adapter.jsonl beside the state, and the presentation
+        planner's lines for `walk` to present.jsonl."""
         d = tempfile.mkdtemp(dir=self.tmp)
-        state, acts = os.path.join(d, "state.json"), os.path.join(d, "actions.json")
+        state, acts, walk_p = (os.path.join(d, n) for n in ("state.json", "actions.json", "walk.json"))
         with open(state, "w", encoding="utf-8") as f:
             f.write(ws.to_json())
         with open(acts, "w", encoding="utf-8") as f:
             json.dump(list(actions), f)
+        with open(walk_p, "w", encoding="utf-8") as f:
+            json.dump(list(walk), f)
         r = subprocess.run([self.exe, state, str(ticks), "--actions", acts, "--adapter", os.path.join(d, "adapter.jsonl"),
-                            *extra], capture_output=True, text=True)
+                            "--walk", walk_p, "--present", os.path.join(d, "present.jsonl"), *extra],
+                           capture_output=True, text=True)
         return r, d, state
 
-    def adapter_lines(self, d):
-        with open(os.path.join(d, "adapter.jsonl"), encoding="utf-8") as f:
+    def lines(self, d, name="adapter.jsonl"):
+        with open(os.path.join(d, name), encoding="utf-8") as f:
             text = f.read()
+        if not text:
+            return []
         self.assertTrue(text.endswith("\n"))
         return text[:-1].split("\n")
 
-    def same_adapter_lines(self, name, want, got):
+    adapter_lines = lines
+
+    def same_lines(self, name, what, want, got, label=lambda k: "start" if k == 0 else f"tick {k}"):
         for k, (w, g) in enumerate(zip(want, got)):
             if w != g:
                 at = diff_at(w, g)
-                self.fail(f"{name}: the engine adapter's {'start' if k == 0 else f'tick {k}'} differs at byte {at}:\n"
+                self.fail(f"{name}: {what}'s {label(k)} differs at byte {at}:\n"
                           f"  Python: ...{w[max(0, at - 160):at + 160]}...\n"
                           f"  C++:    ...{g[max(0, at - 160):at + 160]}...")
         self.assertEqual(len(got), len(want), name)
+
+    def same_adapter_lines(self, name, want, got):
+        self.same_lines(name, "the engine adapter", want, got)
 
     def parity(self, name, ws, ticks, actions=(), every=1 if FULL else DAY):
         """Run both and compare the sha256 of the canonical JSON after every `every`-th tick (and the last); at the
@@ -142,7 +188,9 @@ class CppParityTests(unittest.TestCase):
         plan = adapter.record_plan(ws)
         first, view = adapter_start(ws, plan)
         want = [first]
-        r, d, state = self.native(ws, ticks, actions)
+        walk, shown_want = walk_for(ws, ticks), []
+        shown = present_lines(ws, walk, 0, None, shown_want)
+        r, d, state = self.native(ws, ticks, actions, walk=walk)
         self.assertEqual(r.returncode, 0, f"{name}: {r.stderr}")
         lines = r.stdout.splitlines()
         self.assertEqual(len(lines), ticks, name)
@@ -154,6 +202,7 @@ class CppParityTests(unittest.TestCase):
             new = adapter.game_view(ws, plan)
             want.append(canonical([t, adapter.changes(view, new)]))
             view = new
+            shown = present_lines(ws, walk, t, shown, shown_want)
             if t % every and t != ticks:
                 continue
             text = ws.to_json()
@@ -171,6 +220,8 @@ class CppParityTests(unittest.TestCase):
                           f"  C++:    ...{theirs[max(0, at - 160):at + 160]}...")
             self.assertEqual((int(n), int(hour)), (t, ws.hour), name)
         self.same_adapter_lines(name, want, self.adapter_lines(d))
+        self.same_lines(name, "the presentation planner", shown_want, self.lines(d, "present.jsonl"),
+                        lambda k: f"walk entry {k} (tick {walk[k]['tick']}, at {walk[k]['place']})")
 
     def test_the_fixture_world_for_ten_seeds_over_90_days(self):
         for seed in range(10):
@@ -270,6 +321,54 @@ class CppParityTests(unittest.TestCase):
                 r, _d, _state = self.native(ws, 1, (), "--prefix", prefix)
                 self.assertEqual(r.returncode, 2, r.stdout)
                 self.assertIn(str(cm.exception), r.stderr)                            # Python's message, word for word
+
+    def test_the_presentation_planner_ranks_budgets_and_caps(self):
+        """The player's own garrison (ranked last at its distance), a role above the per-role cap, and budgets that
+        cut at each slot boundary, all from the same place at the start; then 10 days of ticks on that world."""
+        ws = fixture_world(0)
+        sim.player_defended(ws, "market", 30, 72)                      # a "player" squad of 30 at the market
+        ws.settlements["market"].roles["farmer"] = 9                   # above SETTLERS_PER_ROLE_MAX
+        walk = [{"tick": 0, "place": "market", "radius": r, "max_actors": m}
+                for r, m in ((0, 40), (6, 40), (6, 9), (6, 10), (6, 0), (12, 100), (48, 25))]
+        want, shown = [], None
+        shown = present_lines(ws, walk, 0, shown, want)
+        r, d, _state = self.native(ws, 0, walk=walk)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.same_lines("ranks and budgets", "the presentation planner", want, self.lines(d, "present.jsonl"),
+                        lambda k: f"walk entry {k}")
+        self.parity("defended market", ws, 10 * DAY)
+
+    def test_the_presentation_planner_refuses_an_unknown_place(self):
+        ws = fixture_world(0)
+        with self.assertRaisesRegex(KeyError, "unknown place 'nowhere'"):
+            present.plan(ws, "nowhere")
+        r, _d, _state = self.native(ws, 1, walk=[{"tick": 1, "place": "nowhere", "radius": 6, "max_actors": 40}])
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("unknown place 'nowhere'", r.stderr)
+
+    def test_the_presentation_planner_escapes_garrison_id_components(self):
+        """#641: places and holders whose ids hold the separator (the AMBIGUOUS pairs of test_combined_present_ids)
+        and a place literally named region%3Acamp, walked from region and its neighbours on budgets that keep, drop
+        and respawn slots; the plans and diffs match line by line, so the escaped garrison ids match too.
+
+        diff()'s duplicate-id refusal (ValueError in Python, std::invalid_argument and exit 2 in the core) has no
+        parity case: foccsim only diffs plans that plan() built, and plan() cannot give two slots one id (garrison
+        ids are escaped, a settler's role holds no ':', squad ids are the squads' keys), so the walk cannot feed
+        the core a plan with duplicate ids. test_combined_present_ids covers the refusal on the Python side."""
+        from test_combined_present_ids import AMBIGUOUS, world as id_world
+        ws = id_world(AMBIGUOUS + [("region%3Acamp", "raiders")])
+        walk = [{"tick": 0, "place": p, "radius": r, "max_actors": m}
+                for p, r, m in (("region", 6, 100), ("region", 2, 3), ("region:camp", 2, 9), ("region%3Acamp", 2, 6),
+                                ("region", 2, 0), ("region", 2, 100), ("region:camp", 1, 100))]
+        want = []
+        present_lines(ws, walk, 0, None, want)
+        self.assertIn("garrison:region%3Acamp:raiders", want[0])
+        self.assertIn("garrison:region:camp%3Araiders", want[0])
+        self.assertIn("garrison:region%253Acamp:raiders", want[0])
+        r, d, _state = self.native(ws, 0, walk=walk)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.same_lines("escaped ids", "the presentation planner", want, self.lines(d, "present.jsonl"),
+                        lambda k: f"walk entry {k}")
 
 
 if __name__ == "__main__":

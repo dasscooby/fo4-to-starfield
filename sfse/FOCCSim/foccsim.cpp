@@ -122,24 +122,6 @@ std::vector<std::pair<std::string, Int>> neighbours(const WorldState& ws, const 
     return out;
 }
 
-std::map<std::string, Int> distances(const WorldState& ws, const std::string& start) {
-    // the shortest route-hours from start; Python's own walk (sort, pop the nearest) settles on the same numbers
-    std::map<std::string, Int> best{{start, 0}};
-    std::set<std::pair<Int, std::string>> todo{{0, start}};
-    while (!todo.empty()) {
-        auto [d, p] = *todo.begin();
-        todo.erase(todo.begin());
-        if (d != best[p]) continue;
-        for (const auto& [n, h] : neighbours(ws, p)) {
-            auto it = best.find(n);
-            if (it == best.end() || d + h < it->second) {
-                best[n] = d + h;
-                todo.insert({d + h, n});
-            }
-        }
-    }
-    return best;
-}
 
 std::set<std::string> story_shielded(const WorldState& ws) {  // sim._story_shielded
     std::set<std::string> out;
@@ -558,6 +540,25 @@ Reputation get_rep(const Value& v, const std::string& what) {
 }
 
 }  // namespace
+
+std::map<std::string, Int> distances(const WorldState& ws, const std::string& start) {
+    // the shortest route-hours from start; Python's own walk (sort, pop the nearest) settles on the same numbers
+    std::map<std::string, Int> best{{start, 0}};
+    std::set<std::pair<Int, std::string>> todo{{0, start}};
+    while (!todo.empty()) {
+        auto [d, p] = *todo.begin();
+        todo.erase(todo.begin());
+        if (d != best[p]) continue;
+        for (const auto& [n, h] : neighbours(ws, p)) {
+            auto it = best.find(n);
+            if (it == best.end() || d + h < it->second) {
+                best[n] = d + h;
+                todo.insert({d + h, n});
+            }
+        }
+    }
+    return best;
+}
 
 double Settings::raid_multiplier() const {                    // modes.RAID_PRESSURE_MULTIPLIER
     if (raid_pressure == "low") return 0.5;

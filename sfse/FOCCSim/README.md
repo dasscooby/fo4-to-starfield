@@ -1,9 +1,12 @@
 # FOCCSim: the combined core's simulation in portable C++
 
-Steps C1 and C2 of `docs/combined-core-cpp-port.md`. This is the world state and its 6-hour tick from the Python
-reference (`src/fo4sf/combined/model.py`, `sim.py`, `reputation.py`, `modes.py`), and the engine adapter
-(`adapter.py`: which keyword data and globals Papyrus must write), as plain C++17, with no Windows and no SFSE. The
-in-game plugin wraps it later.
+Steps C1 to C3 of `docs/combined-core-cpp-port.md`, as plain C++17 with no Windows and no SFSE:
+- the world state and its 6-hour tick, from the Python reference (`src/fo4sf/combined/model.py`, `sim.py`,
+  `reputation.py`, `modes.py`);
+- the engine adapter (`adapter.py`): which keyword data and globals Papyrus must write;
+- the presentation planner (`present.py`): what to spawn and dissolve near the player.
+
+The in-game plugin wraps it later.
 
 Python stays the reference. The contract is byte-identical canonical JSON after every tick, from the same state, the
 same number of ticks and the same player actions. `tests/test_combined_cpp_parity.py` checks that on every CI run.
@@ -14,6 +17,7 @@ same number of ticks and the same player actions. `tests/test_combined_cpp_parit
 | `json.h` | a reader for the world state Python writes, and a writer that matches `json.dumps(..., sort_keys=True)` byte for byte (separators `", "` and `": "`, `\uXXXX` for everything outside space to `~`). Integers only: a float is refused |
 | `foccsim.h`, `foccsim.cpp` | the state (`WorldState::from_json` / `to_json`, with the reference's checks), `tick`, and the player hooks `player_helped`, `player_defended`, `player_traded` |
 | `adapter.h`, `adapter.cpp` | step C2, the engine adapter (`adapter.py`): the record plan (a keyword per place for its holder, a global per faction for the reputation tier, a global per play setting), the game view for a state, and the fewest writes between two views |
+| `present.h`, `present.cpp` | step C3, the presentation planner (`present.py`): garrisons, settlers, squads and caravans within a route-hour radius of the player, nearest first, within an actor budget (the rest listed as dropped), and the spawn, keep and dissolve lists between two plans |
 | `main.cpp` | the harness's command line: `foccsim <state.json> <ticks> [--actions f] [--dump-at n --dump f] [--out f] [--adapter f] [--prefix p]`, printing `<tick> <hour> <sha256>` per tick; `--adapter` writes the plan and view at the start, then each tick's writes, as canonical JSON lines |
 
 The SHA-256 comes from `../FOCCSidecar/sha256.cpp`, which is already portable.
@@ -21,7 +25,7 @@ The SHA-256 comes from `../FOCCSidecar/sha256.cpp`, which is already portable.
 ## Build
 
 ```
-g++ -std=c++17 -O2 -ffp-contract=off -Wall -Wextra -o foccsim adapter.cpp foccsim.cpp main.cpp ../FOCCSidecar/sha256.cpp
+g++ -std=c++17 -O2 -ffp-contract=off -Wall -Wextra -o foccsim adapter.cpp foccsim.cpp main.cpp present.cpp ../FOCCSidecar/sha256.cpp
 ```
 
 clang++ takes the same flags. `-ffp-contract=off` matters: a fused multiply-add would change the rounding of the three
@@ -44,9 +48,13 @@ On CI, with the compiler on PATH (`tests/test_combined_cpp_parity.py`):
   ids with other characters (`farm-c`, `ruin.2 x`) and one exactly at the 64-character limit, a second prefix, every
   setting's value, the reputation thresholds, and Python's own messages for a colliding id, a too-long id and an
   invalid prefix.
+- **Presentation planner (C3), on every run above:** the player walks one route step a tick. Every 5th tick has a wide
+  view on a 15-actor budget (so slots are dropped), and every 7th tick a second look from elsewhere (a fast travel).
+  Each plan and its diff from the plan before are compared as text. Also: the player's own garrison ranked last at
+  its distance, a role above the per-role cap, budgets that cut at each slot boundary, and Python's message for an
+  unknown place.
 
 `FO4SF_PARITY_FULL=1` compares after every tick, runs every variant for seeds 0 to 9, and runs the
 Commonwealth-scale draft for 90 days.
 
-Not here yet (later steps of the plan): C3 `present.py`, C4 `manage.py` and `jobs.py`, C5 `news.py`; the SFSE plugin
-around the core; the event-log indexes that would let the log be trimmed.
+Not here yet (later steps of the plan): C4 `manage.py` and `jobs.py`, C5 `news.py`; the SFSE plugin around the core; the event-log indexes that would let the log be trimmed.

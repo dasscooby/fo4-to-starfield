@@ -91,6 +91,7 @@ void tick(WorldState& ws);
 void player_helped(WorldState& ws, const std::string& faction, Int amount = 10);
 std::string player_defended(WorldState& ws, const std::string& place, Int bonus = 10, Int hours = 72);
 Counts player_traded(WorldState& ws, const std::string& settlement, const Counts& goods);
+std::map<std::string, Int> distances(const WorldState& ws, const std::string& start);   // sim._distances: route hours
 
 // The harness's scripted player action ({"hour", "do": "help" | "defend" | "trade", ...}), applied when ws.hour equals
 // its hour, before that tick (tests/test_combined_cpp_parity.py applies them the same way in Python).
