@@ -737,9 +737,9 @@ lists and leaves the orphan question open rather than guessing). Send back: `foc
 
 ### P12: encounter conservation across leave, return, save and load (card, 6 Nov 2026; nothing written or run)
 
-Settles: the encounter-conservation contract in [combined-core.md](../combined-core.md) (CC-63, after the module
-contracts list): one live copy per squad member, a death counted once, survivors only on dissolve, and the live
-encounter kept in the save. It needs P1's sidecar and the tagged `OnDeath` path, so it belongs to port step 6 (the
+Settles: the encounter-conservation contract in [combined-core.md](../combined-core.md) (under **Lifecycle
+fixture**, after **Contracts the modules do not have yet**): one live copy per squad member with stable member
+indices, a death counted once, survivors only on dissolve, and the live encounter kept in the save. It needs P1's sidecar and the tagged `OnDeath` path, so it belongs to port step 6 (the
 20-place slice), not to step 4. No kit, session or judge exists for it yet. The native run needs a fresh owner
 release and runs on the PC.
 
@@ -747,16 +747,19 @@ Legs, one launch, one squad of 3 on the slice:
 1. Materialize the squad near the player (generation 1, keys 0 to 2). Kill member 0. Expect one death event and
    `size` 2.
 2. Save S1. Walk beyond 500 m so the squad dissolves. Expect `size` 2 written back, no live tagged actors.
-3. Return inside 400 m. Expect generation 2 with 2 live actors, keys 1 and 2, and no key 0.
-4. Save S2. Kill member 1. Expect `size` 1.
-5. Load S1. Expect `size` 2 and exactly the actors S1 holds (member 0 dead, 1 and 2 alive), adopted by key, with no
-   extra spawn. Load S2. Expect `size` 2 and 2 live actors.
-6. Fire one death event twice for the same key (a scripted replay). Expect `size` to drop once.
+3. Return inside 400 m. Expect generation 2 with 2 live actors, keys 1 and 2 (indices kept), and no key 0.
+4. Save S2. Kill member 1, which also raises `OnKill`. Expect `size` 1 and one logged death.
+5. Load S1. Expect `size` 2, dead set {0}, and exactly the actors S1 holds (member 0's corpse kept, not removed;
+   members 1 and 2 alive), adopted by key, with no extra spawn. Replay member 0's death event. Expect `size` still 2.
+   Load S2. Expect `size` 2 and 2 live actors.
+6. Fire one new death event twice for the same key (a scripted replay). Expect `size` to drop once.
+7. Kill the remaining member. Expect `size` 0, the squad removed from L2, and the removal logged.
 
 Judge `probes p12` (to write). PASS: every expectation above holds, no sample ever shows more live tagged actors for
-the squad than its `size`, and every applied death names a distinct key. FAIL: a duplicate live key, a death
-applied twice, `size` rising on a dissolve, or an extra spawn after a load. INCONCLUSIVE: a missing save, a missing
-sidecar record, or a death the log doesn't show.
+the squad than its `size`, and every applied death names a distinct key. FAIL: a duplicate live key, a dead index
+spawned again, a death applied twice (including a replay of a death the loaded save counts, or an `OnKill` counted
+as a second death), `size` rising on a dissolve, an extra spawn or a removed corpse after a load, or a squad left in
+L2 at `size` 0. INCONCLUSIVE: a missing save, a missing sidecar record, or a death the log doesn't show.
 
 ## B0: the plugin bridge, Papyrus to the SFSE plugin and back (after P1)
 
