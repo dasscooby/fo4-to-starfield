@@ -5,7 +5,8 @@ Vault 111 with no Starfield intro, which everything else plugs into. **In game t
 runs 1 and 2 failed (the pirate-fight developer start, then a load that never finished); run 3 (newgame_v9) reached
 stage 200, with two placement defects of ours fixed offline in newgame_v10.** **Since newgame_v11 (29 Oct, the owner's
 pick F: our own start) the plugin replaces Starfield's start instead of stopping it: a New Game starts our quest, not
-MQ101 (sections 1, 2 and 13); not run in game yet.** Labels follow docs/ai/research-log.md (verified, supported
+MQ101 (sections 1, 2 and 13). v11 crashed at every boot (section 13a); run 4 (newgame_v12, 31 Oct) passed to stage 200
+with our own start (section 13b).** Labels follow docs/ai/research-log.md (verified, supported
 hypothesis, unresolved).
 
 Files: `dotnet/NewGame/Program.cs` (the plugin writer and its checks), `dotnet/NewGame/Records.cs` (the read-only PC
@@ -60,7 +61,7 @@ stage, verify, fold, log reader), `tests/test_newgame.py`.
    != 0`), whose normal route (MQ101 stage 310) is never reached. A hand back never follows the write or the hold-off:
    both come after the move, and both stand-downs return before them.
    Without MQ101's stage 0 nothing empties the inventory or puts on Starfield's miner spacesuit (newgame_v9 and v10
-   left the player in it at the pod): what the player wears and carries now is **unresolved** until run 4 (section 13;
+   left the player in it at the pod): what the player wears and carries now is **unresolved** until run 4 (section 13; run 4 is section 13b;
    the inventory reset, section 4c, stays off until then).
 4. **The cryo pod:** during the first load the player is moved into the converted Vault 111 (`FO4Port_Vault111Cryo`)
    and stands up one metre in front of their own pod, facing out of it (a port whose COC marker is temporary is refused
@@ -307,7 +308,7 @@ because stopping SQ_PlayerShip or SQ_ENV could break the HUD or travel.
   In newgame_v9 and v10 that fragment ran before our quest, so a default build left the player in the miner suit at the
   pod (**unverified** in game: run 3's screenshots are first person and a default build logs no inventory line, section
   12). Since newgame_v11 MQ101 never runs, so neither does that fragment: what a New Game leaves the player with then is
-  **unresolved** until run 4 (section 13). `--clear-inventory --vault-suit <the port's Vault 111 suit EditorID>` stays
+  **unresolved** until run 4 (section 13; run 4 is section 13b). `--clear-inventory --vault-suit <the port's Vault 111 suit EditorID>` stays
   the answer for a start that does not depend on it: the reset runs once the player is confirmed in the vault. The reset stays a writer option, **off by default** until the owner picks it:
   `--clear-inventory`, and the quest script's `ClearInventory` property (false) and `VaultSuitId` (0) record the choice in
   the plugin; `check` holds a build to it, and the selftest's cross-option runs reject a build read under the other
@@ -805,6 +806,62 @@ is in no part of the dump, and Roleplayers' Alternate Start and No Ship Fast Sta
 and run 3 played to stage 200 with no ship, so they cannot explain a crash before the main menu. A limit on a
 script's doc comments in total is not ruled out either: the quest script's 44 doc comments come to 19,123 bytes in v12
 (v10, which booted: 14,109; v11: 21,910), though the exact offset 4,096 points at one comment.
+
+## 13b. In game, run 4 (31 Oct 2026, newgame_v12): PASS to stage 200, our own start
+
+**Setup:** newgame_v12 restaged from main 63c59599 (#623, merged 20:31:51 UTC) and installed by Install on the owner's
+line ("Reinstall the new game", given 20:13 UTC, before the merge; the installed FO4SFNewGame.esm's file time is
+20:39:46 UTC, after it, read on the PC 1 Nov); one boot to the main menu, then the owner's New Game (the boot's `load` at 20:51:13.803
+UTC). The owner: "v12 worked fine". Logs and `log_summary.txt`: `D:\Modding\testqueue\newgame_20261031_run4`
+(Install's read, through the coordinator).
+
+**The boot crash is gone (verified):** FO4SFBorder logged `post_data_load` at 20:51:38.279 UTC, 24.5 s after `load`,
+as a good launch does (section 13a), so the data load finished with the short doc comment. The esm CRC check of
+section 13a was not in the relay.
+
+**What `make_newgame.py log` read (main) on fo4sf_newgame.0.log:**
+- stages 10, 20, 30, 40, 200, `landed` true; stage 200 at rt 89.8 s;
+- `start`: `OnQuestInit player_loaded=false cell=None loading=true`; start events `OnQuestInit`, then `OnQuestStarted`;
+  `start_wait` loaded=true;
+- `fade`: `by=Start loaded=true cell=FO4Port_Vault111Cryo; saving and HUD on`;
+- `guard`: days=0.333 level=1 opening_stage=0 opening_running=false mq101debug=0 write_after_hold=2;
+- `held_off`: MQ00 at pass 2; `mq101debug_written` 2.0 was 0.0;
+- `looks` Quick start; `special` skipped: left the vault with SPECIAL unset (the owner did not set it); `version_saved`
+  1.0;
+- `pod_settle` ok=true drop=-0.864;
+- `surface setposition` ok=true set=1, pos -2467.78 -1406.92 127.45.
+
+**What run 4 answered (section 13's list):**
+- The start events: as Starfield's startup quest, ours got `OnQuestInit` during the first load, before
+  `OnQuestStarted` (**verified**, this run). The supported hypothesis of section 13 (`OnQuestStarted` first, from run
+  2's start-game-enabled quest) was wrong for a startup quest; `Begin` runs once from whichever comes first, so
+  nothing changes.
+- During the load the player's 3D was not in and the player had no parent cell (`player_loaded=false cell=None
+  loading=true`): **verified**. A stand-down then would have handed back to MQ101.
+- The start's own wait saw the 3D, and by then `GetParentCell` named the vault (`fade ... cell=FO4Port_Vault111Cryo`):
+  **verified**. The `enter vault` check right after the MoveTo read `ok=true ... cell=FO4Port_Vault111Cryo` at rt
+  33.220, 3.6 s after the start (rt 29.585) and as the load ended (`3d wait over loaded=true` at rt 33.243; run 4's
+  log, read on the PC 1 Nov): **verified**. Whether the cell was named earlier, inside the load, is not known.
+- The guard read during the load what section 10 read a second into a new game (0.333 days, level 1, MQ101 at stage 0
+  and not running): **verified**, one run.
+- MQ00 starts after our start: pass 1 found it not running and pass 2 stopped it (**verified**, one run).
+- The hand back was not exercised (a New Game; nothing stood down). Whether the fade call or the end of the load
+  brought the screen in is not told apart by the log; the owner reported none.
+- Still **unresolved**: what the player wears with no MQ101 stage 0, a quest list (`sqv`) after the run, and a `coc`
+  session from the main menu with no `init` line.
+
+**One reading to watch, not a defect:** `pod settle drop=-0.864` puts the player 0.86 m above the start point (PodZ
+plus PodLift, -0.729), at about z 0.14 to 0.15 (the logged `pos` reads 0.1497), where section 12 expected about 0.1 m
+under it. The check only bounds a fall (at most 0.5 m under), so it reads ok. Why the player stood higher is
+**unresolved**: on the pod's base or step, or lifted out of something solid by the game, are guesses. The owner
+reported nothing wrong. If the player is ever seen
+standing on the pod or floating, this is the line to read. It is not a one-off: the other three v12 new games in the
+game's own logs on 31 Oct (15:14, 16:11 and 20:53 PC time, copied 1 Nov to the PC's `mapmarkers_20261101_logsnap`)
+read `drop=` -0.993, -0.393 and -0.334, so the player stood above the start point in all four.
+
+**Also played (not a numbered run):** newgame_v10 on 31 Oct, 12:58 PC time (18:58 UTC): 489 s, a normal exit,
+stage 200 on the Mars surface, SPECIAL skipped; `post_data_load` 25.4 s after `load`; logs
+`D:\Modding\testqueue\newgame_20261031_v10`. The owner's map report from that play went to the map markers work.
 
 ## Sources
 

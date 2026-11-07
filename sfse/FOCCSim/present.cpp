@@ -45,11 +45,21 @@ std::string squad_place(const WorldState& ws, const Squad& q) {   // present._sq
     return 2 * elapsed >= hours ? *q.goal : q.at;
 }
 
+std::string id_component(const std::string& value) {   // present._id_component: "%" -> "%25", then ":" -> "%3A"
+    std::string out;
+    for (char c : value) {
+        if (c == '%') out += "%25";
+        else if (c == ':') out += "%3A";
+        else out.push_back(c);
+    }
+    return out;
+}
+
 void place_slots(const WorldState& ws, const std::string& place, Int dist, std::vector<Slot>& out) {
     const Place& pl = ws.places.at(place);
     Int n = garrison_size(ws, place);
-    if (n != 0) out.push_back({"garrison:" + place + ":" + pl.holder.value_or("None"), "garrison", place, pl.holder, n,
-                               std::nullopt, dist});
+    if (n != 0) out.push_back({"garrison:" + id_component(place) + ":" + id_component(pl.holder.value_or("None")),
+                               "garrison", place, pl.holder, n, std::nullopt, dist});
     auto st = ws.settlements.find(place);
     if (st == ws.settlements.end()) return;
     for (const char* role : ROLES) {
@@ -151,6 +161,10 @@ Diff diff(const Plan* old_plan, const Plan& new_plan) {
     if (old_plan)
         for (const Slot& s : old_plan->slots) before[s.id] = &s;
     for (const Slot& s : new_plan.slots) after[s.id] = &s;
+    if (old_plan && before.size() != old_plan->slots.size())         // Python's ValueError
+        throw std::invalid_argument("old presence plan has duplicate slot ids");
+    if (after.size() != new_plan.slots.size())
+        throw std::invalid_argument("new presence plan has duplicate slot ids");
     std::set<std::string> ids;
     for (const auto& kv : before) ids.insert(kv.first);
     for (const auto& kv : after) ids.insert(kv.first);

@@ -26,9 +26,12 @@ A one-second check replaces Fallout 4's triggers, scenes and fragments:
 
 1. Stage 10 at start: "Find the Last Minutemen" (marker on Preston).
 2. The fight counts as started as soon as any raider fights or is dead, whoever started it (a quest that starts or
-   reloads mid-fight still advances). A living raider within 60 m of the player that is not fighting is put into combat with the player (Fallout 4's
-   DN092 does the same with StartCombat; our raider never engaged unprompted, npc_combat_c1, and engaged when forced,
-   npc_combat_c2/c4): stage 20, "Kill the Raiders".
+   reloads mid-fight still advances), or when the player finds Preston: activates him, or comes within 20 m of him
+   (`FindRadius`, chosen), before the fight. A living raider within 60 m of the player that is not fighting is put
+   into combat with the player (Fallout 4's DN092 does the same with StartCombat; our raider never engaged unprompted,
+   npc_combat_c1, and engaged when forced, npc_combat_c2/c4); once the fight is on (Preston found, or stage 20), every
+   living raider whose 3D is loaded and that is not fighting is, at any distance, on every check until stage 30:
+   stage 20, "Kill the Raiders".
 3. Every raider dead: stage 30, "Talk to Preston Garvey".
 4. Activating Preston, or standing within 3 m of him: stage 40, 100 credits for Fallout 4's 100 caps, then stage 200,
    quest complete.
@@ -161,3 +164,36 @@ Four sessions of `fo4sf_mission.{0..3}.log` (verified, the install thread's extr
 - **Crashes.** Two of the four sessions ended in a crash dump: 7 s after stage 30 (player at -2074, -1654) and 21 s
   after complete. Both were in the mission area. The mission did not run anything at those moments except its
   1 s status check. Passed to the Red Rocket work (the workshop radius covers this area, unresolved).
+
+### New game run 3 (28 Oct): activating Preston did nothing (fixed: finding him starts the fight)
+
+The owner's play report (new game run 3 on newgame_v9, snapshot 20261028-181340 PC time, quoted with typos fixed):
+"the Freedom Calls activation didn't work", at Concord. **Verified** (Install's read of
+`D:\Modding\testqueue\newgame_20261028_run3\concord\fo4sf_mission.0.log`, relayed 29 Oct): at 18:10:17 to 18:10:19
+the moves placed Preston at (-2011.14, -1697.54, 89.09) and raiders 0 to 4 near him, all `failed=false`; every status
+line read `stage=10 dead=0/5`; `preston activated at stage 10` was logged five times (18:12:45, 18:13:08 twice,
+18:13:09 twice) and the stage never left 10; no raider was ever put into combat, the nearest 91 to 129 m away.
+
+**Cause (verified from the script):** OnActivate acted only at stage 30 (talking to Preston after the fight), and the
+only thing that started the fight was the player coming within `EngageRadius` (60 m) of a living raider, since our
+raider never engages unprompted. Stage 10's objective puts the marker on Preston, and the plugin takes the raiders
+within 120 m of the museum door, his spot. **Supported hypothesis** (the status lines read the nearest raider 91 to
+129 m away all session): the raiders stand farther than 60 m from his spot, so a player who walks straight to the
+marker never starts the fight. On 18 Oct the fight started from the 60 m rule (raider 3 at 57 m).
+
+**Fix (offline, untested in game):** before the fight, activating Preston or coming within `FindRadius` (20 m) of him
+finds him (`found preston activated` or `found preston near d=<m>`, logged once): stage 20 at the next check, and from
+then on every living raider whose 3D is loaded and that is not fighting is put into combat with the player
+(`startcombat raider <i> d=<m>`), whatever the distance. The 60 m rule stays for a player who meets a raider first.
+A dead Preston is never found: activating his body or standing near it starts nothing (his death stays the quest's
+failure path). **Unverified hypothesis:** raiders 91 to 129 m away may not have their 3D loaded (`Is3DLoaded()`
+false) when Preston is found, so those raiders are put into combat only as they load, on a later check, not at once.
+This is the owner's playtest row 44.
+`make_mission.py log` reports `found`. Only `FO4SF_Min00Quest.pex` changes: `FindRadius` has a default in the script,
+so the plugin's records are the same. **Supported hypothesis:** the new .pex also applies to the run 3 save, where the
+quest is running at stage 10 (a script's new variables start at their defaults on a loaded save). Check in game: walk
+to Preston's marker (or activate him), read `found preston`, `startcombat raider` for every loaded raider, then stages
+20, 30, 40 and 200.
+
+Not this mission: Papyrus.0.log's `Cannot call GetSingleRefArray()/Activate() on a None object` at 18:12:01 is the core's
+activator 00DCC6 (DefaultActivateLinkedRefOnActivate with no linked reference), routed separately.

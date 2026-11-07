@@ -100,12 +100,20 @@ def _squad_place(ws: WorldState, q) -> str:
     return q.goal if 2 * elapsed >= hours else q.at
 
 
+def _id_component(value: str) -> str:
+    """Escape the slot separator and its escape marker; ordinary existing identities stay unchanged."""
+    return value.replace("%", "%25").replace(":", "%3A")
+
+
 def _place_slots(ws: WorldState, place: str, dist: int) -> list[Slot]:
     out = []
     pl = ws.places[place]
     n = garrison_size(ws, place)
     if n:
-        out.append(Slot(f"garrison:{place}:{pl.holder}", "garrison", place, pl.holder, n, distance=dist))
+        # Two arbitrary ids need boundaries: ("region:camp", "raiders") must differ from
+        # ("region", "camp:raiders"). Keep the actual place/faction data unchanged.
+        sid = f"garrison:{_id_component(place)}:{_id_component(pl.holder)}"
+        out.append(Slot(sid, "garrison", place, pl.holder, n, distance=dist))
     s = ws.settlements.get(place)
     if s:
         for role in ROLES:
@@ -169,9 +177,14 @@ class Diff(NamedTuple):
 
 def diff(old: Plan | None, new: Plan) -> Diff:
     """What moving from `old` to `new` spawns, keeps and dissolves. A slot is matched by id; one whose
-    place, faction or count changed is dissolved and spawned again. Lists are sorted by id."""
+    place, faction or count changed is dissolved and spawned again. Lists are sorted by id.
+    Duplicate ids in either input are refused rather than silently dropping a group."""
     before = {s.id: s for s in old.slots} if old else {}
     after = {s.id: s for s in new.slots}
+    if old is not None and len(before) != len(old.slots):
+        raise ValueError("old presence plan has duplicate slot ids")
+    if len(after) != len(new.slots):
+        raise ValueError("new presence plan has duplicate slot ids")
     spawn, keep, dissolve = [], [], []
     for sid in sorted(set(before) | set(after)):
         a, b = before.get(sid), after.get(sid)
