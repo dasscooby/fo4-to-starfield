@@ -1,5 +1,36 @@
 # Codex / Claude / Grok status
 
+## Current handoff, 3 November 2026
+
+The project is a Commonwealth-first Fallout experience and total-conversion framework on Starfield, with the
+GAMMA-style living world as the broader goal. Start with the current [roadmap](ROADMAP.md), changed
+[#32 claims](https://github.com/fo4sf/fo4-to-starfield/issues/32) and the assigned PR's head, replies and reviews.
+The older snapshot below is historical evidence, not a current task queue or permission grant.
+
+| Work | Current handoff |
+|---|---|
+| P9 and P9u | Claude PC owns implementation and native tests. The 2 Nov runs are in [#644](https://github.com/fo4sf/fo4-to-starfield/issues/644). [#663 at a2c67b26](https://github.com/fo4sf/fo4-to-starfield/pull/663#pullrequestreview-5733485009) retains the same-cell near-player finding; [#669 at eada2c28](https://github.com/fo4sf/fo4-to-starfield/pull/669#pullrequestreview-5746648639) has four evidence-gate findings. Review corrections at their new heads |
+| Launcher | The instance-safety head `5387abfa` is already an ancestor of main `1aaf82a0`; #647 and #657 are merged, while the older stacked #660 remains open. Do not infer code absence from that PR state or close it automatically. [#668 at 8fd1bc8b](https://github.com/fo4sf/fo4-to-starfield/pull/668#issuecomment-6594047022) keeps its reviewed source unchanged after merging main; lead/owner integration remains separate |
+| Combined core | C1 to C5 and the Windows build proposal are still under review. [Persistence audit](https://github.com/fo4sf/fo4-to-starfield/pull/654#issuecomment-6572101888): 48 offline checks pass, with 288 region replans. This exercises the codec and desired-state planner, not live creature identity or death processing |
+| World preparation | [#665](https://github.com/fo4sf/fo4-to-starfield/pull/665) and [#667](https://github.com/fo4sf/fo4-to-starfield/pull/667) are documentation proposals awaiting independent review; no game/deployment action follows from them |
+| Earlier shared scope | The #280 function and stage-command ownership approvals were resolved and implemented through #378/#410. Do not revive the old permission blocker; check actual integration and recovery evidence before new work |
+
+Claude retains lead integration, live game/controller, deployment, pipeline, terrain/collision/actors and
+runner/staging. An absent process is not a control release. Codex owns deployment/recovery, persistent identities,
+cache/output verification, ReferenceLinks and the door bridge; shared changes need exact coordination. Agents on
+the owner's Windows PC must also read its local environment handoff and live checkpoint.
+
+When addressing another agent, name its actual environment, branch/head, working directory, tools or shell,
+authorized action, checks and expected result. Use separate worktrees and preserve concurrent edits. No self-merge,
+force-push, rebase, game/deployment action or restart of paused work is granted by this handoff. Keep STOP, Guardian,
+owner-idle, recovery and frozen evidence intact. Keep assets, saves, settings and private operational evidence out
+of Git. Formal reviews under the shared account use COMMENT and a role prefix.
+
+## Historical snapshot, 16 to 17 October 2026
+
+The text below retains its original status and cadence. Later results and owner instructions supersede it; in
+particular, its old pending scopes and automation state must not be applied as current instructions.
+
 Codex checkpoint, October16 Mountain /17 UTC. Goal: playable FO4 with preserved identities/state and native Starfield physics. Persistent doors first. Read current [#32 claims](https://github.com/fo4sf/fo4-to-starfield/issues/32) first.
 
 ## Owners / locks
