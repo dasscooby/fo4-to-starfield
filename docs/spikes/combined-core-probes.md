@@ -653,12 +653,13 @@ longer gaps are Papyrus running late. The console pauses during the hops back st
 p90. Quote both with the result and compare them with the loaded run. What an off-screen world costs is the
 next question as the tests grow (owner, 1 Nov 2026).
 
-### P11: far travel, materialize and hand back with continuity (card, 7 Nov 2026; nothing written or run)
+### P11: far travel, materialize and hand back with continuity (card, 6 Nov 2026; nothing written or run)
 
 Settles: **CC-63**'s far-travel layer (`src/fo4sf/combined/travel.py`, #674). L2 owns a travelling squad's position
 outside the loaded area; L3 creates the real actor at that position inside 400 m (`MATERIALIZE_M`), hands it to the
 P9 link walk, removes it only beyond 500 m (`DISSOLVE_M`) and takes its progress back. P11 asks whether that loop
-keeps one squad as one actor on one line, with no jump, no second copy and no progress lost or gained, in the game.
+keeps one squad as one actor on one line, with no jump and no second copy, and with progress that follows the
+handed-back eta plus the elapsed hours (within the one-hour rounding of `eta_from_progress`), in the game.
 
 Status: a card only. No kit script, session or judge exists for it yet, and none is in this PR. The native run
 needs a fresh owner release and runs on the PC (Claude PC). P9 and P9u passes do not stand in for it. P11 is not
@@ -668,7 +669,8 @@ not that line). Travel between worldspaces is CC-64, not P11.
 
 Kit, P9's with two additions (both to write): a marker the session can place at given world x/y and snap to the
 ground (P9Dest already does this relative to the player), and a dissolve command that deletes the tracked actor and
-logs its last position (P4's Delete). The driver stays `FOCC_P9Drive.Link`; no alias package, no `PathToReference`.
+logs its last x/y (P4's `Disable` and `Delete` are the primitive; P4 logs only cycle counts, so the position line
+is new). The driver stays `FOCC_P9Drive.Link`; no alias package, no `PathToReference`.
 L2 is played offline by the session: a two-place atlas (A and B, on the measured P9 route east of Red Rocket, so the
 navmesh is known to walk), one travelling squad, and `travel.simulated_position` for the game hour the session reads.
 
@@ -677,7 +679,8 @@ Legs, in one launch, at Red Rocket, `tgm`:
 2. **Materialize.** The player hops toward the simulated position. At the first hop that leaves the player within
    400 m of it, the session places the marker there and spawns the actor (`p11 spawn` with the simulated x/y, the
    actor's x/y/z and the player distance), then `P9Track` and `Link` toward B's marker.
-3. **Hand-over.** The loaded walk, judged as P9's samples: forward in time, whole, no step faster than 15 m/s.
+3. **Hand-over.** The loaded walk, judged as P9's samples: forward in time, whole, no step faster than 15 m/s, and
+   the go's `p9 package` line naming `DefaultMaster_PatrolPackage`, as the P9 link judge requires.
 4. **Dissolve.** The player hops away. At the first sample with the player more than 500 m from the actor, the
    session dissolves it (`p11 dissolve` with its last x/y). Offline: `progress_from_position(A, B, last)` gives f,
    and `eta_from_progress` the new eta.
@@ -685,14 +688,18 @@ Legs, in one launch, at Red Rocket, `tgm`:
    the simulated position from the new eta and spawns again (step 2's line).
 
 Judge `probes p11` (to write), proposed bars for review:
-- PASS: every spawn within 400 m of the player and within 5 m (x/y) of the simulated position; the dissolve beyond
-  500 m and only there; P9's sample rules through the walk; never two live actors for the squad (the first id
-  reads deleted before the second spawn); the second spawn's progress at least the dissolve's f, and within one
-  game hour's travel of f plus the elapsed hours over the route hours.
-- FAIL: two live actors for one squad at any sample; a spawn more than 5 m from the simulated position after the
-  snap; progress going backwards at the re-materialize; a spawn outside 400 m or a dissolve inside 500 m.
-- INCONCLUSIVE: a spawn that never loads, a torn or missing sample, a dissolve line missing, or the walk stopped by
-  the near-player stops P9 already allows (within 35 m).
+- PASS: every spawn within 400 m of the player (player to simulated position, the only distance before a spawn)
+  and at the snapped marker; the dissolve beyond 500 m (player to the live actor) and only there; P9's sample rules
+  through the walk, with the Patrol package line; never two live actors for the squad (the first id reads deleted
+  before the second spawn); after the wait of at least one game hour, the second spawn's progress at least the
+  dissolve's f, not above `min(1, f + elapsed / route_hours)`, and at most one route hour behind it (the ceil in
+  `eta_from_progress`). The judge reports the marker's x/y against the simulated x/y.
+- FAIL: two live actors for one squad at any sample; progress going backwards at the re-materialize; a spawn
+  outside 400 m or a dissolve inside 500 m.
+- INCONCLUSIVE: a spawn that never loads; a large snap of the marker from the simulated x/y
+  (`MoveToNearestNavmeshLocation` can move a point off the walked road, and P9 already treats an unverified snap as
+  INCONCLUSIVE); a missing or other package line; a torn or missing sample; a missing dissolve line; or the walk
+  stopped by the near-player stops P9 already allows (within 35 m).
 
 Out of P11 (each its own card): a save and a load while the squad is dissolved (P1, and the save-identity card W8);
 the materialized actor's death or despawn reaching L2 once (the encounter-conservation card W7); more than one squad,
