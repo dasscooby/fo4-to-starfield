@@ -2743,3 +2743,17 @@ reload came in that gap is not known. The roadmap gains a short "since 24
 October" update. By the owner's 1 Nov handoff (written by Claude, given by the
 owner), one Claude session on the PC
 holds every Claude role and the cloud session pauses (decisions.md, 1 Nov).
+
+## 2026-10-29: Mission: finding Preston starts the fight (new game run 3)
+
+The owner's third new game reached Concord, where "the Freedom Calls
+activation didn't work" (snapshot 18:13 PC time). Install's read of
+fo4sf_mission.0.log: every actor moved (`failed=false`), the stage stayed 10
+with 0 of 5 raiders dead, `preston activated at stage 10` five times, and the
+nearest raider 91 to 129 m away. The script acted on activation only at
+stage 30, and only a raider within 60 m of the player started the fight, so
+walking straight to Preston's marker started nothing. Now activating Preston
+or coming within 20 m of him before the fight starts it (`found preston`),
+and once the fight is on every loaded living raider is put into combat. Only
+FO4SF_Min00Quest.pex changes. Offline only (playtest row 44,
+docs/mission/when-freedom-calls.md); the in-game check is the next mission run.
