@@ -126,5 +126,82 @@ class HandBackTests(unittest.TestCase):
         self.assertIn("A", str(cm.exception))
 
 
+WORLDS = {"A": "w1", "B": "w1", "C": "w1", "X": "w2", "Y": "w2"}
+
+
+def two_worlds(hour=HOUR):
+    """w1: A-B-C, w2: X-Y, joined by the gateway edge B-X (48 hours). The atlas is w1's."""
+    ws = world(hour)
+    for pid in ("X", "Y"):
+        ws.places[pid] = Place(id=pid, region="r2", kind="landmark")
+    ws.routes += [Route("B", "C", 4), Route("X", "Y", 4), Route("B", "X", 48)]
+    return ws
+
+
+class InterWorldTests(unittest.TestCase):
+    def test_gateway_edges(self):
+        ws = two_worlds()
+        self.assertEqual(travel.gateway_edges(ws, WORLDS), [("B", "X", 48)])
+        self.assertEqual(travel.gateway_edges(ws, {}), [])
+        self.assertEqual(travel.gateway_edges(ws, {"B": "w1"}), [])          # an end without a world: ordinary
+
+    def test_leg_to_another_world_has_no_position(self):
+        ws = two_worlds(HOUR + 27)
+        for goal, eta in (("X", HOUR + 54), ("Y", HOUR + 58)):
+            q = squad(goal=goal, eta=eta)
+            self.assertTrue(travel.inter_world_leg(ws, q, WORLDS))
+            self.assertIsNone(travel.position_in_world(ws, q, ATLAS, WORLDS, "w1"))
+            self.assertIsNone(travel.position_in_world(ws, q, {"X": (0.0, 0.0)}, WORLDS, "w2"))
+            with self.assertRaises(ValueError):                              # the old, accidental answer
+                travel.simulated_position(ws, q, ATLAS)
+
+    def test_leg_from_another_world_has_no_position(self):
+        q = Squad(id="q2", faction="f1", size=3, at="Y", goal="A", eta=HOUR + 58)
+        self.assertIsNone(travel.position_in_world(two_worlds(HOUR + 1), q, ATLAS, WORLDS, "w1"))
+
+    def test_same_world_leg_through_a_gateway_has_no_position(self):
+        ws = two_worlds(HOUR + 3)
+        ws.places["D"] = Place(id="D", region="r1", kind="landmark")
+        ws.routes = [Route("A", "B", 6), Route("B", "X", 1), Route("X", "Y", 4), Route("D", "Y", 2)]   # 13 hours
+        worlds = {**WORLDS, "D": "w1"}
+        atlas = {**ATLAS, "D": (900.0, 0.0)}
+        q = squad(goal="D", eta=HOUR + 13)
+        self.assertTrue(travel.inter_world_leg(ws, q, worlds))
+        self.assertIsNone(travel.position_in_world(ws, q, atlas, worlds, "w1"))
+        ws.routes.append(Route("C", "D", 3))                                  # A-B-C-D: 13 too, a tie
+        self.assertIsNone(travel.position_in_world(ws, q, atlas, worlds, "w1"))
+        ws.routes.append(Route("A", "D", 12))                                 # in-world and shorter
+        q.eta = HOUR + 12
+        self.assertFalse(travel.inter_world_leg(ws, q, worlds))
+        self.assertEqual(travel.position_in_world(ws, q, atlas, worlds, "w1"), (225.0, 0.0))
+
+    def test_squad_in_another_world_has_no_position(self):
+        ws = two_worlds(HOUR + 2)
+        for q in (Squad(id="q2", faction="f1", size=3, at="X", goal="Y", eta=HOUR + 4),
+                  Squad(id="q3", faction="f1", size=3, at="X")):
+            self.assertFalse(travel.inter_world_leg(ws, q, WORLDS))
+            self.assertIsNone(travel.position_in_world(ws, q, ATLAS, WORLDS, "w1"))
+        self.assertEqual(travel.position_in_world(ws, Squad(id="q2", faction="f1", size=3, at="X", goal="Y",
+                                                            eta=HOUR + 4), {"X": (0.0, 0.0), "Y": (0.0, 80.0)},
+                                                  WORLDS, "w2"), (0.0, 40.0))
+
+    def test_in_world_leg_matches_simulated_position(self):
+        ws = two_worlds(HOUR + 3)
+        q = squad()
+        self.assertFalse(travel.inter_world_leg(ws, q, WORLDS))
+        self.assertEqual(travel.position_in_world(ws, q, ATLAS, WORLDS, "w1"), (300.0, 0.0))
+        self.assertEqual(travel.position_in_world(ws, q, ATLAS, {}, "w1"), (300.0, 0.0))   # no worlds: as today
+
+    def test_missing_in_world_anchor_still_raises(self):
+        ws = two_worlds(HOUR + 3)
+        for worlds in (WORLDS, {}):
+            with self.assertRaises(ValueError) as cm:
+                travel.position_in_world(ws, squad(), {"A": (0.0, 0.0)}, worlds, "w1")
+            self.assertIn("B", str(cm.exception))
+        with self.assertRaises(ValueError) as cm:
+            travel.position_in_world(ws, squad(goal=None), {}, WORLDS, "w1")
+        self.assertIn("A", str(cm.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
