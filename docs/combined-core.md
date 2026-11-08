@@ -436,6 +436,12 @@ our GAMMA." New items continue the design's numbering (CC-60 to CC-62 are in the
   Building note (owner): a large place may be better built as an interior than as an exterior; check how Starfield
   and its mods build their big city spaces (the owner named Cydonia and the city people compare to Cyberpunk) before
   choosing, place by place.
+  **Owner decisions, 7 Nov 2026:** scripted transitions at fixed exits first (map pick later, vertibird or ship a
+  future option); a trip costs the inter-world route hours, the same for the player and squads; a simulation roll at
+  departure for an encounter at arrival or a fixed waypoint, inside encounter conservation; explicit gateway pairs per
+  world with per-pair hours; off-screen travel shown only at the endpoints. Exterior or interior stays open per
+  place, after a survey of Cydonia and Neon. The first source step is the gateway-pair data contract,
+  docs/combined-core-gateways.md (design only, not implemented).
 - **CC-65. The overall GAMMA-style game system.** Tie the pillars (settlements, factions, connected wasteland,
   survival, stories) into one way to play: start options, difficulty and mode presets (`modes.py`), progression and
   what the player works toward. Open: what a run's goal is, and which systems are on by default.
