@@ -22,7 +22,8 @@ command; P9 / P9u later walked one linked citizen in game on this converter's wh
   - P9u PASS once, the actor spawned 643 m south-south-west of the Red Rocket start, 149 m walked unloaded, branch
     `claude/p9-unloaded` ([#644](https://github.com/fo4sf/fo4-to-starfield/issues/644#issuecomment-6573465163)). From
     710 m and 899 m it was INCONCLUSIVE: the actor moved in one jump, or was parked outside the world
-    (combined-core.md:407-409).
+    ([#644 ladder](https://github.com/fo4sf/fo4-to-starfield/issues/644#issuecomment-6580035484);
+    combined-core.md:407-409; the P9u judge, combined-core-probes.md:639-641).
   - Not stated in the receipts: the core plugin's build or hash, and the ids of the cells walked.
 - Not shown in game: any walk on this page's exp2d plugin (`FO4TerrainExp2.esm`, `FO4CW_Commonwealth`); core64c's
   `FO4TerrainCore.esm`, which had 0 NAVM (JOURNAL.md, 2026-10-16 night, R06); any other route, worldspace or
