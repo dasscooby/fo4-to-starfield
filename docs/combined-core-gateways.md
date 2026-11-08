@@ -8,11 +8,11 @@ separate steps.
 ## Owner decisions this rests on (7 November 2026)
 
 - **D1 = A.** The player moves between areas by scripted transitions at fixed exits first (fade, time advance,
-  arrival at a marker). A map pick from known places may come later as a layer on the same transition. A vertibird or
-  ship (CC-61) stays a future option, not current work.
+  arrival at a marker). Map selection may be a later layer. A vertibird or ship (CC-61) stays a future option, not
+  current work.
 - **D2 = A.** A trip costs the route hours of the inter-world edge, the same for the player and for squads.
 - **D3 = B.** What happens on the way is a roll against the simulation at departure, for an encounter at arrival or at
-  a fixed waypoint, inside the encounter-conservation rules. No new ambush interiors.
+  a fixed waypoint, inside the encounter-conservation rules. No new full ambush interiors.
 - **D4 = A.** Inter-world edges are explicit, deterministic gateway pairs listed per world, each with its own hours.
   No nearest-marker guessing across worlds: marker units of different worlds are not comparable (seedpack.py).
 - **D5 = A.** Off-screen travel between worlds shows only through its effects at the endpoints (arrivals, news, map
