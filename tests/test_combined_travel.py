@@ -168,7 +168,9 @@ class InterWorldTests(unittest.TestCase):
         q = squad(goal="D", eta=HOUR + 13)
         self.assertTrue(travel.inter_world_leg(ws, q, worlds))
         self.assertIsNone(travel.position_in_world(ws, q, atlas, worlds, "w1"))
-        ws.routes.append(Route("C", "D", 3))                                  # A-B-C-D: 13 too, a tie
+        ws.routes += [Route("B", "C", 4), Route("C", "D", 3)]                  # A-B-C-D: 13 too, a tie
+        self.assertEqual(sim._distances(ws, "A")["D"], 13)
+        self.assertEqual(sim._distances(ws, "A")["C"] + 3, 13)                # the in-world route ties
         self.assertIsNone(travel.position_in_world(ws, q, atlas, worlds, "w1"))
         ws.routes.append(Route("A", "D", 12))                                 # in-world and shorter
         q.eta = HOUR + 12
