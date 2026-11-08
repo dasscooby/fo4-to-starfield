@@ -452,7 +452,7 @@ our GAMMA." New items continue the design's numbering (CC-60 to CC-62 are in the
 
 `tests/test_combined_lifecycle.py` follows one resupply job from its offer to its one outcome through every way it
 can go wrong, and checks three cross-module properties. The cases are the rules the reference mods describe
-(the review on #32: SSaW's encounter tokens and load recovery, StarSim's reservation and elapsed-time catch-up),
+(the review on #32: SSaW's encounter tokens and load recovery, plus reservation and elapsed-time catch-up),
 written against what `jobs.py`, `present.py` and `sim.py` do today:
 
 - one outcome per job: a hand-in pays once; a replay, a cancel after a hand-in or a hand-in after a cancel is
@@ -490,7 +490,7 @@ cases.
 
 - Acceptance: nothing in the world state says the player is on a job (SSaW keeps one accepted operation at a
   time). Offers are read on demand and only outcomes are logged.
-- Engine acknowledgement: a slot has no applied/failed channel back from the adapter (StarSim's package-to-task
+- Engine acknowledgement: a slot has no applied/failed channel back from the adapter (a package-to-task
   handshake); the planner's diff is the whole contract.
 - A live encounter at save time: L2 has no mid-encounter state, so there is nothing to recover on load (SSaW
   cleans up a battle or patrol that a save left live). This becomes real once L3 stages fights.
