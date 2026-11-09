@@ -197,3 +197,34 @@ to Preston's marker (or activate him), read `found preston`, `startcombat raider
 
 Not this mission: Papyrus.0.log's `Cannot call GetSingleRefArray()/Activate() on a None object` at 18:12:01 is the core's
 activator 00DCC6 (DefaultActivateLinkedRefOnActivate with no linked reference), routed separately.
+
+### After the mission (7 Nov owner report): nothing put Preston back (fixed offline: the keeper keeps him)
+
+The owner's report (Ctrl+Alt+K capture, 7 Nov 21:48 PC time, build terrain_core64v6i_l125_keeper_newgame12): "no
+preston garvy after misson finshes but nothings seems broken". The capture is on the core world (the compass reads
+MARS, as for the whole overlay), with no position, no stage and no mission log, so **where** Preston was is unknown.
+
+**Intended behaviour (this doc, not Fallout 4's):** Preston stays at his placement outside the museum after the mission.
+The cut-down mission has no Sanctuary move, no "The First Step" and no dialogue; sending him to Sanctuary after
+stage 200, as Fallout 4 does, would be a new placement and is the owner's decision, not this fix.
+
+**Cause (verified from the script, with the 19 Oct logs):** Relocate, the only thing that moved Preston to his merged
+spot, runs from the mission's 1 s timer, and stage 200 cancels that timer. On 19 Oct Preston read his unmerged spot
+again 5 times in one session (snap-back, a supported hypothesis about why), and Relocate put him back each time. After
+stage 200 nothing does, so once his cell reloads (the player leaves Concord and comes back, or loads a save) he stays at
+his unmerged spot, about 2,955 units from the museum or in the base world.
+
+**Fix (offline, untested in game):** the keeper quest (FO4SF_CodsworthKeeper, timer 2, never cancelled, restarted on
+every save load) also keeps Preston: `KeepPreston`, the same `MoveOver` rule and the same spot as Relocate, outdoors
+only, with its own budget of 10 failed moves (renewed at each load). It logs where he is at each load
+(`keeper load preston d=... at x y z disabled= dead= fails= player=x y z interior=`) and every `KeeperStatusEvery`
+(12) checks, about once a minute (`keeper status preston ...`); `make_mission.py log` reports the last such line as
+`keeper` and the count of `moved preston` lines as `preston_moves`. Only `FO4SF_Min00Quest.pex` changes: the keeper
+already carries the `Preston` property, so the plugin's records are the same, and a save that completed the mission
+gets the new check at its next load. While the mission runs, the keeper and Relocate apply the same rule. Once he has
+been moved, his position + the offset is far from the player, so neither moves him twice. A `--no-codsworth` build has
+no keeper and so does not keep him.
+
+Check in game: finish the mission (or load a save where it is complete), leave Concord, come back to the museum.
+Preston stands outside its door; the log has `moved preston` (if he had snapped back) and `keeper status preston d=`
+small.

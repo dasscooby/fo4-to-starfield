@@ -337,9 +337,12 @@ def next_stage(stage, dead, total, fighting, at_preston, found=False):
 
 def summarize(lines):
     """The mission log's lines as {"stages": [...], "status": <last status line or None>, "reward": int or None,
-    "startcombat": n, "activated": n, "found": <how the player found Preston before the fight, or None>}; lines of
-    other logs are ignored."""
-    s = {"stages": [], "status": None, "reward": None, "startcombat": 0, "activated": 0, "found": None}
+    "startcombat": n, "activated": n, "found": <how the player found Preston before the fight, or None>,
+    "preston_moves": n, "keeper": <the keeper's last line of where Preston is, or None>}; lines of other logs are
+    ignored. After stage 200 only the keeper moves Preston, so "keeper" and "preston_moves" are the evidence of where he
+    is after the mission."""
+    s = {"stages": [], "status": None, "reward": None, "startcombat": 0, "activated": 0, "found": None,
+         "preston_moves": 0, "keeper": None}
     for line in lines:
         m = LINE.search(line)
         if not m:
@@ -357,6 +360,10 @@ def summarize(lines):
             s["activated"] += 1
         elif msg.startswith("found preston ") and s["found"] is None:
             s["found"] = msg[len("found preston "):]
+        elif msg.startswith("moved preston "):
+            s["preston_moves"] += 1
+        elif msg.startswith(("keeper load preston ", "keeper status preston ")):
+            s["keeper"] = msg
     return s
 
 

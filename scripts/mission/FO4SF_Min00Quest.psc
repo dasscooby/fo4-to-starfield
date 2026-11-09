@@ -19,10 +19,11 @@ Actor Property Codsworth Auto Const
  on FO4SF_Min00 and in a --no-codsworth build. Not part of the mission.}
 
 bool Property KeeperOnly = False Auto Const
-{True on FO4SF_CodsworthKeeper: this instance only keeps Codsworth (enabled, moved into the merged world) and never runs
- the mission. A quest of its own because a new start-game-enabled quest starts on an existing save, where FO4SF_Min00
- had already ended (stage 200 cancels timer 1, which started his timer) or ran OnQuestInit before his timer existed: the
- owner's save, 22 Oct, had him unmoved and no mission log.}
+{True on FO4SF_CodsworthKeeper: this instance only keeps Codsworth (enabled, moved into the merged world) and Preston
+ (moved back to his merged spot, KeepPreston) and never runs the mission. A quest of its own because a new
+ start-game-enabled quest starts on an existing save, where FO4SF_Min00 had already ended (stage 200 cancels timer 1,
+ which started his timer) or ran OnQuestInit before his timer existed: the owner's save, 22 Oct, had him unmoved and no
+ mission log.}
 
 float Property MergeOffsetX = -1200.0 Auto Const
 float Property MergeOffsetY = -2700.0 Auto Const
@@ -43,7 +44,10 @@ int Property RewardCount = 100 Auto Const
 {Fallout 4 gives 100 caps (DialogueConcordArea stage 40).}
 
 float Property CodsworthCheck = 5.0 Auto Const
-{Seconds between Codsworth's own relocation checks (KeepCodsworth).}
+{Seconds between the keeper's relocation checks (KeepCodsworth, KeepPreston).}
+
+int Property KeeperStatusEvery = 12 Auto Const
+{The keeper logs where Preston is every this many checks (12 x 5 s = a minute), and at each save load. Chosen.}
 
 float Property EngageRadius = 60.0 Auto Const
 {The fight starts when the player comes this close (m) to a living raider, as FO4's DN092 StartCombat on its ambush.}
@@ -60,6 +64,8 @@ string LogName = "fo4sf_mission"
 int ticks = 0
 int relocateFails = 0
 int codsworthFails = 0
+int prestonFails = 0
+int keeperChecks = 0
 bool codsworthKept = False
 int applied = 0
 bool prestonFound = False
@@ -91,8 +97,9 @@ Function KeepCodsworthStart()
 EndFunction
 
 Function KeepCodsworthLoad()
-{The keeper's start, at its init and on every save load: Codsworth enabled, a fresh budget of failed moves, his timer
- (re)started. A load also restarts a check that spent its budget in an earlier session.}
+{The keeper's start, at its init and on every save load: Codsworth enabled, fresh budgets of failed moves for him and
+ Preston, one line of where Preston is, the timer (re)started. A load also restarts a check that spent its budget in an
+ earlier session.}
     if Codsworth == None
         return
     endif
@@ -101,7 +108,9 @@ Function KeepCodsworthLoad()
         Trace("codsworth was disabled: enabled")
     endif
     codsworthFails = 0
+    prestonFails = 0
     codsworthKept = True
+    TracePreston("keeper load")
     StartTimer(CodsworthCheck, 2)
 EndFunction
 
@@ -297,14 +306,42 @@ Function KeepCodsworth()
         return                                            ; FO4SF_Min00 on a save that ran his timer before the keeper
     endif
     Actor player = Game.GetPlayer()
-    if codsworthFails < 10 && !player.IsInInterior()
+    bool outdoors = !player.IsInInterior()
+    if codsworthFails < 10 && outdoors
         if MoveOver(Codsworth, player, player.GetPositionX(), player.GetPositionY(), player.GetPositionZ(), "codsworth")
             codsworthFails += 1
         endif
     endif
-    if codsworthFails < 10
+    if KeeperOnly
+        KeepPreston(player, outdoors)
+    endif
+    if codsworthFails < 10 || (KeeperOnly && prestonFails < 10)
         StartTimer(CodsworthCheck, 2)
     endif
+EndFunction
+
+Function KeepPreston(Actor player, bool outdoors)
+{The keeper keeps Preston at his merged spot after the mission too. Stage 200 ends the mission's 1 s check and with it
+ Relocate, the only thing that moved him, while in game 19 Oct he read his unmerged spot again 5 times in one session
+ (snap-back, supported hypothesis: he returns to his editor location as his cell reloads). So once the mission was
+ complete, nothing put him back: the owner's report of 7 Nov, "no preston garvy after misson finshes". No new placement:
+ the same spot (the plugin's ACHR 0x802 + the merge offset) and the same MoveOver rule as Relocate, outdoors only, with
+ its own budget of 10 failed moves. Where he is goes to the log every KeeperStatusEvery checks, the position the 7 Nov
+ capture did not have.}
+    if outdoors && prestonFails < 10
+        if MoveOver(Preston, player, player.GetPositionX(), player.GetPositionY(), player.GetPositionZ(), "preston")
+            prestonFails += 1
+        endif
+    endif
+    keeperChecks += 1
+    if keeperChecks % KeeperStatusEvery == 0
+        TracePreston("keeper status")
+    endif
+EndFunction
+
+Function TracePreston(string what)
+    Actor player = Game.GetPlayer()
+    Trace(what + " preston d=" + player.GetDistance(Preston) + " at " + Preston.GetPositionX() + " " + Preston.GetPositionY() + " " + Preston.GetPositionZ() + " disabled=" + Preston.IsDisabled() + " dead=" + Preston.IsDead() + " fails=" + prestonFails + " player=" + player.GetPositionX() + " " + player.GetPositionY() + " " + player.GetPositionZ() + " interior=" + player.IsInInterior())
 EndFunction
 
 bool Function MoveOver(Actor a, Actor player, float px, float py, float pz, string what)

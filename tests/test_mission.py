@@ -96,6 +96,24 @@ class LogTests(unittest.TestCase):
         s = make_mission.summarize(lines)
         self.assertEqual((s["found"], s["activated"], s["startcombat"], s["stages"]), ("activated", 1, 1, [20]))
 
+    def test_keeper_reports_preston_after_the_mission(self):
+        """FAL-64: after stage 200 the keeper's lines are the only evidence of where Preston is."""
+        s = make_mission.summarize(self.LINES)
+        self.assertEqual((s["preston_moves"], s["keeper"]), (0, None))
+        after = self.LINES + [
+            "[11/07/2026 - 09:40:00PM] FO4SF_MISSION rt=300.0 keeper load preston d=2955.1 at -811.1 1002.5 89.1 "
+            "disabled=False dead=False fails=0 player=-2011.1 -1697.2 90.0 interior=False",
+            "[11/07/2026 - 09:40:05PM] FO4SF_MISSION rt=305.0 moved preston to -2011.1 -1697.5 89.1 target -2011.1 "
+            "-1697.5 89.1 before=2955.1 d=0.3 failed=False",
+            "[11/07/2026 - 09:40:05PM] FO4SF_MISSION rt=305.0 moved codsworth to 1 2 3 target 1 2 3 before=1 d=1 failed=False",
+            "[11/07/2026 - 09:41:00PM] FO4SF_MISSION rt=360.0 keeper status preston d=3.2 at -2011.1 -1697.5 89.1 "
+            "disabled=False dead=False fails=0 player=-2012.0 -1700.0 90.0 interior=False",
+        ]
+        s = make_mission.summarize(after)
+        self.assertEqual(s["preston_moves"], 1)
+        self.assertTrue(s["keeper"].startswith("keeper status preston d=3.2"))
+        self.assertEqual(s["stages"], [10, 20, 30, 40, 200])
+
 
 class NextStageTests(unittest.TestCase):
     """make_mission.next_stage mirrors the script's NextStage (Codex review 5563368986: progress must not depend on
@@ -274,7 +292,7 @@ class RelocateContractTests(unittest.TestCase):
             psc = f.read()
         keep = psc[psc.index("Function KeepCodsworth()"):psc.index("bool Function MoveOver")]
         self.assertIn("codsworthFails += 1", keep)
-        self.assertRegex(keep, r"if codsworthFails < 10\s+StartTimer\(CodsworthCheck, 2\)")
+        self.assertRegex(keep, r"if codsworthFails < 10 \|\| \(KeeperOnly && prestonFails < 10\)\s+StartTimer\(CodsworthCheck, 2\)")
         self.assertNotIn("GetStage", keep)
         relocate = psc[psc.index("Function Relocate("):psc.index("Function KeepCodsworth()")]
         self.assertNotIn("MoveOver(Codsworth", relocate)
@@ -306,6 +324,75 @@ class RelocateContractTests(unittest.TestCase):
         self.assertRegex(psc, r"Event Actor.OnPlayerLoadGame\(Actor akSender\)\s+if KeeperOnly\s+KeepCodsworthLoad\(\)")
         keep = psc[psc.index("Function KeepCodsworth()"):psc.index("bool Function MoveOver")]
         self.assertLess(keep.index("if Codsworth == None"), keep.index("MoveOver(Codsworth"))   # the mission's old timer 2
+
+    def test_the_keeper_keeps_preston_after_the_mission(self):
+        """FAL-64, the owner's report of 7 Nov: "no preston garvy after misson finshes". Stage 200 cancels timer 1, the
+        mission's Relocate with it, while Preston snaps back to his unmerged spot (in game 19 Oct: moved 5 times in one
+        session). The keeper (timer 2, not cancelled by stage 200, restarted on every load) moves him back by the same
+        rule and to the same spot, with its own budget, and logs where he is; the mission instance never does."""
+        psc = read(PSC)
+        body = lambda name: psc[psc.index(f"Function {name}("):psc.index("EndFunction", psc.index(f"Function {name}("))]
+        keep, preston, load = body("KeepCodsworth"), body("KeepPreston"), body("KeepCodsworthLoad")
+        self.assertRegex(keep, r"if KeeperOnly\s+KeepPreston\(player, outdoors\)")      # only the keeper instance
+        self.assertLess(keep.index("if Codsworth == None"), keep.index("KeepPreston("))  # FO4SF_Min00's old timer 2: no-op
+        self.assertRegex(preston, r"if outdoors && prestonFails < 10\s+if MoveOver\(Preston, player,")
+        self.assertIn("prestonFails += 1", preston)
+        self.assertNotIn("GetStage", preston)                           # runs after stage 200, whatever the stage
+        self.assertNotIn("MoveTo(", preston)                            # the same move as Relocate: MoveOver only
+        self.assertIn('TracePreston("keeper status")', preston)
+        self.assertIn("keeperChecks % KeeperStatusEvery == 0", preston)
+        self.assertIn("prestonFails = 0", load)                         # a fresh budget on every save load
+        self.assertLess(load.index("prestonFails = 0"), load.index("StartTimer(CodsworthCheck, 2)"))
+        self.assertIn('TracePreston("keeper load")', load)
+        self.assertNotIn("CancelTimer(2)", psc)
+        for v in ("int prestonFails = 0", "int keeperChecks = 0"):
+            self.assertRegex(psc, rf"(?m)^{v}$")
+        self.assertRegex(psc, r"(?m)^int Property KeeperStatusEvery = 12 Auto Const$")
+        self.assertNotIn("KeeperStatusEvery", make_mission.mandatory_properties(psc))     # the plugin is unchanged
+        trace = body("TracePreston")
+        for field in ('" preston d="', '" disabled="', '" dead="', '" fails="', '" player="', '" interior="'):
+            self.assertIn(field, trace)
+        # the keeper quest carries the mission's properties, Preston among them (no new plugin record)
+        cs = read(CS)
+        keeper = cs[cs.index("var ks = new SF.ScriptEntry"):cs.index("keeper.VirtualMachineAdapter")]
+        self.assertIn("MissionProps(ks);", keeper)
+        self.assertIn('Obj("Preston", prestonRef.FormKey)', cs[cs.index("void MissionProps("):cs.index("MissionProps(script);")])
+
+    def test_keeper_rule_model_after_the_mission(self):
+        """The keeper's rule on plain numbers, after stage 200: Preston snapped back to his local spot, the mission's
+        check is off. He is moved back only when the player is outdoors at his merged spot, never twice, and a no-op move
+        spends the budget until a load renews it."""
+        ox, oy, radius, gap, local = -1200.0, -2700.0, 800.0, 1500.0, (-811.1, 1002.5)
+        merged = (local[0] + ox, local[1] + oy)
+
+        def keeper_check(state, player, outdoors, moveto_works):
+            if outdoors and state["fails"] < 10:
+                p = state["pos"]
+                if math.dist(player, p) >= gap and math.dist(player, (p[0] + ox, p[1] + oy)) <= radius:
+                    if moveto_works:
+                        state["pos"] = (p[0] + ox, p[1] + oy)
+                    else:
+                        state["fails"] += 1
+
+        street, sanctuary = (-2011.1, -1697.2), (-1146.7, 1293.8)
+        s = {"pos": local, "fails": 0}
+        keeper_check(s, sanctuary, True, True)                          # elsewhere: he stays where he is
+        self.assertEqual(s["pos"], local)
+        keeper_check(s, street, False, True)                            # in the museum: no move from an interior
+        self.assertEqual(s["pos"], local)
+        keeper_check(s, street, True, True)                             # back at the museum: put back
+        self.assertEqual(s["pos"], merged)
+        keeper_check(s, street, True, True)                             # never offset twice
+        self.assertEqual(s["pos"], merged)
+        s = {"pos": local, "fails": 0}
+        for _ in range(12):
+            keeper_check(s, street, True, False)
+        self.assertEqual(s["fails"], 10)                                # budget spent: the keeper stops trying
+        keeper_check(s, street, True, True)
+        self.assertEqual(s["pos"], local)
+        s["fails"] = 0                                                  # a save load renews it
+        keeper_check(s, street, True, True)
+        self.assertEqual(s["pos"], merged)
 
     def test_moves_trace_the_worlds(self):
         """Codex's world-identity point (#353): every move logs the player's and the actor's world before it and the
