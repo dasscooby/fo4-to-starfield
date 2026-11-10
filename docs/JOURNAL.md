@@ -2770,3 +2770,16 @@ or externally edited plugin list is first backed up and read back, then restored
 same profile's recorded pre-install bytes. Backup/write/installer failures retain recovery
 state. Healthy dependent installs are refused before rollback. Source and bounded PC
 recipe: `docs/ai/launcher-recovery.md`; exact head and test receipts live on FAL-247.
+
+## 2026-11-10 — Codex / Lone, FAL-247 item 7 part 1: per-save release verifier
+
+**Offline tested**, opaque synthetic saves/state/masters. `launcher.py check-save-release`
+checks a per-save receipt against ordered installed master identities, the original
+release, separate state envelope/payload layout declarations and component-bound state
+file hashes. Unknown/malformed bindings, changed save/state/master bytes and layout
+changes refuse without writing. A release label can change while compatibility inputs
+stay identical; the save retains its original release label. No game-save header is
+parsed or modified. This first part provides the read-only contract/CLI; automatic
+publication for newly produced saves and Play/GUI enforcement remain the next part of
+this same item-7 PR. It does not adopt existing unbound saves. Windows/native checks
+are **NOT_RUN** for this part. Exact-head receipts are on FAL-247.

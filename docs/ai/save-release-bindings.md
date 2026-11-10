@@ -1,0 +1,46 @@
+# Per-save release binding: item 7, part 1
+
+FAL-247, Codex / The Lone Wanderer. This first part provides a read-only verifier and
+CLI. It does **not yet enforce Play or automatically publish save bindings**. Those
+are the next part of this same item-7 PR. No existing save is automatically adopted.
+No game-save header is read or modified; saves and native state are opaque files.
+
+Each release declaration has schema 1, a release_id, ordered masters (name, size,
+sha256), and state_layouts keyed by component. Each layout declares format,
+envelope_schema and payload_schema separately. This keeps a sidecar envelope version
+from being mistaken for the schema of the state inside it.
+
+A save binding has schema 1, the original release declaration, save_name,
+save_identity (size/sha256) and state_files. State files are paths relative to the
+resolved runtime directory, mapped to component/size/sha256. Every declared state
+component must be covered. Relative paths cannot escape their root or traverse links.
+Metadata is bounded and duplicate keys, unknown fields/schemas, ambiguous names and
+malformed identities refuse. State-free releases may declare no state components.
+
+```text
+python -I scripts/launcher.py check-save-release \
+  --release <release.json> --binding <save-binding.json> \
+  --save <save-file> --starfield <game-folder> --state-dir <profile-runtime-folder>
+```
+
+Run on one line on Windows. Exit 0 means the declared compatibility inputs, actual
+installed masters, bound save and required state bytes match. Exit 2 reports refusal.
+The command writes nothing. It cannot establish that a declaration accurately describes
+unmeasured native code, and is not an in-game save/load test.
+
+Changing master membership/order/identity or state layout refuses. Changing only a
+release label with identical compatibility inputs can pass while preserving the save's
+original release ID. Missing/changed saves or state files, and missing/unreadable
+bindings, refuse rather than creating or updating a receipt. Hashing installed masters
+reads their full contents; no performance result is claimed here.
+
+The snapshot_binding API creates an in-memory identity snapshot only. The upcoming
+publisher must prove a save was newly produced by the running, checked release before
+publishing it atomically. An old unbound save cannot be made compatible simply by
+calling that helper. Automatic Play enforcement, publication/recovery, old-save refusal
+in the UI, installer release declarations and cross-native integration remain open.
+
+Verification is synthetic: test_launcher_save_release.py constructs opaque fixture
+bytes and covers changed declarations/files, missing/malformed bindings, component
+coverage, path escape, concurrent changes, Unicode paths and read-only CLI behavior.
+Windows/native/Tk/game acceptance remains **NOT_RUN** for this source part.

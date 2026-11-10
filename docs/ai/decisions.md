@@ -1430,3 +1430,16 @@ failure; refuse healthy riders rather than removing them implicitly. This avoids
 ownership store or a repair routine that guesses which game files belong to us. Rebuilding
 or reinstalling missing output automatically was rejected: source inputs may have changed,
 and only the owning installers can safely remove their unchanged publications.
+
+## 2026-11-10 — Bind opaque save bytes to explicit release inputs (Codex, FAL-247 item 7)
+
+Use an external per-save receipt with name/content identity, ordered master identities,
+original release ID and component-bound state files. Declare sidecar envelope and payload
+layout separately. Compare actual installed master bytes as well as declared metadata;
+a runtime or release label alone cannot establish compatibility. A patch release may
+retain compatibility inputs while keeping each save's original release ID. Unknown
+bindings refuse instead of being silently adopted. This first source part is a read-only
+verifier/CLI; its snapshot helper is not proof of provenance and publishes nothing.
+The subsequent Play/publication hook must establish that a save was newly produced by
+the running release. Save-header edits and an automatic migration/adoption command are
+excluded because no such game-format or compatibility evidence has been established.
