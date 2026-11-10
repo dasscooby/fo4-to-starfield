@@ -164,7 +164,10 @@ static class RadsProbe
         mod.ActorValueInformation.Add(avif);
 
         var arch = new MagicEffectArchetype(MagicEffectArchetype.TypeEnum.ValueModifier);
-        arch.Association.SetTo(avif.FormKey);
+        // The actor value of a value modifier is the MGEF's SecondActorValue (DATA word 14: 321 of Starfield.esm's 853 effects
+        // carry one there; word 0, the archetype's association, is the associated item and is empty in every vanilla effect).
+        // The first two game sessions (FAL-213) wrote it into the association and crashed the engine at Spell.Cast: it
+        // reads the actor value, finds null, and reads that null's flags.
         MagicEffect effect;
         if (found.Effect != null)
         {
@@ -178,7 +181,8 @@ static class RadsProbe
             effect.Keywords = null;
             effect.MagicSkill.SetToNull();
             effect.ResistValue.SetToNull();
-            effect.SecondActorValue.SetToNull();
+            effect.SecondActorValue.SetTo(avif.FormKey);
+            effect.Flags &= ~MagicEffect.Flag.Detrimental;     // the engine negates the magnitude when exactly one of the effect's Detrimental flag and the actor value's damage-is-positive flag is set; neither is set here, so +100 stays +100
             effect.ThirdActorValue.SetToNull();
             effect.CounterEffects.Clear();
         }
@@ -188,8 +192,9 @@ static class RadsProbe
             {
                 EditorID = EffectEdid, Name = "FO4SF Rads", Archetype = arch,
                 CastType = CastType.FireAndForget, TargetType = TargetType.Self,
-                Flags = MagicEffect.Flag.NoDuration | MagicEffect.Flag.NoArea | MagicEffect.Flag.Detrimental,
+                Flags = MagicEffect.Flag.NoDuration | MagicEffect.Flag.NoArea,
             };
+            effect.SecondActorValue.SetTo(avif.FormKey);
         }
         mod.MagicEffects.Add(effect);
 
@@ -338,14 +343,17 @@ static class RadsProbe
         {
             var arch = effect.Archetype as IMagicEffectArchetypeGetter;
             Need(arch != null, "the MGEF archetype is not a plain value modifier archetype");
-            Console.WriteLine($"  MGEF {effect.EditorID} {effect.FormKey} archetype {arch?.Type} association {arch?.Association.FormKey} cast {effect.CastType} target {effect.TargetType} flags {effect.Flags}");
+            Console.WriteLine($"  MGEF {effect.EditorID} {effect.FormKey} archetype {arch?.Type} actor value (DATA word 14) {effect.SecondActorValue.FormKey} association {arch?.Association.FormKey} cast {effect.CastType} target {effect.TargetType} flags {effect.Flags}");
             Need(arch?.Type == MagicEffectArchetype.TypeEnum.ValueModifier, "the MGEF archetype is not ValueModifier");
-            Need(arch?.Association.FormKey == Own(AvifId), "the MGEF's actor value (association) is not FO4SF_Rads");
+            Need(effect.SecondActorValue.FormKey == Own(AvifId), "the MGEF's actor value (SecondActorValue, DATA word 14) is not FO4SF_Rads: the engine would read a null actor value at Spell.Cast");
+            Need(arch?.Association.IsNull != false, "the MGEF's archetype association (DATA word 0) is set: vanilla value modifiers leave it empty");
+            Need(!effect.Flags.HasFlag(MagicEffect.Flag.Detrimental), "the MGEF is Detrimental: with the actor value's flags the engine would negate +100");
+            Need(effect.ResistValue.IsNull && effect.MagicSkill.IsNull && effect.ThirdActorValue.IsNull, "the MGEF still names a resist, skill or third actor value");
             var tm = found.Effect;
             if (tm == null) Need(effect.CastType == CastType.FireAndForget && effect.TargetType == TargetType.Self, "the MGEF is not FireAndForget / Self");
             else
             {
-                Need(effect.CastType == tm.CastType && effect.TargetType == tm.TargetType && effect.Flags == tm.Flags, $"the MGEF's cast type, target or flags differ from its template {tm.EditorID}");
+                Need(effect.CastType == tm.CastType && effect.TargetType == tm.TargetType && effect.Flags == (tm.Flags & ~MagicEffect.Flag.Detrimental), $"the MGEF's cast type, target or flags (other than Detrimental, cleared on purpose) differ from its template {tm.EditorID}");
                 Need(effect.Sounds.Count == tm.Sounds.Count && effect.Components.Count == tm.Components.Count, $"the MGEF's sounds or components differ from its template {tm.EditorID}");
                 Need(effect.Conditions.Count == 0 && effect.VirtualMachineAdapter == null && (effect.Keywords?.Count ?? 0) == 0, "the MGEF still carries conditions, a script or keywords of its template");
             }
@@ -420,13 +428,14 @@ static class RadsProbe
         mod.ActorValueInformation.Add(new ActorValueInformation(new FormKey(SfEsm, 0x00A02D), Release) { EditorID = "Health", Name = "Health" });
         mod.ActorValueInformation.Add(new ActorValueInformation(new FormKey(SfEsm, 0x00A02E), Release) { EditorID = "SynthOther", Name = "Other" });
         var synthArch = new MagicEffectArchetype(MagicEffectArchetype.TypeEnum.ValueModifier);
-        synthArch.Association.SetTo(new FormKey(SfEsm, 0x00A02E));
         var synthMgef = new MagicEffect(new FormKey(SfEsm, 0x00A100), Release)
         {
             EditorID = "SynthValueEffect", Name = "Synth", CastType = CastType.FireAndForget, TargetType = TargetType.Self,
-            Flags = MagicEffect.Flag.NoDuration | MagicEffect.Flag.Detrimental, Archetype = synthArch,
+            Flags = MagicEffect.Flag.NoDuration | MagicEffect.Flag.Detrimental, Archetype = synthArch,       // a template with the flag that would negate
             Keywords = new ExtendedList<IFormLinkGetter<IKeywordGetter>> { new FormLink<IKeywordGetter>(new FormKey(SfEsm, 0x00A200)) },
         };
+        synthMgef.SecondActorValue.SetTo(new FormKey(SfEsm, 0x00A02E));            // the template's own actor value (replaced by ours)
+        synthMgef.ResistValue.SetTo(new FormKey(SfEsm, 0x00A02E));
         mod.MagicEffects.Add(synthMgef);
         mod.Keywords.Add(new Keyword(new FormKey(SfEsm, 0x00A200), Release) { EditorID = "SynthKeyword" });
         var synthSpell = new Spell(new FormKey(SfEsm, 0x00A101), Release)

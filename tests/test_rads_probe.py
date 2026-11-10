@@ -190,7 +190,7 @@ class StageTests(unittest.TestCase):
         self.assertIn("masters [Starfield.esm]", check.stdout)
         self.assertIn("AVIF FO4SF_Rads", check.stdout)
         self.assertIn("type Variable default 0 min 0 max 1000 flags DefaultToZero", check.stdout)
-        self.assertIn("archetype ValueModifier association 000800:FO4SFRadsProbe.esm", check.stdout)
+        self.assertIn("archetype ValueModifier actor value (DATA word 14) 000800:FO4SFRadsProbe.esm association Null", check.stdout)
         self.assertIn("SPEL FO4SF_RadsSpell", check.stdout)
         self.assertIn("1 effect(s) at 100", check.stdout)
         self.assertIn('ALCH FO4SF_RadAway 000803:FO4SFRadsProbe.esm "RadAway"', check.stdout)
@@ -267,6 +267,45 @@ class StageTests(unittest.TestCase):
         check = self.run_tool("check", out / PLUGIN, self.master)
         self.assertEqual(check.returncode, 0, check.stdout)
         self.assertIn("templates (strict)", check.stdout)
+
+    def test_the_mgef_data_word_14_is_our_actor_value_and_the_flags_do_not_negate(self):
+        """Both game crashes (FAL-213): the engine reads the effect's actor value (DATA word 14, Mutagen's
+        SecondActorValue) at Spell.Cast and the kit left it null. Raw bytes, no game."""
+        out = self.root / "b2w"
+        self.assertEqual(self.run_tool("build", self.master, out).returncode, 0)
+        data = (out / PLUGIN).read_bytes()
+        i = data.index(b"MGEF", data.index(b"MGEF") + 4)       # the first is the group's label, the second the record
+        size = struct.unpack_from("<I", data, i + 4)[0]
+        body, j, subs = data[i + 24:i + 24 + size], 0, {}
+        while j < len(body):
+            n = struct.unpack_from("<H", body, j + 4)[0]
+            subs[body[j:j + 4]] = body[j + 6:j + 6 + n]
+            j += 6 + n
+        words = struct.unpack_from(f"<{len(subs[b'DATA']) // 4}I", subs[b"DATA"])
+        avif = 0x01000800                                   # our plugin is load index 1, the AVIF is 0x800
+        self.assertEqual(words[14], avif)                   # the actor value
+        self.assertEqual(words[0], 0)                       # the association stays empty, as in every vanilla effect
+        self.assertEqual(words[16], 0)                      # no resist value (the synthetic template named one)
+        self.assertEqual(words[1], 0)                       # no skill
+        self.assertEqual(words[17], 0)
+        self.assertIn("actor value (DATA word 14) 000800:FO4SFRadsProbe.esm",
+                      self.run_tool("check", out / PLUGIN, self.master).stdout)
+
+    def test_check_refuses_a_kit_whose_actor_value_is_not_ours(self):
+        out = self.root / "b2x"
+        self.assertEqual(self.run_tool("build", self.master, out).returncode, 0)
+        data = bytearray((out / PLUGIN).read_bytes())
+        i = data.index(b"MGEF")
+        d = data.index(b"DATA", i) + 6
+        struct.pack_into("<I", data, d + 14 * 4, 0)         # the crash of both sessions: word 14 empty
+        (out / "bad").mkdir()
+        (out / "bad" / PLUGIN).write_bytes(bytes(data))
+        bad = self.run_tool("check", out / "bad" / PLUGIN, self.master)
+        self.assertEqual(bad.returncode, 1, bad.stdout)
+        self.assertIn("SecondActorValue, DATA word 14) is not FO4SF_Rads", bad.stdout)
+
+    def test_the_no_template_effect_is_not_detrimental_either(self):
+        self.assertNotRegex(TOOL_SRC, r"NoDuration \| MagicEffect\.Flag\.NoArea \| MagicEffect\.Flag\.Detrimental")
 
     def test_a_named_template_is_used_and_an_unknown_one_is_refused(self):
         out = self.root / "b2u"

@@ -16,20 +16,35 @@ Task: FAL-213. Status: **run in game once (head b9ad9081); this head fixes what 
 * **Control passed**: vanilla Health 205 to 215 with `ModValue +10` and back to 205 (`Actor.ModValue` exists and works on
   Health). **Verified.**
 * **Stage 20 crashed the game** (0xC0000005, a read of 0x15c in the game's own code) right after the `before` line, i.e. at
-  `Spell.Cast` of our spell. **Verified.** Cause **unresolved**. Stage 10 wrote 0 to a value that is 0, so whether our value
+  `Spell.Cast` of our spell. **Verified.** Cause: see the second session below. Stage 10 wrote 0 to a value that is 0, so whether our value
   takes a number was not shown.
 
-What this head changes, and why (supported hypothesis, not a finding): the spell, the effect and RadAway were written from
-nothing. Read back, the spell lacked `ETYP` (equip type), the effect ids `MAGF`/`EFIF`/`MUID` and, for the effect,
-`DNAM`; in the sampled vanilla records (`docs/measurements/sf_esm.json`) every one of 300 SPEL carries `OBND`, `ODTY`,
-`ETYP`, `DESC`, `SPIT` and `EFIF`/`MUID` on each of 661 effect entries, and every one of 300 MGEF carries `DATA` and
-`DNAM`. A null equip type or effect id read by the cast is the likeliest reading of a null at +0x15c, **but the crash
-address is not mapped to any field**, so this is a guess. The writer now **copies a vanilla self-cast value-modifier spell
-and its effect, and a vanilla medicine ingestible, from Starfield.esm** (found by what they are, or named with
-`--template-spell` / `--template-aid`; the build prints and `plan.json` records which) and changes only the editor id, the
-name, the effect's actor value and the magnitude; conditions, scripts, keywords, the effect's resist/skill values and an
-addiction are cleared. If the game still crashes on `Cast`, the template choice is the next variable
-(`stage --template-spell <edid>`), then the script-free route below.
+## The second session (head 41d3f968): cause found
+
+Same crash at stage 20 (0xC0000005, read of 0x15c at `Starfield.exe+0x17850f4`), with the spell and effect already copied
+from vanilla records. Stage 10 passed, **including our own value taking a number**: `wrote=50 read=50`, then `wrote=0 read=0`.
+**Verified.** The owner PC's reading of the crash dump (a disassembly reading, not a game test): at `Spell.Cast` the engine
+starts our effect, asks its MGEF for its **actor value**, gets null, and reads that actor value's flags.
+
+* The effect's actor value is **DATA word 14** of the MGEF (Mutagen: `MagicEffect.SecondActorValue`). 321 of Starfield.esm's
+  853 effects carry an AVIF there (`RestoreHealthFood_OBSOLETE` -> Health); 72 carry one in word 16 (the resist value);
+  **none in word 0**, the archetype's `Association`, which is where both earlier kits put our AVIF. The owner PC's count of Starfield.esm, not re-run here; the template copy even dropped the template's own value. Word 14 stayed 0.
+* This head sets `SecondActorValue` to our AVIF (and leaves the association empty, as every vanilla value modifier does).
+  `check` now **fails the kit** when the MGEF's actor value is not our AVIF, when the association is set, or when a resist,
+  skill or third actor value is named; a test reads word 14 out of the raw bytes and another corrupts it and expects `check`
+  to refuse. Each of the two crashes would have been caught offline.
+* **Sign of the magnitude** (the same disassembly, untested in play): the engine negates an effect's magnitude when exactly
+  one of two flags is set, the MGEF's `Detrimental` (0x4) and the actor value's "damage is positive". Our AVIF has only
+  `DefaultToZero`, so this head **clears `Detrimental`** on the effect (both on the template copy, which otherwise keeps the
+  template's flags, and on the no-template path): neither flag is set, the spell should give **+100** and RadAway **-200**.
+  If stage 20 shows a negative sign, the other choice is `Detrimental` on and the AVIF flagged damage-is-positive (how Fallout 4
+  declares Rads).
+* Side fact: the first template's actor value `000002E0` has no AVIF record in Starfield.esm (1107 AVIF, none with that id).
+
+Since the first session the writer **copies a vanilla self-cast value-modifier spell and its effect, and a vanilla medicine
+ingestible, from Starfield.esm** (found by what they are, or named with `--template-spell` / `--template-aid`; the build
+prints and `plan.json` records which) and changes the editor id, name, the effect's actor value and the magnitude;
+conditions, scripts, keywords, resist/skill values and an addiction are cleared. That alone did not stop the crash (above).
 Stage 10 now also writes a non-zero number (50) to our value, reads it, and writes 0 (`set` lines; the reader's
 "own value takes a number" line).
 
