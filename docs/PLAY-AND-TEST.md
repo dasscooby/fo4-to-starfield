@@ -1,3 +1,5 @@
+> **Record of a withdrawn guide (October 2026):** nothing is offered for download or play. The project's goal is in the [README](../README.md); its status is in [ROADMAP.md](ROADMAP.md).
+
 # Play and test the port: a guide for newcomers
 
 > **Withdrawn for now (owner, 19 Oct 2026).** The project is not offered for download or play, for legal reasons and so

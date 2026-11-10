@@ -1,3 +1,5 @@
+> **Handoff snapshot of 3 November 2026** (its file-ownership rules still apply). For what is current, read [ROADMAP.md](ROADMAP.md) from the top and [issue #32](https://github.com/fo4sf/fo4-to-starfield/issues/32).
+
 # Codex / Claude / Grok status
 
 ## Current handoff, 3 November 2026
