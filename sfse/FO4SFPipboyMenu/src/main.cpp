@@ -91,8 +91,8 @@ namespace
 		{ "BSStringPool.GetEntry", 1186742, "libxse" },
 		{ "BSStringPool.Entry.Release", 139340, "libxse" },
 		{ "IMenu.vtable.primary", 475515, "libxse VTABLE_IMenu, checked by RTTI" },
-		{ "IMenu.vtable.BSInputEventUser", 475519, "libxse VTABLE_IMenu, checked by RTTI" },
-		{ "IMenu.vtable.BSTEventSink", 475517, "libxse VTABLE_IMenu, checked by RTTI" },
+		{ "IMenu.vtable.BSInputEventUser", 475517, "libxse VTABLE_IMenu[1], checked by RTTI" },  // +0x10, 10 slots
+		{ "IMenu.vtable.BSTEventSink", 475519, "libxse VTABLE_IMenu[0], checked by RTTI" },     // +0x50, 2 slots
 		{ "IMenu.RTTI", 844868, "libxse RTTI_IMenu" },
 		{ "IMenu.ctor", 130615, "precedent" },
 		{ "IMenu.scalar_deleting_dtor", 130616, "precedent" },
