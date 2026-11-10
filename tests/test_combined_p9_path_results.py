@@ -66,8 +66,37 @@ class P9PathResultTests(unittest.TestCase):
                 verdict = probes.check_p9(col(log=request(result=0, after=after)))
                 self.assertEqual(verdict.verdict, probes.INCONCLUSIVE, verdict.to_dict())
                 self.assertFalse(verdict.extra["attempts"][-1]["arrived"])
-        # The sample at exactly the return time belongs to the request.
-        self.assertEqual(probes.check_p9(col(log=request(result=0, after=222.0))).verdict, probes.PASS)
+        # The sample at exactly the return time belongs to the request, in the verdict and in the rung's own record.
+        verdict = probes.check_p9(col(log=request(result=0, after=222.0)))
+        self.assertEqual(verdict.verdict, probes.PASS)
+        attempt = verdict.extra["attempts"][-1]
+        self.assertTrue(attempt["arrived"], attempt)
+        self.assertEqual(attempt["command_closest_m"], 6.0)
+
+    def test_the_sample_in_the_go_tick_belongs_to_the_request(self):
+        # A request that returns in its go's own tick still owns the sample taken in that tick, and nothing later.
+        attempt = probes.check_p9(col(log=request(result=0, after=0.0))).extra["attempts"][-1]
+        self.assertEqual(attempt["command_closest_m"], 450.0, attempt)
+        self.assertEqual(attempt["command_approach_m"], 0.0, attempt)
+
+    def test_control_arriving_in_its_return_tick_qualifies_a_later_stall(self):
+        # The control's arrival sample shares its Success return's rt= (107.5): it is the control's own arrival, so the
+        # later stall with a native Failure is a navmesh FAIL. Pins the inclusive end in the rung record, which the
+        # control's qualification reads (the judged rung's cut in check_p9 is pinned above).
+        base = p9_log(start=20.0, speed=0.0, seconds=60)
+        control = request(start=20.0, seconds=60, result=0, after=6.0, offset=100.0)
+        stalled = request(speed=0.0, offset=200.0, result=1, after=240.0)
+        verdict = probes.check_p9(col(log=base + control[1:] + stalled[1:]))
+        self.assertEqual(verdict.verdict, probes.FAIL, verdict.to_dict())
+        self.assertTrue(verdict.extra["attempts"][1]["arrived"], verdict.extra["attempts"][1])
+
+    def test_one_return_rule_for_records_and_verdict(self):
+        self.assertTrue(probes._p9_by_return(223.5, 223.5))
+        self.assertTrue(probes._p9_by_return(223.4, 223.5))
+        self.assertFalse(probes._p9_by_return(223.6, 223.5))
+        for rt, back in ((None, 223.5), (223.5, None), (None, None)):
+            with self.subTest(rt=rt, back=back):
+                self.assertFalse(probes._p9_by_return(rt, back))
 
     def test_success_control_cannot_borrow_an_arrival_after_its_return(self):
         base = p9_log(start=20.0, speed=0.0, seconds=60)
