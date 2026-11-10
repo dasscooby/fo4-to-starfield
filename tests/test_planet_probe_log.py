@@ -198,8 +198,15 @@ class T7Tests(unittest.TestCase):
         self.assertIn("T7", [row.split()[0] for row in probe_log.verdict_table(s)[1:]])
 
     def test_unknown_when_t1_is_not_read(self):
-        self.assertEqual(probe_log.t7_result({"T7": {"verdict": "with player"}}), "unknown")
-        self.assertEqual(probe_log.t7_result({"T7": {"verdict": "with player"}, "T1": {"verdict": "left behind"}}), "PASS")
+        self.assertEqual(probe_log.t7_result({"T7": {"verdict": "with player"}}, True), "unknown")
+        self.assertEqual(probe_log.t7_result({"T7": {"verdict": "with player"}, "T1": {"verdict": "left behind"}}, True), "PASS")
+
+    def test_no_pass_when_the_lc172_control_was_never_read(self):
+        both = {"T7": {"verdict": "with player"}, "T1": {"verdict": "left behind"}}
+        self.assertEqual(probe_log.t7_result(both), "control not read")
+        lines = [x for x in t7_lines(t1=False, t7=True) if " tag=MERGE " not in x and " tag=LC172COC " not in x]
+        s = probe_log.summarize(lines, PLAN)
+        self.assertEqual(s["arrivals"][1]["t7"], "control not read")
 
 
 class SummaryTests(unittest.TestCase):

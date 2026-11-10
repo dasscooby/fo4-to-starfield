@@ -39,7 +39,8 @@ The verdict a reference gets at an arrival, from its last reading there:
   unknown       the line lacks a value the verdict needs (a cut line), or both are in interiors
 Probe run 2 adds T7, a persistent marker stored in the spawn cell's own persistent group (merge-diff, FAL-188),
 and t7_result() reads it at each arrival on our planet (at the last reading), after the LC172 control (an arrival
-elsewhere where MERGE and LC172COC are both with player, else "control failed": the session proves nothing):
+elsewhere where MERGE and LC172COC are both with player, else "control failed" or, never read, "control not read":
+the session proves nothing):
   PASS         T7 with player and T1 left behind (the offset of T7 is then a whole-cell overlay shift, not ~0)
   FAIL         T7 left behind or not loaded (rank 2 is wrong: no exterior-persistent markers as the map fix)
   confounded   T1 and T7 both with player (the whole world started instancing: not a result for T7's placement)
@@ -335,12 +336,14 @@ def control_held(arrivals):
 
 def t7_result(refs, control=None):
     """PASS, FAIL, confounded, unknown, "control failed" (control False: the LC172 control did not hold, so nothing
-    is proved) or None (no T7 reading) for one arrival's refs ({tag: {"verdict": ...}}, as summarize() files them)."""
+    is proved), "control not read" (control None: no LC172 arrival was read) or None (no T7 reading) for one arrival's refs ({tag: {"verdict": ...}}, as summarize() files them)."""
     t7 = (refs.get("T7") or {}).get("verdict")
     if t7 is None:
         return None
     if control is False:
         return "control failed"
+    if control is None:
+        return "control not read"                # no LC172 arrival read MERGE and LC172COC: PASS would prove nothing
     t1 = (refs.get("T1") or {}).get("verdict")
     if t7 in ("left behind", "not loaded"):
         return "FAIL"
