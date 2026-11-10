@@ -120,6 +120,8 @@ def publish(values, candidate_path, *, apply=False, running=restore.game_running
     problems = sr._installed_masters(release, root)
     if problems:
         raise sr.BindingError(problems[0])
+    from . import release_load
+    release_load.check(release, root, values.get("my_games"))
     old_raw = read(target)
     old = receipt.get(FIELD)
     if FIELD not in receipt:

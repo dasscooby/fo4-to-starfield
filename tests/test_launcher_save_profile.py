@@ -24,6 +24,9 @@ class SaveProfileTests(unittest.TestCase):
         self.game = self.root / "game"
         self.data = self.game / "Data"
         self.data.mkdir(parents=True)
+        self.plugins = Path(ri.instance.plugins_txt(str(self.game)))
+        self.plugins.parent.mkdir(parents=True)
+        self.plugins.write_text("*FO4Port.esm\n")
         self.my_games = self.root / "My Games"
         self.saves = self.my_games / "Saves" / "FO4SF"
         self.saves.mkdir(parents=True)
@@ -182,6 +185,20 @@ class SaveProfileTests(unittest.TestCase):
                                 env=dict(os.environ, LOCALAPPDATA=str(self.root / "local")))
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Save release check refused", result.stdout + result.stderr)
+
+    def test_active_set_is_checked_even_with_no_saves(self):
+        self.plugins.write_text("FO4Port.esm\n")
+        self.assertIn("active master set/order", self.reason())
+
+    def test_load_order_tool_cannot_change_release_before_start(self):
+        (self.game / "Starfield.exe").write_bytes(b"")
+        system = FakeSystem([])
+        with mock.patch.dict(os.environ, {"LOCALAPPDATA": str(self.root / "local")}):
+            with mock.patch.object(crashwatch, "apply_load_order", side_effect=lambda *a:
+                                   self.plugins.write_text("FO4Port.esm\n")):
+                with self.assertRaisesRegex(ValueError, "release load check refused"):
+                    crashwatch.play(self.values, str(self.game), system=system, folder=str(self.game))
+        self.assertEqual(system.calls, [])
 
 
 if __name__ == "__main__":

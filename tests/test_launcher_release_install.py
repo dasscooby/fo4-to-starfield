@@ -22,6 +22,11 @@ class ReleaseInstallTests(unittest.TestCase):
         self.game = self.root / "instance"
         self.data = self.game / "Data"
         self.data.mkdir(parents=True)
+        self.my_games = self.root / "My Games"
+        self.my_games.mkdir()
+        self.plugins = Path(instance.plugins_txt(str(self.game)))
+        self.plugins.parent.mkdir(parents=True)
+        self.plugins.write_text("*FO4Port.esm\n")
         (self.game / "Starfield.exe").write_bytes(b"synthetic exe")
         (self.data / "FO4Port.esm").write_bytes(b"synthetic master")
         self.receipt = self.game / instance.RECORD
@@ -33,7 +38,7 @@ class ReleaseInstallTests(unittest.TestCase):
         self.candidate.write_bytes(ri.encode(self.release))
         self.target = self.data / sr.RELEASE_FILE
         self.values = settings.defaults()
-        self.values.update(instance=str(self.game))
+        self.values.update(instance=str(self.game), my_games=str(self.my_games))
         self.settings_path = self.root / "settings.json"
         settings.save(str(self.settings_path), self.values)
 
@@ -214,6 +219,14 @@ class ReleaseInstallTests(unittest.TestCase):
         result = subprocess.run(argv + ["--apply"], env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(ri.installed(self.game), sr.declaration(self.release))
+
+    def test_publication_refuses_other_active_configuration_without_writes(self):
+        self.plugins.write_text("FO4Port.esm\n")
+        before = self.snapshot()
+        for apply in (False, True):
+            with self.assertRaisesRegex(ValueError, "active master set/order"):
+                self.publish(apply=apply)
+        self.assertEqual(before, self.snapshot())
 
 
 if __name__ == "__main__":

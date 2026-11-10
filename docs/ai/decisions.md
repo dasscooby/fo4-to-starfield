@@ -1465,3 +1465,13 @@ and known previous/new bytes. Existing saves remain unbound until separate proof
 of new-save provenance is available. The explicit install-release metadata step
 is not yet automatically invoked by packaging/component installers, and does not
 claim to serialize every unrelated installer: observed metadata edits refuse.
+
+### 2026-11-10 — Codex / Lone: compare explicit loader inputs before release Play
+
+Do not infer active masters from every file installed in Data. Compare the actual
+instance Plugins.txt active non-built-in sequence to the declaration, validate
+implicit installed membership separately, and reuse the existing loader override
+and shadow-copy rules. Repeat after load-order tools, so an automatic fix cannot
+change the declared configuration after validation. Keep native built-in indexes
+and accepted implicit CCC identity/order as an explicit remaining boundary; an
+alphabetically enumerated built-in set is not evidence of the game's load indexes.

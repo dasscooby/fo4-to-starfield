@@ -2806,3 +2806,14 @@ atomic, linked files refuse, instance fields and all saves/bindings stay intact.
 This does not publish save bindings. Managed release finalization wiring, active
 master-set/order validation and new-save provenance remain in draft #716.
 Windows/native/Tk/game NOT_RUN. Exact-head review/evidence tracked on FAL-247.
+
+### 2026-11-10 — Codex / Lone: explicit release load configuration (item 7 part 4)
+
+Following Scribe CLEAR of part 3, release publication and Play now compare the
+instance's active plugin set/order and installed built-in membership to its release
+declaration. Reuse loader preflight for override/shadow refusals, require supported
+bounded text, and recheck after load-order application before game start. No writes
+or repair. Full implicit built-in ordering/indexes are not established by this
+part; accepted implicit loader configuration needs further identity/evidence.
+Managed installer workflow wiring and proven new-save binding publication remain
+in draft #716. Synthetic checks only; Windows/native/Tk/game NOT_RUN.

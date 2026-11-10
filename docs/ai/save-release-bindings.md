@@ -83,7 +83,25 @@ publication writes nothing. Saves and their bindings are never touched.
 This remains an incomplete draft. Legacy instances with neither declaration nor
 ownership retain their existing behavior; explicit release publication does not
 make their unbound saves safe. The packaging/component-install workflow must still
-invoke this finalization step for managed releases. Active master-set/order
-validation and provenance-safe atomic publication for newly produced saves remain
-required before item 7 is complete or this PR integrates. No old-save adoption
-command or PC-ready card is offered.
+invoke this finalization step for managed releases. Provenance-safe atomic
+publication for newly produced saves remains required before item 7 is complete
+or this PR integrates. No old-save adoption command or PC-ready card is offered.
+
+Part 4 validates explicit active master membership/order against the declaration,
+using the instance's own `FO4SF-local/Starfield/Plugins.txt`. Missing, oversized,
+non-UTF-8, duplicate or unknown entries refuse. An inactive extra file in Data is
+not treated as loaded. All installed built-in master names must match the declared
+built-in set; active non-built-in names must match the declared order exactly.
+Existing loader preflight rules refuse sTestFile overrides, CCC entries naming
+non-built-in plugins and shadow copies in My Games/Data. Loader inputs must be
+bounded supported UTF-8 text; replacement decoding cannot hide an override. This
+check runs during release publication and full Play checks, then runs again after
+the load-order tool and before the game starts. `load_order=off` cannot bypass it.
+No files are repaired to make a release match.
+
+This does not establish native indexes or relative built-in ordering. Built-in-only
+CCC files follow the existing loader preflight rules; identity/order evidence for
+that implicit loader configuration remains necessary before claiming complete
+load compatibility. Windows/native acceptance is still NOT_RUN. Packaging
+finalization wiring, that implicit-loader evidence/pinning, and new-save provenance
+and binding publication remain in this same draft PR.

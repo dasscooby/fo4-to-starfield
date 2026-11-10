@@ -253,6 +253,8 @@ def play_reason(values, starfield):
         my_games = Path(values["my_games"])
         if not my_games.is_absolute() or not my_games.is_dir():
             raise BindingError("My Games folder is missing or is not absolute")
+        from . import release_load
+        release_load.check(release, starfield, my_games)
         # This is the launcher-resolved SLocalSavePath, not observed H3 placement.
         saves = my_games / "Saves" / "FO4SF"
         if os.path.normcase(str(saves.resolve())) != os.path.normcase(os.path.abspath(saves)):
