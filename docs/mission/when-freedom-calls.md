@@ -277,3 +277,37 @@ keeper line's `off=` as `preston_off`.
 
 Check (logging on, the 9 Nov exit save, wait 70 s at the museum door, capture, quit): PASS is Preston visible at the
 door and `preston_off` at most 25 (`keeper status preston ... off=`); the load notification shows without the log.
+
+### In game 10 Nov: placed, he walked off again (fixed offline: he is held at his spot, FAL-170)
+
+**Verified** (the PC's checks on installed `f9cae827`, logging on, the owner's 9 Nov save; FAL-128 documents
+`ingame-check-1-f9cae827` and `ingame-check-2-restrain`): `PlacePreston` works, 73.7 m off at the load and at the door
+within a second (`preston_off=1.5`). Not fighting, he then walked off east-north-east at about 0.9 m/s and was put back
+every 29 s, 7 times in 175 s, each time with the notification. Held from the console (`setrestrained 1`) after a
+put-back, he stayed: no put-back in 100 s, the same position in every line. The player then activated him: `preston
+activated at stage 30`, stages 40 and 200, `reward credits=100`, `complete stage=200`, the first logged completion on
+this build line.
+
+**Fix (offline, untested in game):** `PlacePreston` holds him with `SetRestrained(True)` (Starfield's `Actor.psc`:
+`bool Function SetRestrained(bool abRestrained = true) native`; Papyrus has no getter, so each instance keeps its own
+`prestonHeld` and counts `prestonHolds`):
+- right after every move that lands (`failed=false`), in the same call, unless he is fighting;
+- at his spot, when he is calm, not yet held by this instance and within `HeldRadius` (3 m) of it, with no move: a
+  load whose hold the engine did not keep, or a save where he already stands there. From `HeldRadius` to `HoldRadius`
+  (25 m) nothing changes: he is put back past 25 m, and that put-back holds him;
+- never in a fight: a held Preston whose combat state is not 0 is let go (`SetRestrained(False)`) before anything else,
+  since his death stays the quest's failure path; once calm he is held again at his spot or by his next put-back.
+
+The keeper clears its `prestonHeld` at every save load (`KeepCodsworthLoad`), so its first check after the load (5 s)
+holds him again, whatever the engine kept. The mission instance has no load hook (it never registers
+`OnPlayerLoadGame`, and the owner's save ran its `OnQuestInit` long before), so its flag can outlive a load; the
+keeper's hold and every put-back cover that. Both instances may hold him: `SetRestrained` is safe to repeat, and the
+flag only keeps the at-spot hold to one log line per instance. Log: `hold preston by=<mission|keeper> off=<m>
+ok=<SetRestrained's return, logged as is>` and `release preston by=<who> reason=fighting`; `held=` in the mission's
+status line, `held=` and `holds=` in `keeper load/status preston ...`. The states (`sqv`) end in `, held` while this
+instance holds him (`placed, held`, `at spot, held`). No notification for a hold or a release: only a move is on
+screen. `make_mission.place_preston` models the same order (`held`, `landed`). Whether the 3 m talk rule fires on a
+held Preston is the PC's check 2b; activation did (check 2).
+
+Check 3 (PC, logging on, the 9 Nov save): one put-back at the load, then `preston_off` under 2 m with no further
+`moved preston`, the player within 3 m, completion, and Preston in the screenshot.

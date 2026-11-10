@@ -57,6 +57,11 @@ float Property HoldRadius = 25.0 Auto Const
 {Preston counts as at his spot within this many m of it (and within RelocateGap of the player); farther, he is put back,
  except while he fights. On 31 Oct he stood 100 to 450 m off it and nothing moved him again. Chosen above FindRadius.}
 
+float Property HeldRadius = 3.0 Auto Const
+{...and he is held there (HoldPreston) when calm and within this many m of it, though no move ran: a load whose hold the
+ engine did not keep, a save where he already stands there. Farther, up to HoldRadius, he is left until his put-back,
+ which holds him. In game 10 Nov (f9cae827, the 9 Nov save) the placement landed 1.5 m off. Chosen.}
+
 int Property RewardCount = 100 Auto Const
 {Fallout 4 gives 100 caps (DialogueConcordArea stage 40).}
 
@@ -86,6 +91,8 @@ int keeperChecks = 0
 int prestonMoves = 0
 float prestonOff = -1.0
 string prestonState = "none"
+bool prestonHeld = False
+int prestonHolds = 0
 bool codsworthKept = False
 int applied = 0
 bool prestonFound = False
@@ -119,7 +126,8 @@ EndFunction
 Function KeepCodsworthLoad()
 {The keeper's start, at its init and on every save load: Codsworth enabled, fresh budgets of failed moves for him and
  Preston, one line of where Preston is (in the log and on screen), the timer (re)started. A load also restarts a check
- that spent its budget in an earlier session. A missing Codsworth no longer stops Preston's keeping (FAL-128).}
+ that spent its budget in an earlier session. A missing Codsworth no longer stops Preston's keeping (FAL-128). Preston
+ counts as not held, so the first check after a load holds him again, whatever the engine kept (FAL-170).}
     if Codsworth != None
         if Codsworth.IsDisabled()
             Codsworth.Enable()
@@ -129,6 +137,7 @@ Function KeepCodsworthLoad()
         codsworthKept = True
     endif
     prestonFails = 0
+    prestonHeld = False
     TracePreston("keeper load")
     Debug.Notification("FO4SF keeper: Preston " + (prestonOff as int) + " m from his spot (last: " + prestonState + ", moves " + prestonMoves + ")")
     StartTimer(CodsworthCheck, 2)
@@ -258,7 +267,7 @@ Event OnTimer(int aiTimerID)
     endwhile
     ticks += 1
     if ticks % 5 == 0
-        Trace("status stage=" + stage + " dead=" + dead + "/" + Raiders.Length + " nearest_raider=" + nearest + " preston=" + dp + " preston_off=" + prestonOff + " pos=" + player.GetPositionX() + " " + player.GetPositionY() + " " + player.GetPositionZ())
+        Trace("status stage=" + stage + " dead=" + dead + "/" + Raiders.Length + " nearest_raider=" + nearest + " preston=" + dp + " preston_off=" + prestonOff + " held=" + prestonHeld + " pos=" + player.GetPositionX() + " " + player.GetPositionY() + " " + player.GetPositionZ())
     endif
     if Preston.GetCombatTarget() == player               ; he never fights the player (in game 18 Oct: "treats me like an enemy")
         Preston.StopCombat()
@@ -367,29 +376,38 @@ bool Function PlacePreston(Actor player, string who)
  spot. FAL-128, the PC's 31 Oct logs: MoveOver judged "already moved" by his distance to the PLAYER (under RelocateGap),
  so a Preston who landed or wandered 100 to 450 m off his spot was never moved again, and it took his target from where
  he stood, so a moved actor could be offset a second time, about 2,955 m away (the raiders were, 31 Oct 16:33). The
- state stays readable without a log: sqv shows prestonState, prestonOff and prestonMoves, and each move is on screen.}
+ state stays readable without a log: sqv shows prestonState, prestonOff and prestonMoves, and each move is on screen.
+ FAL-170, in game 10 Nov: once placed he walked off and was put back every 29 s, so he is held (HoldPreston) after
+ every move that lands and at his spot within HeldRadius, never in a fight (ReleasePreston first).}
     float tx = PrestonLocalX + MergeOffsetX
     float ty = PrestonLocalY + MergeOffsetY
     float tz = PrestonLocalZ
     float dp = player.GetDistance(Preston)                ; float max: another world
     prestonOff = SpotOff(tx, ty, tz)
+    bool fighting = Preston.GetCombatState() != 0
+    if prestonHeld && fighting
+        ReleasePreston(who, "fighting")
+    endif
     if prestonOff <= HoldRadius && dp < RelocateGap
-        prestonState = "at spot"
+        if !prestonHeld && !fighting && prestonOff <= HeldRadius
+            HoldPreston(who)
+        endif
+        SetPrestonState("at spot")
         return False
     endif
     if player.IsInInterior()
-        prestonState = "off, player inside"
+        SetPrestonState("off, player inside")
         return False
     endif
     float px = player.GetPositionX()
     float py = player.GetPositionY()
     float pz = player.GetPositionZ()
     if (px - tx) * (px - tx) + (py - ty) * (py - ty) > PlaceRadius * PlaceRadius
-        prestonState = "off, player away"
+        SetPrestonState("off, player away")
         return False
     endif
-    if dp < RelocateGap && Preston.GetCombatState() != 0
-        prestonState = "off, fighting"
+    if dp < RelocateGap && fighting
+        SetPrestonState("off, fighting")
         return False                                      ; the fight moves him; he is put back once it is over
     endif
     Trace("world preston player=" + player.GetWorldSpace() + " actor=" + Preston.GetWorldSpace() + " cell=" + Preston.GetParentCell())
@@ -403,11 +421,44 @@ bool Function PlacePreston(Actor player, string who)
     Debug.Notification("FO4SF: Preston put back at the museum door (" + who + ", was " + (prestonOff as int) + " m off, failed=" + failed + ")")
     prestonOff = off
     if failed
-        prestonState = "move failed"
+        SetPrestonState("move failed")
     else
-        prestonState = "placed"
+        if !fighting                                      ; in the same call, before his AI walks him off
+            HoldPreston(who)
+        endif
+        SetPrestonState("placed")
     endif
     return failed
+EndFunction
+
+Function HoldPreston(string who)
+{Holds Preston where he stands. In game 10 Nov (f9cae827, the 9 Nov save, logging on): placed 1.5 m off his spot, he
+ walked off east-north-east at about 0.9 m/s, not fighting, and was put back every 29 s (7 times in 175 s); held from
+ the console (setrestrained 1) he stayed, 0 put-backs in 100 s, and the player's activation still completed the
+ mission. Papyrus has no getter for it, so prestonHeld is this instance's own flag: the mission and the keeper may both
+ hold him, which SetRestrained allows, and the flag only keeps the at-spot hold to one log line. ok= is SetRestrained's
+ return, logged as is. No notification: only a move is shown on screen.}
+    bool ok = Preston.SetRestrained(True)
+    prestonHeld = True
+    prestonHolds += 1
+    Trace("hold preston by=" + who + " off=" + prestonOff + " ok=" + ok)
+EndFunction
+
+Function ReleasePreston(string who, string why)
+{Lets Preston go: he is never held in a fight (his death stays the quest's failure path). Held again at his spot once
+ calm, or by his next put-back.}
+    Preston.SetRestrained(False)
+    prestonHeld = False
+    Trace("release preston by=" + who + " reason=" + why)
+EndFunction
+
+Function SetPrestonState(string s)
+{prestonState, with ", held" while this instance holds Preston (prestonHeld).}
+    if prestonHeld
+        prestonState = s + ", held"
+    else
+        prestonState = s
+    endif
 EndFunction
 
 float Function SpotOff(float tx, float ty, float tz)
@@ -422,7 +473,7 @@ EndFunction
 Function TracePreston(string what)
     Actor player = Game.GetPlayer()
     prestonOff = SpotOff(PrestonLocalX + MergeOffsetX, PrestonLocalY + MergeOffsetY, PrestonLocalZ)
-    Trace(what + " preston d=" + player.GetDistance(Preston) + " off=" + prestonOff + " state=" + prestonState + " moves=" + prestonMoves + " at " + Preston.GetPositionX() + " " + Preston.GetPositionY() + " " + Preston.GetPositionZ() + " disabled=" + Preston.IsDisabled() + " dead=" + Preston.IsDead() + " fails=" + prestonFails + " player=" + player.GetPositionX() + " " + player.GetPositionY() + " " + player.GetPositionZ() + " interior=" + player.IsInInterior())
+    Trace(what + " preston d=" + player.GetDistance(Preston) + " off=" + prestonOff + " state=" + prestonState + " moves=" + prestonMoves + " held=" + prestonHeld + " holds=" + prestonHolds + " at " + Preston.GetPositionX() + " " + Preston.GetPositionY() + " " + Preston.GetPositionZ() + " disabled=" + Preston.IsDisabled() + " dead=" + Preston.IsDead() + " fails=" + prestonFails + " player=" + player.GetPositionX() + " " + player.GetPositionY() + " " + player.GetPositionZ() + " interior=" + player.IsInInterior())
 EndFunction
 
 bool Function MoveOver(Actor a, Actor player, float px, float py, float pz, string what)
