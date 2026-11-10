@@ -173,10 +173,15 @@ class VerdictTests(unittest.TestCase):
 
 
 class TableTests(unittest.TestCase):
+    def test_the_quests_form_id_is_printed_for_setstage(self):
+        out = pl.report(pl.summarize(head() + sat() + steps()))
+        self.assertEqual(out[0], f"quest form id {QUEST:08X}: setstage {QUEST:08X} 10 / 20 / 30")
+        self.assertEqual(pl.quest_lines(pl.summarize([]))[0], "quest form id: not in the log (no init line with quest=)")
+
     def test_one_table_in_stage_order_then_the_verdict_last(self):
         out = pl.report(pl.summarize(head() + sat() + steps(inpa_after="true")))
-        self.assertEqual(out[0].split(), ["stage", "when", "race", "cam", "worn", "inpa", "furn", "sit", "pos"])
-        rows = [l.split() for l in out[1:14]]
+        self.assertEqual(out[1].split(), ["stage", "when", "race", "cam", "worn", "inpa", "furn", "sit", "pos"])
+        rows = [l.split() for l in out[2:15]]
         self.assertEqual([(r[0], r[1]) for r in rows[:4]], [("0", "start"), ("10", "before"), ("10", "now"), ("10", "settled")])
         self.assertIn(["20", "settled", "PA"], [r[:3] for r in rows])        # the race column names the copy
         self.assertIn(["30", "settled", "orig"], [r[:3] for r in rows])

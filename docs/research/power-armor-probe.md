@@ -69,6 +69,11 @@ Screenshots (F12 or the usual key), named with the step: `00-arrival`, `01-contr
 `10c-settled` (first and third person for each), `20-after-setrace`, `30-after-restore`, and any message, HUD change or
 error text that appears.
 
+0. **The quest's form id.** The console refuses a plugin quest's name in `setstage` ("not found for parameter Quest"), so
+   every stage line below uses the form id, `<load index>000803`. Read it first: after the game has loaded with the probe
+   ticked, run `python scripts\\planet\\make_power_armor_probe.py log`; its first line is `quest form id <hex>: setstage <hex>
+   10 / 20 / 30` (from the init line's `quest=`, which Papyrus prints as signed decimal; the reader converts it). Or take the
+   probe's load index from the load order (hex, two digits) and append `000803`. Below, `<Q>` is that id.
 1. Start the game with the probe installed (tick it in the load order). Open the console (`~`) and run:
 
        coc FO4SF_PAProbeCell
@@ -79,13 +84,13 @@ error text that appears.
    If you cannot sit, stop: the session is inconclusive and the reader will say so.
 3. Face the right furniture, standing about 2 units from it. Screenshot `10a-before`. Console:
 
-       setstage FO4SF_PAProbeQuest 10
+       setstage <Q> 10
 
    Screenshot immediately (`10b-now`), again after 5 s (`10c-settled`), once in first person and once in third person. Do not
    move or press anything for those 5 s. Note any climb-in animation, camera change, HUD, speed or jump change.
-4. Console: `setstage FO4SF_PAProbeQuest 20`. Wait 5 s. Third-person screenshot `20-after-setrace`. Note any visible change,
+4. Console: `setstage <Q> 20`. Wait 5 s. Third-person screenshot `20-after-setrace`. Note any visible change,
    T-pose, missing head or hands, animation stall.
-5. Console: `setstage FO4SF_PAProbeQuest 30`. Wait 5 s. Screenshot `30-after-restore`.
+5. Console: `setstage <Q> 30`. Wait 5 s. Screenshot `30-after-restore`.
 6. Quit to the desktop **without saving**. Run the reader command above and paste its output with the screenshots.
 7. A retry needs a new game start: each step runs once per script instance.
 

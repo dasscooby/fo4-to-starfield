@@ -233,9 +233,18 @@ def table(summary):
     return ["  ".join(c.ljust(w) for c, w in zip(r, widths)).rstrip() for r in rows]
 
 
+def quest_lines(summary):
+    """The console lines for the three stages: the console refuses a plugin quest's name in setstage ("not found for
+    parameter Quest", seen with the rads probe), so the quest's form id comes from the init line (FAL-212)."""
+    q = (summary.get("init") or {}).get("quest")
+    if not isinstance(q, int):
+        return ["quest form id: not in the log (no init line with quest=)"]
+    return [f"quest form id {q:08X}: setstage {q:08X} 10 / 20 / 30"]
+
+
 def report(summary):
     """The whole printout: the table, each step, notes, the verdict (last line)."""
-    lines = table(summary)
+    lines = quest_lines(summary) + table(summary)
     judged = summary["control"][0]
     for stage, s in summary.get("steps", {}).items():
         shown = s["result"] if judged else f"not judged (control failed; the log shows: {s['result']})"
