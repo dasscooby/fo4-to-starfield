@@ -18,6 +18,7 @@ and logs every step. Two stages, picked by `Stage` in `FO4SFPipboyMenu.ini`:
 | `xmake.lua`, `build.ps1` | the PC build: FOCCPing's build path (`docs/spikes/combined-core-probes.md`, B0-2) |
 | `scripts/ui/make_probe_swf.py` | writes the stage (b) movie (pure Python; test `tests/test_make_probe_swf.py`) |
 | `scripts/ui/make_pipboy_probe.py` | stages the empty `FO4SFPipboyProbe.esm` and the movie; `check` checks the plugin |
+| `scripts/ui/pipboy_probe_install.py` | stage (b) install with its own record (test `tests/test_pipboy_probe_install.py`) |
 
 ## Design: the engine's menu object, not libxse's IMenu class
 
@@ -88,14 +89,16 @@ Install:
 
 1. Copy `FO4SFPipboyMenu.dll`, `FO4SFPipboyMenu.ini` and `versionlib-1-16-244-0.bin` into
    `<Starfield>\Data\SFSE\Plugins\`. Set `Stage=1` or `Stage=2` in that copy of the ini.
-2. Stage (b) only: `python scripts/game/exp_install.py install --exp-dir <exp folder> --starfield <game> --pack`.
-   This activates `FO4SFPipboyProbe.esm` and packs its `Data` tree into `FO4SFPipboyProbe - Main.ba2`, with its
-   own install record.
+2. Stage (b) only: `python scripts/ui/pipboy_probe_install.py install --dir <exp folder> --starfield <game>`.
+   This checks the stage, activates `FO4SFPipboyProbe.esm` and packs its `Data` tree into
+   `FO4SFPipboyProbe - Main.ba2`, under its own record `Data\FO4SFPipboyProbe.install.json`; the installed
+   experiment's `FO4SFExp.install.json` is not read or changed. A `plugin_toggle.py` hold makes it refuse, so run it
+   between `plugin_toggle.py on` and `off`. `status`, `order` and `active` take `--starfield <game>` alone.
 
 Uninstall:
 
-1. `python scripts/game/exp_install.py uninstall --exp-dir <exp folder> --starfield <game>`. This removes exactly
-   what the record lists and the Plugins.txt line it added.
+1. Stage (b) only: `python scripts/ui/pipboy_probe_install.py uninstall --starfield <game>`. This removes exactly
+   what its record lists and the Plugins.txt line it added.
 2. Delete `FO4SFPipboyMenu.dll` and `FO4SFPipboyMenu.ini` from `Data\SFSE\Plugins\`. Delete
    `versionlib-1-16-244-0.bin` too, unless it was there before the session.
 3. Compare with the receipts taken before the install.
@@ -142,6 +145,7 @@ Take a screenshot while the menu is open after the fifth press, and one after th
 | `refuse step=listen` | SFSE gave no messaging or task interface | report the SFSE version |
 | `refuse step=register reason=name_taken` / `not_taken` / `no_ui` | the menu name is in use, the engine did not take our registration, or no UI singleton | report the log |
 | `refuse step=key_thread` | the key thread could not start | report |
+| `refuse step=toggle n=<n> reason=no_ui_or_queue` | the key was pressed before the UI or its message queue existed; nothing was sent | press again once in play; report if it repeats |
 | `refuse step=create reason=out_of_memory` | allocation failed on open | report |
 | `step=create ... vtables=UNEXPECTED` | the constructor set other vtables than the checked ones | stop: the layout differs |
 | `step=state ... match=no` | the menu did not open or close as asked | read the `step=message` lines around it |
