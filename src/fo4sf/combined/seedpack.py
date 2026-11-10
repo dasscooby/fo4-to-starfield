@@ -1,7 +1,7 @@
 """Turn a seed draft (seed.py) into a pack that runs: holders, factions, homes, routes and settlement stats by rules.
 
-generate(draft, rules) returns (pack, report). The pack passes pack.validate_pack, loads into a WorldState and runs
-under sim.run with the balance invariants kept (homes and story locks never change hands, which the simulation
+generate(draft, rules, gateways) returns (pack, report). The pack passes pack.validate_pack, loads into a WorldState
+and runs under sim.run with the balance invariants kept (homes and story locks never change hands, which the simulation
 enforces by construction). Route hours are data-relative (each world's median route distance is a placeholder number
 of hours), so no claim about a game's units is needed. Deterministic: the same draft and rules give byte-identical JSON (sorted walks, no
 randomness, no clock).
@@ -33,6 +33,7 @@ from .pack import validate_pack
 # CoA 2, Deathclaw 1, Mirelurks 6, Molerats 1, Robots 8, Synths 5, Wildlife 5. An unmapped one is reported, not
 # guessed. The pack faction ids on the right are our own names.
 ENC_KEYWORD = re.compile(r"^LocEnc(\w+)$")
+_NO_GATEWAYS = object()
 
 DEFAULT_RULES = {
     # Pack faction that holds every settlement candidate at the start (our name; placeholder).
@@ -209,6 +210,53 @@ def _neighbours(routes: list[dict]) -> dict[str, set[str]]:
     return out
 
 
+def _gateway_routes(gateways: object, places: list[dict]) -> tuple[list[dict], dict | None]:
+    """Validate the entire explicit list before using any edge (G1–G5, combined-core-gateways.md).
+
+    Ends name kept draft ids; their worlds are marker.world, never the root-location region.
+    No list or a valid empty list leaves even the report unchanged. A refused list reports no used pairs.
+    """
+    if gateways is _NO_GATEWAYS:
+        return [], None
+    report = {"pairs": [], "world_pairs": [], "hours": {}, "problems": []}
+    problems = report["problems"]
+    if not isinstance(gateways, dict) or set(gateways) != {"gateways"} or not isinstance(gateways["gateways"], list):
+        problems.append('G5: expected an object with only a "gateways" list')
+        return [], report
+    if not gateways["gateways"]:
+        return [], None
+    by_id = {p["id"]: p for p in places}
+    seen, routes, world_pairs = set(), [], Counter()
+    for index, entry in enumerate(gateways["gateways"]):
+        where = f"gateway {index + 1}"
+        if not isinstance(entry, dict) or set(entry) != {"a", "b", "hours"}:
+            problems.append(f"G5: {where} must have exactly a, b and hours")
+            continue
+        a, b, hours = entry["a"], entry["b"], entry["hours"]
+        if not isinstance(hours, int) or isinstance(hours, bool) or hours <= 0:
+            problems.append(f"G3: {where} hours must be a positive integer (not a boolean)")
+        if any(not isinstance(pid, str) or pid not in by_id for pid in (a, b)):
+            problems.append(f"G1: {where} ends must name kept places; got {a!r}, {b!r}")
+            continue
+        pair = (min(a, b), max(a, b))
+        if pair in seen:
+            problems.append(f"G4: {where} repeats the unordered pair {pair!r}")
+        seen.add(pair)
+        worlds = [(by_id[pid].get("marker") or {}).get("world") for pid in pair]
+        if any(not isinstance(w, str) or not w for w in worlds) or worlds[0] == worlds[1]:
+            problems.append(f"G2: {where} ends must have different marker worlds")
+            continue
+        routes.append({"a": pair[0], "b": pair[1], "hours": hours})
+        world_pairs[tuple(sorted(worlds))] += 1
+    if problems:
+        return [], report
+    routes.sort(key=lambda r: (r["a"], r["b"]))
+    report["pairs"] = routes
+    report["world_pairs"] = [{"a": a, "b": b, "count": n} for (a, b), n in sorted(world_pairs.items())]
+    report["hours"] = dict(sorted(Counter(r["hours"] for r in routes).items()))
+    return routes, report
+
+
 def _home(fid: str, held: list[str], holder: dict[str, str | None], nbrs: dict[str, set[str]]) -> str:
     """The held place with the most neighbours held by the same faction; ties go to the smaller id."""
     return min(held, key=lambda pid: (-sum(holder.get(n) == fid for n in nbrs.get(pid, ())), pid))
@@ -238,8 +286,12 @@ def _fact_relations(draft: dict, rules: dict) -> tuple[dict[str, dict[str, int]]
     return rel, {k: v for k, v in matched.items() if v}
 
 
-def generate(draft: dict, rules: dict | None = None) -> tuple[dict, dict]:
-    """(pack, report) from a seed draft by DEFAULT_RULES (or `rules`, same keys). See the module docstring."""
+def generate(draft: dict, rules: dict | None = None, gateways: object = _NO_GATEWAYS) -> tuple[dict, dict]:
+    """(pack, report) from a seed draft by DEFAULT_RULES (or `rules`, same keys).
+
+    Optional gateways is {"gateways": [{"a": kept_id, "b": kept_id, "hours": positive_int}]}.
+    Any G1–G5 problem refuses the whole list, recording plain-word problems in report["gateways"].
+    """
     rules = copy.deepcopy(DEFAULT_RULES if rules is None else rules)
     settlers = rules["settlers"]
     drops, unmapped, holder, kinds, locks = Counter(), Counter(), {}, {}, {}
@@ -261,8 +313,11 @@ def generate(draft: dict, rules: dict | None = None) -> tuple[dict, dict]:
             enemy = _enc_faction(p, rules, unmapped)
             holder[p["id"]] = enemy
             kinds[p["id"]] = "base" if enemy else ("landmark" if p["kind"] not in ("base", "landmark") else p["kind"])
-    routes, isolated, unlinked, route_scale = _routes(kept, rules)
+    routes, _, unlinked, route_scale = _routes(kept, rules)
+    gateway_routes, gateway_report = _gateway_routes(gateways, kept)
+    routes = sorted(routes + gateway_routes, key=lambda r: (r["a"], r["b"]))
     nbrs = _neighbours(routes)
+    isolated = sorted(p["id"] for p in kept if p["id"] not in nbrs)
 
     places = []
     for p in kept:
@@ -321,11 +376,13 @@ def generate(draft: dict, rules: dict | None = None) -> tuple[dict, dict]:
         "routes": len(routes), "route_hours": dict(sorted(Counter(r["hours"] for r in routes).items())),
         "route_scale": route_scale,
         "isolated": isolated, "unlinked": dict(sorted(unlinked.items())),
-        "worlds": {str(w): n for w, n in sorted(Counter(p["marker"]["world"] for p in kept if p.get("marker")).items(),
+        "worlds": {str(w): n for w, n in sorted(Counter(p["marker"].get("world") for p in kept if p.get("marker")).items(),
                                                 key=lambda kv: (kv[0] is None, kv[0] or ""))},   # str like route_scale
         "validation_problems": problems,
         "rules": rules,
     }
+    if gateway_report is not None:
+        report["gateways"] = gateway_report
     return pack, report
 
 

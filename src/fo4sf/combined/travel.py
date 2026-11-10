@@ -9,6 +9,10 @@ world: an engine binding recorded when a world is converted, not part of the pac
 This module answers where a travelling squad is in metres, whether its real actor should be live, and how a
 dissolving actor's progress would be handed back to L2. Nothing here changes WorldState or the tick; it sits
 outside the C++ parity path and becomes a later port step.
+
+An atlas is one converted world's metres. Between worlds a pack has gateway edges (docs/combined-core-gateways.md):
+routes whose ends lie in two different marker worlds. A squad on a leg over one has no position (D5), so
+position_in_world answers "not in this world" (None) for it instead of interpolating between two atlases.
 """
 from __future__ import annotations
 
@@ -21,6 +25,7 @@ MATERIALIZE_M = 400.0   # CC-63: conservative; the loaded edge on the measured r
 DISSOLVE_M = 500.0      # CC-63: hysteresis; under the ~643 m the engine still walked unloaded, never the abstract band
 
 Atlas = dict[str, tuple[float, float]]   # place id -> (x, y) metres in the converted world
+Worlds = dict[str, str]                  # place id -> its marker world (the seed draft's marker.world, seedpack G2)
 
 
 def missing_anchors(ws: WorldState, atlas: Atlas) -> list[str]:
@@ -62,6 +67,46 @@ def simulated_position(ws: WorldState, q: Squad, atlas: Atlas) -> tuple[float, f
     b = _anchor(atlas, q.goal)
     f = progress(ws, q)
     return (a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f)
+
+
+def gateway_edges(ws: WorldState, worlds: Worlds) -> list[tuple[str, str, int]]:
+    """Routes (a, b, hours) whose ends lie in two different worlds, sorted. An end without a world makes an
+    ordinary route: seedpack refuses such a gateway pair (G2), and fixture packs carry no worlds at all."""
+    return sorted((r.a, r.b, r.hours) for r in ws.routes
+                  if r.a in worlds and r.b in worlds and worlds[r.a] != worlds[r.b])
+
+
+def inter_world_leg(ws: WorldState, q: Squad, worlds: Worlds) -> bool:
+    """Whether a travelling squad's leg (`at` to `goal`) is inter-world: its ends lie in different worlds, or a
+    shortest route between them uses a gateway edge. L2 holds hours, not a path, so a tie between an in-world
+    route and one through another world counts as inter-world: no position is safer than a wrong one."""
+    if q.goal is None or q.goal == q.at:
+        return False
+    if q.at in worlds and q.goal in worlds and worlds[q.at] != worlds[q.goal]:
+        return True
+    edges = gateway_edges(ws, worlds)
+    if not edges:
+        return False
+    start = _distances(ws, q.at)
+    total = start.get(q.goal)
+    if total is None:
+        return False
+    end = _distances(ws, q.goal)
+    return any(u in start and v in end and start[u] + h + end[v] == total
+               for a, b, h in edges for u, v in ((a, b), (b, a)))
+
+
+def position_in_world(ws: WorldState, q: Squad, atlas: Atlas, worlds: Worlds,
+                      world: str) -> tuple[float, float] | None:
+    """The squad's position in metres in `world` (whose atlas this is), or None: not in this world. None for an
+    inter-world leg (D5) and for a squad whose places lie in another world; otherwise simulated_position, so a
+    missing anchor of a place in this world, or of one without a world, still raises ValueError naming it."""
+    if inter_world_leg(ws, q, worlds):
+        return None
+    known = [worlds[p] for p in (q.at, q.goal) if p is not None and p in worlds]
+    if known and known[0] != world:
+        return None
+    return simulated_position(ws, q, atlas)
 
 
 def distance_m(p: tuple[float, float], q: tuple[float, float]) -> float:
