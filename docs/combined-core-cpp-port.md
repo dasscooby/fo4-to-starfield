@@ -12,7 +12,10 @@ C5) are done offline.**
   `jobs.py`, for a scripted player on those worlds.
 - C5: `sfse/FOCCSim/news.cpp` gives the same headlines and terminal pages as `news.py`, textwrap included.
 
-Everything on the PC is still to do: the MSVC build and parity run, then steps 4 to 7. It carries out the 28 October decision in `docs/ai/decisions.md`:
+**Status, 6 November 2026:** C1 to C5 and the MSVC build script (`sfse/FOCCSim/build.ps1`, #656) are merged at
+main `66783a99`. The MSVC parity run in #656 passed (14 tests, default and `FO4SF_PARITY_FULL=1`) on C5 source
+`0ba91c20`; the #641 and #673 rule commits merged after it have Linux CI parity only, so an MSVC rerun at main is
+NOT_RUN. Steps 4 to 7 are still to do. The plan carries out the 28 October decision in `docs/ai/decisions.md`:
 the in-game sim is a C++ port inside our SFSE plugin, and the Python model in `src/fo4sf/combined/` stays the
 reference. The owner's order (28 October): the GAMMA core comes first, with probes P1 to P10, then the seed rerun
 with all DLC, then a 20-place slice in game. The rerun is done ("Real pack, all DLC" in `docs/combined-core.md`).
@@ -59,8 +62,8 @@ only.
 The harness is a Python unittest. It compiles the portable core (no Windows, no SFSE) with `g++` on CI, which runs
 on ubuntu-24.04, and compares the output against Python. That makes it the repo's first compiled test.
 `sfse/FOCCSidecar/codec.h` was only checked by hand (its README, "Verified offline"); this harness should cover it
-too. On the PC the same core is built with `cl.exe` by the plugin's `build.ps1`, and the parity run is repeated
-there once.
+too. On the PC the same core is built with `cl.exe` by `sfse/FOCCSim/build.ps1` (#656), and the parity run is
+repeated there: once on C5 source `0ba91c20`; a rerun at current main is NOT_RUN.
 
 ## 3. What the port must copy exactly
 
@@ -240,7 +243,7 @@ Each step is one PR, with green CI and an independent review.
      - the Commonwealth-scale draft for seeds 0 to 9 over 90 days.
    - The CI default runs a lighter set, about 19 s.
    - The generator was also checked on its own against Python for seeds 0, 1, 2^32 - 1, 2^32 and 2^64 - 1.
-   - Not built with cl.exe yet.
+   - Built with cl.exe in #656 (`sfse/FOCCSim/build.ps1`); MSVC parity passed on C5 source `0ba91c20`.
 3. **Offline, C2 to C5:** each step with its parity tests.
    - C2, **done**: `adapter.h` and `adapter.cpp`. The harness compares the record plan and game view at the start,
      then each tick's writes, after every tick of every world in step 2, so it also proves the game view after

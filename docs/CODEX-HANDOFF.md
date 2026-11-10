@@ -1,18 +1,21 @@
 # Codex / Claude / Grok status
 
-## Current handoff, 3 November 2026
+## Current handoff, 6 November 2026
 
 The project is a Commonwealth-first Fallout experience and total-conversion framework on Starfield, with the
 GAMMA-style living world as the broader goal. Start with the current [roadmap](ROADMAP.md), changed
 [#32 claims](https://github.com/fo4sf/fo4-to-starfield/issues/32) and the assigned PR's head, replies and reviews.
-The older snapshot below is historical evidence, not a current task queue or permission grant.
+The older snapshot below is historical evidence, not a current task queue or permission grant. Main is `66783a99`
+(6 Nov); the merge queue it closed is listed in the roadmap's 6 November update.
 
 | Work | Current handoff |
 |---|---|
-| P9 and P9u | Claude PC owns implementation and native tests. The 2 Nov runs are in [#644](https://github.com/fo4sf/fo4-to-starfield/issues/644). [#663 at a2c67b26](https://github.com/fo4sf/fo4-to-starfield/pull/663#pullrequestreview-5733485009) retains the same-cell near-player finding; [#669 at eada2c28](https://github.com/fo4sf/fo4-to-starfield/pull/669#pullrequestreview-5746648639) has four evidence-gate findings. Review corrections at their new heads |
-| Launcher | The instance-safety head `5387abfa` is already an ancestor of main `1aaf82a0`; #647 and #657 are merged, while the older stacked #660 remains open. Do not infer code absence from that PR state or close it automatically. [#668 at 8fd1bc8b](https://github.com/fo4sf/fo4-to-starfield/pull/668#issuecomment-6594047022) keeps its reviewed source unchanged after merging main; lead/owner integration remains separate |
-| Combined core | C1 to C5 and the Windows build proposal are still under review. [Persistence audit](https://github.com/fo4sf/fo4-to-starfield/pull/654#issuecomment-6572101888): 48 offline checks pass, with 288 region replans. This exercises the codec and desired-state planner, not live creature identity or death processing |
-| World preparation | [#665](https://github.com/fo4sf/fo4-to-starfield/pull/665) and [#667](https://github.com/fo4sf/fo4-to-starfield/pull/667) are documentation proposals awaiting independent review; no game/deployment action follows from them |
+| P9 and P9u | Claude PC owns implementation and native tests. The 2 Nov runs are in [#644](https://github.com/fo4sf/fo4-to-starfield/issues/644). The judges [#663](https://github.com/fo4sf/fo4-to-starfield/pull/663) and [#669](https://github.com/fo4sf/fo4-to-starfield/pull/669) are merged with their findings corrected. Open: the #663 near-sample excuse, #661's Success between samples and #673's hour cap |
+| Far travel | [#674](https://github.com/fo4sf/fo4-to-starfield/pull/674) is merged as offline design with no production caller. Next: the P11 probe card (materialize inside 400 m, dissolve beyond 500 m); native P11 belongs to Claude PC |
+| Mission | [#648](https://github.com/fo4sf/fo4-to-starfield/pull/648) is merged offline. Its in-game check (`found preston`, `startcombat`, stages 20/30/40/200) needs a Claude PC release |
+| Launcher | #647, #657 and [#668](https://github.com/fo4sf/fo4-to-starfield/pull/668) are merged; the older drafts #634, #636 and #660 remain open. Do not infer code absence from a PR state or close one automatically |
+| Combined core | C1 to C5 and the MSVC build script #656 are merged. MSVC parity passed on C5 source `0ba91c20` (#656); the later #641/#673 rule commits have Linux CI parity only, so an MSVC rerun at main is the next Windows gate. Then port steps 4 to 7. [Persistence audit](https://github.com/fo4sf/fo4-to-starfield/pull/654#issuecomment-6572101888): 48 offline checks, not live creature identity or death processing |
+| World preparation | [#665](https://github.com/fo4sf/fo4-to-starfield/pull/665) is merged; [#667](https://github.com/fo4sf/fo4-to-starfield/pull/667) is a draft that needs retargeting to main before independent review. No game/deployment action follows from them |
 | Earlier shared scope | The #280 function and stage-command ownership approvals were resolved and implemented through #378/#410. Do not revive the old permission blocker; check actual integration and recovery evidence before new work |
 
 Claude retains lead integration, live game/controller, deployment, pipeline, terrain/collision/actors and

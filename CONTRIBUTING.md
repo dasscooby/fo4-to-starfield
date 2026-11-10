@@ -30,7 +30,7 @@ one in a sitting.
 ## Using an AI agent
 
 Read [team status and file ownership](docs/CODEX-HANDOFF.md) first. Claude, Codex and Grok must check
-[new or updated GitHub issues](https://github.com/dasscooby/fo4-to-starfield/issues) and relevant comments
+[new or updated GitHub issues](https://github.com/fo4sf/fo4-to-starfield/issues) and relevant comments
 before each work session, choosing the next task, or declaring a fix complete. The owner uses issues
 as the shared inbox for bug reports and priorities. Follow the active milestone and coordinate ownership.
 

@@ -7,7 +7,26 @@ comes after the current testing, and it is the brief Codex and Grok work from. S
 Two independent reviews of this document (17 Oct) are folded in; their corrections are the reason several claims
 below are narrower than the first draft.
 
-## Current update, 3 November 2026
+## Current update, 6 November 2026
+
+The source merge queue finished on 6 November at main `66783a99`. This table replaces the 3 November one below for
+what is merged; that one keeps its own date as history.
+
+| Track | Current state | Evidence or next gate |
+|---|---|---|
+| Travel judges and design | [#663](https://github.com/fo4sf/fo4-to-starfield/pull/663) and [#669](https://github.com/fo4sf/fo4-to-starfield/pull/669) are merged (`be034384`, `50957987`, 4 Nov) with their review findings corrected; the write-up [#670](https://github.com/fo4sf/fo4-to-starfield/pull/670) is merged (`e8abb8c7`) | The native P9/P9u runs in [#644](https://github.com/fo4sf/fo4-to-starfield/issues/644) stand. Three design settings are still open: the #663 near-sample excuse, #661's Success between samples and #673's hour cap |
+| Far travel | [#674](https://github.com/fo4sf/fo4-to-starfield/pull/674) is merged (`5c08062c`): `src/fo4sf/combined/travel.py` places a squad on the straight line between its anchors. Nothing outside its tests calls it yet | Design only. The P11 probe card ([combined-core.md](combined-core.md), CC-63) is next. A multi-hop route and the navmesh path are not that line (CC-63). P11 NOT_RUN |
+| Combined core in C++ | C1 to C5 ([#649](https://github.com/fo4sf/fo4-to-starfield/pull/649), [#651](https://github.com/fo4sf/fo4-to-starfield/pull/651) to [#654](https://github.com/fo4sf/fo4-to-starfield/pull/654)) and the MSVC build script [#656](https://github.com/fo4sf/fo4-to-starfield/pull/656) are merged (6 Nov). The C++ core carries the #641 presentation-id and #673 job rules (`90d8eeb9`, `f5995ea9`) | CI runs parity on Linux. The MSVC parity run in #656 (14 OK, default and `FO4SF_PARITY_FULL=1`) was on C5 source `0ba91c20`, before those two rule commits; MSVC parity at current main is NOT_RUN. Port steps 4 to 7 remain: the PC probes, bridge spike B0, the 20-place slice, then the whole Commonwealth in game |
+| Background-game audio | [#650](https://github.com/fo4sf/fo4-to-starfield/pull/650) is merged (`81de0791`): a design note, [background-game-audio.md](research/framework/background-game-audio.md) | Design only; nothing is built or tested |
+| Mission: When Freedom Calls | [#648](https://github.com/fo4sf/fo4-to-starfield/pull/648) is merged (`3d4ff69d`) | Offline only. The in-game check in [the mission note](mission/when-freedom-calls.md) is NOT_RUN |
+| Launcher and recovery | [#668](https://github.com/fo4sf/fo4-to-starfield/pull/668) is merged (`c6fe6aa5`, 3 Nov); drafts #634, #636 and #660 stay open | Native Steam-update and whole-install recovery remain separate tests |
+| Own Fallout world | [#665](https://github.com/fo4sf/fo4-to-starfield/pull/665) is merged (`d8972d8c`); [#667](https://github.com/fo4sf/fo4-to-starfield/pull/667) is a draft whose base branch was merged with #665 | Retarget #667 to main before its review. Neither moves the test world off the current overlay |
+
+Unchanged since 3 November: the Vault 111 start and map-marker rows, and the P9/P9u limits (one actor on one route).
+Native acceptance for creature reconciliation, death-event deduplication, save generation and tick timing is
+still NOT_RUN.
+
+## Update, 3 November 2026
 
 The conversion is the Commonwealth-first foundation for the broader GAMMA-style framework. The detailed phase
 ledgers below retain their dated results; use this summary for changes since the 1 November update.
