@@ -385,8 +385,9 @@ our GAMMA." New items continue the design's numbering (CC-60 to CC-62 are in the
 
 - **CC-63. Our own A-Life style simulation.** The persistent world sim prototyped here (L2 `sim.py`, L3 `present.py`)
   grows into the full system: factions, squads, caravans and settlements living off-screen and becoming real actors
-  near the player. Open: where its state lives in the save (probes P1 to P3, CC-02); the tick in game (P5); how far
-  out actors are real (the design's L2/L3 split); how many squads a cell can carry, which no probe measures yet (P4
+  near the player. Open: where its state lives in the save (probes P1 to P3, CC-02; save identity, card P1b); the tick
+  in game (one tick per 6 game hours, card P1b; P5 measures only its latency); how far out actors are real (the design's L2/L3 split); how
+  many squads a cell can carry, which no probe measures yet (P4
   only spawns and removes three actors, judging spawn reliability and save growth; a load-scaling probe is needed).
   **How far out actors are real, measured (P9 and P9u, 2 Nov 2026, #644; judges in #663 and #669).** One citizen on
   the converted Commonwealth was sent by its linked ref alone (`SetLinkedRef` and `EvaluatePackage`; Starfield's
