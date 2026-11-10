@@ -6,9 +6,11 @@
 // Built on libxse/commonlibsf 9d090c4 for SFSE, the Address Library, the logger, UI::RegisterMenu, UI::IsMenuOpen,
 // UIMessageQueue::AddMessage and BSFixedString, but NOT on its IMenu class: every IMenu virtual there is
 // REL::ID{ 0 } (include/RE/IDs.h), and a lookup of id 0 stops the game with a message box. The menu object is the
-// engine's own: the engine's IMenu constructor, then a copy of the engine's IMenu primary vtable with only our
-// slots replaced, and the engine's RTTI locator in the slot before the copy (the two other vtables are the engine's,
-// as the constructor set them).
+// engine's own GameMenuBase: the engine's IMenu constructor, GameMenuBase's two state fields cleared as a public
+// precedent's constructor does (1.16.244 has no separate GameMenuBase constructor: its factories inline it), then a
+// copy of the engine's GameMenuBase primary vtable with only our slots replaced and its RTTI locator in the slot before
+// the copy, and the engine's two GameMenuBase secondary vtables. The engine reference-casts a created menu to
+// GameMenuBase (std::bad_cast on a plain IMenu, PC crash dump at b3f352b7).
 //
 // Nothing is called before it is checked (README, "Where every id comes from"):
 //   - the runtime is 1.16.244.0 (SFSE's), else nothing but the refusal line;
@@ -16,7 +18,9 @@
 //     use below its count, non-zero and inside Starfield.exe's image), so libxse's own lookup can never hit a
 //     missing id; then each id is looked up again through libxse and must give the same offset;
 //   - the three IMenu vtables carry IMenu's RTTI (complete object locator: x64, subobject offsets 0, 0x10, 0x50, type
-//     ".?AVIMenu@@", the type descriptor libxse's RTTI id names);
+//     ".?AVIMenu@@", the type descriptor libxse's RTTI id names); the three GameMenuBase vtables are ordered by their
+//     locators' offsets (0, 0x10, 0x50) and carry ".?AVGameMenuBase@@" the same way;
+//   - GameMenuBase's primary slots 0x10 and 0x11 are the stack callbacks a public precedent names;
 //   - the primary vtable's slots are the functions their ids name: 0x00 the scalar deleting destructor, 0x06
 //     LoadMovie (also SFSE 0.2.21's own hook address, 0x2551AB0), 0x08 ProcessMessage, 0x0A IsMovieLoaded; 0x03 and
 //     0x04 (GetName, GetRootPath) are the same pure-virtual stub;
@@ -27,7 +31,8 @@
 // free, since the object is ours), 0x03 GetName, 0x04 GetRootPath (""), 0x05 GetViewScaleMode (ShowAll), 0x06 LoadMovie
 // (stage a: true without a movie; stage b: the engine's, logged, with addEventDispatcher forced off: our movie has no
 // engine event backend), 0x08 ProcessMessage (logged; stage a answers kShow itself, as the engine's refuses a menu
-// without a movie), and in stage a 0x0A IsMovieLoaded (true). The key is polled on a worker thread; every UI call runs
+// without a movie), and in stage a 0x0A IsMovieLoaded (true) and 0x10, 0x11 IMenu's stack callbacks (GameMenuBase's
+// assume a movie, as a public precedent's movie-less menu notes). The key is polled on a worker thread; every UI call runs
 // on the main thread through SFSE's task interface.
 
 #include "pch.h"
@@ -51,7 +56,8 @@ namespace
 	constexpr std::size_t   kSlots = 0x20;                   // primary vtable entries copied (IMenu declares 0x00-0x1A)
 	constexpr std::size_t   kCtorScan = 0x200;
 	constexpr std::size_t   kHeaderBytes = 96;               // Address Library format 5 header (libxse REL/IDDB.cpp)
-	constexpr char          kTypeName[] = ".?AVIMenu@@";
+	constexpr auto          kTypeName = ".?AVIMenu@@"sv;
+	constexpr auto          kGmbTypeName = ".?AVGameMenuBase@@"sv;
 
 	struct Id
 	{
@@ -78,6 +84,12 @@ namespace
 		kLoadMovie,
 		kProcessMessage,
 		kIsMovieLoaded,
+		kGmbVtblA,
+		kGmbVtblB,
+		kGmbVtblC,
+		kGmbRtti,
+		kGmbOnAdded,
+		kGmbOnRemoved,
 		kIdCount
 	};
 
@@ -100,6 +112,12 @@ namespace
 		{ "IMenu.LoadMovie", 130618, "precedent" },
 		{ "IMenu.ProcessMessage", 130624, "precedent" },
 		{ "IMenu.IsMovieLoaded", 130619, "precedent" },
+		{ "GameMenuBase.vtable[0]", 434723, "libxse VTABLE_GameMenuBase[0], ordered and checked by RTTI" },
+		{ "GameMenuBase.vtable[1]", 434725, "libxse VTABLE_GameMenuBase[1], ordered and checked by RTTI" },
+		{ "GameMenuBase.vtable[2]", 434721, "libxse VTABLE_GameMenuBase[2], ordered and checked by RTTI" },
+		{ "GameMenuBase.RTTI", 852954, "libxse RTTI_GameMenuBase" },
+		{ "GameMenuBase.OnAddedToMenuStack", 93620, "precedent" },
+		{ "GameMenuBase.OnRemovedFromMenuStack", 93621, "precedent" },
 	} };
 
 	using Ctor_t = void* (*)(void*);
@@ -107,9 +125,8 @@ namespace
 	using LoadMovie_t = bool (*)(void*, bool, bool);
 	using ProcessMessage_t = RE::UI_MESSAGE_RESULT (*)(void*, RE::UIMessageData&);
 
-	// the primary vtable copy, with the engine's RTTI complete object locator in the slot before it, where MSVC's
-	// dynamic_cast reads it. The engine casts a shown menu from IMenu to GameMenuBase (FAL-187 hang dump at b3f352b7);
-	// without the locator the cast read the global that happened to lie before the copy, and the game hung
+	// the GameMenuBase primary vtable copy, with the engine's RTTI complete object locator in the slot before it, where
+	// MSVC's dynamic_cast reads it: the engine's cast to GameMenuBase needs our object's RTTI to say GameMenuBase
 	struct PrimaryVtable
 	{
 		std::uintptr_t                     locator;
@@ -127,6 +144,7 @@ namespace
 	std::size_t                              g_imageSize = 0;
 	std::array<std::uint32_t, kIdCount>      g_rva{};
 	PrimaryVtable                            g_vtbl{};
+	std::array<std::uintptr_t, 3>            g_gmbVt{};   // GameMenuBase vtables at subobject +0x00, +0x10, +0x50
 	Ctor_t                                   g_ctor = nullptr;
 	Dtor_t                                   g_engineDtor = nullptr;
 	LoadMovie_t                              g_engineLoadMovie = nullptr;
@@ -242,10 +260,15 @@ namespace
 		                     *reinterpret_cast<const std::uintptr_t*>(base + 0x50) == Address(kVtblSink);
 		auto*      refs = reinterpret_cast<volatile std::uint32_t*>(base + 0x08);   // Scaleform RefCountImplCore
 		const auto ctorRefs = *refs;
+		// GameMenuBase's state, as a public precedent's constructor clears it (+0x130: the pause-request state)
+		*reinterpret_cast<std::uint64_t*>(base + 0x128) = 0;
+		*reinterpret_cast<std::uint64_t*>(base + 0x130) = 0;
 		*reinterpret_cast<std::uintptr_t*>(base) = reinterpret_cast<std::uintptr_t>(g_vtbl.slots.data());
+		*reinterpret_cast<std::uintptr_t*>(base + 0x10) = g_gmbVt[1];
+		*reinterpret_cast<std::uintptr_t*>(base + 0x50) = g_gmbVt[2];
 		// what the engine's dynamic_cast reads on our object: the locator one slot before its primary vtable
 		const auto rtti = *reinterpret_cast<const std::uintptr_t*>(*reinterpret_cast<const std::uintptr_t*>(base) - 8) ==
-		                  *reinterpret_cast<const std::uintptr_t*>(Address(kVtblPrimary) - 8);
+		                  *reinterpret_cast<const std::uintptr_t*>(g_gmbVt[0] - 8);
 		auto* imenu = static_cast<RE::IMenu*>(menu);
 		imenu->menuName = MenuName();
 		const auto ctorFlags = imenu->flags;
@@ -256,7 +279,7 @@ namespace
 		if (g_keepAlive && ctorRefs == 1) {
 			REX::W32::InterlockedIncrement(refs);   // a public precedent's count: never released to zero
 		}
-		REX::INFO("step=create n={} menu={} vtables={} rtti={} refcount={} keep_alive={} ctor_flags={} flags={} depth={}", n,
+		REX::INFO("step=create n={} menu={} class=GameMenuBase vtables={} rtti={} refcount={} keep_alive={} ctor_flags={} flags={} depth={}", n,
 			Hex(base), vtables ? "engine" : "UNEXPECTED", rtti ? "engine" : "UNEXPECTED", ctorRefs, g_keepAlive ? 1 : 0,
 			Hex(ctorFlags), Hex(imenu->flags),
 			Hex(*reinterpret_cast<const std::uint8_t*>(base + 0x110)));
@@ -345,9 +368,10 @@ namespace
 		return true;
 	}
 
-	bool CheckVtable(std::size_t a_id, std::uint32_t a_subobject, std::string_view a_which)
+	bool CheckVtable(std::uintptr_t a_vt, std::uint32_t a_subobject, std::string_view a_which, std::string_view a_type,
+		std::size_t a_rttiId)
 	{
-		const auto vt = Address(a_id);
+		const auto vt = a_vt;
 		if (!InImage(vt - 8, 8 + kSlots * 8)) {
 			return Refuse("rtti", std::format("vtable={} reason=outside_image", a_which));
 		}
@@ -362,22 +386,72 @@ namespace
 			return Refuse("rtti", std::format("vtable={} reason=locator signature={} offset={} expected_offset={}", a_which,
 				signature, Hex(offset), Hex(a_subobject)));
 		}
-		if (!InImage(typeDescriptor + 0x10, sizeof kTypeName)) {
+		if (!InImage(typeDescriptor + 0x10, a_type.size() + 1)) {
 			return Refuse("rtti", std::format("vtable={} reason=type_outside_image", a_which));
 		}
 		const auto* name = reinterpret_cast<const char*>(typeDescriptor + 0x10);
-		if (std::memcmp(name, kTypeName, sizeof kTypeName) != 0) {
+		if (std::memcmp(name, a_type.data(), a_type.size()) != 0 || name[a_type.size()] != '\0') {
 			std::string seen;
 			for (std::size_t i = 0; i < 48 && InImage(typeDescriptor + 0x10 + i, 1) && name[i]; ++i) {
 				seen += (name[i] >= 0x20 && name[i] < 0x7F) ? name[i] : '?';
 			}
 			return Refuse("rtti", std::format("vtable={} reason=type type={}", a_which, seen));
 		}
-		if (typeDescriptor != Address(kRtti)) {
+		if (typeDescriptor != Address(a_rttiId)) {
 			return Refuse("rtti", std::format("vtable={} reason=type_descriptor locator={} rtti_id={}", a_which,
-				Hex(typeDescriptor - g_base), Hex(g_rva[kRtti])));
+				Hex(typeDescriptor - g_base), Hex(g_rva[a_rttiId])));
 		}
-		REX::INFO("step=rtti vtable={} offset={} type={}", a_which, Hex(offset), kTypeName);
+		REX::INFO("step=rtti vtable={} offset={} type={}", a_which, Hex(offset), a_type);
+		return true;
+	}
+
+	std::string Rva(std::uintptr_t a_addr) { return InImage(a_addr, 1) ? Hex(a_addr - g_base) : "outside"; }
+
+	// libxse lists VTABLE_GameMenuBase's three ids without saying which subobject each is (its IMenu array was not in
+	// subobject order): each goes where its locator's offset says; CheckVtable then checks type and offset again
+	bool OrderGameMenuBase()
+	{
+		std::string seen;
+		for (const auto id : { kGmbVtblA, kGmbVtblB, kGmbVtblC }) {
+			const auto vt = Address(id);
+			if (!InImage(vt - 8, 8)) {
+				return Refuse("rtti", std::format("vtable=GameMenuBase id={} reason=outside_image", kIds[id].id));
+			}
+			const auto col = *reinterpret_cast<const std::uintptr_t*>(vt - 8);
+			if (!InImage(col, 0x14)) {
+				return Refuse("rtti", std::format("vtable=GameMenuBase id={} reason=locator_outside_image", kIds[id].id));
+			}
+			const auto        offset = *reinterpret_cast<const std::uint32_t*>(col + 0x04);
+			const std::size_t at = offset == 0x00 ? 0 : offset == 0x10 ? 1 : offset == 0x50 ? 2 : 3;
+			if (at == 3 || g_gmbVt[at]) {
+				return Refuse("rtti", std::format("vtable=GameMenuBase id={} reason=offset offset={}", kIds[id].id, Hex(offset)));
+			}
+			g_gmbVt[at] = vt;
+			seen += std::format(" {}={}", kIds[id].id, Hex(offset));
+		}
+		REX::INFO("step=gmb_order{}", seen);
+		return true;
+	}
+
+	bool CheckGameMenuBaseSlots()
+	{
+		const auto* gmb = reinterpret_cast<const std::uintptr_t*>(g_gmbVt[0]);
+		const auto* imenu = reinterpret_cast<const std::uintptr_t*>(Address(kVtblPrimary));
+		if (gmb[0x10] != Address(kGmbOnAdded) || gmb[0x11] != Address(kGmbOnRemoved)) {
+			return Refuse("gmb_slots", std::format("what=stack_callbacks have={},{} want={},{}", Rva(gmb[0x10]), Rva(gmb[0x11]),
+				Hex(g_rva[kGmbOnAdded]), Hex(g_rva[kGmbOnRemoved])));
+		}
+		if (!InImage(gmb[0x00], 1)) {
+			return Refuse("gmb_slots", "what=scalar_deleting_dtor reason=outside_image");
+		}
+		std::string differs;
+		for (std::size_t i = 0; i <= 0x1A; ++i) {
+			if (gmb[i] != imenu[i]) {
+				differs += std::format("{}{}", differs.empty() ? "" : ",", Hex(i));
+			}
+		}
+		REX::INFO("step=gmb_slots stack_callbacks=ok dtor={} differs_from_imenu={} slot1b={}", Rva(gmb[0x00]), differs,
+			Rva(gmb[0x1B]));
 		return true;
 	}
 
@@ -435,17 +509,22 @@ namespace
 	bool CheckEverything(const std::filesystem::path& a_dir)
 	{
 		if (!CheckImage() || !ReadAddressLibrary(a_dir / "versionlib-1-16-244-0.bin") ||
-			!CheckVtable(kVtblPrimary, 0x00, "primary") || !CheckVtable(kVtblInput, 0x10, "BSInputEventUser") ||
-			!CheckVtable(kVtblSink, 0x50, "BSTEventSink") || !CheckSlots() || !CheckCtor()) {
+			!CheckVtable(Address(kVtblPrimary), 0x00, "primary", kTypeName, kRtti) ||
+			!CheckVtable(Address(kVtblInput), 0x10, "BSInputEventUser", kTypeName, kRtti) ||
+			!CheckVtable(Address(kVtblSink), 0x50, "BSTEventSink", kTypeName, kRtti) || !CheckSlots() || !CheckCtor() ||
+			!OrderGameMenuBase() || !CheckVtable(g_gmbVt[0], 0x00, "GameMenuBase.primary", kGmbTypeName, kGmbRtti) ||
+			!CheckVtable(g_gmbVt[1], 0x10, "GameMenuBase.BSInputEventUser", kGmbTypeName, kGmbRtti) ||
+			!CheckVtable(g_gmbVt[2], 0x50, "GameMenuBase.BSTEventSink", kGmbTypeName, kGmbRtti) || !CheckGameMenuBaseSlots()) {
 			return false;
 		}
-		const auto* engine = reinterpret_cast<const std::uintptr_t*>(Address(kVtblPrimary));
-		g_vtbl.locator = *reinterpret_cast<const std::uintptr_t*>(Address(kVtblPrimary) - 8);   // checked by CheckVtable
+		const auto* imenu = reinterpret_cast<const std::uintptr_t*>(Address(kVtblPrimary));
+		const auto* engine = reinterpret_cast<const std::uintptr_t*>(g_gmbVt[0]);
+		g_vtbl.locator = *reinterpret_cast<const std::uintptr_t*>(g_gmbVt[0] - 8);   // checked by CheckVtable
 		std::copy_n(engine, kSlots, g_vtbl.slots.begin());
 		g_ctor = reinterpret_cast<Ctor_t>(Address(kCtor));
-		g_engineDtor = reinterpret_cast<Dtor_t>(engine[0x00]);
-		g_engineLoadMovie = reinterpret_cast<LoadMovie_t>(engine[0x06]);
-		g_engineProcessMessage = reinterpret_cast<ProcessMessage_t>(engine[0x08]);
+		g_engineDtor = reinterpret_cast<Dtor_t>(engine[0x00]);                       // GameMenuBase's
+		g_engineLoadMovie = reinterpret_cast<LoadMovie_t>(Address(kLoadMovie));       // IMenu's, checked by CheckSlots
+		g_engineProcessMessage = reinterpret_cast<ProcessMessage_t>(Address(kProcessMessage));
 		g_vtbl.slots[0x00] = reinterpret_cast<std::uintptr_t>(&MenuDestroy);
 		g_vtbl.slots[0x03] = reinterpret_cast<std::uintptr_t>(&MenuGetName);
 		g_vtbl.slots[0x04] = reinterpret_cast<std::uintptr_t>(&MenuGetRootPath);
@@ -454,9 +533,11 @@ namespace
 		g_vtbl.slots[0x08] = reinterpret_cast<std::uintptr_t>(&MenuProcessMessage);
 		if (g_stage == 1) {
 			g_vtbl.slots[0x0A] = reinterpret_cast<std::uintptr_t>(&MenuIsMovieLoaded);
+			g_vtbl.slots[0x10] = imenu[0x10];   // IMenu's stack callbacks: GameMenuBase's assume a movie
+			g_vtbl.slots[0x11] = imenu[0x11];
 		}
-		REX::INFO("step=ready stage={} replaced=0x00,0x03,0x04,0x05,0x06,0x08{} locator={}", g_stage == 1 ? "a" : "b",
-			g_stage == 1 ? ",0x0A" : "", Hex(g_vtbl.locator - g_base));
+		REX::INFO("step=ready stage={} class=GameMenuBase replaced=0x00,0x03,0x04,0x05,0x06,0x08{} locator={}",
+			g_stage == 1 ? "a" : "b", g_stage == 1 ? ",0x0A,0x10,0x11" : "", Hex(g_vtbl.locator - g_base));
 		return true;
 	}
 
