@@ -10,9 +10,12 @@
 //        Positions in metres in the core's frame: FO4 position / 70 (make_core64c.py: "position = FO4 position / 70").
 //   write <Starfield.esm> <FO4TerrainCore.esm> <FO4ActorRaider.esm> <points.json> <out dir> [--plugin FO4SFMission.esm]
 //         [--world FO4Core_Commonwealth] [--no-alias] [--codsworth-body OutpostRobotMiniBotA_Garden] [--no-codsworth] [--codsworth-model <mesh under Meshes>]
+//         [--merge-offset x,y]
 //        the plugin: Preston (NPC_, a copy of the raider plugin's calm probe FO4_LvlRaider_Calm under Preston's name,
 //        Essential and Unique), the raiders and Preston as persistent ACHRs in the core world's persistent cell (a
-//        WRLD + persistent CELL override of the core, holding only our references), and the quest FO4SF_Min00
+//        WRLD + persistent CELL override of the core, holding only our references), each at its points.json position +
+//        the merge offset (default -1200,-2700: MergeX/MergeY), z kept, so its editor location is its spot in the world
+//        the player walks in (FAL-179; docs/mission/when-freedom-calls.md, "Merged-frame ACHRs"), and the quest FO4SF_Min00
 //        (start game enabled; stages 10 / 20 / 30 / 40 / 200; objectives 10 / 85 / 86) carrying the script
 //        FO4SF_Min00Quest (scripts/mission/FO4SF_Min00Quest.psc) with its properties. --no-alias drops the Preston
 //        reference alias and the objective targets (no quest markers): the fallback when the alias is suspected.
@@ -20,10 +23,12 @@
 //        named by --codsworth-body under his name, Essential and Unique, without its factions and scripts, placed
 //        persistent at his Fallout 4 spot in Sanctuary, kept by the quest FO4SF_CodsworthKeeper (start game enabled; the
 //        same script with KeeperOnly). --no-codsworth leaves him and his keeper out.
-//   check <plugin> <Starfield.esm> <FO4TerrainCore.esm> <FO4ActorRaider.esm> [--no-alias] [--no-codsworth] [--codsworth-model <mesh>]
+//   check <plugin> <Starfield.esm> <FO4TerrainCore.esm> <FO4ActorRaider.esm> --points <points.json> [--merge-offset x,y]
+//         [--no-alias] [--no-codsworth] [--codsworth-model <mesh>]
 //        --codsworth-model: his own model, ARMA FO4_AA_Codsworth (a copy of AA_MiniBotA_Gardening with that mesh) in
 //        ARMO FO4_Skin_Codsworth (a copy of Skin_MiniBotA_Gardening with only it), set as his skin (WNAM); check requires them
-//        reads the plugin back and checks every record and link the script and the quest rely on (exit 1 on a problem).
+//        reads the plugin back and checks every record and link the script and the quest rely on (exit 1 on a problem),
+//        and every ACHR's FormID, EditorID, position (points.json + the merge offset) and rotation against points.json.
 //   npcs <plugin.esm> <fo4 | sf> <regex>
 //        read only: every NPC_ whose EditorID, name or race EditorID matches the regex (case-insensitive): FormKey,
 //        EditorID, name, race; for fo4 also each placed ACHR of it in the Commonwealth (core frame, FO4 / 70) and in
@@ -58,9 +63,11 @@ try
         "write" when args.Length >= 6 => Mission.Write(args[1], args[2], args[3], args[4], args[5], Mission.Arg(args, "--plugin", Mission.Plugin),
                                                        Mission.Arg(args, "--world", Mission.World), !args.Contains("--no-alias"),
                                                        args.Contains("--no-codsworth") ? null : Mission.Arg(args, "--codsworth-body", Mission.CodsworthBody),
-                                                       Mission.ArgOrNull(args, "--codsworth-model"), Mission.ArgOrNull(args, "--codsworth-voice")),
+                                                       Mission.ArgOrNull(args, "--codsworth-model"), Mission.ArgOrNull(args, "--codsworth-voice"),
+                                                       Mission.MergeOpt(args)),
         "check" when args.Length >= 5 => Mission.Check(args[1], args[2], args[3], args[4], !args.Contains("--no-alias"), !args.Contains("--no-codsworth"),
-                                                       Mission.ArgOrNull(args, "--codsworth-model"), Mission.ArgOrNull(args, "--codsworth-voice")),
+                                                       Mission.ArgOrNull(args, "--codsworth-model"), Mission.ArgOrNull(args, "--codsworth-voice"),
+                                                       Mission.ArgOrNull(args, "--points"), Mission.MergeOpt(args)),
         "npcs" when args.Length >= 4 => Mission.Npcs(args[1], args[2], args[3]),
         "quests" when args.Length >= 2 => Mission.Quests(args[1], args.Length >= 3 ? args[2] : "."),
         "infos" when args.Length >= 3 => Mission.Infos(args[1], args[2]),
@@ -117,6 +124,10 @@ static class Mission
         (10, "Find the Last Minutemen", true), (85, "Kill the Raiders", false), (86, "Talk to Preston Garvey", true),
     };
     public const float Units = 70f;                                       // FO4 units per metre
+    // the core's merge offset (vmad_patch.MERGE_MEASURED; FO4SF_Min00Quest.psc MergeOffsetX/Y): the world the player walks
+    // in draws the core's exterior cells at local + this. Our persistent references are not merged (they stay at their
+    // written position: door probe (a), 18 and 31 Oct logs), so the ACHRs are written at local + this once (FAL-179).
+    public const float MergeX = -1200f, MergeY = -2700f;
     static readonly ModKey SfEsm = ModKey.FromFileName("Starfield.esm");
 
     public class Refusal(string m) : Exception(m);
@@ -129,7 +140,18 @@ static class Mission
     public static string? ArgOrNull(string[] a, string name) { var i = Array.IndexOf(a, name); return i >= 0 && i + 1 < a.Length ? a[i + 1] : null; }
     public static string Arg(string[] a, string name, string dflt) { var i = Array.IndexOf(a, name); return i >= 0 && i + 1 < a.Length ? a[i + 1] : dflt; }
     public static float Opt(string[] a, string name, float dflt) => float.Parse(Arg(a, name, dflt.ToString(CultureInfo.InvariantCulture)), CultureInfo.InvariantCulture);
+    /// --merge-offset x,y (metres), what write adds to points.json's positions and check expects; MergeX,MergeY when absent
+    public static (float X, float Y) MergeOpt(string[] a)
+    {
+        var s = ArgOrNull(a, "--merge-offset");
+        if (s is null) return (MergeX, MergeY);
+        var v = s.Split(',');
+        if (v.Length != 2) throw new Refusal($"--merge-offset {s}: give x,y");
+        return (float.Parse(v[0], CultureInfo.InvariantCulture), float.Parse(v[1], CultureInfo.InvariantCulture));
+    }
     static string F(float v) => v.ToString("0.###", CultureInfo.InvariantCulture);
+    static bool Near(P3Float a, float x, float y, float z, float tol = 0.01f) =>
+        MathF.Abs(a.X - x) <= tol && MathF.Abs(a.Y - y) <= tol && MathF.Abs(a.Z - z) <= tol;
 
     // ---------------------------------------------------------------- quests (read only)
 
@@ -372,8 +394,9 @@ static class Mission
 
     public static int Write(string sfPath, string corePath, string raiderPath, string pointsPath, string outDir, string plugin,
                             string worldEdid, bool alias, string? codsworthBody = CodsworthBody, string? codsworthModel = null,
-                            string? codsworthVoice = null)
+                            string? codsworthVoice = null, (float X, float Y)? merge = null)
     {
+        var (mx, my) = merge ?? (MergeX, MergeY);
         var pts = JsonDocument.Parse(File.ReadAllText(pointsPath)).RootElement;
         using var m = Open(sfPath, corePath, raiderPath);
         var modKey = ModKey.FromFileName(plugin);
@@ -408,7 +431,14 @@ static class Mission
         mod.Npcs.Add(npc);
 
         // the world and its persistent cell, overridden with only our references (vanilla keeps every persistent
-        // worldspace reference there; TerrainOverlays puts the door arrival markers there for the same reason)
+        // worldspace reference there; TerrainOverlays puts the door arrival markers there for the same reason). Not an
+        // exterior cell of the core: an add-on's override of one broke the core's coc (15 Oct, verified twice), and a
+        // temporary actor there could not be a script property or the alias's forced reference while its cell is unloaded.
+        // Each ACHR is written at its points.json position (the core's local frame) + the merge offset: the engine leaves
+        // our persistent references at their written position, so that is its editor location in the world the player
+        // walks in, where its AI and its returns take it (31 Oct: raiders back at their written position in the player's
+        // world; Codsworth's saved heading is the bearing to his written position). Offsetting a reference the engine
+        // also merges would offset it twice, as MoveOver did on 31 Oct (FAL-179).
         var w = (SF.Worldspace)world.DeepCopy();
         w.SubCells.Clear();
         var cell = (SF.Cell)top.DeepCopy();
@@ -423,7 +453,7 @@ static class Mission
             var a = new SF.PlacedNpc(new FormKey(modKey, id), SF.StarfieldRelease.Starfield)
             {
                 EditorID = edid, Base = new FormLink<SF.INpcGetter>(baseKey),
-                Position = new P3Float(p[0], p[1], p[2]), Rotation = new P3Float(r[0], r[1], r[2]),
+                Position = new P3Float(p[0] + mx, p[1] + my, p[2]), Rotation = new P3Float(r[0], r[1], r[2]),
             };
             a.MajorRecordFlagsRaw |= 0x400;                                  // Persistent
             cell.Persistent.Add(a);
@@ -585,7 +615,7 @@ static class Mission
                           $"{raiderRefs.Count} raider ACHR(s) of {raiderNpc.EditorID}; " +
                           (cods is null ? "no Codsworth; " : $"NPC_ {CodsworthEdid} {cods.FormKey} \"{cods.Name}\" body {codsworthBody}, ACHR {codsRef!.FormKey} at {Show(codsRef.Position)}" +
                                             (codsworthModel is null ? "; " : $", skin {CodsworthSkinEdid} model {codsworthModel}; ")) +
-                          $"WRLD {w.EditorID} {w.FormKey} persistent CELL {cell.FormKey} overridden");
+                          $"WRLD {w.EditorID} {w.FormKey} persistent CELL {cell.FormKey} overridden; ACHRs at points.json + ({F(mx)}, {F(my)})");
         return 0;
     }
 
@@ -646,7 +676,8 @@ static class Mission
     }
 
     public static int Check(string pluginPath, string sfPath, string corePath, string raiderPath, bool alias, bool codsworth = true,
-                            string? codsworthModel = null, string? codsworthVoice = null)
+                            string? codsworthModel = null, string? codsworthVoice = null, string? pointsPath = null,
+                            (float X, float Y)? merge = null)
     {
         using var m = Open(sfPath, corePath, raiderPath);
         using var plug = SF.StarfieldMod.CreateFromBinaryOverlay(pluginPath, SF.StarfieldRelease.Starfield, Styles(SfEsm, m.Core.ModKey, m.Raider.ModKey));
@@ -716,6 +747,35 @@ static class Mission
                   "a build without --codsworth-model carries Codsworth's ARMA or ARMO");
         Need(refs.All(r => r.FormKey.ID < CodsworthNpcId || r.FormKey.ID == CodsworthRefId), "an ACHR outside Preston, the raiders and Codsworth");
         Need(raiders.Count > 0 && raiders.All(r => r.Base.FormKey == new FormKey(m.Raider.ModKey, RaiderId)), "no raider ACHR on FO4_LvlRaider");
+
+        // the merged frame (FAL-179): each ACHR keeps its FormID and EditorID and stands at its points.json position + the
+        // merge offset (z and rotation as in points.json); a local-frame or doubly offset ACHR is a problem
+        if (pointsPath is null) problems.Add("no --points: the ACHR positions cannot be checked against points.json");
+        else
+        {
+            var (mx, my) = merge ?? (MergeX, MergeY);
+            var pts = JsonDocument.Parse(File.ReadAllText(pointsPath)).RootElement;
+            Console.WriteLine($"  frame: ACHRs at points.json + the merge offset ({F(mx)}, {F(my)}), z kept");
+            void At(uint id, string edid, JsonElement e)
+            {
+                var p = Floats(e.GetProperty("pos"));
+                var r = Floats(e.GetProperty("rot"));
+                var a = refs.FirstOrDefault(x => x.FormKey.ID == id);
+                Need(a is not null && a.EditorID == edid && Near(a.Position, p[0] + mx, p[1] + my, p[2]) && Near(a.Rotation, r[0], r[1], r[2]),
+                     $"ACHR {id:X6} is not {edid} at points.json ({F(p[0])}, {F(p[1])}, {F(p[2])}) + the merge offset = " +
+                     $"({F(p[0] + mx)}, {F(p[1] + my)}, {F(p[2])}) with its rotation" + (a is null ? " (missing)" : $" (is {a.EditorID} at {Show(a.Position)})"));
+            }
+            At(PrestonRefId, "FO4SF_Min00_PrestonREF", pts.GetProperty("preston"));
+            var rj = pts.GetProperty("raiders").EnumerateArray().ToList();
+            Need(raiders.Count == rj.Count, $"{raiders.Count} raider ACHR(s), points.json has {rj.Count}");
+            for (int i = 0; i < rj.Count; i++)
+                At(FirstRaiderRefId + (uint)i, $"FO4SF_Min00_Raider_{rj[i].GetProperty("src").GetString()}", rj[i]);
+            if (codsworth)
+            {
+                if (pts.TryGetProperty("codsworth", out var cj) && cj.ValueKind == JsonValueKind.Object) At(CodsworthRefId, "FO4SF_CodsworthREF", cj);
+                else problems.Add("points.json has no codsworth");
+            }
+        }
 
         var q = plug.Quests.FirstOrDefault(x => x.FormKey == new FormKey(key, QuestId));
         if (q is null) problems.Add("no QUST 0x800");
@@ -863,32 +923,35 @@ static class Mission
                      {"src": "046459", "pos": [-835.0, 1012.0, 88.5], "rot": [0, 0, 0.0]}],
          "codsworth": {"src": "01CA7D", "name": "Codsworth", "pos": [-1146.709, 1293.837, 111.734], "rot": [0, 0, 2.356]}}
         """);
+        // every check reads the ACHRs against these points (FAL-179); merge null is the measured offset, as write's default
+        int Chk(string plugin, bool alias, bool codsworth = true, string? model = null, string? voice = null, (float X, float Y)? merge = null) =>
+            Check(plugin, sfPath, corePath, raiderPath, alias, codsworth, model, voice, pointsPath, merge);
         var outDir = Path.Combine(dir, "out");
         foreach (var alias in new[] { true, false })
         {
             var o = Path.Combine(outDir, alias ? "alias" : "noalias");
             int rc = Write(sfPath, corePath, raiderPath, pointsPath, o, Plugin, World, alias);
             if (rc != 0) return rc;
-            rc = Check(Path.Combine(o, Plugin), sfPath, corePath, raiderPath, alias);
+            rc = Chk(Path.Combine(o, Plugin), alias);
             if (rc != 0) return rc;
         }
         {   // the fallback without Codsworth still writes and checks
             var o = Path.Combine(outDir, "nocodsworth");
             int rc = Write(sfPath, corePath, raiderPath, pointsPath, o, Plugin, World, true, null);
-            if (rc == 0) rc = Check(Path.Combine(o, Plugin), sfPath, corePath, raiderPath, true, false);
+            if (rc == 0) rc = Chk(Path.Combine(o, Plugin), true, false);
             if (rc != 0) return rc;
-            if (Check(Path.Combine(o, Plugin), sfPath, corePath, raiderPath, true, true) == 0)
+            if (Chk(Path.Combine(o, Plugin), true, true) == 0)
                 { Console.WriteLine("FAIL  check passed a build without Codsworth when he was expected"); return 1; }
         }
         {   // Codsworth's own model: written, checked, and a model build is not a plain one (nor the other way round)
             var o = Path.Combine(outDir, "model");
             const string model = "fo4port\\actors\\codsworth\\codsworth.nif";
             int rc = Write(sfPath, corePath, raiderPath, pointsPath, o, Plugin, World, true, CodsworthBody, model);
-            if (rc == 0) rc = Check(Path.Combine(o, Plugin), sfPath, corePath, raiderPath, true, true, model);
+            if (rc == 0) rc = Chk(Path.Combine(o, Plugin), true, true, model);
             if (rc != 0) return rc;
-            if (Check(Path.Combine(o, Plugin), sfPath, corePath, raiderPath, true, true) == 0)
+            if (Chk(Path.Combine(o, Plugin), true, true) == 0)
                 { Console.WriteLine("FAIL  check passed a model build as a plain one"); return 1; }
-            if (Check(Path.Combine(outDir, "alias", Plugin), sfPath, corePath, raiderPath, true, true, model) == 0)
+            if (Chk(Path.Combine(outDir, "alias", Plugin), true, true, model) == 0)
                 { Console.WriteLine("FAIL  check passed a plain build as a model one"); return 1; }
             {   // Codex 5565181946: the same file name in another folder is not his model
                 var mod = SF.StarfieldMod.CreateFromBinary(Path.Combine(o, Plugin), rel, Styles(SfEsm, coreKey, raiderKey));
@@ -898,7 +961,7 @@ static class Mission
                 var lo = new[] { SfEsm, coreKey, raiderKey };
                 mod.BeginWrite.ToPath(Path.Combine(md, Plugin)).WithLoadOrder(lo)
                     .WithKnownMasters(lo.Select(k => new KeyedMasterStyle(k, MasterStyle.Full)).ToArray()).Write();
-                if (Check(Path.Combine(md, Plugin), sfPath, corePath, raiderPath, true, true, model) == 0)
+                if (Chk(Path.Combine(md, Plugin), true, true, model) == 0)
                     { Console.WriteLine("FAIL  check passed his model in another folder"); return 1; }
                 Console.WriteLine("mutation rejected: model in another folder");
             }
@@ -914,11 +977,11 @@ static class Mission
                 """);
             var o = Path.Combine(outDir, "voice");
             int rc = Write(sfPath, corePath, raiderPath, pointsPath, o, Plugin, World, true, CodsworthBody, null, voice);
-            if (rc == 0) rc = Check(Path.Combine(o, Plugin), sfPath, corePath, raiderPath, true, true, null, voice);
+            if (rc == 0) rc = Chk(Path.Combine(o, Plugin), true, true, null, voice);
             if (rc != 0) return rc;
-            if (Check(Path.Combine(o, Plugin), sfPath, corePath, raiderPath, true, true) == 0)
+            if (Chk(Path.Combine(o, Plugin), true, true) == 0)
                 { Console.WriteLine("FAIL  check passed a voice build as a plain one"); return 1; }
-            if (Check(Path.Combine(outDir, "alias", Plugin), sfPath, corePath, raiderPath, true, true, null, voice) == 0)
+            if (Chk(Path.Combine(outDir, "alias", Plugin), true, true, null, voice) == 0)
                 { Console.WriteLine("FAIL  check passed a plain build as a voice one"); return 1; }
             var voiceMutations = new (string Name, Action<SF.StarfieldMod> Edit)[]
             {
@@ -941,9 +1004,55 @@ static class Mission
                 var lo = new[] { SfEsm, coreKey, raiderKey };
                 mod.BeginWrite.ToPath(Path.Combine(md, Plugin)).WithLoadOrder(lo)
                     .WithKnownMasters(lo.Select(k => new KeyedMasterStyle(k, MasterStyle.Full)).ToArray()).Write();
-                if (Check(Path.Combine(md, Plugin), sfPath, corePath, raiderPath, true, true, null, voice) == 0)
+                if (Chk(Path.Combine(md, Plugin), true, true, null, voice) == 0)
                     { Console.WriteLine($"FAIL  check passed a mutation: {name}"); return 1; }
                 Console.WriteLine($"mutation rejected: {name}");
+            }
+        }
+        {   // the merged frame (FAL-179): every ACHR at points.json + the merge offset. check refuses a merged build read as
+            // a local-frame one, a check without points, and each mutation below; a build written with --merge-offset 0,0
+            // (the local frame, as before FAL-179) checks with that offset only
+            var merged = Path.Combine(outDir, "alias", Plugin);
+            if (Chk(merged, true, merge: (0f, 0f)) == 0)
+                { Console.WriteLine("FAIL  check passed a merged build as a local-frame one"); return 1; }
+            if (Check(merged, sfPath, corePath, raiderPath, true) == 0)
+                { Console.WriteLine("FAIL  check passed without points.json"); return 1; }
+            var lf = Path.Combine(outDir, "localframe");
+            int lrc = Write(sfPath, corePath, raiderPath, pointsPath, lf, Plugin, World, true, merge: (0f, 0f));
+            if (lrc == 0) lrc = Chk(Path.Combine(lf, Plugin), true, merge: (0f, 0f));
+            if (lrc != 0) return lrc;
+            if (Chk(Path.Combine(lf, Plugin), true) == 0)
+                { Console.WriteLine("FAIL  check passed a local-frame build as a merged one"); return 1; }
+            static SF.PlacedNpc AchOf(SF.StarfieldMod m, uint id) =>
+                m.Worldspaces.First().TopCell!.Persistent.OfType<SF.PlacedNpc>().First(r => r.FormKey.ID == id);
+            static void ShiftAch(SF.StarfieldMod m, uint id, int k)
+            {
+                var r = AchOf(m, id);
+                r.Position = new P3Float(r.Position.X + k * MergeX, r.Position.Y + k * MergeY, r.Position.Z);
+            }
+            var frameMutations = new (string Name, Action<SF.StarfieldMod> Edit)[]
+            {
+                ("every ACHR in the local frame", m => { foreach (var id in new[] { PrestonRefId, FirstRaiderRefId, FirstRaiderRefId + 1, CodsworthRefId }) ShiftAch(m, id, -1); }),
+                ("Preston offset twice", m => ShiftAch(m, PrestonRefId, 1)),
+                ("a raider in the local frame", m => ShiftAch(m, FirstRaiderRefId + 1, -1)),
+                ("Codsworth offset twice", m => ShiftAch(m, CodsworthRefId, 1)),
+                ("Preston's z moved", m => { var r = AchOf(m, PrestonRefId); r.Position = new P3Float(r.Position.X, r.Position.Y, r.Position.Z + 5); }),
+                ("Preston turned", m => { var r = AchOf(m, PrestonRefId); r.Rotation = new P3Float(r.Rotation.X, r.Rotation.Y, r.Rotation.Z + 1); }),
+                ("two raiders swapped", m => { var a = AchOf(m, FirstRaiderRefId); var b = AchOf(m, FirstRaiderRefId + 1); (a.Position, b.Position) = (b.Position, a.Position); }),
+                ("Preston's EditorID changed", m => AchOf(m, PrestonRefId).EditorID = "FO4SF_Min00_Preston"),
+            };
+            foreach (var (fname, fedit) in frameMutations)
+            {
+                var fmod = SF.StarfieldMod.CreateFromBinary(merged, rel, Styles(SfEsm, coreKey, raiderKey));
+                fedit(fmod);
+                var fd = Path.Combine(outDir, "frame_mutated");
+                Directory.CreateDirectory(fd);
+                var flo = new[] { SfEsm, coreKey, raiderKey };
+                fmod.BeginWrite.ToPath(Path.Combine(fd, Plugin)).WithLoadOrder(flo)
+                    .WithKnownMasters(flo.Select(k => new KeyedMasterStyle(k, MasterStyle.Full)).ToArray()).Write();
+                if (Chk(Path.Combine(fd, Plugin), true) == 0)
+                    { Console.WriteLine($"FAIL  check passed a mutation: {fname}"); return 1; }
+                Console.WriteLine($"mutation rejected: {fname}");
             }
         }
         // mutations of the default output, each of which check must reject (Codex review 5564480667)
@@ -985,7 +1094,7 @@ static class Mission
             var mp = Path.Combine(md, Plugin);
             var lo = new[] { SfEsm, coreKey, raiderKey };
             mod.BeginWrite.ToPath(mp).WithLoadOrder(lo).WithKnownMasters(lo.Select(k => new KeyedMasterStyle(k, MasterStyle.Full)).ToArray()).Write();
-            if (Check(mp, sfPath, corePath, raiderPath, true, true) == 0)
+            if (Chk(mp, true, true) == 0)
                 { Console.WriteLine($"FAIL  check passed a mutated plugin: {name}"); return 1; }
             Console.WriteLine($"mutation rejected: {name}");
         }

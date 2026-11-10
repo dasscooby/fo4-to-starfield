@@ -31,6 +31,37 @@ def function_body(psc, name):
     return psc[i:psc.index("EndFunction", i)]
 
 
+def cs_number(v):
+    """Program.cs F: a float as "0.###"."""
+    s = f"{v:.3f}".rstrip("0").rstrip(".")
+    return "0" if s == "-0" else s
+
+
+def achr_line(fid, edid, pos, flags=0x400):
+    """The line dotnet/Mission check prints for an ACHR (Program.cs Check, Show, F)."""
+    x, y, z = (cs_number(v) for v in pos)
+    return f"  ACHR {fid:06X} {edid} base 000801:FO4SFMission.esm at ({x}, {y}, {z}) flags 0x{flags:X}"
+
+
+def fake_check_output(cmd, edit=None):
+    """What dotnet/Mission check prints for the ACHRs of a writer that obeys --merge-offset: Preston 0x802, the raiders
+    from 0x803, Codsworth 0x811 unless --no-codsworth, each at its points.json position + the offset. edit changes the
+    records first ({form id: [EditorID, [x, y, z], flags]}), as a writer with a fault would."""
+    with open(cmd[cmd.index("--points") + 1], encoding="utf-8") as f:
+        pts = json.load(f)
+    mx, my = (float(v) for v in cmd[cmd.index("--merge-offset") + 1].split(","))
+    recs = {0x802: ["FO4SF_Min00_PrestonREF", pts["preston"]["pos"]]}
+    for i, r in enumerate(pts["raiders"]):
+        recs[0x803 + i] = [f"FO4SF_Min00_Raider_{r['src']}", r["pos"]]
+    if "--no-codsworth" not in cmd:
+        recs[0x811] = ["FO4SF_CodsworthREF", pts["codsworth"]["pos"]]
+    recs = {k: [e, [p[0] + mx, p[1] + my, p[2]], 0x400] for k, (e, p) in recs.items()}
+    if edit:
+        edit(recs)
+    return "\n".join(["FO4SFMission.esm: header Master"] + [achr_line(k, *v) for k, v in sorted(recs.items())] +
+                     ["  frame: ACHRs at points.json + the merge offset", "all checks pass"])
+
+
 class ContractTests(unittest.TestCase):
     def test_script_properties_are_the_ones_the_plugin_fills(self):
         self.assertEqual(tuple(make_mission.mandatory_properties(read(PSC))), make_mission.PROPERTIES)
@@ -362,8 +393,7 @@ class RelocateContractTests(unittest.TestCase):
         keep = psc[psc.index("Function KeepCodsworth()"):psc.index("bool Function MoveOver")]
         self.assertIn("codsworthFails += 1", keep)
         self.assertRegex(keep, r"if \(Codsworth != None && \(codsworthFails < 10 \|\| codsworthHolds > 0\)\) \|\| "
-                               r"\(KeeperOnly && \(prestonFails < 10 \|\| prestonHolds > 0\)\)"
-                               r"\s+StartTimer\(CodsworthCheck, 2\)")
+                               r"KeeperOnly\s+StartTimer\(CodsworthCheck, 2\)")
         self.assertNotIn("GetStage", keep)
         relocate = psc[psc.index("Function Relocate("):psc.index("Function KeepCodsworth()")]
         self.assertNotIn("MoveOver(Codsworth", relocate)
@@ -803,14 +833,14 @@ class RelocateContractTests(unittest.TestCase):
         tick = psc[psc.index("Event OnTimer("):psc.index("EndEvent", psc.index("Event OnTimer("))]
         self.assertRegex(tick, r'KeepCodsworthStart\(\)\s+ReleaseInFight\("mission"\)[^\n]*\s+if relocateFails < 10')
         self.assertRegex(body("KeepPreston"), r'ReleaseInFight\("keeper"\)\s+if prestonFails < 10')
-        # the keeper keeps checking with a spent budget once it has held him, so a fight still releases him
-        self.assertIn("(KeeperOnly && (prestonFails < 10 || prestonHolds > 0))", body("KeepCodsworth"))
+        # the keeper keeps checking with a spent budget, held by it or not, so a fight still releases him (FAL-179)
+        self.assertRegex(body("KeepCodsworth"), r"\) \|\| KeeperOnly\s+StartTimer\(CodsworthCheck, 2\)")
         self.assertRegex(psc, r"(?m)^bool prestonFighting = False$")
 
     def test_two_instances_a_load_and_a_spent_budget(self):
         """PC review of 79c9ba81, on plain numbers: the engine's restraint is one, the flags are two (mission, keeper).
         Each check of an instance: in a fight SetRestrained(False) whatever its flag (ReleaseInFight), then PlacePreston
-        (make_mission.place_preston) unless its budget is spent; a new hold sets the restraint."""
+        (make_mission.place_at) unless its budget is spent; a new hold sets the restraint."""
         def check(world, who, fighting, off=1.5, spent=False):
             if fighting:
                 world["restrained"] = False                             # ReleaseInFight
@@ -909,17 +939,253 @@ class RelocateContractTests(unittest.TestCase):
         self.assertNotIn("Codsworth", make_mission.mandatory_properties(psc))
 
 
+def cs_method(cs, name):
+    """A public static method of Program.cs, from its signature to the next public static member."""
+    i = cs.index(f"public static int {name}(")
+    return cs[i:cs.index("\n    public static ", i + 1)]
+
+
+class MergedFrameTests(unittest.TestCase):
+    """FAL-179: the plugin writes each ACHR at its points.json position (the core's local frame) + the merge offset, so
+    its editor location is its spot in the world the player walks in. The engine leaves our persistent references at
+    their written position (probe (a), 18 Oct 14:40, the raiders' 31 Oct readbacks, Codsworth's saved heading: the
+    bearing to his written position), so the offset is applied once, by the writer, and the script's moves become a
+    safety net that a new game never needs."""
+
+    def test_writer_and_script_share_one_offset(self):
+        """The writer's default, what make_mission.py stage passes it (the script's) and the script's own: one pair. A
+        test of its own pins the script's to vmad_patch.MERGE_MEASURED."""
+        psc = read(PSC)
+        f = make_mission.script_floats(psc)
+        m = re.search(r"public const float MergeX = (-?[\d.]+)f, MergeY = (-?[\d.]+)f;", read(CS))
+        self.assertEqual((float(m.group(1)), float(m.group(2))), (f["MergeOffsetX"], f["MergeOffsetY"]))
+        self.assertEqual(make_mission.merge_offset(psc), (f["MergeOffsetX"], f["MergeOffsetY"]))
+        self.assertEqual(make_mission.merge_offset(psc), (-1200.0, -2700.0))
+
+    def test_form_ids_and_editor_ids_are_unchanged(self):
+        """The script's properties and existing saves name the ACHRs by FormID: Preston 0x802, the raiders from 0x803,
+        Codsworth 0x811, as at 88372e87. Only their position changes."""
+        cs = read(CS)
+        self.assertIn("PrestonRefId = 0x802, FirstRaiderRefId = 0x803;", cs)
+        self.assertIn("CodsworthNpcId = 0x810, CodsworthRefId = 0x811;", cs)
+        self.assertEqual((make_mission.PRESTON_REF, make_mission.FIRST_RAIDER_REF, make_mission.CODSWORTH_REF),
+                         (0x802, 0x803, 0x811))
+        write = cs_method(cs, "Write")
+        for ach in ('Ach(PrestonRefId, npc.FormKey, "FO4SF_Min00_PrestonREF",',
+                    'Ach(next++, raiderNpc.FormKey, $"FO4SF_Min00_Raider_{r.GetProperty("src").GetString()}", r)',
+                    'Ach(CodsworthRefId, cods.FormKey, "FO4SF_CodsworthREF",'):
+            self.assertIn(ach, write)
+        check = cs_method(cs, "Check")
+        for at in ('At(PrestonRefId, "FO4SF_Min00_PrestonREF",', 'At(FirstRaiderRefId + (uint)i, $"FO4SF_Min00_Raider_{',
+                   'At(CodsworthRefId, "FO4SF_CodsworthREF",'):
+            self.assertIn(at, check)
+        psc = read(PSC)
+        for doc in ("(FO4SFMission.esm 0x802)", "(FO4SFMission.esm 0x803 on)", "(FO4SFMission.esm 0x811)"):
+            self.assertIn(doc, psc)
+
+    def test_writer_puts_achrs_in_the_persistent_cell_at_points_plus_the_offset(self):
+        """The record shape stays: persistent ACHRs (0x400) in the core world's persistent cell (a WRLD + persistent
+        CELL override holding only ours), no exterior cell of the core (an add-on's override of one broke the core's coc
+        or crashed the game, 15 Oct, docs/JOURNAL.md). Only DATA moves: points.json + the offset, z and rotation kept.
+        check compares every ACHR with points.json (no --points is a problem) and the selftest's mutations cover a
+        local-frame and a doubly offset build."""
+        cs = read(CS)
+        write = cs_method(cs, "Write")
+        for step in ("var (mx, my) = merge ?? (MergeX, MergeY);", "w.SubCells.Clear();", "cell.Persistent.Clear();",
+                     "w.TopCell = cell;", "Position = new P3Float(p[0] + mx, p[1] + my, p[2]), Rotation = new P3Float(r[0], r[1], r[2]),",
+                     "a.MajorRecordFlagsRaw |= 0x400;", "cell.Persistent.Add(a);"):
+            self.assertIn(step, write)
+        self.assertNotIn("SubCells.Add", cs)
+        check = cs_method(cs, "Check")
+        for need in ("w.SubCells.Count == 0", "cell.FormKey == world.TopCell?.FormKey",
+                     'problems.Add("no --points: the ACHR positions cannot be checked against points.json")',
+                     "Near(a.Position, p[0] + mx, p[1] + my, p[2]) && Near(a.Rotation, r[0], r[1], r[2])",
+                     'Need(raiders.Count == rj.Count,'):
+            self.assertIn(need, check)
+        self.assertIn('Mission.MergeOpt(args)),', cs)                    # write and check take --merge-offset
+        self.assertIn('Mission.ArgOrNull(args, "--points"), Mission.MergeOpt(args)),', cs)
+        selftest = cs[cs.index("public static int SelfTest("):]
+        for name in ("every ACHR in the local frame", "Preston offset twice", "a raider in the local frame",
+                     "Codsworth offset twice", "check passed a merged build as a local-frame one", "check passed without points.json",
+                     "check passed a local-frame build as a merged one"):
+            self.assertIn(name, selftest)
+
+    def test_check_prints_what_stage_reads(self):
+        """stage reads the ACHRs back from check's own lines (a second reading beside check's comparison), so the line
+        and the reader must agree."""
+        cs = read(CS)
+        self.assertIn('Console.WriteLine($"  ACHR {r.FormKey.ID:X6} {r.EditorID} base {r.Base.FormKey} at {Show(r.Position)} '
+                      'flags 0x{r.MajorRecordFlagsRaw:X}");', cs)
+        self.assertIn('static string Show(P3Float p) => $"({F(p.X)}, {F(p.Y)}, {F(p.Z)})";', cs)
+        self.assertIn('static string F(float v) => v.ToString("0.###", CultureInfo.InvariantCulture);', cs)
+        for pos in ((-2346.709, -1406.163, 111.734), (-2011.0, 5.0, 0.0)):
+            m = make_mission.ACHR_LINE.search(achr_line(0x811, "FO4SF_CodsworthREF", pos))
+            self.assertEqual((m.group(1), m.group(2), m.group(6)), ("000811", "FO4SF_CodsworthREF", "400"))
+            self.assertEqual(tuple(float(m.group(k)) for k in (3, 4, 5)), pos)
+
+    def test_expected_records_and_their_problems(self):
+        pts = {"preston": {"pos": [1, 2, 3]}, "raiders": [{"src": "A", "pos": [4, 5, 6]}, {"src": "B", "pos": [7, 8, 9]}],
+               "codsworth": {"pos": [10, 11, 12]}}
+        want = make_mission.expected_records(pts, (-1200.0, -2700.0))
+        self.assertEqual(want, {0x802: ("FO4SF_Min00_PrestonREF", (-1199.0, -2698.0, 3.0)),
+                                0x803: ("FO4SF_Min00_Raider_A", (-1196.0, -2695.0, 6.0)),
+                                0x804: ("FO4SF_Min00_Raider_B", (-1193.0, -2692.0, 9.0)),
+                                0x811: ("FO4SF_CodsworthREF", (-1190.0, -2689.0, 12.0))})
+        self.assertNotIn(0x811, make_mission.expected_records(pts, (-1200.0, -2700.0), codsworth=False))
+        self.assertNotIn(0x811, make_mission.expected_records(dict(pts, codsworth=None), (-1200.0, -2700.0)))
+        good = "\n".join(achr_line(fid, e, p) for fid, (e, p) in want.items())
+        self.assertEqual(make_mission.record_problems(good, want), [])
+        local = make_mission.expected_records(pts, (0.0, 0.0))            # as written before FAL-179
+        bad = make_mission.record_problems("\n".join(achr_line(fid, e, p) for fid, (e, p) in local.items()), want)
+        self.assertEqual(len(bad), 4)
+        self.assertTrue(all("expected" in b for b in bad))
+        lines = good.replace("flags 0x400", "flags 0x0", 1) + "\n" + achr_line(0x805, "FO4SF_Min00_Raider_C", (0, 0, 0))
+        self.assertEqual(len(make_mission.record_problems(lines, want)), 2)  # not persistent; one points.json lacks
+        self.assertEqual(len(make_mission.record_problems("all checks pass", want)), 4)
+
+    def test_merged_actors_are_never_moved(self):
+        """On plain numbers, with the script's own rules: an actor that starts at its merged spot is never moved. Preston
+        and Codsworth (PlaceAt) are "at spot" wherever the player is near enough to place them; a merged raider's
+        MoveOver target is one offset length (2,955 m) from Preston's spot, past the guard (FAL-163). A raider an old
+        save holds at its unmerged spot is still moved. (An actor the engine put in another world, as on 18 Oct 13:25,
+        still reads float max and is placed: test_preston_is_held_at_his_spot.)"""
+        f = make_mission.script_floats(read(PSC))
+        ox, oy = f["MergeOffsetX"], f["MergeOffsetY"]
+        gap, radius = f["RelocateGap"], f["RelocateRadius"]
+        door = (f["PrestonLocalX"] + ox, f["PrestonLocalY"] + oy)
+        sanctuary = (f["CodsworthLocalX"] + ox, f["CodsworthLocalY"] + oy)
+        players = [(door[0] + dx, door[1] + dy) for dx in range(-6000, 6001, 125) for dy in range(-6000, 6001, 125)]
+        players += [door, sanctuary, (door[0] + 2.0, door[1]), (sanctuary[0], sanctuary[1] + 2.0)]
+        for spot in (door, sanctuary):
+            for p in players:
+                dp = math.dist(p, spot)
+                self.assertNotEqual(make_mission.place_at(0.0, dp, dp, False, False, hold=f["HoldRadius"], gap=gap,
+                                                          radius=f["PlaceRadius"], held_radius=f["HeldRadius"]), "move")
+
+        def moves(raider, player):                                       # MoveOver, as test_raiders_are_never_offset_twice
+            target = (raider[0] + ox, raider[1] + oy)
+            return (math.dist(player, raider) >= gap and math.dist(player, target) <= radius
+                    and math.dist(target, door) <= radius)
+
+        local = [(-829.1, 1001.8), (-835.0, 1012.0), (-760.0, 1080.0), (-880.0, 930.0)]   # within 120 m of his spot
+        for x, y in local:
+            self.assertTrue(moves((x, y), door))                         # an old save's unmerged raider: moved
+            merged = (x + ox, y + oy)
+            self.assertFalse(any(moves(merged, p) for p in players))     # the plugin's: never
+
+    def test_every_move_is_logged_with_who_made_it(self):
+        """The PC's second read of 88372e87: nothing pinned the "moved <name> ... by=<who>" line that the in-game
+        evidence and make_mission.py log rely on (changing or dropping it failed no test)."""
+        psc = read(PSC)
+        place = function_body(psc, "PlaceAt")
+        line = ('Trace("moved " + name + " to " + a.GetPositionX() + " " + a.GetPositionY() + " " + a.GetPositionZ()'
+                ' + " target " + tx + " " + ty + " " + tz + " before=" + dp + " off=" + off + " d=" + d'
+                ' + " failed=" + failed + " by=" + who)')
+        self.assertIn(line, place)
+        self.assertEqual(place.count('Trace("moved '), 1)
+        self.assertLess(place.index("a.MoveTo("), place.index(line))
+        self.assertIn('PlaceAt(Preston, "Preston", tx, ty, tz, player, who, ', function_body(psc, "PlacePreston"))
+        self.assertIn('PlaceAt(Codsworth, "Codsworth", tx, ty, tz, player, "keeper", ', function_body(psc, "PlaceCodsworth"))
+        self.assertIn('PlacePreston(player, "mission")', function_body(psc, "Relocate"))
+        self.assertIn('PlacePreston(player, "keeper")', function_body(psc, "KeepPreston"))
+        msgs = ["moved Preston to -2011.1 -1697.5 89.1 target -2011.14 -1697.54 89.09 before=73.7 off=73.7 d=2.4 "
+                "failed=False by=mission",
+                "moved preston to -2011.1 -1697.5 89.1 target -2011.14 -1697.54 89.09 before=40.1 off=30.2 d=2.2 "
+                "failed=False by=keeper",
+                "moved Codsworth to -2346.7 -1406.1 111.7 target -2346.709 -1406.163 111.734 before=122.0 off=120.3 "
+                "d=3.1 failed=False by=keeper",
+                "moved raider 0 to -2029.1 -1698.2 88.0 target -2029.1 -1698.2 88.0 before=2800.0 d=200.0 failed=False"]
+        s = make_mission.summarize([f"FO4SF_MISSION rt={i}.0 {m}" for i, m in enumerate(msgs)])
+        self.assertEqual((s["preston_moves"], s["codsworth_moves"]), (2, 1))
+
+    def test_the_keeper_never_stops_its_check(self):
+        """The PC's second read of 88372e87: the mission instance held Preston, the keeper never did (its prestonHolds 0)
+        and spent its ten moves, so its timer stopped and nothing released him in a fight until the next load. The
+        keeper's check now always restarts; a spent budget ends only the moves (and says so). FO4SF_Min00, without
+        Codsworth and not the keeper, still lets an old timer 2 end."""
+        psc = read(PSC)
+        keep = function_body(psc, "KeepCodsworth")
+        cond = re.search(r"\n    if (.+)\n\s+StartTimer\(CodsworthCheck, 2\)", keep).group(1)
+        self.assertEqual(cond, "(Codsworth != None && (codsworthFails < 10 || codsworthHolds > 0)) || KeeperOnly")
+        self.assertRegex(function_body(psc, "KeepPreston"), r'ReleaseInFight\("keeper"\)\s+if prestonFails < 10\s+'
+                                                            r'if PlacePreston\(player, "keeper"\)')
+        for who in ("Preston", "Codsworth"):
+            self.assertIn(f'"FO4SF keeper: {who} not placed after 10 tries; no more moves until the next load"', psc)
+        self.assertNotIn("stopped until the next load", psc)
+
+    def test_the_logged_cells_are_the_core_cells_at_the_spots(self):
+        """The design question (docs/mission/when-freedom-calls.md, "Runtime cell, from the builder"): which cell an
+        actor at its merged spot is in. dotnet/TerrainOverlays numbers the core in one pass (its anchor 0x800, then
+        SFBK, LCTN and WRLD, then one CELL per grid point, x outer and y inner, and one more key for the COC marker
+        right after the spawn cell); core cell (x, y) holds local x 100x to 100x + 100 and is drawn at local + the
+        offset. Every id the PC's logs give decodes to the cell drawn where the actor stood (10 Nov 14:31: Codsworth
+        DB2 to D30, Preston E2E to DEF; playtest rows 15 and 27), so the spots lie in the core cells DEF (Preston) and
+        D30 (Codsworth)."""
+        ov = read(os.path.join(ROOT, "dotnet", "TerrainOverlays", "Program.cs"))
+        self.assertIn("uint next = 0x800;", ov)
+        one = ov[ov.index("foreach (var o in overlays)\n{\n    string world"):ov.index("w.TopCell = new Cell(NewKey()")]
+        steps = ["templateBlock.Duplicate(NewKey())", "templateLoc.Duplicate(NewKey())",
+                 "templateWorld.Duplicate(NewKey())",
+                 "for (int x = cmin; x <= cmax; x++)\n        for (int y = cmin; y <= cmax; y++)",
+                 "var c = new Cell(NewKey(), release) { Grid = new CellGrid { Point = new P2Int(x, y) } };",
+                 "if (x == spawnCell[0] && y == spawnCell[1])", "c.Temporary.Add(new PlacedObject(NewKey(), release)"]
+        at = [one.index(s) for s in steps]
+        self.assertEqual(at, sorted(at))
+        self.assertEqual(one.count("NewKey()"), 5)
+        grid = read(os.path.join(ROOT, "src", "fo4sf", "terrain_grid.py"))
+        self.assertIn("SF_CELL_M = 100.0", grid)
+        self.assertIn("return int(math.floor(x / SF_CELL_M)), int(math.floor(y / SF_CELL_M))", grid)
+        docs = os.path.join(ROOT, "docs", "terrain")
+        self.assertIn("CW cells -32..31 on both axes", read(os.path.join(docs, "commonwealth-scale.md")))
+        self.assertIn("`spawn_local` (-989.2571, 1146.5143,", read(os.path.join(docs, "core64c.md")))
+
+        def sf_cell_of(x, y):                                            # terrain_grid.sf_cell_of
+            return math.floor(x / 100.0), math.floor(y / 100.0)
+        lo, hi, spawn = -32, 31, sf_cell_of(-989.2571, 1146.5143)         # the core's one overlay, Red Rocket's cell
+        ids, k = {}, 0x800 + 1 + 3
+        for x in range(lo, hi + 1):
+            for y in range(lo, hi + 1):
+                ids[(x, y)] = k
+                k += 2 if (x, y) == spawn else 1
+        cell_of = {v: c for c, v in ids.items()}
+        self.assertEqual({fid: cell_of[fid] for fid in (0xD30, 0xDB2, 0xDEF, 0xE2E)},
+                         {0xD30: (-12, 12), 0xDB2: (-10, 13), 0xDEF: (-9, 10), 0xE2E: (-8, 9)})
+        f = make_mission.script_floats(read(PSC))
+        ox, oy = f["MergeOffsetX"], f["MergeOffsetY"]
+
+        def drawn(x, y):                                                 # the core cell drawn at merged (x, y)
+            return ids.get(sf_cell_of(x - ox, y - oy))
+        preston = (f["PrestonLocalX"] + ox, f["PrestonLocalY"] + oy)
+        codsworth = (f["CodsworthLocalX"] + ox, f["CodsworthLocalY"] + oy)
+        self.assertEqual(drawn(*preston), 0xDEF)
+        self.assertEqual(drawn(*codsworth), 0xD30)
+        self.assertEqual(drawn(-829.1 + ox, 1001.8 + oy), 0xDEF)          # a Concord raider at its merged spot
+        self.assertEqual(drawn(-1997.2, -1721.3), 0xE2E)                  # playtest row 15: the museum roof
+        self.assertEqual(drawn(-2348.21, -1412.55), 0xD30)                # playtest row 27: at Codsworth's spot
+        # read on the core's own, unshifted grid, the merged spots would name cells no log shows
+        self.assertNotIn(ids[sf_cell_of(*preston)], (0xDEF, 0xE2E))
+        self.assertNotIn(ids[sf_cell_of(*codsworth)], (0xD30, 0xDB2))
+        # an actor at its unmerged written position: no core cell is drawn there in the world the player walks in
+        for local in ((f["PrestonLocalX"], f["PrestonLocalY"]), (f["CodsworthLocalX"], f["CodsworthLocalY"]),
+                      (-829.1, 1001.8)):
+            self.assertIsNone(drawn(*local))
+
+
 class StageAndInstallTests(unittest.TestCase):
     """Codex review 5563368986: a failed rebuild keeps the earlier stage; the pins are checked before install."""
 
     SPOT = [-811.14, 1002.46, 89.09]                                    # the script's PrestonLocalX/Y/Z
     CODSWORTH_SPOT = [-1146.709, 1293.837, 111.734]                     # the script's CodsworthLocalX/Y/Z
 
-    def fake_stage(self, d, out, fail_at=None, during_check=None, extra=(), writes=None, preston=None, codsworth=None):
+    RAIDER_SPOT = [-829.1, 1001.8, 88.0]                                 # a Concord raider, 18 m from Preston
+
+    def fake_stage(self, d, out, fail_at=None, during_check=None, extra=(), writes=None, preston=None, codsworth=None,
+                   achr_edit=None):
         def fake_run(cmd, cwd=None):
             if "points" in cmd:
                 with open(cmd[-1], "w", encoding="utf-8") as f:
-                    json.dump({"raiders": [{"src": "046458", "dist_m": 18.9}], "preston": {"pos": preston or self.SPOT},
+                    json.dump({"raiders": [{"src": "046458", "dist_m": 18.9, "pos": self.RAIDER_SPOT, "rot": [0, 0, 0.5]}],
+                               "preston": {"pos": preston or self.SPOT, "rot": [0, 0, 0]},
                                "codsworth": {"src": "01CA7D", "name": "Codsworth", "pos": codsworth or self.CODSWORTH_SPOT,
                                              "rot": [0, 0, 1]}}, f)
             elif "write" in cmd:
@@ -933,7 +1199,7 @@ class StageAndInstallTests(unittest.TestCase):
                     during_check()
                 if fail_at == "check":
                     sys.exit("check exit 1")
-                return "all checks pass"
+                return fake_check_output(cmd, achr_edit)
             elif "PapyrusCompiler" in cmd[0] or cmd[0] == "compiler":
                 _write(os.path.join(cmd[-1][3:], make_mission.SCRIPT + ".pex"), b"pex")
                 return "Compilation succeeded"
@@ -972,6 +1238,67 @@ class StageAndInstallTests(unittest.TestCase):
             self.assertIsNone(plan["codsworth"])
             self.assertIn("--no-codsworth", writes[0])
             self.assertIn("--no-codsworth", writes[1])   # check expects the same mode (Codex review 5564480667)
+            self.assertEqual(sorted(plan["records"]), ["000802", "000803"])
+
+    def test_stage_writes_every_achr_in_the_merged_frame(self):
+        """FAL-179: the writer and check get the script's MergeOffsetX/Y and check reads points.json, so the plugin's
+        ACHRs keep their FormIDs and EditorIDs and stand at points.json + the offset: Preston 000802 at the museum door's
+        merged spot (where the 28 Oct moves put him), the raider 000803 beside him, Codsworth 000811 at his Sanctuary
+        spot (where every logged move put him). plan.json records them; points.json stays the source."""
+        with tempfile.TemporaryDirectory() as d:
+            out, writes = os.path.join(d, "m"), []
+            self.fake_stage(d, out, writes=writes)
+            write, check = writes
+            for cmd in (write, check):
+                self.assertEqual(cmd[cmd.index("--merge-offset") + 1], "-1200.0,-2700.0")
+            points = check[check.index("--points") + 1]
+            self.assertEqual(os.path.basename(points), "points.json")
+            self.assertIn(points, write)                                # one points.json for both
+            with open(os.path.join(out, "plan.json"), encoding="utf-8") as f:
+                plan = json.load(f)
+            self.assertEqual(plan["merge_offset"], [-1200.0, -2700.0, 0.0])
+            self.assertEqual(plan["preston"]["pos"], self.SPOT)          # the local frame, as points.json has it
+            want = {"000802": ("FO4SF_Min00_PrestonREF", [-2011.14, -1697.54, 89.09]),
+                    "000803": ("FO4SF_Min00_Raider_046458", [-2029.1, -1698.2, 88.0]),
+                    "000811": ("FO4SF_CodsworthREF", [-2346.709, -1406.163, 111.734])}
+            self.assertEqual(sorted(plan["records"]), sorted(want))
+            for fid, (edid, pos) in want.items():
+                rec = plan["records"][fid]
+                self.assertEqual((rec["edid"], rec["frame"]), (edid, "merged"))
+                for a, b in zip(rec["pos"], pos):
+                    self.assertAlmostEqual(a, b, places=3)
+            with open(os.path.join(out, "offline_check.txt"), encoding="utf-8") as f:
+                self.assertIn("ACHR 000802 FO4SF_Min00_PrestonREF base", f.read())
+            with open(os.path.join(out, "README.txt"), encoding="utf-8") as f:
+                self.assertIn("000802 FO4SF_Min00_PrestonREF [-2011.14, -1697.54, 89.09]", f.read())
+
+    def test_stage_refuses_achrs_outside_the_merged_frame(self):
+        """FAL-179: stage reads the check's ACHR lines back against points.json + the offset. A plugin whose ACHRs are in
+        the local frame (as before FAL-179), offset twice (MoveOver's 31 Oct fault, in record form), moved, renamed,
+        missing, extra or not persistent is refused, and nothing is published."""
+        ox, oy = -1200.0, -2700.0
+
+        def shift(k, fids=None):
+            def edit(recs):
+                for fid in fids or list(recs):
+                    recs[fid][1] = [recs[fid][1][0] + k * ox, recs[fid][1][1] + k * oy, recs[fid][1][2]]
+            return edit
+
+        cases = {"every ACHR in the local frame": shift(-1), "every ACHR offset twice": shift(1),
+                 "Preston offset twice": shift(1, [0x802]), "Codsworth in the local frame": shift(-1, [0x811]),
+                 "a raider 1 m off": lambda r: r[0x803][1].__setitem__(0, r[0x803][1][0] + 1.0),
+                 "Preston's z": lambda r: r[0x802][1].__setitem__(2, r[0x802][1][2] + 0.5),
+                 "Codsworth missing": lambda r: r.pop(0x811),
+                 "an extra ACHR": lambda r: r.__setitem__(0x804, ["FO4SF_Min00_Raider_046459", [-2030.0, -1690.0, 88.0], 0x400]),
+                 "Preston renamed": lambda r: r[0x802].__setitem__(0, "FO4SF_Min00_Preston"),
+                 "a raider not persistent": lambda r: r[0x803].__setitem__(2, 0)}
+        for name, edit in cases.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as d:
+                out = os.path.join(d, "m")
+                with self.assertRaises(SystemExit) as e:
+                    self.fake_stage(d, out, achr_edit=edit)
+                self.assertIn("not where points.json + the merge offset puts them", str(e.exception))
+                self.assertFalse(os.path.exists(out))
 
     def test_codsworth_assets_reach_the_writer_fold_and_verify(self):
         """The Codsworth thread's model (PR #361): stage copies the asset folders (not the report), names the mesh to the

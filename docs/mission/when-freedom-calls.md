@@ -373,7 +373,7 @@ clears `codsworthHeld` at every load, so its first check holds him again, and ke
 has held him. `codsworthHeld` and `codsworthHolds` show with `sqv`; his states end in `, held`; his keeper lines carry
 `held=` and `holds=`. A model test: over 10 minutes, 9 put-backs without a hold that holds, 1 with it. **Unverified:**
 that `SetRestrained` holds this robot body (a Garden Mini Bot copy) as it held Preston; the Sanctuary check answers it.
-The durable fix is the merged-frame ACHR (FAL-170 follow-up, its own task): then his editor location is his spot.
+The durable fix is the merged-frame ACHR ("Merged-frame ACHRs", FAL-179, below): then his editor location is his spot.
 
 **Visible without a log**, as for Preston:
 - `sqv FO4SF_CodsworthKeeper` lists `codsworthState`, `codsworthOff` and `codsworthMoves`, beside `codsworthFails`.
@@ -401,3 +401,98 @@ Check (logging on, any save after the start, walk to Sanctuary, wait 70 s near h
   `hold codsworth` after it (`state=placed, held` or `at spot, held` in his keeper lines).
 - The load notification for him shows without the log.
 - Leave and come back after 3 minutes or more: he is there again, with `moved codsworth` if he had gone back.
+
+### Merged-frame ACHRs (FAL-179): the plugin puts each actor at its spot
+
+**Why.** The hold (FAL-170, FAL-163) keeps Preston and Codsworth at their spots by restraining them. A held actor cannot
+follow, sandbox or fight on its own, every drift shows a put-back, and the raiders are still moved by `MoveOver`. The
+actors walk back towards their editor location: Codsworth's saved heading is the bearing to his plugin coordinates within
+0.02 degrees in four saves (7 to 9 Nov), and Preston left his spot at about 0.9 m/s (10 Nov). That editor location was
+the ACHR's written position in the core's local frame, 2,955 m from the spot. On the installed `88372e87` (10 Nov 14:31)
+the hold works: the keeper moved Codsworth back from 189 m off and held him (`off=0.105`), and Preston stayed `at spot,
+held` with the player 444 m away. But `MoveOver` moved raider 0 again from its unmerged spot (`before=2847`): the
+snap-back this change ends.
+
+**Change (offline, untested in game):** `dotnet/Mission write` writes each ACHR at its points.json position + the merge
+offset, z and rotation kept: Preston 0x802 at (-2011.14, -1697.54, 89.09), the raiders from 0x803 at their Concord
+positions + the offset, Codsworth 0x811 at (-2346.709, -1406.163, 111.734). FormIDs, EditorIDs, bases, flags and the cell
+do not change.
+- points.json stays in the local frame and stays the one source of the positions. The offset is the script's
+  `MergeOffsetX/Y` (a test pins it to `vmad_patch.MERGE_MEASURED`), which `make_mission.py stage` passes to the writer
+  and to check as `--merge-offset`. So the records and the script's spots cannot part.
+- `check --points` compares each ACHR with points.json + the offset. stage reads check's ACHR lines back
+  (`expected_records`, `record_problems`) and refuses a local-frame, doubly offset, moved, renamed, missing, extra or
+  non-persistent ACHR. plan.json gains `merge_offset` and `records`.
+- The plugin's hash changes, so this is no longer a script-only install. Installing it is a separate decision.
+
+**Design: which record, which cell, whose references.**
+- **Record:** the core world's WRLD (`FO4Core_Commonwealth`) and its persistent CELL, overridden by FO4SFMission.esm
+  with only our ACHRs, as before. In `dotnet/Mission/Program.cs` `Write` that is `w.SubCells.Clear()`,
+  `w.TopCell = cell`, and `cell.Persistent.Add(a)` with flag 0x400. Not the generated planet world: it exists only at
+  run time (FF0054C8 in the 18 Oct log), so no record can name it.
+- **Our own persistent references, not references in the core's cells:**
+  - An add-on's override of a core64c exterior cell moved the coc arrival to cell (0, 0). An override of a neighbour
+    cell ended in a crash twice, inconclusive (15 Oct, `docs/JOURNAL.md`).
+  - The script's properties and the alias's forced reference need persistent references. A temporary reference in an
+    exterior cell does not exist while its cell is unloaded.
+  - Vanilla keeps every persistent worldspace reference in the world's persistent cell: 16,057 of 16,057 in
+    Starfield.esm, 33,571 of 33,571 in Fallout4.esm (`docs/ai/decisions.md`, 17 Oct).
+- **Runtime cell, from the builder:** the logs name core cells, never ours. `dotnet/TerrainOverlays/Program.cs` numbers
+  the core in one pass: the anchor 0x800, its SFBK, LCTN and WRLD (0x801 to 0x803), then one CELL per grid point, x
+  outer and y inner over `cell_min..cell_max` (-32..31 for the core), with one more key for the COC marker right after
+  the spawn cell (Red Rocket, local (-989.26, 1146.51): cell (-10, 11)). Core cell (x, y) holds local x 100x to
+  100x + 100, and the world the player walks in draws it at local + the offset (`vmad_patch.py`, "The overlay merge").
+  Every cell id the logs give decodes to the cell drawn where the actor stood:
+
+  | logged | core cell | drawn at, merged (m) | when |
+  |---|---|---|---|
+  | `D30` | (-12, 12) | x -2400..-2300, y -1500..-1400 | Codsworth after a move (31 Oct, 10 Nov); playtest row 27 |
+  | `DB2` | (-10, 13) | x -2200..-2100, y -1400..-1300 | Codsworth before the 10 Nov move, `off=189` |
+  | `DEF` | (-9, 10) | x -2100..-2000, y -1700..-1600 | Preston after a move; the raiders after theirs (31 Oct) |
+  | `E2E` | (-8, 9) | x -2000..-1900, y -1800..-1700 | Preston before a move; playtest row 15 (museum roof) |
+
+  - So each spot lies in the core cell that holds its local position: Preston's in `DEF`, Codsworth's in `D30`. The
+    PC's "a different cell before the move" is a drift within the same merged area, not another frame: `E2E` is
+    `DEF`'s diagonal neighbour, 11.4 m from Preston's spot, and `DB2` starts 147 m east of Codsworth's (he was
+    `off=189`). Reading the merged spots on the core's unshifted grid would give `AD3` and `A15`, which no log shows.
+  - An actor at its unmerged written position stands, in the world the player walks in, at grid (3, 37): outside the
+    core's -32..31, so no core cell is drawn there. Raider 0's `MoveOver` on 10 Nov read `cell=None` at
+    `before=2847`. That is consistent, not proof: an unloaded cell also reads `None` (the 31 Oct moves from 488 m).
+  - So the ACHR needs no cell record of ours. Written in the world's persistent cell at its merged spot, it is where
+    every held move put it, and the engine attaches it to `DEF` or `D30` as it did after those moves. A test
+    (`test_the_logged_cells_are_the_core_cells_at_the_spots`) pins this arithmetic to the builder's source. **Supported
+    hypothesis** until the PC's logged session; the keeper's load line has no cell, so its `at` and `off=` decide.
+  - **Open risk:** in the first 18 Oct run every distance read float max, the actors in the base world and not the
+    player's; the 17 Oct door decision rejected a marker written at local + offset for that reason (a MoveTo onto it
+    lands in the unmerged instance). If a merged-frame ACHR loads there, `keeper load` reads `d=` float max with
+    `off=` near 0, and `PlaceAt` moves it as at `88372e87`, since its spot needs `d` under `RelocateGap` too
+    (`FO4SF_Min00Quest.psc` `PlaceAt`). The new-game check below then fails visibly, and the game is no worse than now.
+- **What the raiders' double offset tells:** on 31 Oct at 16:33:47 `MoveOver` moved the five raiders already at the
+  museum to (-3000 to -3150, -4500 to -4600). That is their merged position plus the offset again, exactly where the
+  arithmetic put them. So the engine adds no offset of its own to these references after a `MoveTo`, and the load-time
+  evidence below says it adds none at load either. There is one frame, the world the player walks in, and whoever
+  writes a position applies the offset exactly once: the script before FAL-179, the writer now.
+  - Had the engine merged our references the way it draws the core's exterior cells, local + offset would have put
+    them at local + 2 x offset: the double offset in record form. The evidence says it does not: probe (a), 18 Oct
+    14:40, the 31 Oct readbacks and Codsworth's heading.
+  - For the script, `MoveOver` takes its target from where a raider stands + the offset, so it must never move a raider
+    that is already in the merged frame. The FAL-163 guard (target within `RelocateRadius` of Preston's merged spot)
+    already refuses that: a merged raider's target is 2,955 m from the spot. `MoveOver` stays for a save that holds a
+    raider at its unmerged spot, and it moves no raider of a new game. No script rule changes for the frame.
+
+**Existing saves:** FormIDs are unchanged, so the script's properties and the alias still bind. A save keeps each
+actor's saved position, and `PlaceAt`, the hold and `MoveOver` cover those exactly as at `88372e87`. Every actor's
+editor location becomes its spot, so an actor that walks back now walks back to its spot (supported hypothesis).
+
+**Also in this change (the PC's second read of `88372e87`):**
+- A test pins the `moved <name> ... by=<who>` line and checks that `make_mission.py log` counts it.
+- A test docstring no longer says `place_preston`.
+- The keeper's check no longer stops. Before, with Codsworth's budget spent (or no Codsworth), the keeper's timer ended
+  once Preston's ten failed moves were spent while the keeper had never held him (the mission instance had). Then
+  nothing released Preston in a fight until the next load. Now a spent budget ends only the moves, and the on-screen
+  line says "no more moves until the next load".
+
+Check (PC, logging on):
+- New game: `keeper load preston` and `keeper load codsworth` with `d=` finite, `off=` under 25 and `moves=0`, and no
+  `moved` line in five minutes.
+- The owner's save: no worse than `88372e87`.

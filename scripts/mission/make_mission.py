@@ -7,9 +7,12 @@ usage:
       1. dotnet/Mission points: Fallout 4's Concord raiders, the museum door's outside arrival and Codsworth's Sanctuary
          spot (points.json); the script keeps Preston and Codsworth at those spots from its own PrestonLocalX/Y/Z and
          CodsworthLocalX/Y/Z, so points that differ are refused;
-      2. dotnet/Mission write + check: FO4SFMission.esm against the given core and raider plugins (offline_check.txt);
+      2. dotnet/Mission write + check: FO4SFMission.esm against the given core and raider plugins (offline_check.txt),
+         every ACHR at its points.json position + the script's MergeOffsetX/Y (FAL-179: their editor location is their
+         spot in the world the player walks in); stage reads the check's ACHR lines back and refuses any that is not
+         where expected_records puts it;
       3. the Papyrus compile of FO4SF_Min00Quest.psc against every base script of ContentResources.zip;
-      4. plan.json (the plugin's, the script's and the masters' SHA-256) and README.txt.
+      4. plan.json (the plugin's, the script's and the masters' SHA-256, the merge offset and the ACHRs) and README.txt.
       The masters are hashed BEFORE the build and again before publication: a core or raider plugin that changed
       during the build is refused. The stage is built in a new <out>.partial-<time>-<pid> folder (never reused or
       deleted: a failed attempt stays as evidence) and renamed to <out> only when every step passed; an existing
@@ -65,6 +68,11 @@ STARFIELD = r"D:\SteamLibrary\steamapps\common\Starfield"
 LOG = os.path.join(os.path.expanduser("~"), "Documents", "My Games", "Starfield", "Logs", "Script", "User",
                    "fo4sf_mission.0.log")
 LINE = re.compile(r"FO4SF_MISSION rt=(?P<rt>[-\d.]+) (?P<msg>.*)$")
+# the ACHRs dotnet/Mission writes (Program.cs PrestonRefId, FirstRaiderRefId, CodsworthRefId) and the line its check
+# prints for each: "  ACHR 000802 FO4SF_Min00_PrestonREF base 000801:FO4SFMission.esm at (-2011.14, -1697.54, 89.09) flags 0x400"
+PRESTON_REF, FIRST_RAIDER_REF, CODSWORTH_REF = 0x802, 0x803, 0x811
+ACHR_LINE = re.compile(r"^\s*ACHR ([0-9A-F]{6}) (\S+) base \S+ at \((-?[\d.]+), (-?[\d.]+), (-?[\d.]+)\) flags 0x([0-9A-F]+)",
+                       re.M)
 
 
 def run(cmd, cwd=None):
@@ -108,6 +116,48 @@ def spot_problem(psc_text, pos, who="Preston"):
         return (f"points.json puts {who} at {got} but {SCRIPT}.psc {who}LocalX/Y/Z are {want}: set them to the "
                 f"points and stage again")
     return None
+
+
+def merge_offset(psc_text):
+    """The script's MergeOffsetX/Y: what its moves add to a local position, and what the writer adds to points.json's
+    positions (FAL-179), so the plugin's actors and the script's spots share one frame."""
+    f = script_floats(psc_text)
+    return f["MergeOffsetX"], f["MergeOffsetY"]
+
+
+def expected_records(pts, merge, codsworth=True):
+    """The ACHRs dotnet/Mission writes from points.json, as {form id: (EditorID, (x, y, z))}: Preston 0x802, the raiders
+    from 0x803 in points order, Codsworth 0x811 unless left out, each at its points.json position (the core's local frame,
+    FO4 / 70) + the merge offset, z kept. All persistent, in the core world's persistent cell (FAL-179)."""
+    mx, my = merge
+
+    def at(e):
+        x, y, z = (float(v) for v in e["pos"])
+        return (x + mx, y + my, z)
+    recs = {PRESTON_REF: ("FO4SF_Min00_PrestonREF", at(pts["preston"]))}
+    for i, r in enumerate(pts["raiders"]):
+        recs[FIRST_RAIDER_REF + i] = (f"FO4SF_Min00_Raider_{r['src']}", at(r))
+    if codsworth and pts.get("codsworth"):
+        recs[CODSWORTH_REF] = ("FO4SF_CodsworthREF", at(pts["codsworth"]))
+    return recs
+
+
+def record_problems(check_text, want, tol=0.01):
+    """Where the check's ACHR lines (offline_check.txt) differ from expected_records: an ACHR missing, extra, renamed,
+    elsewhere (a local-frame or doubly offset one: FAL-179) or not persistent. A second reading of the plugin, by the
+    check's own print, beside the check's comparison."""
+    got = {int(m.group(1), 16): (m.group(2), tuple(float(m.group(k)) for k in (3, 4, 5)), int(m.group(6), 16))
+           for m in ACHR_LINE.finditer(check_text)}
+    problems = []
+    for fid, (edid, pos) in sorted(want.items()):
+        g = got.get(fid)
+        if g is None:
+            problems.append(f"ACHR {fid:06X} {edid}: not in the check's output")
+        elif g[0] != edid or any(abs(a - b) > tol for a, b in zip(g[1], pos)) or not g[2] & 0x400:
+            problems.append(f"ACHR {fid:06X}: {g[0]} at {list(g[1])} flags 0x{g[2]:X}, expected {edid} at "
+                            f"{[round(v, 3) for v in pos]}, persistent")
+    problems += [f"ACHR {fid:06X} {got[fid][0]}: not one points.json gives" for fid in sorted(set(got) - set(want))]
+    return problems
 
 
 def extract_sources(zip_path, work):
@@ -176,10 +226,18 @@ def stage(a):
         voice_json = os.path.join(work, "voice.json")
         assets |= set(copy_voice(a.codsworth_voice, os.path.join(out, "Data"), voice_json))
         cods = cods + ["--codsworth-voice", voice_json]
-    run(tool + ["write", a.starfield, a.core, a.raider, points, out, "--plugin", PLUGIN] + alias + cods)
-    check = run(tool + ["check", os.path.join(out, PLUGIN), a.starfield, a.core, a.raider] + alias + cods)
+    merge = merge_offset(psc)                            # the script's: its spots and the records share one frame
+    frame = ["--merge-offset", f"{merge[0]},{merge[1]}"]
+    run(tool + ["write", a.starfield, a.core, a.raider, points, out, "--plugin", PLUGIN] + alias + cods + frame)
+    check = run(tool + ["check", os.path.join(out, PLUGIN), a.starfield, a.core, a.raider, "--points", points]
+                + alias + cods + frame)
     with open(os.path.join(out, "offline_check.txt"), "w", encoding="utf-8") as f:
         f.write(check)
+    records = expected_records(pts, merge, a.codsworth)
+    problems = record_problems(check, records)
+    if problems:
+        sys.exit("the plugin's ACHRs are not where points.json + the merge offset puts them: " + "; ".join(problems) +
+                 f"; attempt kept in {out}")
     src = extract_sources(a.content_resources, work)
     pex = compile_script(a.compiler, src, os.path.join(out, "Data", "Scripts"))
     shutil.copy(os.path.join(HERE, SCRIPT + ".psc"), os.path.join(out, SCRIPT + ".psc"))
@@ -191,6 +249,9 @@ def stage(a):
             "script": SCRIPT, "script_sha256": sha256(pex), "alias": a.alias, "masters_sha256": masters, "stages": list(STAGES),
             "raiders": [r["src"] for r in pts["raiders"]], "preston": pts["preston"],
             "codsworth": pts.get("codsworth") if a.codsworth else None,
+            "merge_offset": [merge[0], merge[1], 0.0],
+            "records": {f"{fid:06X}": {"edid": edid, "pos": [round(v, 3) for v in pos], "frame": "merged"}
+                        for fid, (edid, pos) in sorted(records.items())},
             "assets": {rel: sha256(os.path.join(out, "Data", rel)) for rel in sorted(assets)},
             "log": "<My Games>/Starfield/Logs/Script/User/fo4sf_mission.0.log"}
     with open(os.path.join(out, "plan.json"), "w", encoding="utf-8") as f:
@@ -202,6 +263,8 @@ def stage(a):
 at the museum door's outside arrival {pts['preston']['pos']} m, {len(pts['raiders'])} raider ACHRs of FO4_LvlRaider at
 Fallout 4's Concord positions ({raiders}), all persistent in the core world's persistent cell (WRLD override).
 Codsworth: {"NPC_ FO4_Codsworth (a Starfield robot body under his name) at his Sanctuary spot " + str(plan["codsworth"]["pos"]) + " m, kept by QUST FO4SF_CodsworthKeeper (start game enabled, so it also starts on an existing save)" if plan["codsworth"] else "left out (--no-codsworth)"}.
+Those positions are the core's local frame (points.json); each ACHR is written at its position + the merge offset
+{merge[0]}, {merge[1]} (the world the player walks in: FAL-179), plan.json "records": {"; ".join(f"{k} {v['edid']} {v['pos']}" for k, v in plan["records"].items())}.
 Masters (must match the installed files): {json.dumps(masters)}. Rebuild after any core change.
 Data\\Scripts\\{SCRIPT}.pex compiled from {SCRIPT}.psc (beside this file).
 Install (game closed): exp_install.py holds one experiment, so fold this stage into a copy of the core set and
