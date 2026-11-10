@@ -33,7 +33,7 @@ import sys
 import time
 
 from . import detect, manifest as mf, runtimes as rt, settings as settings_mod
-from ..core import loadset
+from ..core import loadset, preflight
 
 STEAM_URL = "steam://rungameid/1716740"
 ATTACH_CHECK_S = 5.0               # how long ProcDump must stay up after attaching before the watcher counts as armed
@@ -546,6 +546,35 @@ def _without_sfse(values, starfield, system):
     return f" (without SFSE; {SFSE_LOADER} is here but route=sfse would be refused: {'; '.join(problems)})"
 
 
+SCRIPT_PLUGINS = ("FO4SFMission.esm", "FO4SFNewGame.esm", "FO4SFQuestProbe.esm", "FO4SFBridge.esm")
+SCRIPT_LOGGING_OFF = ("SCRIPT LOGGING IS OFF: this session will record no mission, keeper or new-game lines. "
+                      "Set papyrus_logging=on before a test you want evidence from.")
+
+
+def script_logging_notice(values, starfield, system):
+    """SCRIPT_LOGGING_OFF when Papyrus logging will not be in effect for this session and one of our script plugins
+    is ticked in the list the game will use, else None. Only says; never refuses or changes anything. papyrus_logging
+    on/off is what play will apply; unchanged leaves the INIs as they are (Starfield.ini, overridden by
+    StarfieldCustom.ini, key by key)."""
+    want = values["papyrus_logging"]
+    if want == "on":
+        return None
+    entries = getattr(system, "plugin_entries", lambda: None)()
+    ticked = {n.casefold() for n, on in entries or () if on}
+    if not ticked & {n.casefold() for n in SCRIPT_PLUGINS}:
+        return None
+    if want == "unchanged":
+        from .loadprobe import papyrus_ini_texts
+        mg = values["my_games"]
+        try:
+            texts = papyrus_ini_texts(starfield, [mg] if mg else [])
+        except OSError:                             # unreadable INI: no claim either way
+            return None
+        if preflight.papyrus_logging_on(texts):
+            return None
+    return SCRIPT_LOGGING_OFF
+
+
 def play(values, starfield, system=None, say=print, start_timeout_s=180.0, dump_wait_s=3600.0, dry_run=False,
          folder=None):
     """Apply the settings, start the game and watch it to its end. Returns a result dict; raises ValueError on a
@@ -601,6 +630,9 @@ def play(values, starfield, system=None, say=print, start_timeout_s=180.0, dump_
                                     else "log only when the game exits without a crash")
                                  if cw else "off")]
     unticked = unticked_ours(system, values, starfield)
+    notice = script_logging_notice(values, starfield, system)
+    if notice:
+        plan.append(notice)
     if dry_run:
         if unticked:
             raise ValueError(unticked)
@@ -610,6 +642,8 @@ def play(values, starfield, system=None, say=print, start_timeout_s=180.0, dump_
             say(p)
         apply_load_order(values, starfield, system, say, dry_run=True)
         return {"dry_run": True, "plan": plan}
+    if notice:
+        say(notice)
     if cw:
         try:                                        # before the game starts: the log must be writable (Codex, #449)
             os.makedirs(values["crash_watch.folder"], exist_ok=True)
