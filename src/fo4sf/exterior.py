@@ -162,6 +162,8 @@ def place(selected: dict, manifest: dict, cell_min: int, cell_max: int, edid_pre
             base = {"key": key, "edid": edid, "model": item["model"], "source": item["source"]}
             if "door" in item:
                 base["door"] = item["door"]
+            if "movable" in item:
+                base["movable"] = item["movable"]     # FAL-171: a loose item with a dynamic body is a MoveableStatic outdoors too
             base_index[key] = len(bases)
             bases.append(base)
         placed.append({"src": r["formkey"], "base": base_index[key], "cell": list(cell),

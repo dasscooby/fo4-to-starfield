@@ -24,7 +24,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import textwrap
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -128,7 +127,7 @@ def run(ws, a, last):
     """One scripted action, as foccsim's run_action does it: the player hooks (help, defend, trade), manage's
     settlement actions (assign, beds, priority, send, status, threats), the radiant jobs (offers; complete or fail
     one of the last offers by position, nothing past the end, or an offer given in full), the news at a place (items
-    and terminal page), and textwrap and str.upper on their own (wrap, shorten, upper). Returns the line foccsim --results writes: the result,
+    and terminal page), and news.wrap, news.shorten and str.upper on their own (wrap, shorten, upper). Returns the line foccsim --results writes: the result,
     or the ValueError's message."""
     do = a["do"]
     try:
@@ -162,9 +161,9 @@ def run(ws, a, last):
             r = {"items": news.items(*args, names=a.get("names")),
                  "page": news.terminal_page(*args, width=a.get("width", news.TERMINAL_WIDTH), names=a.get("names"))}
         elif do == "wrap":
-            r = textwrap.wrap(a["text"], a.get("width", 70), subsequent_indent=a["indent"])
+            r = news.wrap(a["text"], a.get("width", 70), subsequent_indent=a["indent"])
         elif do == "shorten":
-            r = textwrap.shorten(a["text"], a.get("width", 70), placeholder=a["placeholder"])
+            r = news.shorten(a["text"], a.get("width", 70), placeholder=a["placeholder"])
         elif do == "upper":
             r = a["text"][:1].upper() + a["text"][1:]
         else:
@@ -720,7 +719,8 @@ class CppParityTests(unittest.TestCase):
         self.assertIn("unknown place 'nowhere'", r.stderr)
 
     def test_textwrap_and_the_capital_letter_against_python(self):
-        """news.wrap and news.shorten against Python's textwrap on 3,000 random texts: words, hyphenated words,
+        """news.wrap and news.shorten against news.py's (textwrap with CPython 3.14's long-word rule on every Python)
+        on 3,000 random texts: words, hyphenated words,
         em-dashes, punctuation, every whitespace textwrap knows (tabs too), a no-break space, letters outside ASCII,
         widths from -1 to 40, indents and placeholders; and news.upper_first against str.upper for every first character
         it covers."""

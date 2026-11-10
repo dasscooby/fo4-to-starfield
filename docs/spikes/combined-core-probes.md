@@ -653,6 +653,58 @@ longer gaps are Papyrus running late. The console pauses during the hops back st
 p90. Quote both with the result and compare them with the loaded run. What an off-screen world costs is the
 next question as the tests grow (owner, 1 Nov 2026).
 
+### P11: far travel, materialize and hand back with continuity (card, 6 Nov 2026; nothing written or run)
+
+Settles: **CC-63**'s far-travel layer (`src/fo4sf/combined/travel.py`, #674). L2 owns a travelling squad's position
+outside the loaded area; L3 creates the real actor at that position inside 400 m (`MATERIALIZE_M`), hands it to the
+P9 link walk, removes it only beyond 500 m (`DISSOLVE_M`) and takes its progress back. P11 asks whether that loop
+keeps one squad as one actor on one line, with no jump and no second copy, and with progress that follows the
+handed-back eta plus the elapsed hours (within the one-hour rounding of `eta_from_progress`), in the game.
+
+Status: a card only. No kit script, session or judge exists for it yet, and none is in this PR. The native run
+needs a fresh owner release and runs on the PC (Claude PC). P9 and P9u passes do not stand in for it. P11 is not
+a gate for port steps 4 or 6 (FAL-9); it gates using `travel.py` in game. Straight line only: the hand-back projects
+onto the line between the two anchors, an approximation CC-63 records (a multi-hop route and the navmesh path are
+not that line). Travel between worldspaces is CC-64, not P11.
+
+Kit, P9's with two additions (both to write): a marker the session can place at given world x/y and snap to the
+ground (P9Dest already does this relative to the player), and a dissolve command that deletes the tracked actor and
+logs its last x/y (P4's `Disable` and `Delete` are the primitive; P4 logs only cycle counts, so the position line
+is new). The driver stays `FOCC_P9Drive.Link`; no alias package, no `PathToReference`.
+L2 is played offline by the session: a two-place atlas (A and B, on the measured P9 route east of Red Rocket, so the
+navmesh is known to walk), one travelling squad, and `travel.simulated_position` for the game hour the session reads.
+
+Legs, in one launch, at Red Rocket, `tgm`:
+1. **Out of band.** The player stands more than 500 m from the squad's simulated position. Nothing is spawned.
+2. **Materialize.** The player hops toward the simulated position. At the first hop that leaves the player within
+   400 m of it, the session places the marker there and spawns the actor (`p11 spawn` with the simulated x/y, the
+   actor's x/y/z and the player distance), then `P9Track` and `Link` toward B's marker.
+3. **Hand-over.** The loaded walk, judged as P9's samples: forward in time, whole, no step faster than 15 m/s, and
+   the go's `p9 package` line naming `DefaultMaster_PatrolPackage`, as the P9 link judge requires.
+4. **Dissolve.** The player hops away. At the first sample with the player more than 500 m from the actor, the
+   session dissolves it (`p11 dissolve` with its last x/y). Offline: `progress_from_position(A, B, last)` gives f,
+   and `eta_from_progress` the new eta.
+5. **Re-materialize.** After a wait of at least one game hour the player hops back inside 400 m. The session recomputes
+   the simulated position from the new eta and spawns again (step 2's line).
+
+Judge `probes p11` (to write), proposed bars for review:
+- PASS: every spawn within 400 m of the player (player to simulated position, the only distance before a spawn)
+  and at the snapped marker; the dissolve beyond 500 m (player to the live actor) and only there; P9's sample rules
+  through the walk, with the Patrol package line; never two live actors for the squad (the first id reads deleted
+  before the second spawn); after the wait of at least one game hour, the second spawn's progress at least the
+  dissolve's f, not above `min(1, f + elapsed / route_hours)`, and at most one route hour behind it (the ceil in
+  `eta_from_progress`). The judge reports the marker's x/y against the simulated x/y.
+- FAIL: two live actors for one squad at any sample; progress going backwards at the re-materialize; a spawn
+  outside 400 m or a dissolve inside 500 m.
+- INCONCLUSIVE: a spawn that never loads; a large snap of the marker from the simulated x/y
+  (`MoveToNearestNavmeshLocation` can move a point off the walked road, and P9 already treats an unverified snap as
+  INCONCLUSIVE); a missing or other package line; a torn or missing sample; a missing dissolve line; or the walk
+  stopped by the near-player stops P9 already allows (within 35 m).
+
+Out of P11 (each its own card): a save and a load while the squad is dissolved (P1, and the save-identity card W8);
+the materialized actor's death or despawn reaching L2 once (the encounter-conservation card W7); more than one squad,
+which is the open load-scaling probe; routes with more than one hop.
+
 ## P1: SFSE sidecar on save and load (last)
 
 Settles: **CC-02** option C' / B: whether an SFSE plugin can keep a file per save keyed to the save name through
@@ -662,6 +714,47 @@ deletes; `sidecar.orphans` lists). No SFSE build has ever happened in this proje
 patch.md: no cl, cmake, Visual Studio), so the first step is a toolchain check and an **owner decision** to install
 Visual Studio Build Tools 2022 with the C++ workload (several GB). The SFSE loader, dll and plugin folder names are
 what the Nexus archive ships and are unverified here; the first card confirms them.
+
+**What P1 does not settle: save identity and the in-game tick (card P1b, 6 Nov 2026; nothing written or run).** P1
+keys a sidecar to the save name (`sidecar.sidecar_name`: safe name, hash of the name, `.focc`). The risk register's
+living-world persistence row (`docs/research/framework/travel-and-runtime-risks-oct25.md`) names the cases a name alone
+can't tell apart: two characters, same-named saves, an overwritten quicksave, a backward load, and missing or corrupt
+state, with no silent reset. The 6-hour tick is verified offline only (`sim.TICK_HOURS`); P5's 2.42 ms per place is a
+latency number, not proof that the game fires one tick per 6 game hours. Port step 6 assumes both. The contract:
+1. **Identity in the envelope.** Each sidecar records, besides the save name, a character id (fixed when the world
+   state is first created for that character), a save generation that rises by one on every save, the world state's
+   game hour, and a content-set id (a hash of the pack and the plugin list the state was built against). On load, a
+   sidecar is used only if all of these hold: the character id matches the loaded character; the content-set id
+   matches the running pack and plugin list; and the state's game hour is not after the save's own game time and less
+   than one tick (6 game hours) before it. The window is one-sided because the game save and the sidecar are written
+   separately, not as one transaction (`travel-and-runtime-risks-oct25.md:73`): a sidecar from a save that didn't land is ahead
+   of the game save, and is refused. Anything else is refused loudly: a logged mismatch naming both values, and no
+   reset to a fresh world. A content-set change is refused, not migrated; migrating state to a new pack is a separate
+   card.
+2. **One file per character and save.** `sidecar.sidecar_name` hashes the save name only, so two characters with a
+   save of the same name share one file and the second write replaces the first. P1b keys the file by the character
+   id as well as the save name, so both worlds survive. That is a code change to `sidecar.py`, not made here.
+3. **Backward and overwritten saves.** Loading an older save uses that save's sidecar, with its lower generation; the
+   newer state is not carried over. An overwritten quicksave replaces its sidecar in the same save message. A missing
+   or corrupt sidecar is the same loud refusal as 1. Generation is recorded only inside the sidecar (SFSE has no
+   co-save, `sidecar.py:1-8`), so it can't be checked against the game save; the hour window in 1 is what catches a
+   stale or too-new file. Still open: a second save inside the same game hour whose game save didn't land leaves a
+   sidecar the window can't tell apart. Whether SFSE's PostSaveGame message (`sidecar.py:4-6`) means the save landed,
+   so the sidecar can be written only then, is a P1 question.
+4. **One tick per 6 game hours.** The plugin compares the game hour with the state's hour and runs at most
+   `floor((game hour - state hour) / 6)` ticks, each +6 hours, so the state never runs ahead of game time. `sim.run`
+   doesn't enforce this (it ticks a fixed count); the plugin does. How ticks owed after a long sleep, wait or fast
+   travel are run (all of them spread over frames, collapsed into one, or capped) is an **owner decision, pending**
+   (FAL-10 card 88e4cdb5, item 4); this card doesn't settle it.
+
+Legs for P1b, once P1 passes and the bridge exists (to write; the native run needs a fresh owner release, on the PC):
+two characters with a save of the same name each, then load each; save, play 12 game hours, save again, load the
+first (backward); overwrite a quicksave; remove one sidecar and corrupt another; change the plugin list and load;
+wait 24 game hours and count the ticks the log shows (4 expected under full catch-up; the count follows the rule
+chosen for item 4). PASS: every load uses the matching sidecar or refuses loudly; both same-named worlds load intact;
+the content-set change is refused; the generations and game hours read back match; the tick count matches the rule.
+FAIL: a load that uses another character's, a newer or a different-content sidecar, a same-named world lost, a
+silent reset, or ticks running ahead of game time.
 
 **Job focc-P1-0 (toolchain, read-only). Game: CLOSED.**
 
@@ -734,6 +827,32 @@ the name). INCONCLUSIVE = no `post_load` at all (the plugin did not load: paste 
 save name SFSE passes does not equal any `.sfs` stem (display name vs file stem is unverified; the verdict prints both
 lists and leaves the orphan question open rather than guessing). Send back: `focc_sidecar.log`, the `.focc` files,
 `saves.json`, the verdict, the loader output, and which file names the archive used.
+
+### P12: encounter conservation across leave, return, save and load (card, 6 Nov 2026; nothing written or run)
+
+Settles: the encounter-conservation contract in [combined-core.md](../combined-core.md) (under **Lifecycle
+fixture**, after **Contracts the modules do not have yet**): one live copy per squad member with stable member
+indices, a death counted once, survivors only on dissolve, and the live encounter kept in the save. It needs P1's sidecar and the tagged `OnDeath` path, so it belongs to port step 6 (the
+20-place slice), not to step 4. No kit, session or judge exists for it yet. The native run needs a fresh owner
+release and runs on the PC.
+
+Legs, one launch, one squad of 3 on the slice:
+1. Materialize the squad near the player (generation 1, keys 0 to 2). Kill member 0. Expect one death event and
+   `size` 2.
+2. Save S1. Walk beyond 500 m so the squad dissolves. Expect `size` 2 written back, no live tagged actors.
+3. Return inside 400 m. Expect generation 2 with 2 live actors, keys 1 and 2 (indices kept), and no key 0.
+4. Save S2. Kill member 1, which also raises `OnKill`. Expect `size` 1 and one logged death.
+5. Load S1. Expect `size` 2, dead set {0}, and exactly the actors S1 holds (member 0's corpse kept, not removed;
+   members 1 and 2 alive), adopted by key, with no extra spawn. Replay member 0's death event. Expect `size` still 2.
+   Load S2. Expect `size` 2 and 2 live actors.
+6. Fire one new death event twice for the same key (a scripted replay). Expect `size` to drop once.
+7. Kill the remaining member. Expect `size` 0, the squad removed from L2, and the removal logged.
+
+Judge `probes p12` (to write). PASS: every expectation above holds, no sample ever shows more live tagged actors for
+the squad than its `size`, and every applied death names a distinct key. FAIL: a duplicate live key, a dead index
+spawned again, a death applied twice (including a replay of a death the loaded save counts, or an `OnKill` counted
+as a second death), `size` rising on a dissolve, an extra spawn or a removed corpse after a load, or a squad left in
+L2 at `size` 0. INCONCLUSIVE: a missing save, a missing sidecar record, or a death the log doesn't show.
 
 ## B0: the plugin bridge, Papyrus to the SFSE plugin and back (after P1)
 
@@ -835,8 +954,10 @@ value and is INCONCLUSIVE, never a PASS; on a rerun in the same launch pick a ne
 | P8 | Settlement build stages by enable parent, and their save cost | FAIL = stage swaps by script-placed refs |
 | P9 | Long-route pathing on the converted navmesh | FAIL = caravans move abstractly and materialize near the player only |
 | P9u | Does a linked actor travel to the player from beyond the loaded area? | never FAIL; INCONCLUSIVE with frozen positions = actors move only once loaded again, so off-screen travel is abstract |
+| P11 | Does the far-travel loop keep one squad as one actor on one line (materialize inside 400 m, dissolve beyond 500 m, re-materialize with continuity)? | FAIL = `travel.py` stays offline; a second copy or lost progress needs its fix before any in-game use |
 | P10 | SendStoryEvent + our SM branch for radiant quests | FAIL = quests started from script directly |
 | B0 | Can Papyrus call our SFSE plugin and read its answer on 1.16.244 (the C++ port's bridge)? | PASS on stack A = CommonLibSF natives; PASS on B only = the setting bridge; FAIL of B0-1 = no return leg for B |
+| P12 | Does an encounter stay conserved across leave, return, save and load (one live copy, a death counted once)? | FAIL = no 20-place slice with live squads until the contract holds |
 
 ## What to send back, always
 

@@ -246,6 +246,17 @@ class TerminalPageTests(unittest.TestCase):
         a, b = ran(3), ran(3)
         self.assertEqual(news.terminal_page(a, "farm_a"), news.terminal_page(b, "farm_a"))
 
+    def test_wrapping_is_the_same_on_every_python(self):
+        # CPython 3.14's long-word rule on every Python (FAL-14): a full line is not cut an empty piece off the next
+        # long word, so the whitespace before it is dropped. Older textwrap gave "ab cd " and a first line " ".
+        self.assertEqual(news.wrap("ab cd efghijk", 6), ["ab cd", "efghij", "k"])
+        self.assertEqual(news.wrap("\na&wo", 1, subsequent_indent="    "), ["a", "    &", "    w", "    o"])
+        self.assertEqual(news.wrap("x-y long-words", 4), ["x-y", "long", "-wor", "ds"])
+        self.assertEqual(news.shorten("Market   Square news, Day 2", 12, placeholder="..."), "Market...")
+        self.assertEqual(news.shorten("Hi there", 20), "Hi there")
+        with self.assertRaisesRegex(ValueError, "invalid width 0"):
+            news.wrap("a", 0)
+
 
 def fixtures_r1_places():
     return {p["id"] for p in fixtures.REGION_1["places"]}
