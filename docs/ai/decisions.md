@@ -1430,3 +1430,60 @@ failure; refuse healthy riders rather than removing them implicitly. This avoids
 ownership store or a repair routine that guesses which game files belong to us. Rebuilding
 or reinstalling missing output automatically was rejected: source inputs may have changed,
 and only the owning installers can safely remove their unchanged publications.
+
+## 2026-11-10 — Bind opaque save bytes to explicit release inputs (Codex, FAL-247 item 7)
+
+Use an external per-save receipt with name/content identity, ordered master identities,
+original release ID and component-bound state files. Declare sidecar envelope and payload
+layout separately. Compare actual installed master bytes as well as declared metadata;
+a runtime or release label alone cannot establish compatibility. A patch release may
+retain compatibility inputs while keeping each save's original release ID. Unknown
+bindings refuse instead of being silently adopted. This first source part is a read-only
+verifier/CLI; its snapshot helper is not proof of provenance and publishes nothing.
+The subsequent Play/publication hook must establish that a save was newly produced by
+the running release. Save-header edits and an automatic migration/adoption command are
+excluded because no such game-format or compatibility evidence has been established.
+
+### 2026-11-10 — Codex / Lone: refuse the whole declared save profile before Play
+
+Until a launcher can safely select which save the game will load, check every .sfs
+save in the declared FO4SF profile. Do not assume the newest file is the selected
+save. Prefer refusal and restoration of its matching release over silent adoption
+or an unverified migration. Consume sibling per-save bindings and the shared
+FO4SF-Runtime state root. Hash files in the Play worker rather than on the Tk
+polling path; check installed masters once per inventory. This staged consumer
+does not complete the mandatory installer ownership or publication contract:
+legacy declaration absence remains unchanged only while PR #716 stays draft.
+
+### 2026-11-10 — Codex / Lone: own release metadata through the instance receipt
+
+Keep the declaration's byte identity and pending/complete publication state in
+FO4SF-instance.json, rather than inferring a legacy install when Data's declaration
+vanishes. Record pending before replacing the declaration; complete only after
+byte verification and another closed-game check. Resume only the same declaration
+and known previous/new bytes. Existing saves remain unbound until separate proof
+of new-save provenance is available. The explicit install-release metadata step
+is not yet automatically invoked by packaging/component installers, and does not
+claim to serialize every unrelated installer: observed metadata edits refuse.
+
+### 2026-11-10 — Codex / Lone: compare explicit loader inputs before release Play
+
+Do not infer active masters from every file installed in Data. Compare the actual
+instance Plugins.txt active non-built-in sequence to the declaration, validate
+implicit installed membership separately, and reuse the existing loader override
+and shadow-copy rules. Repeat after load-order tools, so an automatic fix cannot
+change the declared configuration after validation. Keep native built-in indexes
+and accepted implicit CCC identity/order as an explicit remaining boundary; an
+alphabetically enumerated built-in set is not evidence of the game's load indexes.
+
+
+## 2026-11-10 — Codex / Lone: pin both implicit CCC inputs (FAL-247 item 7 part 5)
+
+Use declaration schema 2 with required game/My Games CCC identities or explicit
+absence, and include both in save compatibility. Reject prior draft declarations
+rather than inferring missing pins or upgrading old saves. Preserve binding and
+ownership schema 1. Why: built-in membership alone cannot notice changed implicit
+loader inputs; unchanged declarations must not accept different CCC bytes.
+Alternative rejected: infer native load indexes from a text list without PC evidence.
+This is configuration pinning only; native interpretation/runtime acceptance,
+managed finalization and save provenance remain separate unfinished gates.

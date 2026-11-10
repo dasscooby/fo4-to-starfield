@@ -2770,3 +2770,63 @@ or externally edited plugin list is first backed up and read back, then restored
 same profile's recorded pre-install bytes. Backup/write/installer failures retain recovery
 state. Healthy dependent installs are refused before rollback. Source and bounded PC
 recipe: `docs/ai/launcher-recovery.md`; exact head and test receipts live on FAL-247.
+
+## 2026-11-10 — Codex / Lone, FAL-247 item 7 part 1: per-save release verifier
+
+**Offline tested**, opaque synthetic saves/state/masters. `launcher.py check-save-release`
+checks a per-save receipt against ordered installed master identities, the original
+release, separate state envelope/payload layout declarations and component-bound state
+file hashes. Unknown/malformed bindings, changed save/state/master bytes and layout
+changes refuse without writing. A release label can change while compatibility inputs
+stay identical; the save retains its original release label. No game-save header is
+parsed or modified. This first part provides the read-only contract/CLI; automatic
+publication for newly produced saves and Play/GUI enforcement remain the next part of
+this same item-7 PR. It does not adopt existing unbound saves. Windows/native checks
+are **NOT_RUN** for this part. Exact-head receipts are on FAL-247.
+
+### 2026-11-10 — Codex / Lone: item-7 declared-profile refusal consumer (part 2)
+
+After Scribe CLEAR of part 1 and Minuteman's #713 merge, retargeted draft #716 to
+main without rewriting its history. An installed FO4SF.release.json now activates
+a read-only check of all opaque .sfs saves and sibling bindings in the configured
+FO4SF profile before Play settings, and again before load-order application. The
+GUI delegates hashing to its existing CLI worker. Unknown/unbound/changed files
+refuse; no old save adoption. Mandatory installer declaration ownership, active
+master-set validation and new-save provenance/publication remain unfinished in
+the same draft PR. Synthetic checks only; Windows/native/Tk/game NOT_RUN.
+
+### 2026-11-10 — Codex / Lone: instance-owned release declaration (item 7 part 3)
+
+Following Scribe CLEAR of part 2, added install-release preview/--apply for a
+finished FO4SF instance. The instance receipt records pending declaration identity
+before publication and complete afterwards. Missing/changed owned declarations,
+unknown pending input, incomplete publication or observed concurrent edits refuse;
+repeating the same explicit input resumes interrupted publication. Metadata is
+atomic, linked files refuse, instance fields and all saves/bindings stay intact.
+This does not publish save bindings. Managed release finalization wiring, active
+master-set/order validation and new-save provenance remain in draft #716.
+Windows/native/Tk/game NOT_RUN. Exact-head review/evidence tracked on FAL-247.
+
+### 2026-11-10 — Codex / Lone: explicit release load configuration (item 7 part 4)
+
+Following Scribe CLEAR of part 3, release publication and Play now compare the
+instance's active plugin set/order and installed built-in membership to its release
+declaration. Reuse loader preflight for override/shadow refusals, require supported
+bounded text, and recheck after load-order application before game start. No writes
+or repair. Full implicit built-in ordering/indexes are not established by this
+part; accepted implicit loader configuration needs further identity/evidence.
+Managed installer workflow wiring and proven new-save binding publication remain
+in draft #716. Synthetic checks only; Windows/native/Tk/game NOT_RUN.
+
+
+### 2026-11-10 — Codex / Lone: implicit CCC identity (item 7 part 5)
+
+Following Scribe CLEAR6c139438 (FAL-267), declaration schema 2 pins both CCC
+locations, including absence. Changed inputs refuse publication and Play; changed
+pins refuse existing save bindings. Publication rechecks keep ownership pending
+on observed input changes. Synthetic controls cover both locations, bytes/order,
+malformed/missing pins, old schema refusal, interrupted publication recovery and
+post-tool refusal. No game formats parsed, assets, saves or state modified.
+Exact-head receipt/review on FAL-247 and draft #716. Native runtime/implicit-order
+acceptance, installer finalization and new-save provenance/publication remain.
+Windows/native/Tk/game NOT_RUN.

@@ -23,6 +23,7 @@ r"""Launcher backbone CLI (docs/ai/launcher-backbone.md). Offline except `restor
     python scripts/launcher.py measure <folder> ...
     python scripts/launcher.py settings [--set key=value ...] [--settings <json>]
     python scripts/launcher.py play --starfield <game dir> [--settings <json>] [--dry-run]
+    python scripts/launcher.py install-release --declaration <release.json> --settings <json> [--apply]
     python scripts/launcher.py watch [--pid N] [--repeat] [--timeout S] [--settings <json>] [--dry-run]
     python scripts/launcher.py update [--check]
     python scripts/launcher.py instance plan|create --starfield <Steam's game folder> --at <new folder>
@@ -75,7 +76,8 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "src"))
 from fo4sf.launcher import (bundle, crashwatch, detect, driver, files, instance, locate, manifest,  # noqa: E402
-                            paths, plugin_checks, recovery, restore, runtimes, same_ids, selfupdate, settings)
+                            paths, plugin_checks, recovery, release_install, restore, runtimes, same_ids,
+                            save_release, selfupdate, settings)
 
 SOURCES = os.path.join(REPO, "scripts", "launcher_recipes", "known_sources.json")
 
@@ -386,6 +388,24 @@ def cmd_recover_install(a):
     return 0
 
 
+def cmd_check_save_release(a):
+    problems = save_release.check_files(a.release, a.binding, a.save, a.starfield, a.state_dir)
+    for problem in problems:
+        print(problem)
+    if not problems:
+        print("save release: compatible with the declared master/state identities")
+    return 2 if problems else 0
+
+
+def cmd_install_release(a):
+    values = settings.load(a.settings or default_settings_path())
+    try:
+        release_install.publish(values, a.declaration, apply=a.apply)
+    except (OSError, RecursionError) as error:
+        raise ValueError(f"release publication refused: {error}") from None
+    return 0
+
+
 def cmd_paths(a):
     """Each location the launcher needs: the saved one, or what was found on this PC and is waiting to be confirmed."""
     path = a.settings or default_settings_path()
@@ -565,6 +585,16 @@ def main(argv=None):
     s.add_argument("--starfield", default="")
     s.add_argument("--settings", default="")
     s.add_argument("--apply", action="store_true", help="apply the rollback (default: preview only)")
+    s = sub.add_parser("check-save-release", help="read-only: verify one save's release/state binding")
+    s.add_argument("--release", required=True)
+    s.add_argument("--binding", required=True)
+    s.add_argument("--save", required=True)
+    s.add_argument("--starfield", required=True)
+    s.add_argument("--state-dir", required=True)
+    s = sub.add_parser("install-release", help="preview or publish an instance-owned release declaration; never bind saves")
+    s.add_argument("--declaration", required=True)
+    s.add_argument("--settings", default="")
+    s.add_argument("--apply", action="store_true")
     s = sub.add_parser("watch", help="watch a game something else starts (the test runner): ProcDump as play attaches it")
     s.add_argument("--settings", default="")
     s.add_argument("--pid", type=int, default=None, help="follow this process only (default: the next Starfield.exe)")
@@ -595,7 +625,8 @@ def main(argv=None):
                 "check-plugins": cmd_check_plugins, "find": cmd_find, "bundle": cmd_bundle, "measure": cmd_measure,
                 "status": cmd_status, "settings": cmd_settings, "play": cmd_play,
                 "watch": cmd_watch, "gui": cmd_gui, "paths": cmd_paths, "update": cmd_update,
-                "instance": cmd_instance, "recover-install": cmd_recover_install}[a.cmd](a)
+                "instance": cmd_instance, "recover-install": cmd_recover_install,
+                "check-save-release": cmd_check_save_release, "install-release": cmd_install_release}[a.cmd](a)
     except driver.RecipeError as e:
         print(f"recipe: {e}")
         return 2
