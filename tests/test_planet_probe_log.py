@@ -151,7 +151,7 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(probe_log.runs(["FO4SFPP rt=1 arrive n=1"])[0][0]["event"], "arrive")
 
 
-def t7_lines(t1, t7, control=True, t7_found=True):
+def t7_lines(t1, t7, control=True, t7_found=True, t5=None):
     """log_lines() with T7 read at the second arrival: t1 / t7 True = with player (the played world), False = the base
     world (left behind); control False makes MERGE left behind at the LC172 arrival."""
     out = []
@@ -162,6 +162,10 @@ def t7_lines(t1, t7, control=True, t7_found=True):
             body = ref(2, int(at), "T7", RUNTIME + 1 if t7 else PROBE_WORLD, 72.0 if not t7 else 0.0, 50.0, t7,
                        found=t7_found, local=0x815)
             out.append("[10/29/2026 - 03:00:00AM] FO4SFPP rt=" + re.search(r"rt=([\d.]+)", x).group(1) + " " + body)
+    if t5 is not None:                           # T5 read at the second arrival: True with player, False left behind
+        out = [ref(2, int(re.search(r"at=(\d+)", x).group(1)), "T5", RUNTIME + 1 if t5 else PROBE_WORLD,
+                   0.0 if t5 else 72.0, 50.0, t5, local=0x804).join(("[10/29/2026 - 03:00:00AM] FO4SFPP rt=1.0 ", ""))
+               if " ref n=2 at=" in x and " tag=T5 " in x else x for x in out]
     if t1:
         out = [re.sub(r"(tag=T1 .*)world=" + sid(PROBE_WORLD), lambda m: m.group(1) + "world=" + sid(RUNTIME + 1), x)
                if " ref n=2 at=" in x and " tag=T1 " in x else x for x in out]
@@ -181,9 +185,24 @@ class T7Tests(unittest.TestCase):
     def test_pass_fail_confounded_words(self):
         self.assertEqual(self.result(t1=False, t7=True)[0], "PASS")
         self.assertEqual(self.result(t1=False, t7=False)[0], "FAIL")           # left behind
-        self.assertEqual(self.result(t1=False, t7=False, t7_found=False)[0], "FAIL")   # not loaded
+        self.assertEqual(self.result(t1=False, t7=False, t7_found=False, t5=True)[0], "FAIL")   # a real miss
         self.assertEqual(self.result(t1=True, t7=True)[0], "confounded")
         self.assertEqual(self.result(t1=True, t7=False)[0], "FAIL")
+
+    def test_cell_not_loaded_when_t5_is_not_loaded_either(self):
+        # log_lines() has T5 not loaded at the arrival on our planet
+        self.assertEqual(self.result(t1=False, t7=False, t7_found=False)[0], "cell not loaded")
+        self.assertEqual(self.result(t1=True, t7=False, t7_found=False)[0], "cell not loaded")
+        self.assertEqual(probe_log.t7_result({"T7": {"verdict": "not loaded"}, "T5": {"verdict": "not loaded"}}, True),
+                         "cell not loaded")
+        self.assertEqual(self.result(t1=False, t7=False, t7_found=False, control=False)[0], "control failed")
+
+    def test_t7_not_loaded_with_t5_present_stays_a_real_miss(self):
+        for t5 in (True, False):                 # with player, left behind
+            self.assertEqual(self.result(t1=False, t7=False, t7_found=False, t5=t5)[0], "FAIL", t5)
+        self.assertEqual(probe_log.t7_result({"T7": {"verdict": "not loaded"}, "T5": {"verdict": "with player"}}, True),
+                         "FAIL")
+        self.assertEqual(probe_log.t7_result({"T7": {"verdict": "not loaded"}}, True), "FAIL")   # T5 unread
 
     def test_control_failure_comes_first_and_t7_is_read_as_a_tag(self):
         res, refs = self.result(t1=False, t7=True, control=False)
@@ -424,6 +443,32 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(s["arrivals"][0]["kind"], "Mars")
         self.assertEqual(s["arrivals"][0]["refs"]["T1"]["verdict"], "left behind")
         self.assertEqual(probe_log.summarize(log_lines() + log_lines(), PLAN, run=0)["run"], 0)
+
+
+class InitTests(unittest.TestCase):
+    EMPTY = "[10/29/2026 - 03:00:00AM] FO4SFPP rt=9.0 init version=2 quest=-2080374764 world=none loc=none planet=none surface=none planetloc=none merge=true"
+
+    def test_a_second_empty_init_keeps_the_complete_one(self):
+        lines = log_lines()
+        lines.insert(lines.index(next(x for x in lines if " arrive n=1" in x)), self.EMPTY)   # logged twice
+        self.assertEqual(len(probe_log.runs(lines)), 1)
+        s = probe_log.summarize(lines, PLAN)
+        self.assertEqual(s["init"]["world"], PROBE_WORLD)
+        self.assertEqual(s["load_index"], IDX)
+        self.assertEqual(s["problems"], [])
+        s = probe_log.summarize(lines[:1] + [self.EMPTY] + lines[1:], PLAN)       # empty line in front of nothing
+        self.assertEqual(s["problems"], [])
+
+    def test_an_empty_init_first_then_the_complete_one(self):
+        lines = log_lines()
+        s = probe_log.summarize([self.EMPTY] + lines, PLAN)
+        self.assertEqual(len(probe_log.runs([self.EMPTY] + lines)), 1)
+        self.assertEqual(s["init"]["world"], PROBE_WORLD)
+        self.assertEqual(s["problems"], [])
+
+    def test_only_empty_inits_still_report_the_problem(self):
+        s = probe_log.summarize([self.EMPTY] + [x for x in log_lines() if " init " not in x], PLAN)
+        self.assertIn("init: the probe world or our planet was not found by GetFormFromFile", s["problems"])
 
 
 class LogCommandTests(unittest.TestCase):
