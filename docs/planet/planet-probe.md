@@ -45,6 +45,11 @@ All six stand in the spawn cell (0, 0) of the test world, around the arrival, on
 | T4 | ACHR citizen | persistent | none | our Codsworth today |
 | T5 | REFR XMarker | temporary, in the spawn cell | none | the control: plain cell content |
 | T6 | ACHR citizen | persistent | XLCN + LCPR row | a fix for Codsworth |
+| T7 | REFR XMarker | persistent, stored in the spawn cell's own persistent group (run 2) | none | rank 2 of the `merge-diff` document (FAL-188): a persistent reference kept as a child of our own exterior cell |
+
+Run 2 reads T7 as PASS (T7 with player, T1 left behind), FAIL (T7 left behind or not loaded) or confounded (T1 and T7
+both with player), after the LC172 control (MERGE and LC172COC with player); `probe_log.t7_result`. The stage option
+`--alignment relative` (default `absolute`) builds the second kit with the block's INAM 0, as vanilla's LC overlays.
 
 The citizen is Starfield.esm's EncCitizen01Template (`2B211C`), the calm NPC the combined-core probes placed. The
 same session also reads two references in LC172World: `MERGE` (FO4SFMergeProbe.esm's marker, persistent, in vanilla's

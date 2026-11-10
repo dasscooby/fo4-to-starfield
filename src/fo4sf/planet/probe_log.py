@@ -29,7 +29,7 @@ Case: Starfield's Papyrus prints a bool as "true" / "false" (verified: the bridg
 of 28 Oct, docs/ai/test-queue.md and docs/newgame/vault111-start.md), Fallout 4's as "True" / "False". It also keeps
 one spelling per string, so literal text can come back in another case (the 28 Oct log printed "FO4Port.esm" as
 "fo4port.esm"). So the reader ignores case: in the prefix, the events, the keys, the bools, "none" and the tags
-(read as upper case: T1 .. T6, MERGE, LC172COC).
+(read as upper case: T1 .. T7, MERGE, LC172COC).
 
 The verdict a reference gets at an arrival, from its last reading there:
   with player   found, in the player's worldspace (sameworld true, the worldspace not None)
@@ -37,6 +37,15 @@ The verdict a reference gets at an arrival, from its last reading there:
   not loaded    GetFormFromFile returned None: a temporary reference whose cell is not loaded, or a missing record
   not installed its plugin is not loaded
   unknown       the line lacks a value the verdict needs (a cut line), or both are in interiors
+Probe run 2 adds T7, a persistent marker stored in the spawn cell's own persistent group (merge-diff, FAL-188),
+and t7_result() reads it at each arrival on our planet (at the last reading), after the LC172 control (an arrival
+elsewhere where MERGE and LC172COC are both with player, else "control failed" or, never read, "control not read":
+the session proves nothing):
+  PASS         T7 with player and T1 left behind (the offset of T7 is then a whole-cell overlay shift, not ~0)
+  FAIL         T7 left behind or not loaded (rank 2 is wrong: no exterior-persistent markers as the map fix)
+  confounded   T1 and T7 both with player (the whole world started instancing: not a result for T7's placement)
+  unknown      anything else (T7 or T1 unread, or not installed)
+
 The offset is the reference's position minus its position in the plugin (plan.json "refs" / "merge"): (0, 0) is a
 reference where the plugin put it; a merged reference moves with its world (LC172World's COC marker moved by about
 (-500, -2300) on 11 Oct). The distance is GetDistance to the player; for a reference in another worldspace the game
@@ -66,6 +75,7 @@ LINKS = (("the probe location under our surface", ISCHILD[0], "our surface", ("p
 REACH = (("the planet lookup from the probe location", "probe_orbitals", "our planet location"),
          ("the star system lookup from the probe location", "probe_systems", "the system location"))
 READINGS = (2, 10, 30, 60)
+T7_CONTROLS = ("MERGE", "LC172COC")      # the LC172 arrival's controls: both must be with player
 OTHER_WORLD_M = 1e30                     # GetDistance's answer for another worldspace is 3.4e38 (FLT_MAX)
 
 
@@ -311,6 +321,39 @@ def ref_verdict(r):
     return "unknown"
 
 
+def control_held(arrivals):
+    """Whether the LC172 control held: True when an arrival that is not on our planet has MERGE and LC172COC both
+    with player, False when such arrivals read the controls and none has both, None when no other arrival read them."""
+    seen = False
+    for a in arrivals:
+        if a["kind"] == "our planet" or not all(t in a["refs"] for t in T7_CONTROLS):
+            continue
+        seen = True
+        if all(a["refs"][t]["verdict"] == "with player" for t in T7_CONTROLS):
+            return True
+    return False if seen else None
+
+
+def t7_result(refs, control=None):
+    """PASS, FAIL, confounded, unknown, "control failed" (control False: the LC172 control did not hold, so nothing
+    is proved), "control not read" (control None: no LC172 arrival was read) or None (no T7 reading) for one arrival's refs ({tag: {"verdict": ...}}, as summarize() files them)."""
+    t7 = (refs.get("T7") or {}).get("verdict")
+    if t7 is None:
+        return None
+    if control is False:
+        return "control failed"
+    if control is None:
+        return "control not read"                # no LC172 arrival read MERGE and LC172COC: PASS would prove nothing
+    t1 = (refs.get("T1") or {}).get("verdict")
+    if t7 in ("left behind", "not loaded"):
+        return "FAIL"
+    if t7 == "with player" and t1 == "left behind":
+        return "PASS"
+    if t7 == "with player" and t1 == "with player":
+        return "confounded"
+    return "unknown"
+
+
 def local_positions(plan):
     """{tag: (x, y, z)} of the references' positions in their plugins (plan.json)."""
     out = {}
@@ -388,6 +431,9 @@ def summarize(lines, plan=None, run=-1):
         ours = pl.get("ourplanet") is True or a["probeworld"] is True or pl.get("probeworld") is True
         a["kind"] = "our planet" if ours else pl.get("planet", "unknown")
         out_arrivals.append(a)
+    control = control_held(out_arrivals)
+    for a in out_arrivals:
+        a["t7"] = t7_result(a["refs"], control) if a["kind"] == "our planet" else None
     problems = []
     if init is None:
         problems.append("no init line in this run (the log lost its start)")
