@@ -37,10 +37,11 @@ before it (issue #628 is the fix that lets the launcher's restore do this with t
 which this phase does not plan), actor animation, distant object LOD, and polish of Preston, Codsworth and the
 mission (#700 gets its review and is then left).
 
-**What this changes in older text.** [PLAN.md](PLAN.md) lists re-implementing the Pip-Boy as a non-goal, and the
-new-game notes of 19 October say "no Pip-Boy in phase 1" ([newgame.md](research/framework/newgame.md), NG-D2). The
-direction above puts the Pip-Boy on the list of things to build. PLAN.md is changed once the owner confirms the first
-deliverable (asked on 10 Nov: the map page).
+**What this changes in older text.** [PLAN.md](PLAN.md) schedules a Starfield-native equivalent of the Pip-Boy for
+phase P5 (Systems) and lists a re-implementation as a non-goal; the new-game notes of 19 October say "no Pip-Boy in
+phase 1" ([newgame.md](research/framework/newgame.md), NG-D2). The direction above moves that work to the front. It
+does not decide whether the result is the planned equivalent or closer to a rebuild, so PLAN.md stays as it is until
+the owner says otherwise. The working assumption for the first deliverable is the map page.
 
 ## Update, 3 November 2026
 
