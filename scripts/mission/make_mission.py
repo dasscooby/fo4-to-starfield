@@ -1,10 +1,12 @@
-"""Stage the cut-down "When Freedom Calls" mission (docs/mission/when-freedom-calls.md) and read its in-game log.
+r"""Stage the cut-down "When Freedom Calls" mission (docs/mission/when-freedom-calls.md) and read its in-game log.
 
 usage:
   python make_mission.py stage --out <experiment dir> --fo4 <Fallout4.esm> --starfield <Starfield.esm>
                                --core <FO4TerrainCore.esm> --raider <FO4ActorRaider.esm>
                                [--compiler <PapyrusCompiler.exe>] [--content-resources <zip>] [--no-alias]
-      1. dotnet/Mission points: Fallout 4's Concord raiders and the museum door's outside arrival (points.json);
+      1. dotnet/Mission points: Fallout 4's Concord raiders, the museum door's outside arrival and Codsworth's Sanctuary
+         spot (points.json); the script keeps Preston and Codsworth at those spots from its own PrestonLocalX/Y/Z and
+         CodsworthLocalX/Y/Z, so points that differ are refused;
       2. dotnet/Mission write + check: FO4SFMission.esm against the given core and raider plugins (offline_check.txt);
       3. the Papyrus compile of FO4SF_Min00Quest.psc against every base script of ContentResources.zip;
       4. plan.json (the plugin's, the script's and the masters' SHA-256) and README.txt.
@@ -22,8 +24,8 @@ usage:
       in <exp-dir> and FO4ActorRaider.esm (in <exp-dir>, else --raider) match the masters the plugin was built
       against (it copies the core's world record). Exit 1 on any mismatch or missing file: install only after exit 0.
   python make_mission.py log [--file <fo4sf_mission.0.log>]
-      the mission's user log as a summary: stages reached in order, the last status line, the reward; exit 0 when
-      stage 200 was reached, 1 otherwise.
+      the mission's user log as a summary: stages reached in order, the last status line, the reward, the keeper's
+      last line for Preston and for Codsworth; exit 0 when stage 200 was reached, 1 otherwise.
 Install (the install session, game closed, on the owner's words): fold, then verify, then
   python scripts/game/exp_install.py install --exp-dir <folded dir> --starfield <game> --plugins <the core set's list>,FO4SFMission.esm --pack
 """
@@ -56,6 +58,9 @@ FIRST_WEM = 0x00F4C001
 STAGES = (10, 20, 30, 40, 200)
 # the script properties dotnet/Mission writes (Program.cs, Write): a renamed property would leave the script unbound
 PROPERTIES = ("Preston", "Raiders", "Credits")
+# the script carries Preston's and Codsworth's spots as defaults (PrestonLocalX/Y/Z, FAL-128; CodsworthLocalX/Y/Z,
+# FAL-163); stage refuses points farther than this (m)
+SPOT_TOLERANCE = 0.5
 STARFIELD = r"D:\SteamLibrary\steamapps\common\Starfield"
 LOG = os.path.join(os.path.expanduser("~"), "Documents", "My Games", "Starfield", "Logs", "Script", "User",
                    "fo4sf_mission.0.log")
@@ -84,6 +89,25 @@ def mandatory_properties(psc_text):
     """The names of the script's Auto Const Mandatory properties (what the plugin must fill), in source order."""
     return [m.group(1) for m in re.finditer(r"^\s*[\w\[\]]+\s+Property\s+(\w+)\s+Auto\s+Const\s+Mandatory\b",
                                             psc_text, re.M | re.I)]
+
+
+def script_floats(psc_text):
+    """The script's float properties with a default (`float Property Name = value Auto Const`), as {name: value}."""
+    return {m.group(1): float(m.group(2)) for m in re.finditer(
+        r"^\s*float\s+Property\s+(\w+)\s*=\s*(-?[\d.]+)\s+Auto\s+Const\b", psc_text, re.M | re.I)}
+
+
+def spot_problem(psc_text, pos, who="Preston"):
+    """None when points.json's position of who (Preston or Codsworth) is the script's <who>LocalX/Y/Z (within
+    SPOT_TOLERANCE), else why not: the script puts him back at that spot, so a build whose points moved him must not
+    ship the old one."""
+    f = script_floats(psc_text)
+    want = [f[who + "LocalX"], f[who + "LocalY"], f[who + "LocalZ"]]
+    got = [float(v) for v in pos]
+    if len(got) != 3 or any(abs(a - b) > SPOT_TOLERANCE for a, b in zip(got, want)):
+        return (f"points.json puts {who} at {got} but {SCRIPT}.psc {who}LocalX/Y/Z are {want}: set them to the "
+                f"points and stage again")
+    return None
 
 
 def extract_sources(zip_path, work):
@@ -117,7 +141,8 @@ def compile_script(compiler, src_dir, out_dir):
 
 def stage(a):
     with open(os.path.join(HERE, SCRIPT + ".psc"), encoding="utf-8") as f:
-        props = mandatory_properties(f.read())
+        psc = f.read()
+    props = mandatory_properties(psc)
     if tuple(props) != PROPERTIES:
         sys.exit(f"{SCRIPT}.psc properties {props} differ from what dotnet/Mission writes {list(PROPERTIES)}")
     final = os.path.abspath(a.out)
@@ -130,6 +155,13 @@ def stage(a):
     tool = ["dotnet", "run", "-c", "Release", "--project", PROJECT, "--"]
     points = os.path.join(work, "points.json")
     run(tool + ["points", a.fo4, points])
+    with open(points, encoding="utf-8") as f:
+        pts = json.load(f)
+    problem = spot_problem(psc, pts["preston"]["pos"])
+    if not problem and a.codsworth and pts.get("codsworth"):
+        problem = spot_problem(psc, pts["codsworth"]["pos"], "Codsworth")
+    if problem:
+        sys.exit(f"{problem}; attempt kept in {out}")
     alias = [] if a.alias else ["--no-alias"]
     cods = [] if a.codsworth else ["--no-codsworth"]
     assets = set()
@@ -151,8 +183,6 @@ def stage(a):
     src = extract_sources(a.content_resources, work)
     pex = compile_script(a.compiler, src, os.path.join(out, "Data", "Scripts"))
     shutil.copy(os.path.join(HERE, SCRIPT + ".psc"), os.path.join(out, SCRIPT + ".psc"))
-    with open(points, encoding="utf-8") as f:
-        pts = json.load(f)
     drift = [f"{n}: {masters[n]} at the start, {h} now" for n, h in pin_masters((a.core, a.raider)).items()
              if h != masters[n]]
     if drift:
@@ -335,28 +365,81 @@ def next_stage(stage, dead, total, fighting, at_preston, found=False):
     return s
 
 
+def place_at(off, dp, to_spot, interior, fighting, held=False, landed=None, hold=25.0, gap=1500.0, radius=300.0,
+             held_radius=3.0):
+    """The script's PlaceAt decision with its caller's hold (FO4SF_Min00Quest.psc: PlacePreston, PlaceCodsworth, HoldDue),
+    Preston's (FAL-128, FAL-170) and Codsworth's (FAL-163) fixed-spot rule, the same rule in Python so it can be tested:
+    off is the actor's distance from its fixed merged spot, dp its distance from the player (inf: another world),
+    to_spot the player's (x, y) distance from that spot, held the instance's prestonHeld/codsworthHeld before the check,
+    landed whether a move leaves it at its spot (None: the move's outcome is not modelled). Returns the script's state
+    (prestonState, codsworthState), or "move" when a move is due and landed is None. An actor that fights is let go
+    first, whatever held says (the caller's ReleaseInFight); at its spot it is held when calm, not yet held and within
+    held_radius; a move that lands holds it unless it fights; the state ends in ", held" while this instance holds it
+    after the check."""
+    if fighting:
+        held = False                                    # ReleaseInFight, before PlaceAt
+    state = lambda s, h: s + ", held" if h else s       # HeldState
+    if off <= hold and dp < gap:
+        return state("at spot", held or (not fighting and off <= held_radius))
+    if interior:
+        return state("off, player inside", held)
+    if to_spot > radius:
+        return state("off, player away", held)
+    if dp < gap and fighting:
+        return state("off, fighting", held)
+    if landed is None:
+        return "move"
+    if not landed:
+        return state("move failed", held)
+    return state("placed", held or not fighting)
+
+
+def off_of(msg):
+    """A keeper line's off= (m from the spot) as a float, or None when it has none or it is unreadable."""
+    off = re.search(r" off=(\S+)", msg)
+    try:
+        return float(off.group(1)) if off else None
+    except ValueError:
+        return None
+
+
 def summarize(lines):
     """The mission log's lines as {"stages": [...], "status": <last status line or None>, "reward": int or None,
-    "startcombat": n, "activated": n, "found": <how the player found Preston before the fight, or None>}; lines of
-    other logs are ignored."""
-    s = {"stages": [], "status": None, "reward": None, "startcombat": 0, "activated": 0, "found": None}
+    "startcombat": n, "activated": n, "found": <how the player found Preston before the fight, or None>,
+    "preston_moves": n, "keeper": <the keeper's last line of where Preston is, or None>, "preston_off": <that line's
+    off=, his distance in m from his spot, or None>, "codsworth_moves", "codsworth_keeper", "codsworth_off": the same
+    for Codsworth}; lines of other logs are ignored. After stage 200 only the keeper moves Preston, and only the keeper
+    ever moves Codsworth, so these are the evidence of where they are. Prefixes match in any case: the game prints a
+    name as the script property it matches (31 Oct: "moved Codsworth" from the literal "codsworth")."""
+    s = {"stages": [], "status": None, "reward": None, "startcombat": 0, "activated": 0, "found": None,
+         "preston_moves": 0, "keeper": None, "preston_off": None,
+         "codsworth_moves": 0, "codsworth_keeper": None, "codsworth_off": None}
     for line in lines:
         m = LINE.search(line)
         if not m:
             continue
         msg = m.group("msg")
-        if msg.startswith("stage "):
+        low = msg.lower()
+        if low.startswith("stage "):
             s["stages"].append(int(msg.split()[1]))
-        elif msg.startswith("status "):
+        elif low.startswith("status "):
             s["status"] = msg
-        elif msg.startswith("reward credits="):
+        elif low.startswith("reward credits="):
             s["reward"] = int(msg.split("=", 1)[1])
-        elif msg.startswith("startcombat "):
+        elif low.startswith("startcombat "):
             s["startcombat"] += 1
-        elif msg.startswith("preston activated"):
+        elif low.startswith("preston activated"):
             s["activated"] += 1
-        elif msg.startswith("found preston ") and s["found"] is None:
+        elif low.startswith("found preston ") and s["found"] is None:
             s["found"] = msg[len("found preston "):]
+        elif low.startswith("moved preston "):
+            s["preston_moves"] += 1
+        elif low.startswith("moved codsworth "):
+            s["codsworth_moves"] += 1
+        elif low.startswith(("keeper load preston ", "keeper status preston ")):
+            s["keeper"], s["preston_off"] = msg, off_of(msg)
+        elif low.startswith(("keeper load codsworth ", "keeper status codsworth ")):
+            s["codsworth_keeper"], s["codsworth_off"] = msg, off_of(msg)
     return s
 
 

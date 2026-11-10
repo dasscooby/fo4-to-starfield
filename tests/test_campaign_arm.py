@@ -3,13 +3,14 @@ away from held cells (synthetic queue folders; nothing launched)."""
 import hashlib
 import io
 import json
+import ntpath
 import os
 import sys
 import tempfile
 import re
 import unittest
 from unittest import mock
-from contextlib import redirect_stdout
+from contextlib import chdir, redirect_stdout
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "scripts", "game"))
@@ -570,9 +571,11 @@ class PlanTerrainHoldTests(Base):
             ok, why = self.check(self.camp([("a", q)], **{k: v}))
             self.assertFalse(ok, k)
             self.assertIn(f"{k} {v!r} is not a full path", " ".join(why))
-        rel = os.path.relpath(self.staging)
-        q = self.queue("rel", [{"coc": "FO4Port_X"}], staging=rel)
-        ok, why = self.check(self.camp([("a", q)], staging=rel))
+        # TEMP and the checkout may be on different Windows drives (#659).
+        with chdir(self.d):
+            rel = os.path.relpath(self.staging)
+            q = self.queue("rel", [{"coc": "FO4Port_X"}], staging=rel)
+            ok, why = self.check(self.camp([("a", q)], staging=rel))
         self.assertFalse(ok)
         self.assertIn("not a full path", " ".join(why))
 
@@ -715,7 +718,8 @@ class PlanTerrainHoldTests(Base):
                 self.assertFalse(ok)
                 self.assertIn("can not be checked against the holds", " ".join(why))
         q = self.queue("rel", [{"coc": "FO4Port_X"}])
-        ok, why = self.check(self.camp([("a", os.path.relpath(q))]))
+        with chdir(self.d):
+            ok, why = self.check(self.camp([("a", os.path.relpath(q))]))
         self.assertFalse(ok)
         self.assertIn("is not a full path", " ".join(why))
         self.assertTrue(self.check(self.camp([("a", q)]))[0])
@@ -741,6 +745,35 @@ class PlanTerrainHoldTests(Base):
         ok, why = self.check(c)
         self.assertFalse(ok)
         self.assertIn("not a full path", " ".join(why))
+
+
+class CrossDriveFixtureTests(unittest.TestCase):
+    def test_relative_path_refusals_with_temp_on_another_drive(self):
+        # Model TEMP on C: and the checkout on D: with Windows' real relpath
+        # semantics, while retaining the host filesystem for the queue checks.
+        real_relpath = os.path.relpath
+        windows_relpath = ntpath.relpath
+        original_cwd = os.getcwd()
+        for method in ("test_relative_checkout_staging_and_bridge_are_refused",
+                       "test_travel_other_than_coc_and_relative_queues_are_refused"):
+            with self.subTest(method=method):
+                case = PlanTerrainHoldTests(method)
+
+                def on_drive(path):
+                    full = os.path.abspath(path)
+                    drive = "C:" if full == case.d or full.startswith(case.d + os.sep) else "D:"
+                    return drive + os.path.splitdrive(full)[1].replace("/", "\\")
+
+                def cross_drive_relpath(path, start=None):
+                    start = os.getcwd() if start is None else start
+                    windows_relpath(on_drive(path), on_drive(start))
+                    return real_relpath(path, start)
+
+                result = unittest.TestResult()
+                with mock.patch.object(os.path, "relpath", side_effect=cross_drive_relpath):
+                    case.run(result)
+                self.assertEqual(os.getcwd(), original_cwd)
+                self.assertTrue(result.wasSuccessful(), result.errors + result.failures)
 
 
 class ScriptAndGateTests(Base):

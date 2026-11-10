@@ -177,7 +177,8 @@ def cell(fid, grid=None, edid=None):
 def world_group(world, persistent_cell=None, persistent=(), cells=()):
     """One world in a WRLD top group: the WRLD record, then its children group (type 1): the persistent cell with
     its persistent references (types 6 / 8), then each exterior cell in a block and sub-block (types 4 / 5) with
-    its temporary references (types 6 / 9)."""
+    its temporary references (types 6 / 9); a cell given as (cell, temporary, persistent) also holds a persistent group
+    (type 8, before the temporary one)."""
     def lab(fid):
         return struct.pack("<I", fid)
     inner = b""
@@ -185,11 +186,15 @@ def world_group(world, persistent_cell=None, persistent=(), cells=()):
         inner += persistent_cell.to_bytes()
         kids = esm.group_bytes(lab(persistent_cell.formid), b"".join(r.to_bytes() for r in persistent), 8)
         inner += esm.group_bytes(lab(persistent_cell.formid), kids, 6)
-    for c, refs in cells:
+    for c, refs, *more in cells:
         body = c.to_bytes()
+        kids = b""
+        if more and more[0]:
+            kids += esm.group_bytes(lab(c.formid), b"".join(r.to_bytes() for r in more[0]), 8)
         if refs:
-            temp = esm.group_bytes(lab(c.formid), b"".join(r.to_bytes() for r in refs), 9)
-            body += esm.group_bytes(lab(c.formid), temp, 6)
+            kids += esm.group_bytes(lab(c.formid), b"".join(r.to_bytes() for r in refs), 9)
+        if kids:
+            body += esm.group_bytes(lab(c.formid), kids, 6)
         inner += esm.group_bytes(b"\0\0\0\0", esm.group_bytes(b"\0\0\0\0", body, 5), 4)
     return world.to_bytes() + esm.group_bytes(lab(world.formid), inner, 1)
 
@@ -323,7 +328,7 @@ def probe_plugin(path, prm, change=None):
     wsubs += [(b"CNAM", struct.pack("<I", 0x0024E982)), (b"DATA", b"\x01"), (b"FNAM", b"\x00")]
     world = edit("world", esm.Record(b"WRLD", own(w["id"]), wsubs, version=0x246))
     pcell = edit("cell", cell(own(prm["persistent_cell"])))
-    pers, temp = [], {}
+    pers, temp, ext = [], {}, {}
     for r in prm["refs"]:
         rec = placed(r["kind"].encode(), own(r["id"]), key(r["base"]), tuple(r["pos"]), tuple(r["rot"]),
                      edid=r["edid"] or None, persistent=r["persistent"],
@@ -331,14 +336,16 @@ def probe_plugin(path, prm, change=None):
         rec = edit("ref:" + r["tag"], rec)
         if rec is None:
             continue
-        if r["persistent"]:
+        if r.get("exterior_persistent"):
+            ext.setdefault(tuple(r["cell"]), []).append(rec)
+        elif r["persistent"]:
             pers.append(rec)
         else:
             temp.setdefault(tuple(r["cell"]), []).append(rec)
     cells = []
     for x, y in probe.cells():
         edid = prm["spawn"]["edid"] if [x, y] == list(prm["spawn"]["cell"]) else None
-        cells.append((cell(own(probe.cell_id(x, y)), (x, y), edid), temp.get((x, y), [])))
+        cells.append((cell(own(probe.cell_id(x, y)), (x, y), edid), temp.get((x, y), []), ext.get((x, y), [])))
     q = prm["quest"]
     name = q["script"].encode("cp1252")
     vmad = struct.pack("<hhH", 6, 2, 1) + struct.pack("<H", len(name)) + name + b"\x00" + struct.pack("<H", 0)

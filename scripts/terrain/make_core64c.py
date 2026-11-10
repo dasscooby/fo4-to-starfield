@@ -2763,6 +2763,7 @@ def cmd_stage(a):
             save(os.path.join(out, "map_markers_left_out.json"), {"left_out": left + outside}, indent=1)
             print(f"map markers: {len(extra)} from {a.fo4_map_markers}, {len(left) + len(outside)} left out "
                   "(map_markers_left_out.json)")
+            print("map marker icon types:\n" + map_markers.format_type_counts(markers))
     except ValueError as e:
         sys.exit(f"map markers: {e}")
     params["overlays"] = [dict(ov, map_markers=markers)]

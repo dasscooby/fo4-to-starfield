@@ -222,8 +222,15 @@ named; 307 left after the fixed four's own records, all inside the overlay. Noth
    near that limit. A quest's `MaxMoves` is the script's 40, twice its marker count, so one session can place them all. `check` matches the
    quests, in FormID order, against the core.
 
-Every new marker keeps LC172's `FNAM` 0x1B and `TNAM` 0x17, so they all draw one icon type; FO4's own marker types
-are not mapped yet. The export carries each FO4 marker's type (`type`, `type_id`) for that later table.
+Every new marker keeps LC172's `FNAM` 0x1B. Their `TNAM` type now comes from `src/fo4sf/map_marker_types.json` (FAL-189):
+each FO4 marker type id of the export (`type_id`, xEdit's `TNAM` enum 0-80) maps to one Starfield icon number in 10-93
+(0-9 are emblems of Starfield's own places), with a one-line reason and a `fair` flag; `fair: false` rows (Vault, Metro
+Station, Institute, faction emblems, ...) are the case for own Pip-Boy icons. An FO4 id not in the table gets the
+default 85 (landmark). The core's fixed four carry their Starfield number directly (`fixed_markers`: Red Rocket 86, Sanctuary 35, Vault 111 86, Concord 35), each one the table itself uses.
+`TerrainOverlays` writes a map-marker entry's `type` (else LC172's 0x17 stays) and `dotnet/MapMarkers` an `--extra`
+entry's; the landing marker keeps 45. `make_map_markers.py stage` and `make_core64c.py` print a count per number. The
+numbers come from the owner's PC measurement of the map screen's 94-kind list; a table row is unverified in game until
+the markers plugin is restaged and installed.
 
 Marker data in the two games (Claude-cloud, 2026-10-19). Mutagen 0.55.0-alpha.67, read by reflection on
 `PlacedObjectMapMarker`:
