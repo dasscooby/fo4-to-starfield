@@ -5,7 +5,33 @@ question first: **can a value of our own hold rads, lower maximum health, and be
 needs hang from the same value pattern. Verified on the PC, untested in play: Starfield.esm has `ENV_*` hazards, hazard
 spells and effects, `AFFL_*` affliction values and addiction effects; nothing is named mutation. Research rows R1 to R4,
 C1 to C3, V1 to V5 (docs/research/framework/engine-mechanics-notes).
-Task: FAL-213. Status: **built offline, not run in game** (no Starfield.esm, no Papyrus compiler, no game on the build box).
+Task: FAL-213. Status: **run in game once (head b9ad9081); this head fixes what that session found.**
+
+## What the first game session found (head b9ad9081, owner PC, 10 Nov 20:49 and 20:58 UTC)
+
+* The plugin loads; our actor value `FO4SF_Rads` exists and reads 0 (Health 205, base 200). **Verified.**
+* The console does **not** find the quest by its editor id (`setstage FO4SF_RadsProbeQuest 10`: "Item ... not found for
+  parameter Quest"). With the form id from the init line (`setstage 0B000804 10`) stage 10 runs. **Verified.** The card
+  and `make_rads_probe.py console` now use the form id.
+* **Control passed**: vanilla Health 205 to 215 with `ModValue +10` and back to 205 (`Actor.ModValue` exists and works on
+  Health). **Verified.**
+* **Stage 20 crashed the game** (0xC0000005, a read of 0x15c in the game's own code) right after the `before` line, i.e. at
+  `Spell.Cast` of our spell. **Verified.** Cause **unresolved**. Stage 10 wrote 0 to a value that is 0, so whether our value
+  takes a number was not shown.
+
+What this head changes, and why (supported hypothesis, not a finding): the spell, the effect and RadAway were written from
+nothing. Read back, the spell lacked `ETYP` (equip type), the effect ids `MAGF`/`EFIF`/`MUID` and, for the effect,
+`DNAM`; in the sampled vanilla records (`docs/measurements/sf_esm.json`) every one of 300 SPEL carries `OBND`, `ODTY`,
+`ETYP`, `DESC`, `SPIT` and `EFIF`/`MUID` on each of 661 effect entries, and every one of 300 MGEF carries `DATA` and
+`DNAM`. A null equip type or effect id read by the cast is the likeliest reading of a null at +0x15c, **but the crash
+address is not mapped to any field**, so this is a guess. The writer now **copies a vanilla self-cast value-modifier spell
+and its effect, and a vanilla medicine ingestible, from Starfield.esm** (found by what they are, or named with
+`--template-spell` / `--template-aid`; the build prints and `plan.json` records which) and changes only the editor id, the
+name, the effect's actor value and the magnitude; conditions, scripts, keywords, the effect's resist/skill values and an
+addiction are cleared. If the game still crashes on `Cast`, the template choice is the next variable
+(`stage --template-spell <edid>`), then the script-free route below.
+Stage 10 now also writes a non-zero number (50) to our value, reads it, and writes 0 (`set` lines; the reader's
+"own value takes a number" line).
 
 ## What is built
 
@@ -13,7 +39,7 @@ Task: FAL-213. Status: **built offline, not run in game** (no Starfield.esm, no 
 |---|---|
 | Plugin writer (build, check, fixture) | `dotnet/RadsProbe` |
 | Quest script | `scripts/planet/FO4SF_RadsProbeQuest.psc` |
-| Stage (precheck, stage, log) | `scripts/planet/make_rads_probe.py` |
+| Stage (precheck, stage, log, console) | `scripts/planet/make_rads_probe.py` |
 | Ride-along installer, its own record `Data\FO4SFRadsProbe.install.json` | `scripts/planet/rads_probe_install.py` |
 | Log reader | `src/fo4sf/rads/probe_log.py` |
 | Tests | `tests/test_rads_probe.py`, `_log.py`, `_install.py` |
@@ -60,7 +86,7 @@ docs/questprobe/engine-questions.md) and runs each step once.
 
 | Stage | Step | Expected rads |
 |---|---|---|
-| 10 | `SetValue(rads, 0)`, and the **control** (below) | 0 |
+| 10 | the **control** (below), then `SetValue(rads, 50)` read back and `SetValue(rads, 0)` | 0 |
 | 20 | the spell, once | 100 |
 | 30 | the spell, twice | 300 |
 | 40 | `AddItem` + `EquipItem` RadAway | 100 |
@@ -77,10 +103,9 @@ is optional too: if it does not exist, the control fails and the session is **IN
 Per step: *before*, *now* (right after the call), *settled* (3 s later, the effect has had its time), a `fix` line (was the
 step's number there, or did the script **force** it with `SetValue`, `forced=true`, so that the route is still tested when the
 effect does nothing), a `route` line, *routed*, and *final* 3 s later. Each line ends `end=true`; a line without it was cut.
-The log is `My Games\Starfield\Logs\Script\User\FO4SFRadsProbe.0.log`.
+The log is `My Games\Starfield\Logs\Script\User\FO4SFRadsProbe.0.log`, under `OneDrive\Documents` on the owner's PC (the reader tries that first, then `Documents`; `--file` names it).
 
-**Not run offline:** the real Papyrus compile, the real Starfield.esm, any of it in the game. The tests use a synthetic
-Starfield.esm, a fake compiler and fake base sources. The Mutagen shapes of the MGEF archetype (the actor value sits in
+**Offline tests** use a synthetic Starfield.esm (with synthetic template records), a fake compiler and fake base sources. The Mutagen shapes of the MGEF archetype (the actor value sits in
 `Association`), the ingestible and the AVIF are checked by read-back through Mutagen only; whether Starfield accepts them
 is the session's question.
 
@@ -118,14 +143,20 @@ or a reload of the save made before stage 10 (variant B).
 
 ### Variant A: no save (throwaway state; do not save, autosave, quicksave or save on exit)
 
-Open the console (`~`) and wait 5 s after the first lines of the log exist (`init` and `start`).
+Start the game with the probe ticked and wait until the log has an `init` line (the quest starts with the game). The console
+does not find the quest by name: get this session's lines with
+
+    python scripts\planet\make_rads_probe.py console
+
+which prints `setstage <quest form id> 10` to `40` and the two `player.getav` lines (the form id follows the load order, so
+take it fresh each session). Below, `<Q>` is that form id. Open the console (`~`).
 
 1. `player.getav FO4SF_Rads`  (expect 0) and `player.getav health`. Note both. Screenshot `00-start`.
-2. `setstage FO4SF_RadsProbeQuest 10`. Wait 10 s. Then `player.getav FO4SF_Rads`, `player.getav health`. Screenshot `10`.
-3. `setstage FO4SF_RadsProbeQuest 20`. Wait 10 s. The same two console lines, screenshot `20` (the HUD, the health bar, any
+2. `setstage <Q> 10`. Wait 10 s. Then `player.getav FO4SF_Rads`, `player.getav health`. Screenshot `10`.
+3. `setstage <Q> 20`. Wait 10 s. The same two console lines, screenshot `20` (the HUD, the health bar, any
    message or effect icon).
-4. `setstage FO4SF_RadsProbeQuest 30`. Wait 10 s. The same two lines, screenshot `30`.
-5. `setstage FO4SF_RadsProbeQuest 40`. Wait 10 s. The same two lines, screenshot `40`. Open the inventory once: is there
+4. `setstage <Q> 30`. Wait 10 s. The same two lines, screenshot `30`.
+5. `setstage <Q> 40`. Wait 10 s. The same two lines, screenshot `40`. Open the inventory once: is there
    a RadAway left, and does the effect list or Pip-Boy/Scanner show anything?
 6. Quit to the desktop **without saving**. Run the reader command above and paste its output with the screenshots.
 
@@ -138,7 +169,7 @@ Does the value, and the route's effect on Health, survive a save? Use a characte
 3. Quit to the desktop. Start the game, load `rads-30`. Wait 10 s.
 4. `player.getav FO4SF_Rads`, `player.getav health`. Screenshot `31-reloaded`. Are they the values at 30 (300 and
    the reduced health) or defaults (0 and the original)?
-5. `setstage FO4SF_RadsProbeQuest 40`. Wait 10 s. The same two lines, screenshot `40`.
+5. `setstage <Q> 40`. Wait 10 s. The same two lines, screenshot `40`.
 6. Quit **without saving**. Run the reader command. The user log may have started a new file after the reload: run
    `make_rads_probe.py log --file` on each file, and paste both. Lines after the reload carry no `init`; that is expected.
 

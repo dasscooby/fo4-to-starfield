@@ -7,7 +7,7 @@ signed decimal ("none" for None); bools "true" / "false"; a reading the game cou
 
 Events: init (once per script instance), start (the forms the script was given), step (the stage's call and what it
 expects), state (a reading: stage 10 / 20 / 30 / 40 and when = before, now, settled, routed, final; stage 0 when=start),
-control, fix (after the effect had 3 s: was the step's value there, or was it forced), route (the modifier on Health).
+control, set (stage 10: a non-zero number written to our value, then 0; each with what was read back), fix (after the effect had 3 s: was the step's value there, or was it forced), route (the modifier on Health).
 
 The control comes first: a vanilla actor value (Health) set and read in the same step, with the very call the route uses
 (Actor.ModValue +10, read, -10, read; stage 10). When the call was not made, the first read did not move by +10, or the
@@ -25,7 +25,8 @@ import re
 
 LINE = re.compile(r"FO4SFRADS rt=(?P<rt>[-+\d.eE]+) (?P<event>\w+)(?P<rest>.*)$", re.IGNORECASE)
 TOKEN = re.compile(r"(\w+)=(\S*)")
-EVENTS = ("init", "start", "step", "state", "control", "fix", "route")
+EVENTS = ("init", "start", "step", "state", "control", "set", "fix", "route")
+WRITE_TEST = 50.0         # the script's WriteTest: stage 10 writes this to our value and reads it
 ID_KEYS = {"quest", "rads_av", "health_av", "spell", "radaway", "av"}
 WHENS = ("start", "before", "now", "settled", "routed", "final")
 ORDER = {w: i for i, w in enumerate(WHENS)}
@@ -216,12 +217,30 @@ def extra_effects(by):
     return out
 
 
+def setvalue_check(events):
+    """Did our own actor value take a number that is not zero (stage 10)? A sentence."""
+    sets = [e for e in events if e["event"] == "set"]
+    if not sets:
+        return "not run (no set line)"
+    nz = [e for e in sets if num(e.get("wrote")) and e["wrote"] != 0]
+    if not nz:
+        return "not run (no non-zero write)"
+    e = nz[0]
+    if not num(e.get("read")):
+        return f"no reading (wrote {fmt(e.get('wrote'))}, read {fmt(e.get('read'))})"
+    if abs(e["read"] - e["wrote"]) <= EPS:
+        back = next((x for x in sets if num(x.get("wrote")) and x["wrote"] == 0 and num(x.get("read"))), None)
+        tail = "" if back is None else f"; set back to 0 reads {fmt(back['read'])}"
+        return f"yes (wrote {fmt(e['wrote'])}, read {fmt(e['read'])}{tail})"
+    return f"NO (wrote {fmt(e['wrote'])}, read {fmt(e['read'])})"
+
+
 def summarize(lines, run=-1):
     """{"runs", "run", "cut", "init", "start", "control": (ok, why), "effect": {stage: text}, "route": {stage: text},
     "radaway": text, "maxsource", "states", "extra_effects", "problems", "verdict"} of one run (the latest)."""
     rs, cut = runs(lines)
     out = {"runs": len(rs), "cut": cut, "init": None, "start": None, "control": (False, "no log"), "effect": {}, "route": {},
-           "radaway": "not run", "maxsource": None, "states": [], "extra_effects": {}, "problems": [],
+           "radaway": "not run", "setvalue": "not run", "maxsource": None, "states": [], "extra_effects": {}, "problems": [],
            "verdict": "INCONCLUSIVE: no log lines"}
     if not rs:
         return out
@@ -246,7 +265,7 @@ def summarize(lines, run=-1):
         out["verdict"] = f"INCONCLUSIVE: control failed: {why}"
         return out
     eff, route, rad, src, bad = judge(r)
-    out.update(effect=eff, route=route, radaway=rad, maxsource=src)
+    out.update(effect=eff, route=route, radaway=rad, maxsource=src, setvalue=setvalue_check(r))
     by = by_stage(states)
     out["extra_effects"] = extra_effects(by)
     if all(isinstance(s.get("fx"), str) and s.get("fx") == "na" for s in states if "fx" in s) and states:
@@ -255,7 +274,7 @@ def summarize(lines, run=-1):
         out["problems"].append("no maximum or base reading for Health (both na): the route is judged on the current health")
     for e in bad:
         out["problems"].append(f"the route's ModValue was not called at rads {fmt(e.get('rads'))} (delta {fmt(e.get('delta'))})")
-    out["verdict"] = (f"CONTROL OK ({why}). Effect +100: {eff.get(20)}; effect +200: {eff.get(30)}; "
+    out["verdict"] = (f"CONTROL OK ({why}). Own value takes a number: {out['setvalue']}; effect +100: {eff.get(20)}; effect +200: {eff.get(30)}; "
                       f"route at 100 rads: {route.get(20)}; at 300 rads: {route.get(30)}; RadAway: {rad}; "
                       f"route after RadAway: {route.get(40)}")
     return out
@@ -286,6 +305,7 @@ def report(summary):
         for stage in (20, 30, 40):
             if stage in summary["route"]:
                 lines.append(f"stage {stage} route (maximum health, source {summary['maxsource']}): {summary['route'][stage]}")
+        lines.append(f"stage 10 own value takes a number: {summary['setvalue']}")
         lines.append(f"stage 40 RadAway: {summary['radaway']}")
         for stage, ids in summary["extra_effects"].items():
             lines.append(f"stage {stage} active effects not there at stage 10: " + ", ".join(f"{i:08X}" if isinstance(i, int) else str(i) for i in ids))

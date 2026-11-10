@@ -14,7 +14,9 @@ usage:
          <out>.partial-<time>-<pid> and renamed to <out> only when every step passed; an existing <out> is refused.
   python make_rads_probe.py log [--file <FO4SFRadsProbe.0.log>]
       the run's user log as one table and a verdict (src/fo4sf/rads/probe_log.py); exit 0 when the control held,
-      1 when the session is inconclusive.
+      1 when the session is inconclusive. The log is looked for under OneDrive\\Documents first, then Documents.
+  python make_rads_probe.py console [--file <FO4SFRadsProbe.0.log>]
+      the card's console lines with this session's quest form id (the console does not find the quest by name).
 Nothing here installs anything: scripts/planet/rads_probe_install.py does, on the owner's word, game closed.
 """
 import argparse
@@ -43,7 +45,24 @@ PSC = os.path.join(HERE, SCRIPT + ".psc")
 DEFAULT_HEALTH = "Health"        # Starfield.esm's own Health AVIF: the control and the route's target
 DEFAULT_TYPE = "Variable"          # the type our AVIF is written with (an open question: the PC run tells)
 STARFIELD = r"D:\SteamLibrary\steamapps\common\Starfield"
-LOG = os.path.join(os.path.expanduser("~"), "Documents", "My Games", "Starfield", "Logs", "Script", "User", "FO4SFRadsProbe.0.log")
+LOG_NAME = "FO4SFRadsProbe.0.log"
+
+
+def user_logs(name=LOG_NAME):
+    """Where the game writes the user log, in the order tried: Documents under OneDrive (the owner's PC, as
+    make_planet_probe.py's user_logs), then plain Documents."""
+    home = os.path.expanduser("~")
+    return [os.path.join(home, *base, "My Games", "Starfield", "Logs", "Script", "User", name)
+            for base in (("OneDrive", "Documents"), ("Documents",))]
+
+
+def default_log():
+    """The first existing log of user_logs(), else the first candidate (so the message names a real place)."""
+    found = [p for p in user_logs() if os.path.isfile(p)]
+    return found[0] if found else user_logs()[0]
+
+
+LOG = default_log()
 # what the script cannot run without (the optional readings are the .psc's ";OPT" lines)
 REQUIRED = {
     "Actor": ["GetValue", "SetValue", "AddItem", "EquipItem"],
@@ -129,6 +148,13 @@ def compile_text(compiler, text, src_dir, out_dir):
     return False, err
 
 
+def template_line(text):
+    """The writer's "templates (<level>): SPEL ..., MGEF ..., ALCH ..." line (the vanilla records the effect, the spell
+    and RadAway were copied from), "" when there is none."""
+    m = re.search(r"^templates \((\w+)\): (.*)$", text, re.M)
+    return f"{m.group(1)}: {m.group(2)}" if m else ""
+
+
 def stage_files(out):
     """{path relative to the stage, "/" separated: SHA-256} of the plugin and every file under Data/."""
     files = {}
@@ -186,6 +212,10 @@ def stage(a):
     os.makedirs(work)
     tool = ["dotnet", "run", "-c", "Release", "--project", PROJECT, "--"]
     opts = ["--health", a.health, "--type", a.type]
+    if a.template_spell:
+        opts += ["--template-spell", a.template_spell]
+    if a.template_aid:
+        opts += ["--template-aid", a.template_aid]
     wrote = run(tool + ["build", a.starfield, out] + opts).stdout
     check = run(tool + ["check", os.path.join(out, PLUGIN), a.starfield] + opts).stdout
     with open(os.path.join(out, "offline_check.txt"), "w", encoding="utf-8") as f:
@@ -217,7 +247,7 @@ def stage(a):
     if sha256(a.starfield) != before:
         sys.exit(f"Starfield.esm changed during the build, nothing published; attempt kept in {out}")
     plan = {"kind": "rads-probe", "version": 1, "plugins": [PLUGIN], "outputs": stage_files(out),
-            "inputs": {"Starfield.esm": {"sha256": before}}, "health": a.health, "avif_type": a.type, "optional": fate,
+            "inputs": {"Starfield.esm": {"sha256": before}}, "health": a.health, "avif_type": a.type, "templates": template_line(wrote), "optional": fate,
             "log": "<My Games>/Starfield/Logs/Script/User/FO4SFRadsProbe.0.log"}
     with open(os.path.join(out, "plan.json"), "w", encoding="utf-8") as f:
         json.dump(plan, f, indent=1)
@@ -232,6 +262,8 @@ Install (the owner's word, game closed; loose scripts are not read, the installe
   python scripts\\planet\\rads_probe_install.py install --dir <this folder> --starfield <game dir>
 Remove:  python scripts\\planet\\rads_probe_install.py uninstall --starfield <game dir>
 Read:    python scripts\\planet\\make_rads_probe.py log
+Console lines of this session (the quest is found by form id, not name):
+  python scripts\\planet\\make_rads_probe.py console
 Session card: docs/research/rads-probe.md. No save unless the owner allowed one (variant B of the card).
 """)
     os.replace(out, final)
@@ -249,6 +281,25 @@ def log(a):
     return 0 if s["control"][0] else 1
 
 
+def console(a):
+    """The exact console lines of the session card for this game session: the console does not find the quest by its
+    editor id, so setstage takes the form id from the init line of the user log (the quest starts with the game)."""
+    if not os.path.isfile(a.file):
+        print(f"no log at {a.file}: start the game with the probe ticked, then run this again")
+        return 2
+    with open(a.file, encoding="utf-8", errors="replace") as f:
+        rs, _ = probe_log.runs(f)
+    quest = next((e.get("quest") for r in reversed(rs) for e in r if e["event"] == "init" and isinstance(e.get("quest"), int)), None)
+    if quest is None:
+        print("no init line with a quest id in the log: the script has not started yet")
+        return 1
+    for stage in probe_log.STAGES:
+        print(f"setstage {quest:08X} {stage}")
+    print("player.getav FO4SF_Rads")
+    print("player.getav health")
+    return 0
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -263,10 +314,14 @@ def main(argv=None):
     s.add_argument("--content-resources", default=cr)
     s.add_argument("--health", default=DEFAULT_HEALTH)
     s.add_argument("--type", default=DEFAULT_TYPE)
+    s.add_argument("--template-spell", default="", help="a vanilla self-cast value-modifier spell to copy (default: found)")
+    s.add_argument("--template-aid", default="", help="a vanilla medicine ingestible to copy (default: found)")
     g = sub.add_parser("log")
     g.add_argument("--file", default=LOG)
+    c = sub.add_parser("console")
+    c.add_argument("--file", default=LOG)
     a = p.parse_args(argv)
-    return {"precheck": precheck, "stage": stage, "log": log}[a.cmd](a)
+    return {"precheck": precheck, "stage": stage, "log": log, "console": console}[a.cmd](a)
 
 
 if __name__ == "__main__":

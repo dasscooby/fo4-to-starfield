@@ -47,6 +47,7 @@ def step(t, stage, rads_gain, rads_now, mx_by, rads_before, forced, fx0="none", 
 def good_log(mx_key="max"):
     out = head() + control()
     out += [line(3.0, "step", stage=10, call="SetValue", expect=0),
+            line(3.05, "set", stage=10, wrote=50.0, read=50.0), line(3.06, "set", stage=10, wrote=0.0, read=0.0),
             state(3.1, 10, "before", 0.0, mx=200.0), state(3.2, 10, "now", 0.0, mx=200.0),
             state(6.2, 10, "settled", 0.0, mx=200.0), line(6.3, "fix", stage=10, forced="false", want=0.0, had=0.0, now=0.0),
             line(6.4, "route", rads=0.0, want=0.0, delta=0.0, applied=0.0, ok="true"),
@@ -124,6 +125,30 @@ class ControlTests(unittest.TestCase):
         s = self.verdict(lines)
         self.assertTrue(s["verdict"].startswith("INCONCLUSIVE"))
         self.assertEqual(s["route"], {})
+
+
+class SetValueTests(unittest.TestCase):
+    def test_a_number_that_is_read_back_is_yes(self):
+        s = pl.summarize(good_log())
+        self.assertEqual(s["setvalue"], "yes (wrote 50, read 50; set back to 0 reads 0)")
+        self.assertIn("Own value takes a number: yes", s["verdict"])
+        self.assertIn("stage 10 own value takes a number: yes", "\n".join(pl.report(s)))
+
+    def test_a_number_that_reads_back_as_zero_is_no(self):
+        lines = [x.replace("wrote=50.0 read=50.0", "wrote=50.0 read=0.0") for x in good_log()]
+        self.assertEqual(pl.summarize(lines)["setvalue"], "NO (wrote 50, read 0)")
+
+    def test_no_set_line_is_not_run(self):
+        lines = [x for x in good_log() if " set " not in x]
+        self.assertEqual(pl.summarize(lines)["setvalue"], "not run (no set line)")
+
+    def test_only_a_zero_write_is_not_a_test(self):
+        lines = [x for x in good_log() if "wrote=50.0" not in x]
+        self.assertEqual(pl.summarize(lines)["setvalue"], "not run (no non-zero write)")
+
+    def test_a_failed_control_still_judges_nothing(self):
+        lines = head() + control(after=200.0) + [line(3.05, "set", stage=10, wrote=50.0, read=50.0)]
+        self.assertEqual(pl.summarize(lines)["setvalue"], "not run")
 
 
 class VerdictTests(unittest.TestCase):

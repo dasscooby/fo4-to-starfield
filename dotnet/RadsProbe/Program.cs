@@ -14,9 +14,16 @@
 // docs/research/rads-probe.md. The script reaches every form through its four properties;
 // tests/test_rads_probe.py checks the properties' names against the constants here.
 //
-// usage: RadsProbe build <Starfield.esm> <out dir> [--health <AVIF editor id>] [--type <AVIF type>]
-//        RadsProbe check <plugin> <Starfield.esm> [--health <AVIF editor id>] [--type <AVIF type>]     exit 1 on a mismatch
-//        RadsProbe fixture <out dir>             a synthetic Starfield.esm holding the AVIF looked up
+// The effect, the spell and RadAway are written as COPIES of vanilla records (found in Starfield.esm by what they are,
+// or by --template-spell / --template-aid): the first session (FAL-213) crashed the game on Spell.Cast with a spell and
+// effect written from nothing (a null read inside the engine), and a vanilla SPEL always carries fields (equip type,
+// effect ids, description) that a from-nothing one lacks. Only what must differ is changed: editor id, name, the
+// effect's actor value and magnitude; conditions, scripts, keywords and the effect's resist/skill values are cleared.
+// No template found: the minimal record is written and the build says so (plan.json keeps it).
+//
+// usage: RadsProbe build <Starfield.esm> <out dir> [--health <AVIF editor id>] [--type <AVIF type>] [--template-spell <edid>] [--template-aid <edid>]
+//        RadsProbe check <plugin> <Starfield.esm> [same options]     exit 1 on a mismatch
+//        RadsProbe fixture <out dir>             a synthetic Starfield.esm holding the AVIF and the template records looked up
 using System.Globalization;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Plugins.Binary.Parameters;
@@ -38,10 +45,15 @@ try
         rest.RemoveRange(i, 2);
         return true;
     }
+    var tSpell = "";
+    var tAid = "";
     Opt("--health", ref health);
     Opt("--type", ref type);
-    if (rest.Count == 3 && rest[0] == "build") return RadsProbe.Build(rest[1], rest[2], health, type);
-    if (rest.Count == 3 && rest[0] == "check") return RadsProbe.Check(rest[1], rest[2], health, type);
+    Opt("--template-spell", ref tSpell);
+    Opt("--template-aid", ref tAid);
+    var tpl = new RadsProbe.Templates(tSpell, tAid);
+    if (rest.Count == 3 && rest[0] == "build") return RadsProbe.Build(rest[1], rest[2], health, type, tpl);
+    if (rest.Count == 3 && rest[0] == "check") return RadsProbe.Check(rest[1], rest[2], health, type, tpl);
     if (rest.Count == 2 && rest[0] == "fixture") return RadsProbe.Fixture(rest[1]);
 }
 catch (RadsProbe.Refusal r)
@@ -49,8 +61,8 @@ catch (RadsProbe.Refusal r)
     Console.Error.WriteLine("refused: " + r.Message);
     return 1;
 }
-Console.Error.WriteLine("usage: RadsProbe build <Starfield.esm> <out dir> [--health <edid>] [--type <avif type>] | " +
-                        "check <plugin> <Starfield.esm> [--health <edid>] [--type <avif type>] | fixture <out dir>");
+Console.Error.WriteLine("usage: RadsProbe build <Starfield.esm> <out dir> [--health <edid>] [--type <avif type>] [--template-spell <edid>] [--template-aid <edid>] | " +
+                        "check <plugin> <Starfield.esm> [same options] | fixture <out dir>");
 return 2;
 
 static class RadsProbe
@@ -68,6 +80,45 @@ static class RadsProbe
     static readonly ushort[] Stages = { 10, 20, 30, 40 };
     // the script's property names, in the order the writer adds them
     static readonly string[] PropNames = { "RadsAV", "HealthAV", "RadsSpell", "RadAway" };
+
+    public record Templates(string SpellEdid, string AidEdid);
+
+    /// <summary>The vanilla records the effect, the spell and RadAway are copied from (null: none found, minimal record).</summary>
+    public record Found(ISpellGetter? Spell, IMagicEffectGetter? Effect, IIngestibleGetter? Aid, string Level);
+
+    static Found FindTemplates(IStarfieldModGetter sf, Templates t)
+    {
+        var mgefs = sf.MagicEffects.ToDictionary(m => m.FormKey);
+        bool ValueMod(IMagicEffectGetter m, bool strict) =>
+            m.Archetype.Type == MagicEffectArchetype.TypeEnum.ValueModifier &&
+            (!strict || (m.CastType == CastType.FireAndForget && m.TargetType == TargetType.Self && m.Flags.HasFlag(MagicEffect.Flag.NoDuration)));
+        IMagicEffectGetter? EffectOf(ISpellGetter sp) =>
+            sp.Effects.Count == 1 && sp.Effects[0].BaseEffect.FormKey is { } fk && mgefs.TryGetValue(fk, out var m) ? m : null;
+        ISpellGetter? spell = null;
+        IMagicEffectGetter? effect = null;
+        string level = "none";
+        if (t.SpellEdid != "")
+        {
+            spell = One(sf.Spells, t.SpellEdid, "SPEL");
+            effect = EffectOf(spell) ?? throw new Refusal($"{t.SpellEdid} has not exactly one effect with a record in Starfield.esm");
+            level = "named";
+        }
+        else
+        {
+            foreach (var strict in new[] { true, false })
+            {
+                var hit = sf.Spells.Where(sp => sp.Type == Spell.SpellType.Spell && sp.CastType == CastType.FireAndForget && sp.TargetType == TargetType.Self)
+                    .OrderBy(sp => sp.FormKey.ID).FirstOrDefault(sp => EffectOf(sp) is { } m && ValueMod(m, strict));
+                if (hit != null) { spell = hit; effect = EffectOf(hit); level = strict ? "strict" : "relaxed"; break; }
+            }
+        }
+        IIngestibleGetter? aid = null;
+        if (t.AidEdid != "") aid = One(sf.Ingestibles, t.AidEdid, "ALCH");
+        else aid = sf.Ingestibles.OrderBy(i => i.FormKey.ID).FirstOrDefault(i => i.Flags.HasFlag(Ingestible.Flag.Medicine) && i.MajorFlags.HasFlag(Ingestible.MajorFlag.Medicine) && i.Effects.Count == 1 && i.Addiction.IsNull);
+        return new Found(spell, effect, aid, level);
+    }
+
+    static string Name(IMajorRecordGetter? r) => r == null ? "none (minimal record)" : $"{r.EditorID} {r.FormKey}";
 
     static FormKey Own(uint id) => new(Plugin, id);
 
@@ -93,11 +144,13 @@ static class RadsProbe
 
     // ---------------------------------------------------------------- build
 
-    public static int Build(string templatePath, string outDir, string healthEdid, string typeName)
+    public static int Build(string templatePath, string outDir, string healthEdid, string typeName, Templates tpl)
     {
         var avType = ParseType(typeName);
         using var sf = OpenTemplate(templatePath);
         var health = One(sf.ActorValueInformation, healthEdid, "AVIF");
+        var found = FindTemplates(sf, tpl);
+        Console.WriteLine($"templates ({found.Level}): SPEL {Name(found.Spell)}, MGEF {Name(found.Effect)}, ALCH {Name(found.Aid)}");
         if (health.FormKey.ModKey != SfEsm) throw new Refusal($"{healthEdid} is not Starfield.esm's");
 
         var mod = new StarfieldMod(Plugin, Release);
@@ -112,34 +165,87 @@ static class RadsProbe
 
         var arch = new MagicEffectArchetype(MagicEffectArchetype.TypeEnum.ValueModifier);
         arch.Association.SetTo(avif.FormKey);
-        var effect = new MagicEffect(Own(EffectId), Release)
+        MagicEffect effect;
+        if (found.Effect != null)
         {
-            EditorID = EffectEdid, Name = "FO4SF Rads",
-            Archetype = arch,
-            CastType = CastType.FireAndForget, TargetType = TargetType.Self,
-            Flags = MagicEffect.Flag.NoDuration | MagicEffect.Flag.NoArea | MagicEffect.Flag.Detrimental,
-        };
+            effect = (MagicEffect)found.Effect.Duplicate(Own(EffectId), new MagicEffect.TranslationMask(defaultOn: true));
+            effect.EditorID = EffectEdid;
+            effect.Name = "FO4SF Rads";
+            effect.Description = "Rads of the FO4SF probe.";
+            effect.Archetype = arch;
+            effect.VirtualMachineAdapter = null;
+            effect.Conditions.Clear();
+            effect.Keywords = null;
+            effect.MagicSkill.SetToNull();
+            effect.ResistValue.SetToNull();
+            effect.SecondActorValue.SetToNull();
+            effect.ThirdActorValue.SetToNull();
+            effect.CounterEffects.Clear();
+        }
+        else
+        {
+            effect = new MagicEffect(Own(EffectId), Release)
+            {
+                EditorID = EffectEdid, Name = "FO4SF Rads", Archetype = arch,
+                CastType = CastType.FireAndForget, TargetType = TargetType.Self,
+                Flags = MagicEffect.Flag.NoDuration | MagicEffect.Flag.NoArea | MagicEffect.Flag.Detrimental,
+            };
+        }
         mod.MagicEffects.Add(effect);
 
-        Effect Entry(float magnitude) => new()
+        Effect Entry(float magnitude, IEffectGetter? from) => new()
         {
             BaseEffect = new FormLinkNullable<IMagicEffectGetter>(effect.FormKey),
             Data = new EffectData { Magnitude = magnitude, Area = 0, Duration = 0 },
+            MAGF = from?.MAGF, EFIF = from?.EFIF, MUID = from?.MUID,       // the template's ids, as a vanilla entry carries them
         };
-        var spell = new Spell(Own(SpellId), Release)
+        Spell spell;
+        if (found.Spell != null)
         {
-            EditorID = SpellEdid, Name = "FO4SF Rads", Type = Spell.SpellType.Spell, CastType = CastType.FireAndForget,
-            TargetType = TargetType.Self, Flags = Spell.Flag.ManualCostCalc,
-        };
-        spell.Effects.Add(Entry(SpellMagnitude));
+            spell = (Spell)found.Spell.Duplicate(Own(SpellId), new Spell.TranslationMask(defaultOn: true));
+            spell.EditorID = SpellEdid;
+            spell.Name = "FO4SF Rads";
+            spell.Description = "Raises FO4SF Rads by 100.";
+            spell.VirtualMachineAdapter = null;
+            spell.Keywords = null;
+            spell.Effects.Clear();
+            spell.Effects.Add(Entry(SpellMagnitude, found.Spell.Effects[0]));
+        }
+        else
+        {
+            spell = new Spell(Own(SpellId), Release)
+            {
+                EditorID = SpellEdid, Name = "FO4SF Rads", Type = Spell.SpellType.Spell, CastType = CastType.FireAndForget,
+                TargetType = TargetType.Self, Flags = Spell.Flag.ManualCostCalc,
+            };
+            spell.Effects.Add(Entry(SpellMagnitude, null));
+        }
         mod.Spells.Add(spell);
 
-        var radAway = new Ingestible(Own(RadAwayId), Release)
+        Ingestible radAway;
+        if (found.Aid != null)
         {
-            EditorID = RadAwayEdid, Name = "RadAway", Weight = 0.5f, Value = 10, Flags = Ingestible.Flag.Medicine,
-            MajorFlags = Ingestible.MajorFlag.Medicine,
-        };
-        radAway.Effects.Add(Entry(RadAwayMagnitude));
+            radAway = (Ingestible)found.Aid.Duplicate(Own(RadAwayId), new Ingestible.TranslationMask(defaultOn: true));
+            radAway.EditorID = RadAwayEdid;
+            radAway.Name = "RadAway";
+            radAway.Description = "Lowers FO4SF Rads by 200.";
+            radAway.VirtualMachineAdapter = null;
+            radAway.Keywords = null;
+            radAway.Addiction.SetToNull();
+            radAway.AddictionChance = 0f;
+            radAway.AddictionName = null;
+            radAway.Effects.Clear();
+            radAway.Effects.Add(Entry(RadAwayMagnitude, found.Aid.Effects[0]));
+        }
+        else
+        {
+            radAway = new Ingestible(Own(RadAwayId), Release)
+            {
+                EditorID = RadAwayEdid, Name = "RadAway", Weight = 0.5f, Value = 10, Flags = Ingestible.Flag.Medicine,
+                MajorFlags = Ingestible.MajorFlag.Medicine,
+            };
+            radAway.Effects.Add(Entry(RadAwayMagnitude, null));
+        }
         mod.Ingestibles.Add(radAway);
 
         var quest = new Quest(Own(QuestId), Release)
@@ -196,11 +302,13 @@ static class RadsProbe
 
     // ---------------------------------------------------------------- check (Mutagen read-back)
 
-    public static int Check(string pluginPath, string templatePath, string healthEdid, string typeName)
+    public static int Check(string pluginPath, string templatePath, string healthEdid, string typeName, Templates tpl)
     {
         var avType = ParseType(typeName);
         using var sf = OpenTemplate(templatePath);
         var health = One(sf.ActorValueInformation, healthEdid, "AVIF");
+        var found = FindTemplates(sf, tpl);
+        Console.WriteLine($"templates ({found.Level}): SPEL {Name(found.Spell)}, MGEF {Name(found.Effect)}, ALCH {Name(found.Aid)}");
         var styles = new Cache<IModMasterStyledGetter, ModKey>(x => x.ModKey);
         styles.Set(new KeyedMasterStyle(SfEsm, MasterStyle.Full));
         using var mod = StarfieldMod.CreateFromBinaryOverlay(pluginPath, Release, new BinaryReadParameters { MasterFlagsLookup = styles });
@@ -233,7 +341,14 @@ static class RadsProbe
             Console.WriteLine($"  MGEF {effect.EditorID} {effect.FormKey} archetype {arch?.Type} association {arch?.Association.FormKey} cast {effect.CastType} target {effect.TargetType} flags {effect.Flags}");
             Need(arch?.Type == MagicEffectArchetype.TypeEnum.ValueModifier, "the MGEF archetype is not ValueModifier");
             Need(arch?.Association.FormKey == Own(AvifId), "the MGEF's actor value (association) is not FO4SF_Rads");
-            Need(effect.CastType == CastType.FireAndForget && effect.TargetType == TargetType.Self, "the MGEF is not FireAndForget / Self");
+            var tm = found.Effect;
+            if (tm == null) Need(effect.CastType == CastType.FireAndForget && effect.TargetType == TargetType.Self, "the MGEF is not FireAndForget / Self");
+            else
+            {
+                Need(effect.CastType == tm.CastType && effect.TargetType == tm.TargetType && effect.Flags == tm.Flags, $"the MGEF's cast type, target or flags differ from its template {tm.EditorID}");
+                Need(effect.Sounds.Count == tm.Sounds.Count && effect.Components.Count == tm.Components.Count, $"the MGEF's sounds or components differ from its template {tm.EditorID}");
+                Need(effect.Conditions.Count == 0 && effect.VirtualMachineAdapter == null && (effect.Keywords?.Count ?? 0) == 0, "the MGEF still carries conditions, a script or keywords of its template");
+            }
         }
 
         void Entry(IReadOnlyList<IEffectGetter> list, float magnitude, string what)
@@ -247,7 +362,16 @@ static class RadsProbe
         {
             Console.WriteLine($"  SPEL {spell.EditorID} {spell.FormKey} {spell.Type} cast {spell.CastType} target {spell.TargetType}, {spell.Effects.Count} effect(s) at {string.Join(",", spell.Effects.Select(e => e.Data?.Magnitude))}");
             Entry(spell.Effects.ToList(), SpellMagnitude, "the spell");
-            Need(spell.CastType == CastType.FireAndForget && spell.TargetType == TargetType.Self, "the spell is not FireAndForget / Self");
+            var ts = found.Spell;
+            if (ts == null) Need(spell.CastType == CastType.FireAndForget && spell.TargetType == TargetType.Self, "the spell is not FireAndForget / Self");
+            else
+            {
+                Need(spell.EquipmentType.FormKey == ts.EquipmentType.FormKey && spell.CastType == ts.CastType && spell.TargetType == ts.TargetType && spell.Type == ts.Type && spell.Flags == ts.Flags,
+                     $"the spell's equip type, cast type, target, type or flags differ from its template {ts.EditorID}");
+                var e0 = spell.Effects.FirstOrDefault();
+                Need(e0 != null && e0.MAGF == ts.Effects[0].MAGF && e0.EFIF == ts.Effects[0].EFIF && e0.MUID == ts.Effects[0].MUID, "the spell's effect entry ids (MAGF, EFIF, MUID) are not its template's");
+                Need(spell.Effects.All(e => e.Conditions.Count == 0) && spell.VirtualMachineAdapter == null && (spell.Keywords?.Count ?? 0) == 0, "the spell still carries conditions, a script or keywords of its template");
+            }
         }
         var radAway = mod.Ingestibles.SingleOrDefault();
         Need(radAway?.FormKey == Own(RadAwayId) && radAway.EditorID == RadAwayEdid && radAway.Name?.String == "RadAway", "not exactly our ALCH named RadAway");
@@ -255,6 +379,12 @@ static class RadsProbe
         {
             Console.WriteLine($"  ALCH {radAway.EditorID} {radAway.FormKey} \"{radAway.Name?.String}\" flags {radAway.Flags}, {radAway.Effects.Count} effect(s) at {string.Join(",", radAway.Effects.Select(e => e.Data?.Magnitude))}");
             Entry(radAway.Effects.ToList(), RadAwayMagnitude, "RadAway");
+            var ta = found.Aid;
+            if (ta != null)
+            {
+                Need(radAway.Model?.File.GivenPath == ta.Model?.File.GivenPath && radAway.Flags == ta.Flags && radAway.MajorFlags == ta.MajorFlags, $"RadAway's model or flags differ from its template {ta.EditorID}");
+                Need(radAway.Addiction.IsNull && radAway.VirtualMachineAdapter == null && (radAway.Keywords?.Count ?? 0) == 0 && radAway.Effects.All(e => e.Conditions.Count == 0), "RadAway still carries an addiction, a script, keywords or conditions of its template");
+            }
         }
 
         var quest = mod.Quests.SingleOrDefault();
@@ -289,6 +419,30 @@ static class RadsProbe
         mod.ModHeader.Flags |= StarfieldModHeader.HeaderFlag.Master;
         mod.ActorValueInformation.Add(new ActorValueInformation(new FormKey(SfEsm, 0x00A02D), Release) { EditorID = "Health", Name = "Health" });
         mod.ActorValueInformation.Add(new ActorValueInformation(new FormKey(SfEsm, 0x00A02E), Release) { EditorID = "SynthOther", Name = "Other" });
+        var synthArch = new MagicEffectArchetype(MagicEffectArchetype.TypeEnum.ValueModifier);
+        synthArch.Association.SetTo(new FormKey(SfEsm, 0x00A02E));
+        var synthMgef = new MagicEffect(new FormKey(SfEsm, 0x00A100), Release)
+        {
+            EditorID = "SynthValueEffect", Name = "Synth", CastType = CastType.FireAndForget, TargetType = TargetType.Self,
+            Flags = MagicEffect.Flag.NoDuration | MagicEffect.Flag.Detrimental, Archetype = synthArch,
+            Keywords = new ExtendedList<IFormLinkGetter<IKeywordGetter>> { new FormLink<IKeywordGetter>(new FormKey(SfEsm, 0x00A200)) },
+        };
+        mod.MagicEffects.Add(synthMgef);
+        mod.Keywords.Add(new Keyword(new FormKey(SfEsm, 0x00A200), Release) { EditorID = "SynthKeyword" });
+        var synthSpell = new Spell(new FormKey(SfEsm, 0x00A101), Release)
+        {
+            EditorID = "SynthSelfSpell", Name = "Synth spell", Type = Spell.SpellType.Spell, CastType = CastType.FireAndForget, TargetType = TargetType.Self,
+            Flags = Spell.Flag.ManualCostCalc, Keywords = new ExtendedList<IFormLinkGetter<IKeywordGetter>> { new FormLink<IKeywordGetter>(new FormKey(SfEsm, 0x00A200)) },
+        };
+        synthSpell.EquipmentType.SetTo(new FormKey(SfEsm, 0x00A300));
+        synthSpell.Effects.Add(new Effect { BaseEffect = new FormLinkNullable<IMagicEffectGetter>(synthMgef.FormKey), Data = new EffectData { Magnitude = 5f }, MAGF = 7, EFIF = 8, MUID = 9 });
+        mod.Spells.Add(synthSpell);
+        var synthAid = new Ingestible(new FormKey(SfEsm, 0x00A102), Release)
+        {
+            EditorID = "SynthAid", Name = "Synth aid", Flags = Ingestible.Flag.Medicine, MajorFlags = Ingestible.MajorFlag.Medicine,
+        };
+        synthAid.Effects.Add(new Effect { BaseEffect = new FormLinkNullable<IMagicEffectGetter>(synthMgef.FormKey), Data = new EffectData { Magnitude = 5f }, MAGF = 1, EFIF = 2, MUID = 3 });
+        mod.Ingestibles.Add(synthAid);
         Directory.CreateDirectory(outDir);
         mod.BeginWrite.ToPath(Path.Combine(outDir, "Starfield.esm")).WithNoLoadOrder().Write();
         Console.WriteLine($"wrote {Path.Combine(outDir, "Starfield.esm")}");

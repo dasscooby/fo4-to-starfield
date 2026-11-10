@@ -63,6 +63,8 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(PSC.count("RadsSpell.Cast(p, p)"), 3)            # once at stage 20, twice at stage 30
         self.assertIn("p.EquipItem(RadAway, false, true)", PSC)
         self.assertIn("p.SetValue(RadsAV, 0.0)", PSC)
+        self.assertIn("p.SetValue(RadsAV, WriteTest)", PSC)            # stage 10 writes a number that is not zero
+        self.assertIn(f"float WriteTest = {int(__import__('fo4sf.rads.probe_log', fromlist=['x']).WRITE_TEST)}.0", PSC)
         self.assertEqual(len(re.findall(r"^;OPT Actor\.ModValue +p\.ModValue\(HealthAV, delta\)", PSC, re.M)), 1)
 
     def test_the_committed_script_compiles_alone_every_optional_line_is_a_comment(self):
@@ -229,6 +231,53 @@ class StageTests(unittest.TestCase):
         self.assertEqual(kinds, {b"TES4": 1, b"AVIF": 1, b"MGEF": 1, b"SPEL": 1, b"ALCH": 1, b"QUST": 1})
         self.assertNotIn(b"HAZD", kinds)
 
+    def test_the_effect_spell_and_radaway_are_copies_of_vanilla_records(self):
+        """The first game session crashed on Spell.Cast with records written from nothing: they now carry the
+        template's own subrecords (equip type, effect ids, description) and none of its keywords or conditions."""
+        out = self.root / "b2t"
+        proc = self.run_tool("build", self.master, out)
+        self.assertIn("templates (strict): SPEL SynthSelfSpell", proc.stdout)
+        self.assertIn("MGEF SynthValueEffect", proc.stdout)
+        self.assertIn("ALCH SynthAid", proc.stdout)
+        data = (out / PLUGIN).read_bytes()
+        subs = {}
+
+        def walk(buf, i, end):
+            while i < end:
+                sig = buf[i:i + 4]
+                size = struct.unpack_from("<I", buf, i + 4)[0]
+                if sig == b"GRUP":
+                    walk(buf, i + 24, i + size)
+                    i += size
+                    continue
+                body, j, names = buf[i + 24:i + 24 + size], 0, []
+                while j < len(body):
+                    names.append(body[j:j + 4])
+                    j += 6 + struct.unpack_from("<H", body, j + 4)[0]
+                subs[sig] = names
+                i += 24 + size
+        walk(data, 0, len(data))
+        for sub in (b"ETYP", b"MAGF", b"EFIF", b"MUID", b"DESC"):
+            self.assertIn(sub, subs[b"SPEL"], sub)
+        self.assertIn(b"DNAM", subs[b"MGEF"])
+        for sub in (b"MAGF", b"EFIF", b"MUID", b"DESC"):
+            self.assertIn(sub, subs[b"ALCH"], sub)
+        self.assertNotIn(b"KWDA", subs[b"SPEL"] + subs[b"MGEF"] + subs[b"ALCH"])
+        self.assertNotIn(b"CTDA", subs[b"SPEL"] + subs[b"MGEF"] + subs[b"ALCH"])
+        check = self.run_tool("check", out / PLUGIN, self.master)
+        self.assertEqual(check.returncode, 0, check.stdout)
+        self.assertIn("templates (strict)", check.stdout)
+
+    def test_a_named_template_is_used_and_an_unknown_one_is_refused(self):
+        out = self.root / "b2u"
+        ok = self.run_tool("build", self.master, out, "--template-spell", "SynthSelfSpell", "--template-aid", "SynthAid")
+        self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
+        self.assertIn("templates (named)", ok.stdout)
+        bad = self.run_tool("build", self.master, self.root / "b2v", "--template-spell", "NoSuchSpell")
+        self.assertEqual(bad.returncode, 1)
+        self.assertIn("0 SPEL named NoSuchSpell", bad.stderr)
+        self.assertFalse((self.root / "b2v" / PLUGIN).exists())
+
     def test_the_avif_type_can_be_named_and_is_checked(self):
         out = self.root / "b3"
         proc = self.run_tool("build", self.master, out, "--type", "DerivedAttribute")
@@ -272,6 +321,7 @@ class StageTests(unittest.TestCase):
         self.assertEqual((plan["health"], plan["avif_type"]), ("Health", "Variable"))
         self.assertEqual(sorted(plan["outputs"]), sorted([PLUGIN, "Data/Scripts/FO4SF_RadsProbeQuest.pex"]))
         self.assertEqual(plan["inputs"]["Starfield.esm"]["sha256"], mrp.sha256(str(self.master)))
+        self.assertTrue(plan["templates"].startswith("strict: SPEL SynthSelfSpell"))
         self.assertEqual(plan["optional"]["Actor.ModValue"], "kept")
         self.assertEqual(plan["optional"]["Actor.GetActiveEffects"], "kept")
         self.assertTrue(plan["optional"]["Actor.GetBaseValue"].startswith("declared but did not compile"))
@@ -303,6 +353,31 @@ class StageTests(unittest.TestCase):
                       "--content-resources", str(z)])
         self.assertIn("Quest.GetStageDone", str(e.exception))
         self.assertFalse(final.exists())                                       # nothing published
+
+
+class ConsoleCommandTests(unittest.TestCase):
+    def test_the_console_lines_carry_the_quest_form_id_of_the_session(self):
+        import contextlib
+        import io
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        f = Path(tmp.name) / "l.log"
+        f.write_text("\n".join(["[x] FO4SFRADS rt=1.0 init version=1 quest=184551428 installed=true end=true",
+                                "[x] FO4SFRADS rt=9.0 init version=1 quest=184551429 installed=true end=true"]), encoding="utf-8")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = mrp.main(["console", "--file", str(f)])
+        self.assertEqual(code, 0)
+        lines = out.getvalue().splitlines()
+        self.assertEqual(lines[:4], [f"setstage 0B000805 {s}" for s in (10, 20, 30, 40)])   # the latest init
+        self.assertIn("player.getav FO4SF_Rads", lines)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(mrp.main(["console", "--file", str(Path(tmp.name) / "none.log")]), 2)
+
+    def test_the_log_is_looked_for_under_onedrive_first(self):
+        paths = mrp.user_logs()
+        self.assertIn("OneDrive", paths[0])
+        self.assertNotIn("OneDrive", paths[1])
 
 
 class LogCommandTests(unittest.TestCase):

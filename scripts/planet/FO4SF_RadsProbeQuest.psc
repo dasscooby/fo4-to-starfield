@@ -4,7 +4,8 @@ Scriptname FO4SF_RadsProbeQuest extends Quest
  dotnet/RadsProbe, fills in: our actor value, Starfield's Health, our spell, our RadAway). The owner sets a stage from
  the console; the script polls the stage once a second (it does not rely on OnStageSet, whose behaviour is unresolved:
  docs/questprobe/engine-questions.md E2) and runs each step once:
-   stage 10  rads to 0       (SetValue) and the CONTROL: vanilla Health +10 with ModValue, read, -10, read
+   stage 10  the CONTROL (vanilla Health +10 with ModValue, read, -10, read), then our value written with a number that
+             is not zero (SetValue 50, read) and back to 0 (SetValue 0, read): does our own actor value take a number
    stage 20  rads to 100     (the spell, once: effect +100)
    stage 30  rads to 300     (the spell, twice: +200)
    stage 40  RadAway         (AddItem + EquipItem: effect -200, so 100 left)
@@ -32,6 +33,7 @@ int Version = 1
 string LogName = "FO4SFRadsProbe"
 string ProbePlugin = "FO4SFRadsProbe.esm"
 float ControlDelta = 10.0   ; the control: Health +10, read, -10, read
+float WriteTest = 50.0     ; stage 10: a number that is not zero, written to our value and read
 float PenaltyPerRad = 0.1   ; the route: Health loses one tenth of the rads (100 rads: 10, 300 rads: 30)
 
 int TIMER_POLL = 1
@@ -207,7 +209,10 @@ Function Step10(Actor p)
     Trace("step stage=10 call=SetValue expect=0")
     Reading("before", 10)
     Control(p)
+    p.SetValue(RadsAV, WriteTest)
+    Trace("set stage=10 wrote=" + WriteTest + " read=" + p.GetValue(RadsAV))
     p.SetValue(RadsAV, 0.0)
+    Trace("set stage=10 wrote=0.0 read=" + p.GetValue(RadsAV))
     Reading("now", 10)
     StartTimer(SETTLE_S, TIMER_SETTLE + 10)
 EndFunction
