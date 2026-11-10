@@ -42,10 +42,10 @@ def load_type_table(path=MAP_MARKER_TYPES_JSON):
             raise ValueError(f"map marker type table: FO4 type {row['fo4_id']} twice")
         by_fo4[row["fo4_id"]] = row
     default = doc["default"]["sf_type"]
-    for n in [default] + [r["sf_type"] for r in by_fo4.values()]:
+    for n in [default] + [r["sf_type"] for r in by_fo4.values()] + [r["sf_type"] for r in doc["fixed_markers"].values()]:
         if not (isinstance(n, int) and 0 <= n <= SF_TYPE_MAX and n not in SF_TYPE_OWN_PLACES):
             raise ValueError(f"map marker type table: Starfield type {n!r} is not in 10-{SF_TYPE_MAX}")
-    return {"by_fo4": by_fo4, "default": default, "fixed": dict(doc["fixed_markers"])}
+    return {"by_fo4": by_fo4, "default": default, "fixed": {t: r["sf_type"] for t, r in doc["fixed_markers"].items()}}
 
 
 _TYPE_TABLE = None
@@ -66,9 +66,9 @@ def starfield_type(fo4_type_id, table=None):
 
 
 def fixed_marker_type(tag):
-    """The icon number of one of the core's fixed four (COMMONWEALTH_MARKERS) by tag."""
+    """The Starfield icon number of one of the core's fixed four (COMMONWEALTH_MARKERS) by tag."""
     table = _table()
-    return starfield_type(table["fixed"].get(tag), table)
+    return table["fixed"].get(tag, table["default"])
 
 
 def type_counts(entries):

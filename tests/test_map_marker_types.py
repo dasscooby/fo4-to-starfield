@@ -30,6 +30,13 @@ class TypeTable(unittest.TestCase):
             self.assertTrue(row["reason"].strip(), fid)
         self.assertTrue(10 <= self.table["default"] <= 93)
 
+    def test_the_fixed_four_only_use_numbers_the_table_uses(self):
+        used = {r["sf_type"] for r in self.table["by_fo4"].values()}
+        self.assertEqual(set(self.table["fixed"]), {m[0] for m in mm.COMMONWEALTH_MARKERS})
+        for tag, n in self.table["fixed"].items():
+            self.assertIn(n, used, tag)
+            self.assertTrue(10 <= n <= 93, tag)
+
     def test_bad_number_is_refused(self):
         for bad in (5, 94, -1):
             doc = json.loads(Path(mm.MAP_MARKER_TYPES_JSON).read_text(encoding="utf-8"))

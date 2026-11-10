@@ -226,7 +226,7 @@ Every new marker keeps LC172's `FNAM` 0x1B. Their `TNAM` type now comes from `sr
 each FO4 marker type id of the export (`type_id`, xEdit's `TNAM` enum 0-80) maps to one Starfield icon number in 10-93
 (0-9 are emblems of Starfield's own places), with a one-line reason and a `fair` flag; `fair: false` rows (Vault, Metro
 Station, Institute, faction emblems, ...) are the case for own Pip-Boy icons. An FO4 id not in the table gets the
-default 85 (landmark). The core's fixed four are typed by tag (their FO4 type is assumed, not read from the plugin).
+default 85 (landmark). The core's fixed four carry their Starfield number directly (`fixed_markers`: Red Rocket 86, Sanctuary 35, Vault 111 86, Concord 35), each one the table itself uses.
 `TerrainOverlays` writes a map-marker entry's `type` (else LC172's 0x17 stays) and `dotnet/MapMarkers` an `--extra`
 entry's; the landing marker keeps 45. `make_map_markers.py stage` and `make_core64c.py` print a count per number. The
 numbers come from the owner's PC measurement of the map screen's 94-kind list; a table row is unverified in game until

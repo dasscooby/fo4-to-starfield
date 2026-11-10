@@ -5,12 +5,24 @@
   "reason": "an FO4 type not listed here (custom ids 81+, mods): landmark"
  },
  "fixed_markers": {
-  "RedRocket": 27,
-  "Sanctuary": 12,
-  "Vault111": 15,
-  "Concord": 49
+  "RedRocket": {
+   "sf_type": 86,
+   "reason": "a truck stop: generic structure"
+  },
+  "Sanctuary": {
+   "sf_type": 35,
+   "reason": "settlement"
+  },
+  "Vault111": {
+   "sf_type": 86,
+   "reason": "no vault kind: generic structure"
+  },
+  "Concord": {
+   "sf_type": 35,
+   "reason": "settlement"
+  }
  },
- "fixed_markers_note": "the core's four hand-placed markers have no export row here; their FO4 type is assumed (Red Rocket 27 filling station, Sanctuary 12, Vault 111 15, Concord 49 town), not read from Fallout4.esm",
+ "fixed_markers_note": "the core's four hand-placed markers have no export row; each carries its Starfield number directly (not an FO4 id), and it must be one the types table itself uses",
  "types": [
   {
    "fo4_id": 0,
