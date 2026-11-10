@@ -35,9 +35,9 @@ or "not decoded" in the report; it does not abort the run.
   * change forms:     "3-byte RefID, u32 flags, vsval A, B, C, A*3 bytes, B*2 bytes, 1 byte, C data bytes
                       starting with x, y, z, heading (floats)", accepted only if the floats are finite and
                       plausible. A 4-byte vsval (kind 3) is read like kind 2 (3 bytes); not verified.
-  * quest stage flags: NOT decoded. The layout of the quest change form is not verified; the report says
-                      so and shows the mission script's own `applied` value, which is a script variable and
-                      not the stage flag.
+  * quest stage flags: NOT decoded (the QUST change-form layout is not verified). The report says so and gives
+                      `script_stage` instead: the mission script's own `applied` member, i.e. the last stage
+                      the mission script applied (set on every OnStageSet). It is not the engine's stage flag.
 """
 import argparse
 import json
@@ -458,8 +458,9 @@ def build_report(data, spots=None, plugin_index=None, file_name=""):
     spots = spots or {}
     rep = {"file": file_name, "header": parse_header(data), "plugin_index": None, "script": None,
            "quest_stage": {"quest": QUEST_NAME, "decoded": False,
-                           "note": "not decoded: the quest change-form layout is not verified; see `applied` "
-                                   "in the mission instance (a script variable, not the stage flag)"},
+                           "note": "engine stage flags not decoded (quest change-form layout not verified); "
+                                   "use script_stage"},
+           "script_stage": None,
            "instances": [], "actors": [], "player": [], "warnings": []}
     w = rep["warnings"]
     if rep["header"] is None:
@@ -509,9 +510,14 @@ def build_report(data, spots=None, plugin_index=None, file_name=""):
         elif vals and not all(v["decoded"] for v in vals):
             w.append("instance %s: some member values not decoded" % iid.hex())
 
+    for inst in rep["instances"]:
+        if inst["role"] == "mission" and inst["members"]:
+            for m in inst["members"]:
+                if m["name"].lower() == "applied" and m["decoded"]:
+                    rep["script_stage"] = {"value": m["value"], "source": "mission script member `applied`",
+                                           "description": "the last stage the mission script applied"}
     if fa:
         prefix = fa[0]
-        pre = None
         for label, local in ACTOR_LOCALS:
             fid = (prefix << 24) | local
             rb = refid_for(data, arr_start, arr_count, fid)
@@ -556,6 +562,8 @@ def format_report(rep):
         L.append("script %s: %d strings, %s member variables" % (s["name"], s["string_count"],
                                                                  len(s["members"]) if s["members"] is not None else "?"))
     L.append("quest %s stage flags: %s" % (rep["quest_stage"]["quest"], rep["quest_stage"]["note"]))
+    ss = rep["script_stage"]
+    L.append("script_stage: %s (the last stage the mission script applied)" % (ss["value"] if ss else "not found"))
     for i in rep["instances"]:
         L.append("instance %s on quest %s (%s):" % (i["instance_id"], i["quest_form"] or "?", i["role"]))
         if i["members"] is None:

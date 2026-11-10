@@ -181,6 +181,15 @@ class ReportTests(unittest.TestCase):
         self.assertFalse(qs["decoded"])
         self.assertIn("not decoded", qs["note"])
 
+    def test_script_stage_is_the_mission_applied_value(self):
+        ss = self.report()["script_stage"]
+        self.assertEqual(ss["value"], 30)
+        self.assertEqual(ss["description"], "the last stage the mission script applied")
+
+    def test_script_stage_missing_without_mission(self):
+        plain = build_plain_save().replace(SCRIPT_NAME.encode(), b"X" * len(SCRIPT_NAME))
+        self.assertIsNone(save_probe.build_report(plain, {}, None, "x")["script_stage"])
+
     def test_unknown_type_code_does_not_fail_the_read(self):
         rep = self.report(keeper_object_member=True)
         keeper = next(i for i in rep["instances"] if i["role"] == "keeper")
@@ -231,6 +240,7 @@ class CommandLineTests(unittest.TestCase):
         code, out, err = self.run_main(self.save, "--spots", spots, "--json", out_json)
         self.assertEqual(code, 0, err)
         self.assertIn("applied=30", out)
+        self.assertIn("script_stage: 30 (the last stage the mission script applied)", out)
         self.assertIn("m from spot", out)
         self.assertEqual(json.loads(slurp(out_json))["plugin_index"], "%02X" % PREFIX)
         self.assertEqual(slurp(self.save), before)                 # the save is untouched
