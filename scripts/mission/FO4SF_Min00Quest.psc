@@ -19,8 +19,8 @@ Actor Property Codsworth Auto Const
  on FO4SF_Min00 and in a --no-codsworth build. Not part of the mission.}
 
 bool Property KeeperOnly = False Auto Const
-{True on FO4SF_CodsworthKeeper: this instance only keeps Codsworth (enabled, moved into the merged world) and Preston
- (moved back to his merged spot, KeepPreston) and never runs the mission. A quest of its own because a new
+{True on FO4SF_CodsworthKeeper: this instance only keeps Codsworth (enabled, put back at his merged spot, PlaceCodsworth)
+ and Preston (put back at his merged spot, KeepPreston) and never runs the mission. A quest of its own because a new
  start-game-enabled quest starts on an existing save, where FO4SF_Min00 had already ended (stage 200 cancels timer 1,
  which started his timer) or ran OnQuestInit before his timer existed: the owner's save, 22 Oct, had him unmoved and no
  mission log.}
@@ -48,14 +48,23 @@ float Property PrestonLocalZ = 89.09 Auto Const
  who drifted or was offset twice goes back to the same spot (PlacePreston). make_mission.py stage refuses a build whose
  points differ from these.}
 
+float Property CodsworthLocalX = -1146.709 Auto Const
+float Property CodsworthLocalY = 1293.837 Auto Const
+float Property CodsworthLocalZ = 111.734 Auto Const
+{Codsworth's spot in the plugin (ACHR 0x811, Fallout 4's ACHR 01CA7D: points.json "codsworth" pos). His merged spot is
+ this + the merge offset, (-2346.709, -1406.163, 111.734), where every logged move put him (23 and 31 Oct). Fixed, as
+ Preston's (PlaceCodsworth, FAL-163). make_mission.py stage refuses a build whose points differ from these.}
+
 float Property PlaceRadius = 300.0 Auto Const
-{Preston is placed only when the player stands outdoors within this many m of his merged spot, so he lands in a loaded
- cell. PC logs of 31 Oct: moves made from 488 to 545 m away ended with cell=None and did not hold; the raiders' moves
- from 198 to 353 m away ended in a loaded cell (Surface 04000DEF) and held. Chosen below 353.}
+{Preston and Codsworth are placed only when the player stands outdoors within this many m of their merged spot, so they
+ land in a loaded cell. PC logs of 31 Oct: moves made from 488 to 545 m away ended with cell=None and did not hold; the
+ raiders' moves from 198 to 353 m away ended in a loaded cell (Surface 04000DEF) and held; Codsworth's, from 122 m,
+ ended in a loaded cell (Surface 04000D30). Chosen below 353.}
 
 float Property HoldRadius = 25.0 Auto Const
-{Preston counts as at his spot within this many m of it (and within RelocateGap of the player); farther, he is put back,
- except while he fights. On 31 Oct he stood 100 to 450 m off it and nothing moved him again. Chosen above FindRadius.}
+{Preston (Codsworth) counts as at his spot within this many m of it (and within RelocateGap of the player); farther, he
+ is put back, except while he fights. On 31 Oct Preston stood 100 to 450 m off it and nothing moved him again. Chosen
+ above FindRadius.}
 
 int Property RewardCount = 100 Auto Const
 {Fallout 4 gives 100 caps (DialogueConcordArea stage 40).}
@@ -64,7 +73,8 @@ float Property CodsworthCheck = 5.0 Auto Const
 {Seconds between the keeper's relocation checks (KeepCodsworth, KeepPreston).}
 
 int Property KeeperStatusEvery = 12 Auto Const
-{The keeper logs where Preston is every this many checks (12 x 5 s = a minute), and at each save load. Chosen.}
+{The keeper logs where Preston and Codsworth are every this many checks (12 x 5 s = a minute), and at each save load.
+ Chosen.}
 
 float Property EngageRadius = 60.0 Auto Const
 {The fight starts when the player comes this close (m) to a living raider, as FO4's DN092 StartCombat on its ambush.}
@@ -86,6 +96,9 @@ int keeperChecks = 0
 int prestonMoves = 0
 float prestonOff = -1.0
 string prestonState = "none"
+int codsworthMoves = 0
+float codsworthOff = -1.0
+string codsworthState = "none"
 bool codsworthKept = False
 int applied = 0
 bool prestonFound = False
@@ -118,8 +131,8 @@ EndFunction
 
 Function KeepCodsworthLoad()
 {The keeper's start, at its init and on every save load: Codsworth enabled, fresh budgets of failed moves for him and
- Preston, one line of where Preston is (in the log and on screen), the timer (re)started. A load also restarts a check
- that spent its budget in an earlier session. A missing Codsworth no longer stops Preston's keeping (FAL-128).}
+ Preston, one line each of where they are (in the log and on screen), the timer (re)started. A load also restarts a
+ check that spent its budget in an earlier session. A missing Codsworth no longer stops Preston's keeping (FAL-128).}
     if Codsworth != None
         if Codsworth.IsDisabled()
             Codsworth.Enable()
@@ -131,6 +144,10 @@ Function KeepCodsworthLoad()
     prestonFails = 0
     TracePreston("keeper load")
     Debug.Notification("FO4SF keeper: Preston " + (prestonOff as int) + " m from his spot (last: " + prestonState + ", moves " + prestonMoves + ")")
+    if Codsworth != None
+        TraceCodsworth("keeper load")
+        Debug.Notification("FO4SF keeper: Codsworth " + (codsworthOff as int) + " m from his spot (last: " + codsworthState + ", moves " + codsworthMoves + ")")
+    endif
     StartTimer(CodsworthCheck, 2)
 EndFunction
 
@@ -296,7 +313,7 @@ EndFunction
 Function Relocate(Actor player)
 {Moves the raiders (Codsworth: KeepCodsworth) from their unmerged local position to the same spot in the merged world the
  player walks in: each actor's local position + the merge offset, z kept (MoveTo onto the player with the difference as
- the offset, the verified MoveTo form of FO4SF_LoadDoor and FO4SF_Probe), and puts Preston at his fixed spot
+ the offset, the verified MoveTo form of FO4SF_LoadDoor and FO4SF_Probe; MoveOver), and puts Preston at his fixed spot
  (PlacePreston). Decided per actor and by position, every check: in game 18 Oct 14:40 the unmoved actors read a finite
  distance (same world, local spot), so "finite means reachable" skipped the move. An actor a move missed is tried
  again (Codex 5564899342), up to 10 failed moves in all. Never from an interior.}
@@ -321,17 +338,27 @@ EndFunction
 Function KeepCodsworth()
 {Codsworth is not part of the quest, so he has his own check every CodsworthCheck seconds with its own budget of 10
  failed moves. It keeps running after stage 200, which ends the mission's timer: the player may reach Sanctuary only
- after the mission, and he went back to his unmerged spot once already (in game 18 Oct 15:17). On the keeper, Preston's
- check runs whether or not Codsworth is there (FAL-128); FO4SF_Min00 (no Codsworth) on a save that ran this timer before
- the keeper does nothing and lets it end.}
+ after the mission, and he goes back to his unmerged spot (in game 18 Oct 15:17; 29 Oct, within about three minutes).
+ He has Preston's rule, one fixed spot (PlaceCodsworth, FAL-163); a spent budget is logged and shown on screen, and where
+ he is goes to the log every KeeperStatusEvery checks. On the keeper, Preston's check runs whether or not Codsworth is
+ there (FAL-128); FO4SF_Min00 (no Codsworth) on a save that ran this timer before the keeper does nothing and lets it
+ end.}
     Actor player = Game.GetPlayer()
-    if Codsworth != None && codsworthFails < 10 && !player.IsInInterior()
-        if MoveOver(Codsworth, player, player.GetPositionX(), player.GetPositionY(), player.GetPositionZ(), "codsworth")
+    if Codsworth != None && codsworthFails < 10
+        if PlaceCodsworth(player)
             codsworthFails += 1
+            if codsworthFails >= 10
+                codsworthState = "gave up"
+                Trace("keeper gave up codsworth fails=" + codsworthFails)
+                Debug.Notification("FO4SF keeper: Codsworth not placed after 10 tries; stopped until the next load")
+            endif
         endif
     endif
     if KeeperOnly
         KeepPreston(player)
+        if Codsworth != None && keeperChecks % KeeperStatusEvery == 0
+            TraceCodsworth("keeper status")
+        endif
     endif
     if (Codsworth != None && codsworthFails < 10) || (KeeperOnly && prestonFails < 10)
         StartTimer(CodsworthCheck, 2)
@@ -362,74 +389,110 @@ Function KeepPreston(Actor player)
 EndFunction
 
 bool Function PlacePreston(Actor player, string who)
-{Puts Preston at his merged spot (PrestonLocalX/Y/Z + the merge offset, fixed) when he is not there, the player stands
- outdoors within PlaceRadius of it and he is not fighting. Returns True for a failed move: one that leaves him off his
- spot. FAL-128, the PC's 31 Oct logs: MoveOver judged "already moved" by his distance to the PLAYER (under RelocateGap),
- so a Preston who landed or wandered 100 to 450 m off his spot was never moved again, and it took his target from where
- he stood, so a moved actor could be offset a second time, about 2,955 m away (the raiders were, 31 Oct 16:33). The
- state stays readable without a log: sqv shows prestonState, prestonOff and prestonMoves, and each move is on screen.}
+{Preston's fixed spot (FAL-128): PrestonLocalX/Y/Z + the merge offset, by PlaceAt. Returns True for a failed move: one
+ that leaves him off his spot. The PC's 31 Oct logs: MoveOver judged "already moved" by his distance to the PLAYER (under
+ RelocateGap), so a Preston who landed or wandered 100 to 450 m off his spot was never moved again, and it took his
+ target from where he stood, so a moved actor could be offset a second time, about 2,955 m away (the raiders were,
+ 31 Oct 16:33). The state stays readable without a log: sqv shows prestonState, prestonOff and prestonMoves.}
     float tx = PrestonLocalX + MergeOffsetX
     float ty = PrestonLocalY + MergeOffsetY
     float tz = PrestonLocalZ
-    float dp = player.GetDistance(Preston)                ; float max: another world
-    prestonOff = SpotOff(tx, ty, tz)
-    if prestonOff <= HoldRadius && dp < RelocateGap
-        prestonState = "at spot"
-        return False
+    prestonState = PlaceAt(Preston, "Preston", tx, ty, tz, player, who, "at the museum door")
+    prestonOff = SpotOff(Preston, tx, ty, tz)
+    if prestonState == "placed" || prestonState == "move failed"
+        prestonMoves += 1
+    endif
+    return prestonState == "move failed"
+EndFunction
+
+bool Function PlaceCodsworth(Actor player)
+{Codsworth's fixed spot (FAL-163): CodsworthLocalX/Y/Z + the merge offset, by PlaceAt, Preston's rule; only the keeper
+ places him. Returns True for a failed move. The PC's 31 Oct logs: MoveOver moved him once per session, from 122 m, and
+ never again, since under RelocateGap from the player counted as "already moved"; it moved from up to RelocateRadius
+ (800) away, where Preston's moves ended with cell=None; and on 29 Oct he was back at his unmerged spot within about
+ three minutes. sqv shows codsworthState, codsworthOff and codsworthMoves.}
+    float tx = CodsworthLocalX + MergeOffsetX
+    float ty = CodsworthLocalY + MergeOffsetY
+    float tz = CodsworthLocalZ
+    codsworthState = PlaceAt(Codsworth, "Codsworth", tx, ty, tz, player, "keeper", "in Sanctuary")
+    codsworthOff = SpotOff(Codsworth, tx, ty, tz)
+    if codsworthState == "placed" || codsworthState == "move failed"
+        codsworthMoves += 1
+    endif
+    return codsworthState == "move failed"
+EndFunction
+
+string Function PlaceAt(Actor a, string name, float tx, float ty, float tz, Actor player, string who, string where)
+{The fixed-spot rule of Preston (FAL-128) and Codsworth (FAL-163): puts the actor at its merged spot (tx, ty, tz) when it
+ is not there, the player stands outdoors within PlaceRadius of it and it is not fighting. At its spot means within
+ HoldRadius of it and within RelocateGap of the player. Returns the actor's state: "at spot", "off, player inside", "off,
+ player away", "off, fighting", "placed", or "move failed" (a move that leaves it off its spot). Each move is logged
+ ("moved <name> ... by=<who>") and shown on screen. The game prints a name as the property it matches (31 Oct:
+ "moved Codsworth" from the literal "codsworth"), so make_mission.py log reads the lines case-insensitively.}
+    float dp = player.GetDistance(a)                      ; float max: another world
+    float off = SpotOff(a, tx, ty, tz)
+    if off <= HoldRadius && dp < RelocateGap
+        return "at spot"
     endif
     if player.IsInInterior()
-        prestonState = "off, player inside"
-        return False
+        return "off, player inside"
     endif
     float px = player.GetPositionX()
     float py = player.GetPositionY()
     float pz = player.GetPositionZ()
     if (px - tx) * (px - tx) + (py - ty) * (py - ty) > PlaceRadius * PlaceRadius
-        prestonState = "off, player away"
-        return False
+        return "off, player away"
     endif
-    if dp < RelocateGap && Preston.GetCombatState() != 0
-        prestonState = "off, fighting"
-        return False                                      ; the fight moves him; he is put back once it is over
+    if dp < RelocateGap && a.GetCombatState() != 0
+        return "off, fighting"                            ; the fight moves it; it is put back once the fight is over
     endif
-    Trace("world preston player=" + player.GetWorldSpace() + " actor=" + Preston.GetWorldSpace() + " cell=" + Preston.GetParentCell())
-    Preston.MoveTo(player, tx - px, ty - py, tz - pz, True, False)
-    float d = player.GetDistance(Preston)
-    float off = SpotOff(tx, ty, tz)
-    bool failed = off > HoldRadius || d >= RelocateGap
-    prestonMoves += 1
-    Trace("world preston after=" + Preston.GetWorldSpace() + " cell=" + Preston.GetParentCell())
-    Trace("moved preston to " + Preston.GetPositionX() + " " + Preston.GetPositionY() + " " + Preston.GetPositionZ() + " target " + tx + " " + ty + " " + tz + " before=" + dp + " off=" + prestonOff + " d=" + d + " failed=" + failed + " by=" + who)
-    Debug.Notification("FO4SF: Preston put back at the museum door (" + who + ", was " + (prestonOff as int) + " m off, failed=" + failed + ")")
-    prestonOff = off
+    Trace("world " + name + " player=" + player.GetWorldSpace() + " actor=" + a.GetWorldSpace() + " cell=" + a.GetParentCell())
+    a.MoveTo(player, tx - px, ty - py, tz - pz, True, False)
+    float d = player.GetDistance(a)
+    float after = SpotOff(a, tx, ty, tz)
+    bool failed = after > HoldRadius || d >= RelocateGap
+    Trace("world " + name + " after=" + a.GetWorldSpace() + " cell=" + a.GetParentCell())
+    Trace("moved " + name + " to " + a.GetPositionX() + " " + a.GetPositionY() + " " + a.GetPositionZ() + " target " + tx + " " + ty + " " + tz + " before=" + dp + " off=" + off + " d=" + d + " failed=" + failed + " by=" + who)
+    Debug.Notification("FO4SF: " + name + " put back " + where + " (" + who + ", was " + (off as int) + " m off, failed=" + failed + ")")
     if failed
-        prestonState = "move failed"
-    else
-        prestonState = "placed"
+        return "move failed"
     endif
-    return failed
+    return "placed"
 EndFunction
 
-float Function SpotOff(float tx, float ty, float tz)
-{Preston's distance (m) from a point, by position only: positions cannot tell two worlds apart, so PlacePreston also
- wants him within RelocateGap of the player.}
-    float ex = Preston.GetPositionX() - tx
-    float ey = Preston.GetPositionY() - ty
-    float ez = Preston.GetPositionZ() - tz
+float Function SpotOff(Actor a, float tx, float ty, float tz)
+{An actor's distance (m) from a point, by position only: positions cannot tell two worlds apart, so PlaceAt also wants
+ it within RelocateGap of the player.}
+    float ex = a.GetPositionX() - tx
+    float ey = a.GetPositionY() - ty
+    float ez = a.GetPositionZ() - tz
     return Math.Sqrt(ex * ex + ey * ey + ez * ez)
 EndFunction
 
 Function TracePreston(string what)
+    prestonOff = SpotOff(Preston, PrestonLocalX + MergeOffsetX, PrestonLocalY + MergeOffsetY, PrestonLocalZ)
+    TraceSpot(what, Preston, "preston", prestonOff, prestonState, prestonMoves, prestonFails)
+EndFunction
+
+Function TraceCodsworth(string what)
+    codsworthOff = SpotOff(Codsworth, CodsworthLocalX + MergeOffsetX, CodsworthLocalY + MergeOffsetY, CodsworthLocalZ)
+    TraceSpot(what, Codsworth, "codsworth", codsworthOff, codsworthState, codsworthMoves, codsworthFails)
+EndFunction
+
+Function TraceSpot(string what, Actor a, string name, float off, string spotState, int moves, int fails)
+{One keeper line of where an actor is: "<what> <name> d= off= state= moves= at x y z disabled= dead= fails= player=x y z
+ interior=" (keeper load / keeper status). (State is a Papyrus keyword, so the parameter is spotState.)}
     Actor player = Game.GetPlayer()
-    prestonOff = SpotOff(PrestonLocalX + MergeOffsetX, PrestonLocalY + MergeOffsetY, PrestonLocalZ)
-    Trace(what + " preston d=" + player.GetDistance(Preston) + " off=" + prestonOff + " state=" + prestonState + " moves=" + prestonMoves + " at " + Preston.GetPositionX() + " " + Preston.GetPositionY() + " " + Preston.GetPositionZ() + " disabled=" + Preston.IsDisabled() + " dead=" + Preston.IsDead() + " fails=" + prestonFails + " player=" + player.GetPositionX() + " " + player.GetPositionY() + " " + player.GetPositionZ() + " interior=" + player.IsInInterior())
+    Trace(what + " " + name + " d=" + player.GetDistance(a) + " off=" + off + " state=" + spotState + " moves=" + moves + " at " + a.GetPositionX() + " " + a.GetPositionY() + " " + a.GetPositionZ() + " disabled=" + a.IsDisabled() + " dead=" + a.IsDead() + " fails=" + fails + " player=" + player.GetPositionX() + " " + player.GetPositionY() + " " + player.GetPositionZ() + " interior=" + player.IsInInterior())
 EndFunction
 
 bool Function MoveOver(Actor a, Actor player, float px, float py, float pz, string what)
-{Moves one actor (a raider, Codsworth; Preston: PlacePreston) when the player is within RelocateRadius of its merged
- spot and it is still farther than RelocateGap. Returns True for a failed move: one that leaves it farther than
- RelocateGap. Its target is where the actor stands + the offset, so an actor already moved is offset again when the
- player stands about one offset length (2,955 m) from it (raiders, 31 Oct 16:33): open, not fixed here.}
+{Moves one raider (Preston: PlacePreston; Codsworth: PlaceCodsworth) when the player is within RelocateRadius of its
+ merged spot and it is still farther than RelocateGap. Returns True for a failed move: one that leaves it farther than
+ RelocateGap. Its target is where the raider stands + the offset, so it moves only a raider at its unmerged spot, whose
+ target is within RelocateRadius of Preston's merged spot (the plugin takes the raiders within 120 m of his spot). A
+ raider already moved stands about one offset length (2,955 m) from there: the PC's 31 Oct logs (16:33, the player about
+ that far south-west of them) had all five offset a second time, to (-3000..-3150, -4500..-4600) (FAL-163).}
     float before = player.GetDistance(a)                  ; float max: another world; finite: this world (the world proof)
     if before < RelocateGap
         return False                                      ; already where the player is
@@ -441,6 +504,11 @@ bool Function MoveOver(Actor a, Actor player, float px, float py, float pz, stri
     float dy = py - y
     if dx * dx + dy * dy > RelocateRadius * RelocateRadius
         return False                                      ; the player is not at its merged spot
+    endif
+    float hx = x - (PrestonLocalX + MergeOffsetX)
+    float hy = y - (PrestonLocalY + MergeOffsetY)
+    if hx * hx + hy * hy > RelocateRadius * RelocateRadius
+        return False                                      ; moved already: never offset twice
     endif
     WorldSpace wa = a.GetWorldSpace()                     ; evidence for Codex's world-identity point (#353): which
     WorldSpace wp = player.GetWorldSpace()                ; world each side is in before a move (only moves: Codex 4331303552)
