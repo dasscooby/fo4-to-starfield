@@ -299,6 +299,8 @@ class CommandLineTests(unittest.TestCase):
         self.assertIn("applied=30", out)
         self.assertIn("script_stage: 30 (the last stage the mission script applied)", out)
         self.assertIn("m from spot", out)
+        self.assertRegex(out, r"actor player .*\d m from spot Preston")
+        self.assertNotRegex(out, r"m from Preston")
         self.assertEqual(json.loads(slurp(out_json))["plugin_index"], "%02X" % PREFIX)
         self.assertEqual(slurp(self.save), before)                 # the save is untouched
         self.assertEqual(sorted(os.listdir(self.tmp.name)), ["fixture.sfs", "out.json", "spots.json"])

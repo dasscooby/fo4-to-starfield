@@ -613,7 +613,7 @@ def format_report(rep):
         if a["from_spot_m"] is not None:
             line += " | %.1f m from spot (%.2f, %.2f, %.2f)" % (a["from_spot_m"], *a["spot"])
         if a.get("from_spots_m"):
-            line += " | " + ", ".join("%.1f m from %s" % (d, k) for k, d in a["from_spots_m"].items())
+            line += " | " + ", ".join("%.1f m from spot %s" % (d, k) for k, d in a["from_spots_m"].items())
         L.append(line)
     for w in rep["warnings"]:
         L.append("warning: %s" % w)
