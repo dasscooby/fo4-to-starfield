@@ -57,10 +57,14 @@ def cmd_seedpack(args) -> int:
     draft = _load_json(args.draft)
     if not isinstance(draft, dict) or not draft.get("draft") or "places" not in draft:
         raise ValueError(f"{args.draft}: not a seed draft (want the commonwealth_seed.draft.json that `seed` writes)")
-    pack, report = seedpack.generate(draft)
+    gateway_args = {"gateways": _load_json(args.gateways)} if args.gateways else {}
+    pack, report = seedpack.generate(draft, **gateway_args)
     paths = seedpack.write(args.out_dir, pack, report)
     print(f"{seedpack.summary(report)} -> {paths['pack']}")
-    return 1 if report["validation_problems"] else 0
+    gateway_problems = report.get("gateways", {}).get("problems", [])
+    for problem in gateway_problems:
+        print(f"error: {problem}", file=sys.stderr)
+    return 1 if report["validation_problems"] or gateway_problems else 0
 
 
 def _world(args, seed: int = 1) -> WorldState | None:
@@ -163,6 +167,7 @@ def parser() -> argparse.ArgumentParser:
     s = sub.add_parser("seed-pack", help="generate a runnable pack from a seed draft (placeholder rules)")
     s.add_argument("draft", metavar="DRAFT.json")
     s.add_argument("out_dir")
+    s.add_argument("--gateways", metavar="FILE", help="explicit inter-world gateway pairs (a, b, hours)")
     s.set_defaults(fn=cmd_seedpack)
     s = sub.add_parser("simulate", help="run the simulation on JSON packs")
     s.add_argument("--pack", action="append", metavar="FILE")

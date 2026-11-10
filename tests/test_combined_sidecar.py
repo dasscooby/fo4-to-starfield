@@ -188,5 +188,213 @@ class OrphanTests(unittest.TestCase):
             self.assertEqual(sidecar.orphans(d, ["Save1"]), [])
 
 
+class CharacterNameTests(unittest.TestCase):
+    def test_golden_name(self):
+        self.assertEqual(sidecar.character_sidecar_name("Save 1", "character_A-01"),
+                         "Save_1-01107a54-f05d3f7ca8396b6d.focc")
+
+    def test_safe_names_and_id_boundaries(self):
+        for name in ("../evil", "...", "ünïcödé", "x" * 300):
+            for cid in ("a", "A_0-9", "x" * 64):
+                with self.subTest(name=name, cid=cid):
+                    filename = sidecar.character_sidecar_name(name, cid)
+                    self.assertRegex(filename, r"^[A-Za-z0-9_.-]+$")
+                    self.assertLessEqual(len(filename), 111)
+                    self.assertEqual(filename, sidecar.character_sidecar_name(name, cid))
+        self.assertNotEqual(sidecar.character_sidecar_name("a/b", "a"),
+                            sidecar.character_sidecar_name("a_b", "a"))
+        self.assertNotEqual(sidecar.character_sidecar_name("x" * 300, "a"),
+                            sidecar.character_sidecar_name("x" * 301, "a"))
+
+    def test_invalid_character_ids(self):
+        for cid in ("", "x" * 65, ".", "/", " ", "é", None, 7, b"abc", "abc\n"):
+            with self.subTest(cid=cid):
+                with self.assertRaises(ValueError):
+                    sidecar.validate_character_id(cid)
+                with self.assertRaises(ValueError):
+                    sidecar.character_sidecar_name("Save", cid)
+                with self.assertRaises(ValueError):
+                    sidecar.character_encode("Save", world(), cid)
+
+    def test_save_name_validated_before_character_id(self):
+        for save_name in ("", None, 7):
+            with self.subTest(save_name=save_name):
+                with self.assertRaisesRegex(ValueError, "save name"):
+                    sidecar.character_sidecar_name(save_name, ".")
+
+
+class CharacterVerifyTests(unittest.TestCase):
+    def setUp(self):
+        self.ws = world(5, hours=24)
+        self.text = sidecar.character_encode("Save5", self.ws, "character_5")
+        self.body = json.loads(self.text)
+
+    def decode(self, body):
+        return sidecar.character_decode(json.dumps(body, sort_keys=True), "Save5", "character_5")
+
+    def test_character_envelope_is_deterministic(self):
+        self.assertEqual(self.text, sidecar.character_encode("Save5", self.ws, "character_5"))
+        self.assertEqual(self.text, json.dumps(self.body, sort_keys=True))
+        self.assertEqual(set(self.body), {"character_id", "format", "save_name", "schema", "sha256", "world_state"})
+        self.assertEqual((self.body["character_id"], self.body["format"], self.body["save_name"], self.body["schema"]),
+                         ("character_5", sidecar.FORMAT, "Save5", 2))
+        self.assertEqual(self.body["sha256"], sidecar.checksum(self.ws.to_json()))
+        self.assertEqual(sidecar.character_decode(self.text, "Save5", "character_5").to_json(), self.ws.to_json())
+
+    def test_legacy_classified_before_checksum_and_identity(self):
+        legacy = json.loads(sidecar.encode("OtherSave", self.ws))
+        for checksum in (legacy["sha256"], "wrong"):
+            with self.subTest(checksum=checksum):
+                body = dict(legacy, sha256=checksum)
+                with self.assertRaisesRegex(sidecar.LegacySidecarError,
+                                            "schema 1 has no character id; refused, not adopted"):
+                    self.decode(body)
+
+    def test_unknown_schema_is_not_legacy(self):
+        for schema in (0, 3, 99, None, "2"):
+            with self.subTest(schema=schema):
+                with self.assertRaisesRegex(ValueError, "unknown sidecar schema") as caught:
+                    self.decode(dict(self.body, schema=schema, sha256="wrong"))
+                self.assertNotIsInstance(caught.exception, sidecar.LegacySidecarError)
+
+    def test_edited_character_id_with_valid_state_checksum(self):
+        with self.assertRaises(ValueError) as caught:
+            self.decode(dict(self.body, character_id="other_character"))
+        self.assertIn("other_character", str(caught.exception))
+        self.assertIn("character_5", str(caught.exception))
+
+    def test_edited_save_name_with_valid_state_checksum(self):
+        with self.assertRaises(ValueError) as caught:
+            self.decode(dict(self.body, save_name="OtherSave"))
+        self.assertIn("OtherSave", str(caught.exception))
+        self.assertIn("Save5", str(caught.exception))
+
+    def test_missing_fields_and_checksum_have_distinct_errors(self):
+        for field in ("world_state", "sha256"):
+            with self.subTest(field=field):
+                body = {k: v for k, v in self.body.items() if k != field}
+                with self.assertRaisesRegex(ValueError, "^sidecar lacks world_state or sha256$"):
+                    self.decode(body)
+        body = copy.deepcopy(self.body)
+        body["world_state"]["hour"] += 1
+        with self.assertRaisesRegex(ValueError, "^sidecar checksum mismatch: body edited or truncated$"):
+            self.decode(body)
+
+    def test_invalid_json_or_format_is_not_legacy(self):
+        for text, message in ((self.text[:-20], "not JSON"), ("[]", "not a focc-sidecar"),
+                              (json.dumps(dict(self.body, format="other", schema=1)), "not a focc-sidecar")):
+            with self.subTest(text=text):
+                with self.assertRaisesRegex(ValueError, message) as caught:
+                    sidecar.character_decode(text, "Save5", "character_5")
+                self.assertNotIsInstance(caught.exception, sidecar.LegacySidecarError)
+
+    def test_stale_world_schema_refused_after_checksum(self):
+        body = copy.deepcopy(self.body)
+        body["world_state"]["schema"] = 99
+        body["sha256"] = sidecar.checksum(json.dumps(body["world_state"], sort_keys=True))
+        with self.assertRaisesRegex(ValueError, "world-state schema"):
+            self.decode(body)
+
+
+class CharacterFileTests(unittest.TestCase):
+    def bytes_at(self, path):
+        with open(path, "rb") as f:
+            return f.read()
+
+    def test_same_save_two_characters_survive_and_rewrite_independently(self):
+        first, second = world(1, hours=24), world(2, hours=48)
+        with tempfile.TemporaryDirectory() as d:
+            first_path = sidecar.character_write(d, "Quicksave", first, "first")
+            first_bytes = self.bytes_at(first_path)
+            second_path = sidecar.character_write(d, "Quicksave", second, "second")
+            self.assertNotEqual(first_path, second_path)
+            self.assertEqual(len(os.listdir(d)), 2)
+            self.assertEqual(self.bytes_at(first_path), first_bytes)
+            second_bytes = self.bytes_at(second_path)
+            self.assertEqual(sidecar.character_read(d, "Quicksave", "first").to_json(), first.to_json())
+            self.assertEqual(sidecar.character_read(d, "Quicksave", "second").to_json(), second.to_json())
+            sim.run(first, 24)
+            self.assertEqual(sidecar.character_write(d, "Quicksave", first, "first"), first_path)
+            self.assertEqual(sidecar.character_read(d, "Quicksave", "first").to_json(), first.to_json())
+            self.assertEqual(self.bytes_at(second_path), second_bytes)
+            self.assertEqual(len(os.listdir(d)), 2)
+
+    def test_legacy_only_refused_with_path_and_untouched_bytes(self):
+        with tempfile.TemporaryDirectory() as d:
+            legacy_path = sidecar.write(d, "Save", world())
+            for data in (self.bytes_at(legacy_path), b"not JSON\xff"):
+                with self.subTest(data=data):
+                    with open(legacy_path, "wb") as f:
+                        f.write(data)
+                    with self.assertRaises(sidecar.LegacySidecarError) as caught:
+                        sidecar.character_read(d, "Save", "first")
+                    self.assertIn(legacy_path, str(caught.exception))
+                    self.assertEqual(self.bytes_at(legacy_path), data)
+                    self.assertEqual(os.listdir(d), [os.path.basename(legacy_path)])
+
+    def test_both_files_read_character_and_report_legacy_orphan(self):
+        with tempfile.TemporaryDirectory() as d:
+            ws = world(2, hours=24)
+            legacy_path = sidecar.write(d, "Save", world(1))
+            character_path = sidecar.character_write(d, "Save", ws, "second")
+            before = self.bytes_at(legacy_path)
+            self.assertEqual(sidecar.character_read(d, "Save", "second").to_json(), ws.to_json())
+            self.assertEqual(self.bytes_at(legacy_path), before)
+            self.assertEqual(sidecar.character_orphans(d, {("Save", "second")}), [legacy_path])
+            self.assertEqual(sidecar.orphans(d, ["Save"]), [character_path])  # schema-1 behavior stays frozen
+
+    def test_character_write_never_reads_or_moves_legacy(self):
+        with tempfile.TemporaryDirectory() as d:
+            legacy_path = sidecar.write(d, "Save", world(1))
+            before = self.bytes_at(legacy_path)
+            with mock.patch("builtins.open", side_effect=AssertionError("must not read legacy")):
+                character_path = sidecar.character_write(d, "Save", world(2), "second")
+            self.assertEqual(self.bytes_at(legacy_path), before)
+            self.assertEqual(sorted(os.listdir(d)),
+                             sorted([os.path.basename(legacy_path), os.path.basename(character_path)]))
+
+    def test_character_orphans_keep_legacy_unknown_pairs_and_non_sidecars(self):
+        with tempfile.TemporaryDirectory() as d:
+            legacy_path = sidecar.write(d, "Save", world())
+            known = sidecar.character_write(d, "Save", world(), "first")
+            unknown = sidecar.character_write(d, "Save", world(2), "second")
+            notes = os.path.join(d, "notes.txt")
+            with open(notes, "w") as f:
+                f.write("not a sidecar")
+            before = {p: self.bytes_at(p) for p in (legacy_path, known, unknown, notes)}
+            self.assertEqual(sidecar.character_orphans(d, {("Save", "first")}), sorted([legacy_path, unknown]))
+            self.assertEqual(sidecar.character_orphans(d, set()), sorted([legacy_path, known, unknown]))
+            self.assertEqual(sorted(os.listdir(d)), sorted(os.path.basename(p) for p in before))
+            for path, data in before.items():
+                self.assertEqual(self.bytes_at(path), data)
+
+    def test_neither_file_is_file_not_found(self):
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(FileNotFoundError) as caught:
+                sidecar.character_read(d, "Save", "first")
+            self.assertEqual(caught.exception.filename, sidecar.character_sidecar_path(d, "Save", "first"))
+
+    def test_corrupt_character_file_does_not_fall_back_to_legacy(self):
+        with tempfile.TemporaryDirectory() as d:
+            legacy_path = sidecar.write(d, "Save", world())
+            before = self.bytes_at(legacy_path)
+            path = sidecar.character_write(d, "Save", world(2), "second")
+            with open(path, "w") as f:
+                f.write("{")
+            with self.assertRaisesRegex(ValueError, "not JSON"):
+                sidecar.character_read(d, "Save", "second")
+            self.assertEqual(self.bytes_at(legacy_path), before)
+
+    def test_failed_atomic_replace_keeps_previous_file_and_cleans_temp(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = sidecar.character_write(d, "Save", world(), "first")
+            before = self.bytes_at(path)
+            with mock.patch.object(sidecar.os, "replace", side_effect=OSError("disk full")):
+                with self.assertRaises(OSError):
+                    sidecar.character_write(d, "Save", world(2), "first")
+            self.assertEqual(self.bytes_at(path), before)
+            self.assertEqual(os.listdir(d), [os.path.basename(path)])
+
+
 if __name__ == "__main__":
     unittest.main()
