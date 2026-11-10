@@ -71,7 +71,7 @@ error text that appears.
 
 0. **The quest's form id.** The console refuses a plugin quest's name in `setstage` ("not found for parameter Quest"), so
    every stage line below uses the form id, `<load index>000803`. Read it first: after the game has loaded with the probe
-   ticked, run `python scripts\\planet\\make_power_armor_probe.py log`; its first line is `quest form id <hex>: setstage <hex>
+   ticked, run `python scripts\planet\make_power_armor_probe.py log`; its first line is `quest form id <hex>: setstage <hex>
    10 / 20 / 30` (from the init line's `quest=`, which Papyrus prints as signed decimal; the reader converts it). Or take the
    probe's load index from the load order (hex, two digits) and append `000803`. Below, `<Q>` is that id.
 1. Start the game with the probe installed (tick it in the load order). Open the console (`~`) and run:
