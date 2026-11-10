@@ -29,8 +29,10 @@ float Property MergeOffsetX = -1200.0 Auto Const
 float Property MergeOffsetY = -2700.0 Auto Const
 {The core world's merge offset (vmad_patch.MERGE_MEASURED, measured in game): the world the player walks in places the
  core's records at their local position + this; z unchanged. Persistent references of the core's persistent cell stay
- at their LOCAL position in the base world (probe (a), 16 Oct; in game 18 Oct: GetDistance to Preston stayed at float max
- with the player standing on his merged spot), so the quest moves its actors over (Relocate).}
+ at their WRITTEN position (probe (a), 16 Oct; in game 18 Oct: GetDistance to Preston stayed at float max with the player
+ standing on his merged spot), so the quest moved its actors over (Relocate). Since FAL-179 the plugin writes each ACHR
+ at its local position + this (make_mission.py stage passes this pair to the writer), so a new game starts them at
+ their merged spot; the moves stay for a save that holds an actor elsewhere.}
 
 float Property RelocateRadius = 800.0 Auto Const
 {Move an actor only when the player stands outdoors within this many units of that actor's merged spot (its position +
@@ -43,16 +45,18 @@ float Property RelocateGap = 1500.0 Auto Const
 float Property PrestonLocalX = -811.14 Auto Const
 float Property PrestonLocalY = 1002.46 Auto Const
 float Property PrestonLocalZ = 89.09 Auto Const
-{Preston's spot in the plugin (ACHR 0x802, the museum door's outside arrival: points.json "preston" pos). His merged spot
- is this + the merge offset, (-2011.14, -1697.54, 89.09), where the moves put him in game 28 Oct. Fixed, so a Preston
+{Preston's spot in the core's local frame (the museum door's outside arrival: points.json "preston" pos). His merged spot
+ is this + the merge offset, (-2011.14, -1697.54, 89.09), where the moves put him in game 28 Oct and where the plugin's
+ ACHR 0x802 stands since FAL-179. Fixed, so a Preston
  who drifted or was offset twice goes back to the same spot (PlacePreston). make_mission.py stage refuses a build whose
  points differ from these.}
 
 float Property CodsworthLocalX = -1146.709 Auto Const
 float Property CodsworthLocalY = 1293.837 Auto Const
 float Property CodsworthLocalZ = 111.734 Auto Const
-{Codsworth's spot in the plugin (ACHR 0x811, Fallout 4's ACHR 01CA7D: points.json "codsworth" pos). His merged spot is
- this + the merge offset, (-2346.709, -1406.163, 111.734), where every logged move put him (23 and 31 Oct). Fixed, as
+{Codsworth's spot in the core's local frame (Fallout 4's ACHR 01CA7D: points.json "codsworth" pos). His merged spot is
+ this + the merge offset, (-2346.709, -1406.163, 111.734), where every logged move put him (23 and 31 Oct) and where the
+ plugin's ACHR 0x811 stands since FAL-179. Fixed, as
  Preston's (PlaceCodsworth, FAL-163). make_mission.py stage refuses a build whose points differ from these.}
 
 float Property PlaceRadius = 300.0 Auto Const
@@ -358,7 +362,10 @@ Function KeepCodsworth()
  He has Preston's rule, one fixed spot (PlaceCodsworth, FAL-163); a spent budget is logged and shown on screen, and where
  he is goes to the log every KeeperStatusEvery checks. On the keeper, Preston's check runs whether or not Codsworth is
  there (FAL-128); FO4SF_Min00 (no Codsworth) on a save that ran this timer before the keeper does nothing and lets it
- end. A fight releases him first, on every check and with a spent budget too (ReleaseCodsworthInFight, FAL-163).}
+ end. A fight releases him first, on every check and with a spent budget too (ReleaseCodsworthInFight, FAL-163).
+ The keeper's check never stops: a spent budget ends the moves, not the release. The PC's second review of 88372e87: the
+ mission instance may hold Preston while the keeper never did (its prestonHolds 0), and once the keeper had spent its
+ ten moves and stopped, nothing released him in a fight until the next load (FAL-179).}
     Actor player = Game.GetPlayer()
     if Codsworth != None
         ReleaseCodsworthInFight("keeper")
@@ -369,7 +376,7 @@ Function KeepCodsworth()
             if codsworthFails >= 10
                 codsworthState = "gave up"
                 Trace("keeper gave up codsworth fails=" + codsworthFails)
-                Debug.Notification("FO4SF keeper: Codsworth not placed after 10 tries; stopped until the next load")
+                Debug.Notification("FO4SF keeper: Codsworth not placed after 10 tries; no more moves until the next load")
             endif
         endif
     endif
@@ -379,7 +386,7 @@ Function KeepCodsworth()
             TraceCodsworth("keeper status")
         endif
     endif
-    if (Codsworth != None && (codsworthFails < 10 || codsworthHolds > 0)) || (KeeperOnly && (prestonFails < 10 || prestonHolds > 0))
+    if (Codsworth != None && (codsworthFails < 10 || codsworthHolds > 0)) || KeeperOnly
         StartTimer(CodsworthCheck, 2)
     endif
 EndFunction
@@ -390,8 +397,9 @@ Function KeepPreston(Actor player)
  hypothesis: he returns to his editor location as his cell reloads). So once the mission was complete, nothing put him
  back: the owner's report of 7 Nov, "no preston garvy after misson finshes". No new placement: the same fixed spot and
  rule as the mission (PlacePreston), with its own budget of 10 failed moves; a spent budget is logged and shown on
- screen. Where he is goes to the log every KeeperStatusEvery checks. A fight releases him first, on every check and
- with a spent budget too (ReleaseInFight).}
+ screen, and ends his moves until the next load, not this check (KeepCodsworth restarts it on the keeper). Where he is
+ goes to the log every KeeperStatusEvery checks. A fight releases him first, on every check and with a spent budget too
+ (ReleaseInFight).}
     ReleaseInFight("keeper")
     if prestonFails < 10
         if PlacePreston(player, "keeper")
@@ -399,7 +407,7 @@ Function KeepPreston(Actor player)
             if prestonFails >= 10
                 prestonState = "gave up"
                 Trace("keeper gave up preston fails=" + prestonFails)
-                Debug.Notification("FO4SF keeper: Preston not placed after 10 tries; stopped until the next load")
+                Debug.Notification("FO4SF keeper: Preston not placed after 10 tries; no more moves until the next load")
             endif
         endif
     endif
@@ -614,7 +622,9 @@ bool Function MoveOver(Actor a, Actor player, float px, float py, float pz, stri
  RelocateGap. Its target is where the raider stands + the offset, so it moves only a raider at its unmerged spot, whose
  target is within RelocateRadius of Preston's merged spot (the plugin takes the raiders within 120 m of his spot). A
  raider already moved stands about one offset length (2,955 m) from there: the PC's 31 Oct logs (16:33, the player about
- that far south-west of them) had all five offset a second time, to (-3000..-3150, -4500..-4600) (FAL-163).}
+ that far south-west of them) had all five offset a second time, to (-3000..-3150, -4500..-4600) (FAL-163). A raider the
+ plugin writes at its merged spot (FAL-179) is such a raider from the start, so this moves only a raider a save holds at
+ its unmerged spot.}
     float before = player.GetDistance(a)                  ; float max: another world; finite: this world (the world proof)
     if before < RelocateGap
         return False                                      ; already where the player is
