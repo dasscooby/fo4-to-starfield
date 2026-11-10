@@ -11,7 +11,8 @@ the test fails in CI and skips locally. FOCCSIM_EXE=<path> runs the same tests a
 By default: the two-region fixture for seeds 0 to 9 over 90 days, its variants (raid pressure low and high, story mode
 with an active story, scripted player actions) for seed 0, and the Commonwealth-scale draft for 30 days, each compared
 once per game day and at the end. With FO4SF_PARITY_FULL=1: after every tick, every variant for seeds 0 to 9, and the
-Commonwealth-scale draft for 90 days, as the plan asks."""
+Commonwealth-scale draft for 90 days, as the plan asks. Seeds 2**32 and 2**32 + 7 also run with settlement priorities
+and regional reputation for 8 days (90 in FULL), always compared after every tick."""
 import copy
 import dataclasses
 import glob
@@ -56,6 +57,21 @@ def fixture_world(seed, **settings):
     model.load_pack(ws, copy.deepcopy(fixtures.REGION_2))
     for k, v in settings.items():
         setattr(ws.settings, k, v)
+    return ws
+
+
+def layered_world(seed):
+    """Non-default Settlement.priority and WorldState.regional_reputation, with jobs in both regions."""
+    ws = fixture_world(seed)
+    manage.set_priority(ws, "market", "food")
+    manage.set_priority(ws, "river_town", "water")
+    ws.regional_reputation = {
+        "R1": {"settlers": model.Reputation(fame=9, infamy=24), "raiders": model.Reputation(infamy=49)},
+        "R2": {"settlers": model.Reputation(fame=24, infamy=9), "traders": model.Reputation(infamy=25)},
+    }
+    ws.settlements["market"].stock["food"] = 1       # a guaranteed resupply job, so its reward reaches both layers
+    ws.squads["s900"] = model.Squad(id="s900", faction="slavers", size=3, at="slaver_pit", goal="river_town",
+                                    kind="attack", eta=12)   # a defence job to give up: nonzero regional infamy
     return ws
 
 
@@ -329,6 +345,24 @@ class CppParityTests(unittest.TestCase):
         for seed in range(10):
             with self.subTest(seed=seed):
                 self.parity(f"fixture seed {seed}", fixture_world(seed), 90 * DAY)
+
+    def test_large_seeds_with_priority_settlements_and_regional_reputation(self):
+        for seed in (2 ** 32, 2 ** 32 + 7):
+            with self.subTest(seed=seed):
+                ws = layered_world(seed)
+                days = 90 if FULL else 8
+                sim.rng_seed(seed, days * 24)       # the entire run fits the unsigned 64-bit per-tick seed bound
+                # Before the general script, complete a resupply and give one up in the other region. These
+                # exercise fame/infamy propagation, priority status and news even in the short default run.
+                actions = [{"hour": 0, "do": "status", "settlement": "market"},
+                           {"hour": 0, "do": "offers", "place": "market"},
+                           {"hour": 0, "do": "complete", "pick": 0},
+                           {"hour": 0, "do": "offers", "place": "river_town"},
+                           {"hour": 0, "do": "fail", "pick": 0},
+                           {"hour": 0, "do": "news", "place": "market"},
+                           {"hour": 0, "do": "news", "place": "river_town"}] + script_for(ws, days)
+                self.parity(f"large seed {seed}, priorities and regional reputation", ws, days * DAY,
+                            actions, every=1)       # multi-word init_by_array: never thin these state comparisons
 
     def test_raid_pressure_story_mode_and_player_actions(self):
         variants = [("raid low", {"raid_pressure": "low"}, ()), ("raid high", {"raid_pressure": "high"}, ()),
@@ -617,6 +651,26 @@ class CppParityTests(unittest.TestCase):
             why = "this job was given up and its window has not ended"
             self.assertEqual(got[1]["error"], cannot.format("complete") + why)
             self.assertEqual(got[2]["error"], cannot.format("fail") + why)
+
+    def test_one_time_jobs_stay_retired_across_new_offer_instances(self):
+        """Pin the C++ one_time predicate by behavior: an older outcome retires only these three kinds forever.
+        A fresh repeating offer read after that outcome (and after a failed window) remains usable."""
+        base, offers = self.jobs_world()
+        for kind, offer in offers.items():
+            for outcome in ("job_done", "job_failed"):
+                with self.subTest(kind=kind, outcome=outcome):
+                    ws = copy.deepcopy(base)
+                    sim._event(ws, outcome, "market", offer=offer.id, job=kind, faction=offer.giver,
+                               offered=0, until=1)
+                    ws.hour = 1
+                    fresh = dataclasses.replace(offer, offered_hour=1, read_at=len(ws.events)).to_dict()
+                    got = self.same_actions(f"{kind} after {outcome}", ws,
+                                            [{"do": "complete", "offer": fresh}, {"do": "fail", "offer": fresh}])
+                    if kind in ("defend", "escort", "retake"):
+                        self.assertIn("already handed in or given up", got[0]["error"])
+                    else:
+                        self.assertIn("ok", got[0])
+                    self.assertIn("already handed in or given up", got[1]["error"])
 
     def test_manage_at_its_limits_and_a_long_defence(self):
         """Each manage action exactly at its limit and one past it; and a defence whose attack is due after the usual

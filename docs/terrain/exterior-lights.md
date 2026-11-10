@@ -1,6 +1,8 @@
 # Exterior lights: FO4 LIGH -> native Starfield LIGH (core64 builds)
 
-Author: Claude, 2026-10-16. Status: **offline only**. Nothing deployed or queued, and the game was not launched.
+Author: Claude, 2026-10-16. Status (checked 2026-11-06, Mountain): **owner night check recorded on core64k / core64l**
+("the lights are very bright"); see [Calibration (17 Oct)](#calibration-17-oct). That check does not establish
+acceptance of the later 0.375 lumens patch or the comparison screenshots under "Not done / open".
 Labels as in the other terrain docs: **verified** means read from files, **supported** means a hypothesis with
 evidence, **unresolved** means open. The owner's playtest found the nights dark: core64c placed none of FO4's
 6,275 exterior Light references (`exterior.TYPE_REASONS`).

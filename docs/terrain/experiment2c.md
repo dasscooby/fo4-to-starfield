@@ -2,8 +2,9 @@
 
 Author: Claude, 2026-10-11. Branch `claude/terrain-exterior-statics`, stacked on PR #64
 (`claude/terrain-overlay-records`, which contains #60, #57 and #56). Starfield 1.16.244.
-Status: **built and checked offline, staged, not deployed, not queued.** It waits for a run of the same terrain
-that shows the BTD relief in game (see "Prerequisite").
+Status (checked 2026-11-06, Mountain): **in-game object alignment and collision recorded within 0.02 m**, with textures
+loaded from the General archive; see [core64c.md, "What it is"](core64c.md#what-it-is) (2026-10-12), which identifies
+exp2c on exp2b terrain. The prerequisite below preserves the earlier pre-run state.
 Labels: **verified** = checked here on files, number given; **supported** = supported hypothesis; **unresolved**.
 Offline checks are not in-game acceptance.
 
