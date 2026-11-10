@@ -1,6 +1,7 @@
 """Map-marker LCSR through the actual terrain writer (dotnet/TerrainOverlays) on the synthetic master of
 test_terrain_reference_identity (dotnet/TerrainIdentityFixture map-marker extra arg), never a game: Grid from
 spawn_cell and Unknown -1 serialize as the vanilla 0xFFFFFFFF tail (docs/terrain/map-markers.md)."""
+import copy
 import json
 import os
 from pathlib import Path
@@ -13,8 +14,10 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
+sys.path.insert(0, str(ROOT / "scripts" / "terrain"))
 import test_terrain_reference_identity as tri  # noqa: E402
 import test_terrain_lights_writer as tlw  # noqa: E402
+import vmad_patch as vp  # noqa: E402
 
 subrecords, field = tlw.subrecords, tlw.field
 MAPMARKER_REF_TYPE = 0x0002271F
@@ -77,6 +80,67 @@ class TerrainMapMarkerWriterTests(unittest.TestCase):
         self.assertEqual(recs[marker][0], b"REFR")
         self.assertEqual(recs[marker][3] & 0xC00, 0x400)                     # persistent, enabled (not LC172's 0xC00)
         self.assertIsNone(field(lctn[1], b"LCID"))
+
+    def test_multiple_markers_preserve_existing_records_and_serialize_each_link(self):
+        self.params = copy.deepcopy(type(self).params)
+        before, baseline = self.run_writer(self.objects, "multi-before")
+        self.assertEqual(before.returncode, 0, before.stdout + before.stderr)
+        entries = [
+            {"tag": tag, "name": tag + " synthetic", "pos": pos, "cell": cell}
+            for tag, pos, cell in (
+                ("RedRocket", [1, 1, 2], [1, 0]),
+                ("Sanctuary", [20, 120, 3], [0, 1]),
+                ("Vault111", [120, 130, 4], [1, 1]),
+                ("Concord", [140, 20, 5], [1, 0]),
+            )
+        ]
+        self.params["overlays"][0]["map_markers"] = entries
+        after, candidate = self.run_writer(self.objects, "multi-after")
+        self.assertEqual(after.returncode, 0, after.stdout + after.stderr)
+        old = json.loads((baseline / "formids.json").read_text())
+        new = json.loads((candidate / "formids.json").read_text())
+        self.assertEqual(old["map_markers"], new["map_markers"])
+        for key in old.keys() - {"map_marker_refs"}:
+            self.assertEqual(old[key], new[key], key)
+        ids = new["map_marker_refs"]["SyntheticWorld"]
+        self.assertEqual(set(ids), {e["tag"] for e in entries})
+        self.assertEqual(len(set(ids.values())), len(entries))
+        old_records = tri.records(baseline / "Synthetic.esm")
+        new_records = tri.records(candidate / "Synthetic.esm")
+        for value in old["refs"].values():
+            self.assertEqual(old_records[int(value, 16)], new_records[int(value, 16)])
+
+        plugin = vp.Plugin.read(candidate / "Synthetic.esm")
+        own = len(plugin.masters()) << 24
+        world = next(r for r, _ in plugin.walk() if r.sig == b"WRLD")
+        location = next(r for r, _ in plugin.walk() if r.sig == b"LCTN")
+        location_fields = dict(location.fields())
+        rows = list(struct.iter_unpack("<IIIhhI", location_fields[b"LCSR"]))
+        expected_rows = []
+        anchor = next((r, path) for r, path in plugin.walk() if r.fid == own | 0x800)
+        source = vp.Plugin.read(self.master)
+        source_fields = dict(next(r for r, _ in source.walk() if r.fid == 0x3E5E12).fields())
+        for index, entry in enumerate(entries):
+            fid = own | int(ids[entry["tag"]], 16)
+            record, path = next((r, p) for r, p in plugin.walk() if r.fid == fid)
+            fields = dict(record.fields())
+            self.assertEqual(path, anchor[1])
+            self.assertTrue(any(kind == 8 for kind, _ in path))
+            self.assertEqual(record.flags & 0xC00, 0xC00)
+            self.assertEqual(struct.unpack("<I", fields[b"NAME"])[0], 0x10)
+            self.assertEqual(fields[b"XMRK"], b"")
+            self.assertEqual(fields[b"FULL"].rstrip(b"\0").decode(), entry["name"])
+            suffix = "" if index == 0 else entry["tag"]
+            self.assertEqual(fields[b"EDID"].rstrip(b"\0").decode(), "SyntheticWorldMapMarker" + suffix)
+            self.assertEqual(struct.unpack("<6f", fields[b"DATA"])[:3], tuple(entry["pos"]))
+            for sig in (b"FNAM", b"TNAM"):
+                self.assertEqual(fields[sig], source_fields[sig])
+            expected_rows.append((MAPMARKER_REF_TYPE, fid, world.fid,
+                                  entry["cell"][1], entry["cell"][0], LCSR_TAIL))
+        self.assertEqual(rows, expected_rows)
+        self.assertEqual(list(struct.iter_unpack("<I", location_fields[b"LCID"])),
+                         [(row[1],) for row in expected_rows])
+        self.assertEqual(plugin.hedr()[2], max(new_records) + 1)
 
     def test_params_map_markers_write_one_chain_each(self):
         # the four-marker loop (make_core64c stage "map_markers"), judged by make_core64c check's map_marker_problems
