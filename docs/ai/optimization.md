@@ -73,3 +73,19 @@ Before: `state.json` kept every Plugins.txt line as a Get-Content object, with P
 Windows with the real script, real Get-Content/ConvertTo-Json, the same synthetic ten-line Plugins.txt and a stubbed
 capture: **4,551,695 bytes before, 794 bytes after** (parent vs 1da8aba3). The list keeps the same strings in the same
 order.
+
+### 2026-11-10 Codex: reuse verified experiment packages (FAL-161)
+
+Ubuntu OptiPlex, Ubuntu 26.04.1 x86_64, Python 3.14. Same deterministic staged set: four 16 MiB synthetic
+terrain members and one synthetic plugin, three alternating install/uninstall rounds per path. Command:
+`.venv/bin/python .paperclip-evidence/fal161/bench.py` (script and raw output preserved in FAL-161's
+`optimization-evidence` document). Both paths call the real installer, verification, copies and rollback;
+Archive2 alone is replaced by the repository's `ba2_fixture.archive_from_tree`, with no artificial delay.
+
+Before (`install --pack`): median **1.269059 s** (1.289017, 1.211789, 1.269059), **3 archive builds**.
+After (`install --pack --package <dir>`): median **1.070381 s** (1.070381, 1.042383, 1.074718),
+**0 archive builds**, a 15.7% reduction here. One package build cost **0.736135 s** outside install timing.
+The package archive is renamed into its reserved directory on the same filesystem, without another archive copy.
+All staged inputs and stored archive members remain content-verified on reuse. This is a synthetic Linux
+measurement, not an Archive2 or 4 GB PC prediction. Windows/real Archive2 timing remains NOT_RUN; the PC recipe
+requests one package build and one timed scratch install without a game launch. No existing baseline was rerun.

@@ -1,5 +1,6 @@
 """Experiment deployment failures use synthetic files, never a live game install."""
 import json
+import hashlib
 import os
 from pathlib import Path
 import sys
@@ -39,7 +40,7 @@ class ExperimentRecoveryTests(unittest.TestCase):
 
     def archive_builder(self, payload=None):
         tool = self.data.parent / "Tools" / "Archive2" / "Archive2.exe"
-        tool.parent.mkdir(parents=True)
+        tool.parent.mkdir(parents=True, exist_ok=True)
         tool.write_bytes(b"synthetic tool; never executed")
         self.args.pack = True
 
@@ -55,6 +56,214 @@ class ExperimentRecoveryTests(unittest.TestCase):
     def assert_rolled_back(self):
         self.assertEqual(list(self.data.iterdir()), [])
         self.assertEqual(self.plugins.read_bytes(), self.original)
+
+    def make_package(self):
+        self.args.package = str(self.root / "package")
+        build = self.archive_builder()
+        with patch.object(exp.subprocess, "run", side_effect=build) as process:
+            exp.main(["package", "--exp-dir", self.args.exp_dir, "--starfield", self.args.starfield,
+                      "--package", self.args.package, "--plugins", self.args.plugins])
+            process.assert_called_once()
+        self.args.pack = False
+        return Path(self.args.package)
+
+    def test_package_install_matches_every_pack_receipt_field_and_uninstalls_exactly(self):
+        self.args.plugins = "Experiment.esm,Experiment_Mars.esm"
+        (self.staging / "Experiment_Mars.esm").write_bytes(b"synthetic registration plugin")
+        build = self.archive_builder()
+        with patch.object(exp.subprocess, "run", side_effect=build):
+            exp.install(self.args)
+        packed = json.loads((self.data / exp.RECORD).read_bytes())
+        exp.uninstall(self.args)
+        package = self.make_package()
+        existing = self.data / "Owner.txt"
+        existing.write_bytes(b"owner")
+        # --package implies packed install even without --pack, and invokes no packing tool.
+        with patch.object(exp.subprocess, "run", side_effect=AssertionError("must reuse package")):
+            exp.main(["install", "--exp-dir", self.args.exp_dir, "--starfield", self.args.starfield,
+                      "--package", self.args.package, "--plugins", self.args.plugins])
+            receipt = (self.data / exp.RECORD).read_bytes()
+            actual = json.loads(receipt)
+            self.assertEqual(actual.pop("package_sha256"),
+                             hashlib.sha256((package / exp.PACKAGE_MANIFEST).read_bytes()).hexdigest())
+            self.assertEqual(actual, packed)
+            exp.install(self.args)
+            self.assertEqual((self.data / exp.RECORD).read_bytes(), receipt)
+        exp.uninstall(self.args)
+        self.assertEqual(list(self.data.iterdir()), [existing])
+        self.assertEqual(existing.read_bytes(), b"owner")
+        self.assertEqual(self.plugins.read_bytes(), self.original)
+        self.assertEqual(set(p.name for p in package.iterdir()),
+                         {exp.PACKAGE_MANIFEST, "Experiment - Main.ba2"})
+
+    def test_package_manifest_binds_paths_sizes_hashes_plugins_and_policy(self):
+        package = self.make_package()
+        manifest = json.loads((package / exp.PACKAGE_MANIFEST).read_bytes())
+        self.assertEqual(manifest["schema"], 1)
+        self.assertEqual(manifest["packing_policy"], "general-stored-verified-v2")
+        self.assertEqual(manifest["plugins"], [{"path": "Experiment.esm", "size": 16,
+                                              "sha256": exp.digest(self.staging / "Experiment.esm")}])
+        self.assertEqual(manifest["members"], [{"path": self.terrain.as_posix(), "size": 17,
+                                              "sha256": exp.digest(self.staging / "Data" / self.terrain)}])
+        self.assertEqual(manifest["archive"], {"path": "Experiment - Main.ba2",
+                                              **exp.deployment.artifact_identity(package / "Experiment - Main.ba2")})
+
+    def test_package_rejects_changed_member_or_plugin_before_data_publication(self):
+        self.make_package()
+        for path in (self.staging / "Data" / self.terrain, self.staging / "Experiment.esm"):
+            with self.subTest(path=path):
+                original = path.read_bytes()
+                # Same size and timestamps cannot make changed content acceptable.
+                times = path.stat()
+                path.write_bytes(b"x" * len(original))
+                os.utime(path, ns=(times.st_atime_ns, times.st_mtime_ns))
+                with self.assertRaisesRegex(SystemExit, "package validation"):
+                    exp.install(self.args)
+                self.assert_rolled_back()
+                path.write_bytes(original)
+
+    def test_package_rejects_added_or_removed_members_before_data_publication(self):
+        self.make_package()
+        member = self.staging / "Data" / self.terrain
+        original = member.read_bytes()
+        member.unlink()
+        with self.assertRaisesRegex(SystemExit, "package validation"):
+            exp.install(self.args)
+        self.assert_rolled_back()
+        member.write_bytes(original)
+        (member.parent / "extra.btd").write_bytes(b"extra")
+        with self.assertRaisesRegex(SystemExit, "package validation"):
+            exp.install(self.args)
+        self.assert_rolled_back()
+
+    def test_package_rejects_truncated_archive_before_data_publication(self):
+        package = self.make_package()
+        archive = package / "Experiment - Main.ba2"
+        archive.write_bytes(archive.read_bytes()[:-1])
+        with self.assertRaisesRegex(SystemExit, "package validation"):
+            exp.install(self.args)
+        self.assert_rolled_back()
+
+    def test_manifest_from_another_staged_set_is_refused_before_data_publication(self):
+        package = self.make_package()
+        member = self.staging / "Data" / self.terrain
+        original = member.read_bytes()
+        member.write_bytes(b"another set")
+        self.args.package = str(self.root / "other-package")
+        with patch.object(exp.subprocess, "run", side_effect=self.archive_builder()):
+            exp.package(self.args)
+        member.write_bytes(original)
+        (package / exp.PACKAGE_MANIFEST).write_bytes((Path(self.args.package) / exp.PACKAGE_MANIFEST).read_bytes())
+        self.args.package = str(package)
+        with self.assertRaisesRegex(SystemExit, "package validation"):
+            exp.install(self.args)
+        self.assert_rolled_back()
+
+    def test_package_checks_actual_archive_members_even_with_matching_archive_digest(self):
+        package = self.make_package()
+        archive = package / "Experiment - Main.ba2"
+        archive.write_bytes(general_archive({self.terrain.as_posix(): b"wrong member"}))
+        path = package / exp.PACKAGE_MANIFEST
+        manifest = json.loads(path.read_bytes())
+        manifest["archive"].update(exp.deployment.artifact_identity(archive))
+        path.write_text(json.dumps(manifest))
+        with self.assertRaisesRegex(SystemExit, "archive resource differs"):
+            exp.install(self.args)
+        self.assert_rolled_back()
+
+    def test_package_rejects_policy_size_and_path_tampering(self):
+        package = self.make_package()
+        path = package / exp.PACKAGE_MANIFEST
+        original = path.read_bytes()
+        for key in ("policy", "size", "path"):
+            with self.subTest(key=key):
+                manifest = json.loads(original)
+                if key == "policy":
+                    manifest["packing_policy"] = "unverified"
+                elif key == "size":
+                    manifest["members"][0]["size"] += 1
+                else:
+                    manifest["archive"]["path"] = "../Experiment - Main.ba2"
+                path.write_text(json.dumps(manifest))
+                with self.assertRaisesRegex(SystemExit, "package validation"):
+                    exp.install(self.args)
+                self.assert_rolled_back()
+
+    def test_package_rejects_a_different_selected_plugin_list(self):
+        self.args.plugins = "Experiment.esm,Other.esm"
+        (self.staging / "Other.esm").write_bytes(b"other plugin")
+        self.make_package()
+        for selection in ("Other.esm,Experiment.esm", "Experiment.esm"):
+            with self.subTest(selection=selection):
+                self.args.plugins = selection
+                with self.assertRaisesRegex(SystemExit, "package validation"):
+                    exp.install(self.args)
+                self.assert_rolled_back()
+
+    def test_package_relaunch_revalidates_archive_before_already_installed(self):
+        package = self.make_package()
+        exp.install(self.args)
+        before = {p.name: p.read_bytes() for p in self.data.iterdir()}
+        (package / "Experiment - Main.ba2").write_bytes(b"changed package")
+        with self.assertRaisesRegex(SystemExit, "package validation"):
+            exp.install(self.args)
+        self.assertEqual({p.name: p.read_bytes() for p in self.data.iterdir()}, before)
+
+    def test_package_respects_no_overwrite_and_held_off_refusal(self):
+        self.make_package()
+        existing = self.data / "Experiment - Main.ba2"
+        existing.write_bytes(b"owner archive")
+        with self.assertRaisesRegex(SystemExit, "overwrite"):
+            exp.install(self.args)
+        self.assertEqual(list(self.data.iterdir()), [existing])
+        self.assertEqual(existing.read_bytes(), b"owner archive")
+        existing.unlink()
+        toggle = self.data / exp.TOGGLE
+        toggle.write_text(json.dumps({"off": ["Experiment.esm"]}))
+        with self.assertRaisesRegex(SystemExit, "held off"):
+            exp.install(self.args)
+        self.assertEqual(list(self.data.iterdir()), [toggle])
+        self.assertEqual(self.plugins.read_bytes(), self.original)
+
+    def test_package_archive_changed_during_copy_rolls_back(self):
+        package = self.make_package()
+        real_copy = exp.shutil.copyfile
+
+        def copy(source, target):
+            if Path(source) == package / "Experiment - Main.ba2":
+                Path(source).write_bytes(b"changed during copy")
+            return real_copy(source, target)
+
+        with patch.object(exp.shutil, "copyfile", side_effect=copy):
+            with self.assertRaisesRegex(SystemExit, "rolled back"):
+                exp.install(self.args)
+        self.assert_rolled_back()
+
+    def test_package_creation_refuses_existing_or_nested_output(self):
+        package = self.make_package()
+        before = {p.name: p.read_bytes() for p in package.iterdir()}
+        with self.assertRaisesRegex(SystemExit, "overwrite"):
+            exp.package(self.args)
+        self.assertEqual({p.name: p.read_bytes() for p in package.iterdir()}, before)
+        self.args.package = str(self.staging / "package")
+        with self.assertRaisesRegex(SystemExit, "separate"):
+            exp.package(self.args)
+        self.assertFalse(Path(self.args.package).exists())
+
+    def test_package_can_be_created_on_a_separate_drive(self):
+        self.args.package = str(self.root / "package")
+        with patch.object(exp.os.path, "commonpath", side_effect=ValueError("Paths don't have the same drive")), \
+                patch.object(exp.subprocess, "run", side_effect=self.archive_builder()):
+            exp.package(self.args)
+        self.assertTrue((Path(self.args.package) / exp.PACKAGE_MANIFEST).is_file())
+
+    def test_failed_package_build_never_publishes_a_manifest(self):
+        self.args.package = str(self.root / "package")
+        with patch.object(exp.subprocess, "run", side_effect=self.archive_builder(general_archive({}))):
+            with self.assertRaisesRegex(SystemExit, "coverage"):
+                exp.package(self.args)
+        self.assertFalse((Path(self.args.package) / exp.PACKAGE_MANIFEST).exists())
+        self.assert_rolled_back()
 
     def test_successful_install_is_idempotent_and_uninstall_preserves_existing_files(self):
         existing = self.data / "Owner.txt"

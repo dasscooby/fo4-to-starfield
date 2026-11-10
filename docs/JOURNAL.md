@@ -2757,3 +2757,12 @@ or coming within 20 m of him before the fight starts it (`found preston`),
 and once the fight is on every loaded living raider is put into combat. Only
 FO4SF_Min00Quest.pex changes. Offline only (playtest row 44,
 docs/mission/when-freedom-calls.md); the in-game check is the next mission run.
+
+## 2026-11-10: Codex reusable verified experiment packages (FAL-161, offline)
+
+Added `exp_install.py package` and `install --package`: pin member paths/sizes/SHA256s, the selected plugin
+identities, archive identity and `general-stored-verified-v2`; revalidate before any Data publication.
+The existing install receipt is preserved with an added manifest SHA256; publication and recovery reuse the
+existing deployment helpers. Synthetic receipt parity, changed member/plugin, truncated archive, wrong manifest,
+held-off/no-overwrite and rollback controls are in `tests/test_exp_install.py`. Performance measurements and
+limits are in [optimization.md](ai/optimization.md). Ubuntu source checks only; Windows/game NOT_RUN.
