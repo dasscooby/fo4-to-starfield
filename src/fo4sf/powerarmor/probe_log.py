@@ -236,8 +236,10 @@ def table(summary):
 def report(summary):
     """The whole printout: the table, each step, notes, the verdict (last line)."""
     lines = table(summary)
+    judged = summary["control"][0]
     for stage, s in summary.get("steps", {}).items():
-        lines.append(f"stage {stage} {s['call'] or '-'}: {s['result']}")
+        shown = s["result"] if judged else f"not judged (control failed; the log shows: {s['result']})"
+        lines.append(f"stage {stage} {s['call'] or '-'}: {shown}")
     if summary.get("unavailable"):
         lines.append("readings the game gave as na: " + ", ".join(summary["unavailable"]))
     lines += ["note: " + p for p in summary.get("problems", [])]

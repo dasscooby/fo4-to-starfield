@@ -84,6 +84,9 @@ class VerdictTests(unittest.TestCase):
         self.assertTrue(s["verdict"].startswith("INCONCLUSIVE: control failed"), s["verdict"])
         self.assertIn("never read sitting", s["verdict"])
         self.assertNotIn("entered", s["verdict"])
+        out = "\n".join(pl.report(s))                     # the printout never judges a step either (FAL-223)
+        self.assertIn("stage 10 SwitchToPowerArmor: not judged (control failed", out)
+        self.assertNotIn("SwitchToPowerArmor: entered", out)
 
     def test_a_control_furniture_ref_of_none_is_inconclusive(self):
         s = pl.summarize(head(controlref=None) + sat() + steps())
