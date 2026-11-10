@@ -1343,6 +1343,14 @@ def _p9_returned(evs: list[Event], go: Event) -> Event | None:
     return None
 
 
+def _p9_by_return(rt: float | None, back_rt: float | None) -> bool:
+    """Whether a sample timed rt= belongs to the request its explicit `p9 path returned` (timed back_rt=) ended: no later
+    than the return, inclusive, since a sample in the return's own tick was taken during the request. False when either
+    time is unreadable. One rule for the rung records (_p9_attempts: a control's arrival, the approach a FAIL needs)
+    and the judged rung's own cut in check_p9, so the two cannot drift apart."""
+    return rt is not None and back_rt is not None and rt <= back_rt
+
+
 def _p9_continuous(samples: list[Event], origin: Event) -> bool | None:
     """Whether a rung's samples read as one continuous, loaded walk from its origin (the `p9 go` when the script sent
     the actor, else the `p9 start`), by the latest rung's own checks: the origin carries rt= and dist=; each sample
@@ -1431,8 +1439,8 @@ def _p9_attempts(evs: list[Event], starts: list[Event]) -> list[dict]:
         # for diagnostics, but never credit later wandering as approach or arrival.
         command_samples = samples
         if back is not None and "result" in back.fields:
-            command_samples = [e for e in samples if e.rt is not None and back.rt is not None
-                               and go.rt is not None and go.rt <= e.rt <= back.rt]
+            command_samples = [e for e in samples if e.rt is not None and go.rt is not None and go.rt <= e.rt
+                               and _p9_by_return(e.rt, back.rt)]
         command_dists = [e.num("dist") for e in command_samples if e.num("dist") is not None]
         command_closest = min(command_dists, default=None)
         command_approach = base - min([base] + command_dists) if base is not None else None
@@ -1670,7 +1678,7 @@ def check_p9(c: Collection) -> Verdict:
     # They cannot prove arrival, cell crossings or a stall during that request.
     if latest["path_result_raw"] is not None:
         end = latest["path_return_rt"]
-        rows = [r for r in rows if end is not None and r[5].rt <= end]
+        rows = [r for r in rows if _p9_by_return(r[5].rt, end)]
         if len(rows) < 2:
             v.reasons.append("fewer than 2 samples before the explicit path return; later movement is not this request")
             return v
