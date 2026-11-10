@@ -37,10 +37,33 @@ reads their full contents; no performance result is claimed here.
 The snapshot_binding API creates an in-memory identity snapshot only. The upcoming
 publisher must prove a save was newly produced by the running, checked release before
 publishing it atomically. An old unbound save cannot be made compatible simply by
-calling that helper. Automatic Play enforcement, publication/recovery, old-save refusal
-in the UI, installer release declarations and cross-native integration remain open.
+calling that helper. Publication/recovery, mandatory installer release declarations
+and cross-native integration remain open.
 
 Verification is synthetic: test_launcher_save_release.py constructs opaque fixture
 bytes and covers changed declarations/files, missing/malformed bindings, component
 coverage, path escape, concurrent changes, Unicode paths and read-only CLI behavior.
 Windows/native/Tk/game acceptance remains **NOT_RUN** for this source part.
+
+Part 2 consumes an installed `Data/FO4SF.release.json` declaration. Once present,
+Play (including dry-run and the GUI's existing CLI worker) checks every `.sfs` save
+in the launcher-resolved `my_games/Saves/FO4SF` folder. Each requires a sibling
+`<save name>.fo4sf-release.json` binding using the schema above. The state root is
+that profile's `FO4SF-Runtime` folder. This is configured storage, not an H3 result.
+An unconfirmed instance/My Games folder or custom INI save-path override refuses.
+Unreadable/unknown metadata, unbound or changed saves, changed required state,
+changed master/layout declarations and changed installed master bytes refuse.
+The player keeps the saves/bindings and restores the matching release; no file is
+adopted, repaired, backed up or deleted by this check. An empty first-run profile
+needs no binding, but its installed masters are still checked. Hashes run in the
+launch worker, not the Tk process-status polling path. A second check runs after
+settings, before load-order changes or game start. Symlink/redirected profile roots
+and linked bindings refuse; inventories above 4096 saves refuse.
+
+This remains an incomplete draft: installers do not yet publish the declaration,
+and absence retains legacy behavior. Deleting a declaration is therefore not yet
+detected as a broken managed install. The mandatory ownership/installation link,
+active master-set/order validation, and provenance-safe publication for newly
+produced saves are required before item 7 is complete or the PR can integrate.
+Part 2 supplies the refusal consumer, not a supported workflow for manually
+creating a declaration or retroactively binding old saves. No PC card is ready.

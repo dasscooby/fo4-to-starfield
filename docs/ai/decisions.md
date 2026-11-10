@@ -1443,3 +1443,14 @@ verifier/CLI; its snapshot helper is not proof of provenance and publishes nothi
 The subsequent Play/publication hook must establish that a save was newly produced by
 the running release. Save-header edits and an automatic migration/adoption command are
 excluded because no such game-format or compatibility evidence has been established.
+
+### 2026-11-10 — Codex / Lone: refuse the whole declared save profile before Play
+
+Until a launcher can safely select which save the game will load, check every .sfs
+save in the declared FO4SF profile. Do not assume the newest file is the selected
+save. Prefer refusal and restoration of its matching release over silent adoption
+or an unverified migration. Consume sibling per-save bindings and the shared
+FO4SF-Runtime state root. Hash files in the Play worker rather than on the Tk
+polling path; check installed masters once per inventory. This staged consumer
+does not complete the mandatory installer ownership or publication contract:
+legacy declaration absence remains unchanged only while PR #716 stays draft.

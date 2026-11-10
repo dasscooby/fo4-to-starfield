@@ -581,8 +581,8 @@ def play(values, starfield, system=None, say=print, start_timeout_s=180.0, dump_
     refusal (nothing started). folder: the FO4SF game folder (setting `instance`, docs/ai/fo4sf-instance.md): the game
     starts from it, our tools run on its own Plugins.txt, its own Starfield.ini takes the saves path and the Papyrus
     keys, and its Plugins.txt stands in the player's place only while the game runs (instance.swap_in / swap_out)."""
-    from . import instance as inst, recovery
-    reason = recovery.play_reason(folder or starfield)
+    from . import instance as inst, recovery, save_release
+    reason = recovery.play_reason(folder or starfield) or save_release.play_reason(values, folder or starfield)
     if reason:
         raise ValueError(reason)
     if folder:
@@ -667,7 +667,7 @@ def play(values, starfield, system=None, say=print, start_timeout_s=180.0, dump_
             apply_bridge(values, starfield, system, say)
             apply_papyrus(values, say, ini)
 
-        reason = recovery.play_reason(starfield)
+        reason = recovery.play_reason(starfield) or save_release.play_reason(values, starfield)
         if reason:
             raise ValueError(reason)
         apply_load_order(values, starfield, system, say)   # after the bridge: a toggle rewrites Plugins.txt too

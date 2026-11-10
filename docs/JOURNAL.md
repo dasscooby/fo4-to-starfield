@@ -2783,3 +2783,14 @@ parsed or modified. This first part provides the read-only contract/CLI; automat
 publication for newly produced saves and Play/GUI enforcement remain the next part of
 this same item-7 PR. It does not adopt existing unbound saves. Windows/native checks
 are **NOT_RUN** for this part. Exact-head receipts are on FAL-247.
+
+### 2026-11-10 — Codex / Lone: item-7 declared-profile refusal consumer (part 2)
+
+After Scribe CLEAR of part 1 and Minuteman's #713 merge, retargeted draft #716 to
+main without rewriting its history. An installed FO4SF.release.json now activates
+a read-only check of all opaque .sfs saves and sibling bindings in the configured
+FO4SF profile before Play settings, and again before load-order application. The
+GUI delegates hashing to its existing CLI worker. Unknown/unbound/changed files
+refuse; no old save adoption. Mandatory installer declaration ownership, active
+master-set validation and new-save provenance/publication remain unfinished in
+the same draft PR. Synthetic checks only; Windows/native/Tk/game NOT_RUN.

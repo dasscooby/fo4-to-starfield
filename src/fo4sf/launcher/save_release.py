@@ -3,7 +3,8 @@
 Saves are opaque bytes. No save headers are parsed, migrated or adopted. A future
 publisher must establish that a newly produced save belongs to the running release;
 snapshot_binding only captures bytes and is not itself proof of that provenance.
-Play enforcement and automatic publication are deliberately a later part of item 7.
+An installed declaration activates a read-only profile gate. Declaration and binding
+publication remain a later part of item 7; absence does not retrofit legacy installs.
 """
 import hashlib
 import json
@@ -14,6 +15,9 @@ import re
 SCHEMA = 1
 MAX_METADATA_BYTES = 1 << 20
 SHA = re.compile(r"[0-9a-f]{64}")
+RELEASE_FILE = "FO4SF.release.json"
+BINDING_SUFFIX = ".fo4sf-release.json"
+MAX_PROFILE_SAVES = 4096
 
 
 class BindingError(ValueError):
@@ -175,38 +179,48 @@ def read_metadata(path):
     return json.loads(raw.decode("utf-8-sig"), object_pairs_hook=_pairs, parse_constant=_constant)
 
 
+def _installed_masters(release, starfield):
+    problems = []
+    data = Path(starfield) / "Data"
+    names = {}
+    for path in data.iterdir():
+        names.setdefault(path.name.casefold(), []).append(path.name)
+    for master in release["masters"]:
+        found = names.get(master["name"], [])
+        if len(found) != 1:
+            problems.append(f"{master['name']}: missing or ambiguous installed master")
+        elif identity(_inside(data, found[0])) != {k: master[k] for k in ("size", "sha256")}:
+            problems.append(f"{master['name']}: installed bytes differ from release")
+    return problems
+
+
+def _bound_save(release, binding, save, state_dir):
+    """Internal binding check; caller must separately verify installed masters."""
+    _keys(binding, ("schema", "release", "save_name", "save_identity", "state_files"), "save binding")
+    if type(binding["schema"]) is not int or binding["schema"] != SCHEMA:
+        raise BindingError("unknown save-binding schema")
+    old = declaration(binding["release"])
+    _name(binding["save_name"])
+    saved_pin = _identity_fields(binding["save_identity"])
+    state_files = _state_files(binding["state_files"], old["state_layouts"])
+    problems = []
+    if release["masters"] != old["masters"]:
+        problems.append("required master identities/order changed")
+    if release["state_layouts"] != old["state_layouts"]:
+        problems.append("required state envelope/payload layout changed")
+    if binding["save_name"].casefold() != Path(save).name.casefold() or identity(save) != saved_pin:
+        problems.append("save name or bytes differ from its binding")
+    for relative, pin in state_files.items():
+        if identity(_inside(state_dir, relative)) != {k: pin[k] for k in ("size", "sha256")}:
+            problems.append(f"{relative}: state bytes differ from save binding")
+    return problems
+
+
 def check(release, binding, save, starfield, state_dir):
     """Return refusal reasons. No writes and no inference that an unbound save is safe."""
     try:
         release = declaration(release)
-        _keys(binding, ("schema", "release", "save_name", "save_identity", "state_files"), "save binding")
-        if type(binding["schema"]) is not int or binding["schema"] != SCHEMA:
-            raise BindingError("unknown save-binding schema")
-        old = declaration(binding["release"])
-        _name(binding["save_name"])
-        saved_pin = _identity_fields(binding["save_identity"])
-        state_files = _state_files(binding["state_files"], old["state_layouts"])
-        problems = []
-        if release["masters"] != old["masters"]:
-            problems.append("required master identities/order changed")
-        if release["state_layouts"] != old["state_layouts"]:
-            problems.append("required state envelope/payload layout changed")
-        if binding["save_name"].casefold() != Path(save).name.casefold() or identity(save) != saved_pin:
-            problems.append("save name or bytes differ from its binding")
-        data = Path(starfield) / "Data"
-        names = {}
-        for path in data.iterdir():
-            names.setdefault(path.name.casefold(), []).append(path.name)
-        for master in release["masters"]:
-            found = names.get(master["name"], [])
-            if len(found) != 1:
-                problems.append(f"{master['name']}: missing or ambiguous installed master")
-            elif identity(_inside(data, found[0])) != {k: master[k] for k in ("size", "sha256")}:
-                problems.append(f"{master['name']}: installed bytes differ from release")
-        for relative, pin in state_files.items():
-            if identity(_inside(state_dir, relative)) != {k: pin[k] for k in ("size", "sha256")}:
-                problems.append(f"{relative}: state bytes differ from save binding")
-        return problems
+        return _bound_save(release, binding, save, state_dir) + _installed_masters(release, starfield)
     except (OSError, ValueError, UnicodeError) as error:
         return [f"save release refused: {error}"]
 
@@ -216,3 +230,63 @@ def check_files(release_path, binding_path, save, starfield, state_dir):
         return check(read_metadata(release_path), read_metadata(binding_path), save, starfield, state_dir)
     except (OSError, ValueError, UnicodeError, RecursionError) as error:
         return [f"unbound or unreadable save release: {error}"]
+
+
+def play_reason(values, starfield):
+    """Gate a declared FO4SF instance, including dry runs. Never publish or adopt saves.
+
+    This staged consumer activates only when an installer declaration exists. The
+    publisher must make that declaration mandatory for managed releases in a later
+    part. Legacy installs without one retain their existing behavior for now.
+    """
+    try:
+        release_path = Path(starfield) / "Data" / RELEASE_FILE
+        try:
+            release_path.lstat()
+        except FileNotFoundError:
+            return ""
+        if release_path.is_symlink():
+            raise BindingError("release declaration is a link")
+        raw = read_metadata(release_path)
+        release = declaration(raw)
+        if not values.get("instance") or not values.get("my_games"):
+            raise BindingError("confirm the FO4SF instance and My Games folder before playing this release")
+        from . import instance
+        overrides = instance.custom_ini_problems(values["my_games"], values)
+        if overrides:
+            raise BindingError("; ".join(overrides))
+        my_games = Path(values["my_games"])
+        if not my_games.is_absolute() or not my_games.is_dir():
+            raise BindingError("My Games folder is missing or is not absolute")
+        # This is the launcher-resolved SLocalSavePath, not observed H3 placement.
+        saves = my_games / "Saves" / "FO4SF"
+        if os.path.normcase(str(saves.resolve())) != os.path.normcase(os.path.abspath(saves)):
+            raise BindingError("save folder is redirected; confirm its location before playing")
+        runtime = saves / "FO4SF-Runtime"
+        if os.path.normcase(str(runtime.resolve())) != os.path.normcase(os.path.abspath(runtime)):
+            raise BindingError("runtime folder is redirected; confirm its location before playing")
+        problems = _installed_masters(release, starfield)
+        if problems:
+            raise BindingError(problems[0])
+        if not saves.exists():
+            return ""  # first run: do not create the folder during a read-only check
+        names = set()
+        for save in saves.iterdir():
+            if save.suffix.casefold() != ".sfs":
+                continue
+            if save.name.casefold() in names:
+                raise BindingError("ambiguous save names")
+            names.add(save.name.casefold())
+            if len(names) > MAX_PROFILE_SAVES:
+                raise BindingError("save inventory exceeds supported limit")
+            binding_path = save.with_name(save.name + BINDING_SUFFIX)
+            if binding_path.is_symlink():
+                raise BindingError(f"{save.name}: binding is a link")
+            binding = read_metadata(binding_path)
+            problems = _bound_save(release, binding, save, runtime)
+            if problems:
+                raise BindingError(f"{save.name}: {problems[0]}")
+        return ""
+    except (OSError, ValueError, UnicodeError, RecursionError) as error:
+        return (f"Save release check refused: {error}. Keep the saves and their bindings; "
+                "restore their matching release before playing. Unbound saves are never adopted automatically.")
