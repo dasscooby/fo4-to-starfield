@@ -365,20 +365,33 @@ def next_stage(stage, dead, total, fighting, at_preston, found=False):
     return s
 
 
-def place_at(off, dp, to_spot, interior, fighting, hold=25.0, gap=1500.0, radius=300.0):
-    """The script's PlaceAt decision (FO4SF_Min00Quest.psc), Preston's (FAL-128) and Codsworth's (FAL-163) fixed-spot
-    rule, the same rule in Python so it can be tested: off is the actor's distance from its fixed merged spot, dp its
-    distance from the player (inf: another world), to_spot the player's (x, y) distance from that spot. Returns the
-    script's state (prestonState, codsworthState), or "move"."""
+def place_at(off, dp, to_spot, interior, fighting, held=False, landed=None, hold=25.0, gap=1500.0, radius=300.0,
+             held_radius=3.0):
+    """The script's PlaceAt decision with its caller's hold (FO4SF_Min00Quest.psc: PlacePreston, PlaceCodsworth, HoldDue),
+    Preston's (FAL-128, FAL-170) and Codsworth's (FAL-163) fixed-spot rule, the same rule in Python so it can be tested:
+    off is the actor's distance from its fixed merged spot, dp its distance from the player (inf: another world),
+    to_spot the player's (x, y) distance from that spot, held the instance's prestonHeld/codsworthHeld before the check,
+    landed whether a move leaves it at its spot (None: the move's outcome is not modelled). Returns the script's state
+    (prestonState, codsworthState), or "move" when a move is due and landed is None. An actor that fights is let go
+    first, whatever held says (the caller's ReleaseInFight); at its spot it is held when calm, not yet held and within
+    held_radius; a move that lands holds it unless it fights; the state ends in ", held" while this instance holds it
+    after the check."""
+    if fighting:
+        held = False                                    # ReleaseInFight, before PlaceAt
+    state = lambda s, h: s + ", held" if h else s       # HeldState
     if off <= hold and dp < gap:
-        return "at spot"
+        return state("at spot", held or (not fighting and off <= held_radius))
     if interior:
-        return "off, player inside"
+        return state("off, player inside", held)
     if to_spot > radius:
-        return "off, player away"
+        return state("off, player away", held)
     if dp < gap and fighting:
-        return "off, fighting"
-    return "move"
+        return state("off, fighting", held)
+    if landed is None:
+        return "move"
+    if not landed:
+        return state("move failed", held)
+    return state("placed", held or not fighting)
 
 
 def off_of(msg):
