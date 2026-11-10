@@ -53,9 +53,15 @@ class Parse(unittest.TestCase):
         self.assertEqual([e["bucket"] for e in errors],
                          ["unknown_function", "unknown_function", "unknown_type",
                           "unknown_property_or_variable", "unknown_property_or_variable",
-                          "wrong_argument_count", "syntax", "other", "other"])
+                          "wrong_argument_count", "syntax", "other"])
         self.assertEqual(errors[0]["line"], 10)
         self.assertNotIn("warning", " ".join(e["message"] for e in errors).lower().replace("compilation failed", ""))
+
+    def test_trailer_lines_are_not_errors(self):
+        text = ("Demo.psc(1,1): Foo is not a function or does not exist\n"
+                "No output generated for Demo.psc, compilation failed.\n"
+                "Batch compile of 1 files finished. 0 succeeded, 1 failed.\n")
+        self.assertEqual([e["bucket"] for e in cc.parse_output(text)], ["unknown_function"])
 
     def test_clean_output_has_no_errors(self):
         self.assertEqual(cc.parse_output("Starting 1 compile threads\nBatch compile of 1 files finished. 1 succeeded, 0 failed.\n"), [])
@@ -93,11 +99,13 @@ class EndToEnd(unittest.TestCase):
         self.compiler.write_text("", encoding="utf-8")
         self.out = t / "out"
         self.cmds = []
+        self.cwds = []
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def runner(self, cmd, timeout):
+    def runner(self, cmd, timeout, cwd=None):
+        self.cwds.append(cwd)
         self.cmds.append(cmd)
         name = Path(cmd[1]).stem
         if name == "Alpha":
@@ -106,7 +114,7 @@ class EndToEnd(unittest.TestCase):
             return 1, "", "X.psc(3,1): unknown type Thing\n"
         if name == "Gamma":
             return 3, "", ""  # silent failure must not count as a pass
-        return 0, "Batch compile of 1 files finished. 1 succeeded, 0 failed.\n", ""
+        return 0, "Compilation succeeded.\nBatch compile of 1 files finished. 1 succeeded, 0 failed.\n", ""
 
     def test_census(self):
         c = cc.run_census(self.fo4, self.sf, self.shim, self.compiler, "QF_Fake_0001", 3, 1, self.out,
@@ -125,6 +133,17 @@ class EndToEnd(unittest.TestCase):
         imports = self.cmds[0][3].removeprefix("-i=").split(";")
         self.assertEqual([Path(i).name for i in imports], ["shim", "sf", "fo4"])
         self.assertIn("Foo", cc.format_table(c))
+        # Bare file name, run from the script's own folder (a path is rejected by the compiler).
+        for cmd, cwd in zip(self.cmds, self.cwds):
+            self.assertEqual(cmd[1], Path(cmd[1]).name)
+            self.assertTrue(cmd[1].endswith(".psc"))
+            self.assertEqual(cwd, str(self.fo4))
+
+    def test_exit_zero_without_success_line_is_not_a_pass(self):
+        c = cc.run_census(self.fo4, self.sf, self.shim, self.compiler, "QF_Fake_0001", 0, 1, self.out,
+                          runner=lambda cmd, t, cwd=None: (0, "", ""))
+        self.assertEqual(c["compiled"], 0)
+        self.assertEqual(c["buckets"]["other"]["errors"], 1)
 
     def test_missing_flags_fails_early(self):
         (self.sf / cc.DEFAULT_FLAGS).unlink()
@@ -136,7 +155,7 @@ class EndToEnd(unittest.TestCase):
     def test_timeout_is_other(self):
         import subprocess
 
-        def slow(cmd, timeout):
+        def slow(cmd, timeout, cwd=None):
             raise subprocess.TimeoutExpired(cmd, timeout)
         c = cc.run_census(self.fo4, self.sf, self.shim, self.compiler, "QF_Fake_0001", 1, 1, self.out, runner=slow)
         self.assertEqual(c["compiled"], 0)

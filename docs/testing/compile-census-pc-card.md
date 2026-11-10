@@ -34,8 +34,7 @@ PowerShell, from the repo root, with the repo's Python (`$py`):
 ```
 
 Run time: one compiler start per script, so a few minutes for 200. `--timeout` (default 120 s per script) marks a stuck
-one as `other`. If the first run fails everything with one `other` line, send me that line: likely the compiler wants a
-different script-path form or the flags file is elsewhere.
+one as `other`. The tool passes the compiler the bare `.psc` file name and runs it from that script's own folder (the compiler rejects a path, as `make_bridge.py` shows). A script counts as compiled only on exit 0 plus `Compilation succeeded`. If the first run fails everything with one `other` line, send me that line.
 
 ## Import order (so the result means what it says)
 

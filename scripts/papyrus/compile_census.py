@@ -34,6 +34,10 @@ TOP_NAMES = 20
 
 # file(line,col): message
 LOCATED = re.compile(r"^(?P<file>.*?)\((?P<line>\d+),(?P<col>\d+)\):\s*(?P<msg>.*\S)\s*$")
+# The compiler's own trailer lines are not errors: they restate failures already counted.
+SUMMARY = re.compile(r"(?:compilation (?:succeeded|failed)|batch compile\b|no output generated|"
+                     r"starting \d+ compile threads)", re.I)
+SUCCESS = "Compilation succeeded"
 UNLOCATED = re.compile(r"\b(error|failed)\b", re.I)
 
 # Checked in order; the first match wins. Name group is optional.
@@ -90,7 +94,7 @@ def parse_output(text):
             msg = re.sub(r"^error:?\s*", "", msg, flags=re.I)
             where = (int(located.group("line")), int(located.group("col")))
         elif UNLOCATED.search(line) and not re.search(r"\b0 error", line, re.I) \
-                and not re.match(r"(?:compilation|batch compile)\b", line, re.I):
+                and not SUMMARY.match(line):
             if re.match(r"warning\b", line, re.I):
                 continue
             msg, where = line, (0, 0)
@@ -121,12 +125,13 @@ def pick_sample(scripts, fragment, count, seed):
     return [matches[0]] + random.Random(seed).sample(rest, count)
 
 
-def build_command(compiler, script_path, flags, imports, out_dir):
-    return [str(compiler), str(script_path), f"-f={flags}", f"-i={';'.join(map(str, imports))}", f"-o={out_dir}"]
+def build_command(compiler, script_name, flags, imports, out_dir):
+    """The compiler rejects a path: pass the bare .psc file name and run it from the script's own folder."""
+    return [str(compiler), script_name, f"-f={flags}", f"-i={';'.join(map(str, imports))}", f"-o={out_dir}"]
 
 
-def default_runner(cmd, timeout):
-    res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, errors="replace")
+def default_runner(cmd, timeout, cwd=None):
+    res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, errors="replace", cwd=cwd)
     return res.returncode, res.stdout, res.stderr
 
 
@@ -148,25 +153,26 @@ def run_census(fo4, starfield, shim, compiler, fragment, count, seed, out, flags
 
     results = []
     for rel in sample:
-        cmd = build_command(compiler, fo4 / rel, flags, imports, pex_dir)
+        script_file = fo4 / rel
+        cmd = build_command(compiler, script_file.name, flags, imports, pex_dir)
         try:
-            code, stdout, stderr = runner(cmd, timeout)
+            code, stdout, stderr = runner(cmd, timeout, str(script_file.parent))
             note = None
         except subprocess.TimeoutExpired:
             code, stdout, stderr, note = None, "", "", f"timed out after {timeout}s"
         except OSError as err:
             code, stdout, stderr, note = None, "", "", f"could not run compiler: {err}"
         raw_name = rel.replace("/", "__") + ".txt"
-        (raw_dir / raw_name).write_text(f"$ {' '.join(cmd)}\nexit={code}\n--stdout--\n{stdout}\n--stderr--\n{stderr}\n"
+        (raw_dir / raw_name).write_text(f"$ (cwd {script_file.parent}) {' '.join(cmd)}\nexit={code}\n--stdout--\n{stdout}\n--stderr--\n{stderr}\n"
                                         f"{note or ''}\n", encoding="utf-8")
         errors = parse_output(stdout + "\n" + stderr)
         if note:
             errors.append({"bucket": "other", "name": None, "line": 0, "col": 0, "message": note})
-        elif code not in (0, None) and not errors:
-            # Non-zero exit with nothing parseable: do not count it as a pass.
+        elif not errors and (code != 0 or SUCCESS not in stdout):
+            # Nothing parseable but no clean success either: never count it as a pass.
             errors.append({"bucket": "other", "name": None, "line": 0, "col": 0,
-                           "message": f"compiler exit code {code} with no parseable error"})
-        results.append({"script": rel, "compiled": code == 0 and not errors, "exit_code": code,
+                           "message": f"exit code {code} without '{SUCCESS}' and no parseable error"})
+        results.append({"script": rel, "compiled": code == 0 and SUCCESS in stdout and not errors, "exit_code": code,
                         "is_fragment": rel == sample[0], "errors": errors, "raw": f"raw/{raw_name}"})
 
     census = summarize(results)
