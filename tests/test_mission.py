@@ -25,6 +25,12 @@ def read(path):
         return f.read()
 
 
+def function_body(psc, name):
+    """A script function's text, from its "Function <name>(" to its EndFunction."""
+    i = psc.index(f"Function {name}(")
+    return psc[i:psc.index("EndFunction", i)]
+
+
 class ContractTests(unittest.TestCase):
     def test_script_properties_are_the_ones_the_plugin_fills(self):
         self.assertEqual(tuple(make_mission.mandatory_properties(read(PSC))), make_mission.PROPERTIES)
@@ -42,6 +48,15 @@ class ContractTests(unittest.TestCase):
         for o in (10, 85, 86):                                   # Min00's objective indices, written by Program.cs
             self.assertIn(f"SetObjectiveDisplayed({o})", psc)
             self.assertIn(f"({o}, \"", cs)
+
+    def test_make_mission_compiles_without_warnings(self):
+        """PC, Python 3.14 (FAL-128): make_mission.py's docstring printed a SyntaxWarning for "\\S" (Data\\Scripts)."""
+        import warnings
+        src = read(os.path.join(ROOT, "scripts", "mission", "make_mission.py"))
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            compile(src, "make_mission.py", "exec")
+        self.assertIn(r"Data\Scripts\FO4SF_Min00Quest.pex", make_mission.__doc__)     # the help text is unchanged
 
     def test_mandatory_properties_parser(self):
         text = ("Actor Property A Auto Const Mandatory\nActor[] Property B Auto Const Mandatory\n"
@@ -117,6 +132,40 @@ class LogTests(unittest.TestCase):
         # a 2590549e keeper line has no off=, and an unreadable one is None, never an error
         self.assertIsNone(make_mission.summarize([after[-1].replace(" off=0.4", "")])["preston_off"])
         self.assertIsNone(make_mission.summarize([after[-1].replace("off=0.4", "off=nan?")])["preston_off"])
+
+    def test_names_are_read_in_any_case(self):
+        """The 31 Oct logs (FAL-128 pc-evidence-20261110) print "moved Codsworth" and "moved Preston" where the script's
+        literals were "codsworth" and "preston": the game prints a name as the property it matches. Those moves count."""
+        lines = [
+            "[15:04:21] FO4SF_MISSION rt=130.3 moved Codsworth to -2346.7 -1406.1 111.7 target -2346.7 -1406.1 111.7 "
+            "before=INF d=122.0 failed=false",
+            "[15:04:21] FO4SF_MISSION rt=131.1 moved Preston to -2011.5 -1697.2 89.0 target -2011.1 -1697.5 89.0 "
+            "before=INF d=544.4 failed=false",
+            "[15:04:22] FO4SF_MISSION rt=131.6 moved raider 0 to -2029.7 -1696.5 88.3 target -2029.1 -1698.2 88.3 "
+            "before=INF d=529.7 failed=false",
+        ]
+        s = make_mission.summarize(lines)
+        self.assertEqual((s["preston_moves"], s["codsworth_moves"]), (1, 1))
+
+    def test_keeper_reports_codsworth(self):
+        """FAL-163: the keeper's lines for Codsworth (load, status) are read like Preston's, apart from his."""
+        lines = [
+            "[11/10/2026 - 09:40:00PM] FO4SF_MISSION rt=30.0 keeper load Preston d=3.0 off=0.5 state=at spot moves=1 "
+            "at -2011.1 -1697.5 89.1 disabled=False dead=False fails=0 player=-2012.0 -1700.0 90.0 interior=False",
+            "[11/10/2026 - 09:40:00PM] FO4SF_MISSION rt=30.0 keeper load Codsworth d=3102.0 off=2955.1 state=none "
+            "moves=0 at -1146.7 1293.8 111.7 disabled=False dead=False fails=0 player=-2012.0 -1700.0 90.0 interior=False",
+            "[11/10/2026 - 09:45:05PM] FO4SF_MISSION rt=335.0 moved Codsworth to -2346.7 -1406.2 111.7 target -2346.709 "
+            "-1406.163 111.734 before=3001.2 off=2955.1 d=120.3 failed=False by=keeper",
+            "[11/10/2026 - 09:46:00PM] FO4SF_MISSION rt=390.0 keeper status Codsworth d=118.0 off=1.2 state=placed "
+            "moves=1 at -2346.0 -1406.0 111.7 disabled=False dead=False fails=0 player=-2460.0 -1400.0 127.0 "
+            "interior=False",
+        ]
+        s = make_mission.summarize(lines)
+        self.assertEqual((s["codsworth_moves"], s["codsworth_off"], s["preston_moves"], s["preston_off"]),
+                         (1, 1.2, 0, 0.5))
+        self.assertTrue(s["codsworth_keeper"].startswith("keeper status Codsworth d=118.0"))
+        self.assertTrue(s["keeper"].startswith("keeper load Preston"))
+        self.assertIsNone(make_mission.summarize(lines[:1])["codsworth_keeper"])
 
 
 class NextStageTests(unittest.TestCase):
@@ -236,6 +285,22 @@ class RelocateContractTests(unittest.TestCase):
         code = "\n".join(line.split(";")[0] for line in code.splitlines())
         self.assertIsNone(re.search(r"\d[eE][-+]?\d", code))
 
+    def test_no_keyword_names(self):
+        """Papyrus keywords (case-insensitive) cannot name a parameter or a variable: a parameter "state" (TraceSpot,
+        FAL-163) would not compile, and this host has no Papyrus compiler to catch it."""
+        keywords = {"as", "auto", "autoreadonly", "betaonly", "bool", "collapsed", "conditional", "const", "customevent",
+                    "debugonly", "else", "elseif", "endevent", "endfunction", "endguard", "endif", "endproperty",
+                    "endstate", "endstruct", "endwhile", "event", "extends", "false", "float", "function", "global",
+                    "guard", "hidden", "if", "import", "int", "is", "length", "mandatory", "native", "new", "none",
+                    "parent", "property", "return", "scriptname", "self", "state", "string", "struct", "true",
+                    "tryguard", "var", "while"}
+        code = re.sub(r"\{[^}]*\}", "", read(PSC))
+        code = re.sub(r'"[^"]*"', '""', "\n".join(line.split(";")[0] for line in code.splitlines()))
+        names = [n for n in re.findall(r"\b(?:bool|int|float|string|Actor|WorldSpace|MiscObject)(?:\[\])?\s+(\w+)",
+                                       code, re.I) if n not in ("Property", "Function")]
+        self.assertIn("spotState", names)
+        self.assertEqual([n for n in names if n.lower() in keywords], [])
+
     def test_relocate_decides_by_position(self):
         """In game 18 Oct 14:40 the unmoved actors read a finite distance of about 2,955 (the offset's length), and the
         "finite means reachable" test skipped the move: the gap must sit between the radius and that length."""
@@ -296,7 +361,7 @@ class RelocateContractTests(unittest.TestCase):
             psc = f.read()
         keep = psc[psc.index("Function KeepCodsworth()"):psc.index("bool Function MoveOver")]
         self.assertIn("codsworthFails += 1", keep)
-        self.assertRegex(keep, r"if \(Codsworth != None && codsworthFails < 10\) \|\| "
+        self.assertRegex(keep, r"if \(Codsworth != None && \(codsworthFails < 10 \|\| codsworthHolds > 0\)\) \|\| "
                                r"\(KeeperOnly && \(prestonFails < 10 \|\| prestonHolds > 0\)\)"
                                r"\s+StartTimer\(CodsworthCheck, 2\)")
         self.assertNotIn("GetStage", keep)
@@ -330,8 +395,7 @@ class RelocateContractTests(unittest.TestCase):
         self.assertRegex(psc, r"Event Actor.OnPlayerLoadGame\(Actor akSender\)\s+if KeeperOnly\s+KeepCodsworthLoad\(\)")
         keep = psc[psc.index("Function KeepCodsworth()"):psc.index("bool Function MoveOver")]
         # the mission's old timer 2 (no Codsworth, not the keeper) moves nobody and is not restarted
-        self.assertRegex(keep, r"if Codsworth != None && codsworthFails < 10 && !player\.IsInInterior\(\)\s+"
-                               r"if MoveOver\(Codsworth,")
+        self.assertRegex(keep, r"if Codsworth != None && codsworthFails < 10\s+if PlaceCodsworth\(player\)")
 
     def test_a_missing_codsworth_does_not_stop_preston(self):
         """FAL-128 (2590549e review): KeepCodsworthLoad and KeepCodsworth returned early when Codsworth was None, which
@@ -376,10 +440,14 @@ class RelocateContractTests(unittest.TestCase):
             self.assertRegex(psc, rf"(?m)^{v}$")
         self.assertRegex(psc, r"(?m)^int Property KeeperStatusEvery = 12 Auto Const$")
         self.assertNotIn("KeeperStatusEvery", make_mission.mandatory_properties(psc))     # the plugin is unchanged
-        trace = body("TracePreston")
-        for field in ('" preston d="', '" off="', '" state="', '" moves="', '" disabled="', '" dead="', '" fails="',
+        self.assertIn('TraceSpot(what, Preston, "preston", prestonOff, prestonState, prestonMoves, prestonHeld, prestonHolds, '
+                      'prestonFails)',
+                      body("TracePreston"))
+        trace = body("TraceSpot")
+        for field in ('" d="', '" off="', '" state="', '" moves="', '" disabled="', '" dead="', '" fails="',
                       '" player="', '" interior="'):
             self.assertIn(field, trace)
+        self.assertIn('Trace(what + " " + name + " d="', trace)
         # the keeper quest carries the mission's properties, Preston among them (no new plugin record)
         cs = read(CS)
         keeper = cs[cs.index("var ks = new SF.ScriptEntry"):cs.index("keeper.VirtualMachineAdapter")]
@@ -387,7 +455,7 @@ class RelocateContractTests(unittest.TestCase):
         self.assertIn('Obj("Preston", prestonRef.FormKey)', cs[cs.index("void MissionProps("):cs.index("MissionProps(script);")])
 
     def test_keeper_rule_model_after_the_mission(self):
-        """The keeper's rule on plain numbers, after stage 200, with make_mission.place_preston (the script's
+        """The keeper's rule on plain numbers, after stage 200, with make_mission.place_at (the script's PlaceAt, by
         PlacePreston): Preston snapped back to his local spot, the mission's check is off. He is put back only when the
         player is outdoors near his merged spot, always to that spot, and a no-op move spends the budget until a load
         renews it."""
@@ -399,7 +467,7 @@ class RelocateContractTests(unittest.TestCase):
                 return
             off = math.dist(state["pos"], spot)
             dp = math.dist(player, state["pos"]) if same_world else float("inf")
-            if make_mission.place_preston(off, dp, math.dist(player, spot), not outdoors, False) == "move":
+            if make_mission.place_at(off, dp, math.dist(player, spot), not outdoors, False) == "move":
                 if moveto_works:
                     state["pos"] = spot
                 else:
@@ -434,14 +502,14 @@ class RelocateContractTests(unittest.TestCase):
         off, dp, to_spot = math.dist(preston, spot), math.dist(player, preston), math.dist(player, spot)
         self.assertGreater(off, 25.0)
         self.assertLess(dp, 1500.0)                                     # what MoveOver read as "already there"
-        self.assertEqual(make_mission.place_preston(off, dp, to_spot, False, False), "move")
-        self.assertEqual(make_mission.place_preston(off, dp, to_spot, False, True), "off, fighting")
-        self.assertEqual(make_mission.place_preston(off, dp, to_spot, True, False), "off, player inside")
-        self.assertEqual(make_mission.place_preston(off, dp, 544.4, False, False), "off, player away")   # cell=None range
-        self.assertEqual(make_mission.place_preston(10.0, 9.0, to_spot, False, False), "at spot")
+        self.assertEqual(make_mission.place_at(off, dp, to_spot, False, False), "move")
+        self.assertEqual(make_mission.place_at(off, dp, to_spot, False, True), "off, fighting")
+        self.assertEqual(make_mission.place_at(off, dp, to_spot, True, False), "off, player inside")
+        self.assertEqual(make_mission.place_at(off, dp, 544.4, False, False), "off, player away")   # cell=None range
+        self.assertEqual(make_mission.place_at(10.0, 9.0, to_spot, False, False), "at spot")
         # snapped back or in another world: off, also while "fighting" (he cannot fight from there)
-        self.assertEqual(make_mission.place_preston(2955.0, 2955.0, to_spot, False, True), "move")
-        self.assertEqual(make_mission.place_preston(0.0, float("inf"), to_spot, False, False), "move")
+        self.assertEqual(make_mission.place_at(2955.0, 2955.0, to_spot, False, True), "move")
+        self.assertEqual(make_mission.place_at(0.0, float("inf"), to_spot, False, False), "move")
 
     def test_preston_is_never_offset_twice(self):
         """31 Oct 16:33 (.1.log): with the player about one offset length south-west of them, raiders already moved
@@ -453,43 +521,179 @@ class RelocateContractTests(unittest.TestCase):
         self.assertIn("float ty = PrestonLocalY + MergeOffsetY", place)
         self.assertIn("float tz = PrestonLocalZ", place)
         self.assertNotRegex(place, r"\.GetPosition[XY]\(\) \+ MergeOffset")
-        self.assertIn("Preston.MoveTo(player, tx - px, ty - py, tz - pz, True, False)", place)
+        self.assertIn('PlaceAt(Preston, "Preston", tx, ty, tz, player, who, "at the museum door", fighting)', place)
+        self.assertIn("a.MoveTo(player, tx - px, ty - py, tz - pz, True, False)", function_body(psc, "PlaceAt"))
         far = (-2011.14 - 1200.0, -1697.54 - 2700.0)                    # MoveOver's second target for him
-        self.assertEqual(make_mission.place_preston(0.0, 2955.0, math.dist(far, (-2011.14, -1697.54)), False, False),
+        self.assertEqual(make_mission.place_at(0.0, 2955.0, math.dist(far, (-2011.14, -1697.54)), False, False),
                          "off, player away")
 
     def test_script_carries_the_place_rule(self):
-        """make_mission.place_preston is PlacePreston's decision, in the same order (FAL-170: the hold at the spot and
-        after a move that lands; the release is the callers', before it)."""
+        """make_mission.place_at is PlaceAt's decision with its callers' hold, in the same order; PlacePreston and
+        PlaceCodsworth both use it, count a move whichever way it ends, and hold (FAL-170: the hold at the spot and after
+        a move that lands; the release is the callers', before it)."""
         psc = read(PSC)
-        place = psc[psc.index("bool Function PlacePreston("):psc.index("EndFunction", psc.index("bool Function PlacePreston("))]
-        steps = ["bool fighting = Preston.GetCombatState() != 0",
-                 "if prestonOff <= HoldRadius && dp < RelocateGap",
-                 "if !prestonHeld && !fighting && prestonOff <= HeldRadius", "HoldPreston(who)",
-                 'SetPrestonState("at spot")',
-                 "if player.IsInInterior()", 'SetPrestonState("off, player inside")',
-                 "> PlaceRadius * PlaceRadius", 'SetPrestonState("off, player away")',
-                 "if dp < RelocateGap && fighting", 'SetPrestonState("off, fighting")',
-                 "Preston.MoveTo(", "bool failed = off > HoldRadius || d >= RelocateGap", "prestonOff = off",
-                 'SetPrestonState("move failed")', "if !fighting", "HoldPreston(who)", 'SetPrestonState("placed")']
-        at = 0
-        for s in steps:                                                 # each one after the one before
-            at = place.index(s, at) + len(s)
-        self.assertIn("prestonMoves += 1", place)
-        self.assertNotIn("prestonState = ", place)                      # every state goes through SetPrestonState
+        place = function_body(psc, "PlaceAt")
+        steps = ["if off <= HoldRadius && dp < RelocateGap", 'return "at spot"',
+                 "if player.IsInInterior()", 'return "off, player inside"',
+                 "> PlaceRadius * PlaceRadius", 'return "off, player away"',
+                 "if dp < RelocateGap && fighting", 'return "off, fighting"',
+                 "a.MoveTo(", "bool failed = after > HoldRadius || d >= RelocateGap", 'return "move failed"',
+                 'return "placed"']
+        at = [place.index(s) for s in steps]
+        self.assertEqual(at, sorted(at))
+        self.assertIn("Debug.Notification(", place)
+        self.assertNotIn("SetRestrained", place)                         # the callers hold (HoldDue)
+        self.assertEqual(len(re.findall(r"\.MoveTo\(", psc)), 2)          # PlaceAt's and MoveOver's (the raiders)
+        due = function_body(psc, "HoldDue")
+        self.assertRegex(due, r"if fighting\s+return False\s+endif\s+"
+                              r'return s == "placed" \|\| \(s == "at spot" && !held && off <= HeldRadius\)')
+        for who in ("Preston", "Codsworth"):
+            wrap = function_body(psc, "Place" + who)
+            low = who[0].lower() + who[1:]
+            steps = [f"bool fighting = {who}.GetCombatState() != 0",
+                     f'string s = PlaceAt({who}, "{who}", tx, ty, tz, player, ',
+                     f"{low}Off = SpotOff({who}, tx, ty, tz)",
+                     'if s == "placed" || s == "move failed"', f"{low}Moves += 1",
+                     f"if HoldDue(s, fighting, {low}Held, {low}Off)", f"Hold{who}(",
+                     f"{low}State = HeldState(s, {low}Held)", 'return s == "move failed"']
+            at = 0
+            for s in steps:                                             # each one after the one before
+                at = wrap.index(s, at) + len(s)
+            self.assertNotIn(f'{low}State = "', wrap)                    # every state goes through HeldState
 
     def test_place_radii_follow_the_evidence(self):
         """PlaceRadius below the farthest move that landed in a loaded cell and held (353 m, raider 4, 31 Oct) and so
-        below every move that ended with cell=None (488 m on); HoldRadius above FindRadius (finding him is no move)."""
+        below every move that ended with cell=None (488 m on), and above Codsworth's 122 m moves (loaded cell, 31 Oct);
+        HoldRadius above FindRadius (finding him is no move)."""
         f = make_mission.script_floats(read(PSC))
         self.assertLess(f["PlaceRadius"], 353.0)
+        self.assertGreater(f["PlaceRadius"], 122.0)
         self.assertLess(f["PlaceRadius"], f["RelocateRadius"])
         self.assertGreater(f["HoldRadius"], f["FindRadius"])
         self.assertLess(f["HoldRadius"], f["PlaceRadius"])
         self.assertLess(f["HeldRadius"], f["HoldRadius"])               # FAL-170: held only close to the spot...
         self.assertGreater(f["HeldRadius"], 1.5)                        # ...where the 10 Nov placement landed
-        for name in ("PlaceRadius", "HoldRadius", "HeldRadius", "PrestonLocalX", "PrestonLocalY", "PrestonLocalZ"):
+        for name in ("PlaceRadius", "HoldRadius", "HeldRadius", "PrestonLocalX", "PrestonLocalY", "PrestonLocalZ",
+                     "CodsworthLocalX", "CodsworthLocalY", "CodsworthLocalZ"):
             self.assertNotIn(name, make_mission.mandatory_properties(read(PSC)))   # the plugin is unchanged
+
+    def test_codsworth_spot_is_where_the_moves_put_him(self):
+        """FAL-163: every logged move put Codsworth at (-2346.7, -1406.1..-1406.2, 111.7) (23 Oct, playtest row 32; 31 Oct,
+        pc-evidence-20261110): his plugin spot (ACHR 0x811 = Fallout 4's 01CA7D, the writer's fixture and the doc's
+        table) + the merge offset."""
+        f = make_mission.script_floats(read(PSC))
+        local = (f["CodsworthLocalX"], f["CodsworthLocalY"], f["CodsworthLocalZ"])
+        self.assertEqual(local, (-1146.709, 1293.837, 111.734))
+        self.assertIn('"pos": [-1146.709, 1293.837, 111.734]', read(CS))
+        self.assertIn("(-1146.709, 1293.837, 111.734) m",
+                      read(os.path.join(ROOT, "docs", "mission", "when-freedom-calls.md")))
+        merged = (local[0] + f["MergeOffsetX"], local[1] + f["MergeOffsetY"], local[2])
+        for a, b in zip(merged, (-2346.7, -1406.15, 111.7)):
+            self.assertAlmostEqual(a, b, delta=0.06)
+
+    def test_codsworth_has_prestons_rule(self):
+        """FAL-163, the owner's most reported defect ("Codsworth is not at Sanctuary", playtest rows 27, 32, 42): the
+        keeper moved him with MoveOver once per session (31 Oct, from 122 m) and never again, and he went back to his
+        unmerged spot within about three minutes (29 Oct). He now has Preston's fixed-spot rule (PlaceAt): his own
+        fixed target, budget, state variables, load and status lines and on-screen notes; MoveOver is the raiders' only."""
+        psc = read(PSC)
+        place = function_body(psc, "PlaceCodsworth")
+        for line in ("float tx = CodsworthLocalX + MergeOffsetX", "float ty = CodsworthLocalY + MergeOffsetY",
+                     "float tz = CodsworthLocalZ"):
+            self.assertIn(line, place)
+        self.assertNotRegex(place, r"\.GetPosition[XY]\(\) \+ MergeOffset")
+        self.assertNotIn("MoveOver(Codsworth", psc)
+        self.assertEqual(re.findall(r"if MoveOver\((\w+)", psc), ["Raiders"])
+        keep = function_body(psc, "KeepCodsworth")
+        self.assertRegex(keep, r"if PlaceCodsworth\(player\)\s+codsworthFails \+= 1\s+if codsworthFails >= 10\s+"
+                               r'codsworthState = "gave up"\s+Trace\([^\n]*\n\s+Debug\.Notification\(')
+        self.assertRegex(keep, r"if KeeperOnly\s+KeepPreston\(player\)\s+"
+                               r"if Codsworth != None && keeperChecks % KeeperStatusEvery == 0\s+"
+                               r'TraceCodsworth\("keeper status"\)')
+        self.assertNotIn("GetStage", keep + place)                      # after stage 200 too
+        load = function_body(psc, "KeepCodsworthLoad")
+        tail = load[load.rindex("if Codsworth != None"):]
+        self.assertRegex(tail, r'if Codsworth != None\s+TraceCodsworth\("keeper load"\)\s+Debug\.Notification\('
+                               r'"FO4SF keeper: Codsworth "')
+        self.assertLess(load.index('TraceCodsworth("keeper load")'), load.index("StartTimer(CodsworthCheck, 2)"))
+        self.assertIn('TraceSpot(what, Codsworth, "codsworth", codsworthOff, codsworthState, codsworthMoves, '
+                      'codsworthHeld, codsworthHolds, codsworthFails)', function_body(psc, "TraceCodsworth"))
+        for v in ("int codsworthMoves = 0", "float codsworthOff = -1.0", 'string codsworthState = "none"'):
+            self.assertRegex(psc, rf"(?m)^{v}$")                          # sqv FO4SF_CodsworthKeeper shows them
+
+    def test_codsworth_rule_model(self):
+        """His rule on the logged numbers (make_mission.place_at, the script's PlaceAt). 31 Oct: moved from 122 m, he
+        landed in a loaded cell. A snap-back is caught at the next check once the player is near; from Concord (444 m)
+        nothing is moved into an unloaded cell, where MoveOver (800 m) would; a drift under RelocateGap from the player,
+        which MoveOver called "already moved", is put back."""
+        spot, local = (-2346.709, -1406.163), (-1146.709, 1293.837)
+        start, concord = (-2467.7, -1406.9), (-2011.1, -1697.5)          # the walk's start and the museum door
+
+        def decide(codsworth, player, same_world=True, interior=False):
+            dp = math.dist(player, codsworth) if same_world else float("inf")
+            return make_mission.place_at(math.dist(codsworth, spot), dp, math.dist(player, spot), interior, False)
+
+        self.assertAlmostEqual(math.dist(start, spot), 121.0, delta=1.5)
+        self.assertEqual(decide(local, start), "move")                  # unmoved at the start: placed from 121 m
+        self.assertEqual(decide(local, start, same_world=False), "move")
+        self.assertEqual(decide((-2346.5, -1406.0), start), "at spot, held")   # calm within HeldRadius
+        self.assertEqual(decide(local, concord), "off, player away")    # snapped back while the player is at Concord
+        self.assertEqual(decide(local, (-2300.0, -1450.0)), "move")     # ...caught when he comes back
+        self.assertEqual(decide(local, start, interior=True), "off, player inside")
+        drifted = (-2290.0, -1380.0)                                    # 62 m off his spot, 180 m from the player
+        self.assertLess(math.dist(drifted, start), 1500.0)              # what MoveOver read as "already there"
+        self.assertEqual(decide(drifted, start), "move")
+
+    def test_codsworth_is_held_once_placed(self):
+        """FAL-163, the PC's saves of 7 to 9 Nov (save-evidence-20261110): Codsworth heads straight for his editor
+        coordinates (heading = bearing within 0.02 degrees) at about 0.34 m/s, so a put-back alone repeats about every
+        75 s. With the keeper's check (8.3 s measured on the PC) over 10 minutes: without a hold that holds, 9 put-backs;
+        with it, the one at the start. A fight releases him whatever his flag; calm at his spot, he is held again."""
+        def put_backs(hold_works, step=8.3, speed=0.34):
+            off, held, moves, t = 178.9, False, 0, 0.0                   # 9 Nov 19:49:33: 178.9 m off his spot
+            while t < 600.0:
+                state = make_mission.place_at(off, off, 120.0, False, False, held=held, landed=True)
+                if state.startswith("placed"):
+                    off, moves = 0.5, moves + 1
+                held = hold_works and state.endswith(", held")
+                if not held:
+                    off += speed * step                                 # he walks off towards his editor spot
+                t += step
+            return moves
+
+        self.assertEqual(put_backs(False), 9)
+        self.assertEqual(put_backs(True), 1)
+        self.assertEqual(make_mission.place_at(0.5, 120.0, 120.0, False, True, held=True), "at spot")     # released
+        self.assertEqual(make_mission.place_at(0.5, 120.0, 120.0, False, False, held=False), "at spot, held")
+
+    def test_raiders_are_never_offset_twice(self):
+        """31 Oct 16:33:47 (.1.log): with the player at about (-2551, -4055), one offset length south-west of the
+        museum, MoveOver moved raiders already at the museum a second time, raider 0 from about (-1950, -1850) to
+        (-3150, -4550). A raider's target must lie within RelocateRadius of Preston's merged spot (its unmerged spot is
+        within 120 m of his), so a raider already moved is never moved again (FAL-163)."""
+        psc = read(PSC)
+        move = function_body(psc, "MoveOver")
+        guard = ("float hx = x - (PrestonLocalX + MergeOffsetX)", "float hy = y - (PrestonLocalY + MergeOffsetY)",
+                 "if hx * hx + hy * hy > RelocateRadius * RelocateRadius")
+        for line in guard:
+            self.assertIn(line, move)
+        self.assertLess(move.index(guard[-1]), move.index("a.MoveTo("))
+        self.assertRegex(move, re.escape(guard[-1]) + r"\s+return False")
+        f = make_mission.script_floats(psc)
+        ox, oy, radius, gap = f["MergeOffsetX"], f["MergeOffsetY"], f["RelocateRadius"], f["RelocateGap"]
+        door = (f["PrestonLocalX"] + ox, f["PrestonLocalY"] + oy)
+
+        def moves(raider, player):
+            target = (raider[0] + ox, raider[1] + oy)
+            return (math.dist(player, raider) >= gap and math.dist(player, target) <= radius
+                    and math.dist(target, door) <= radius)
+
+        self.assertTrue(moves((-829.1, 1001.8), (-2011.1, -1697.5)))    # unmerged, player at the door: moved
+        moved, far_player = (-1950.0, -1850.0), (-2551.3, -4055.1)
+        self.assertTrue(math.dist(far_player, moved) >= gap and
+                        math.dist(far_player, (moved[0] + ox, moved[1] + oy)) <= radius)   # what MoveOver did
+        self.assertFalse(moves(moved, far_player))                      # now: no second offset
+        self.assertFalse(moves((-829.1, 1001.8), far_player))           # and the player is not at its spot
 
     def test_preston_spot_is_where_the_moves_put_him(self):
         """In game 28 Oct (new game run 3) the moves put Preston at (-2011.14, -1697.54, 89.09): his spot + the merge
@@ -509,7 +713,8 @@ class RelocateContractTests(unittest.TestCase):
         body = lambda name: psc[psc.index(f"Function {name}("):psc.index("EndFunction", psc.index(f"Function {name}("))]
         load = body("KeepCodsworthLoad")
         self.assertLess(load.index('TracePreston("keeper load")'), load.index("Debug.Notification("))
-        self.assertIn("Debug.Notification(", body("PlacePreston"))
+        self.assertIn("PlaceAt(Preston,", body("PlacePreston"))
+        self.assertIn("Debug.Notification(", body("PlaceAt"))         # every move, on screen
         self.assertRegex(body("KeepPreston"), r'prestonState = "gave up"[^\n]*\n(.*\n)*\s+Debug\.Notification\(')
         self.assertIn('" preston_off=" + prestonOff', psc)             # and in the mission's status line
 
@@ -519,64 +724,79 @@ class RelocateContractTests(unittest.TestCase):
         fights); a failed move holds nobody. Only the move is on screen."""
         spot, player = (-2011.14, -1697.54), (-2013.0, -1696.0)
         off = 73.7                                                      # at the load, 10 Nov
-        self.assertEqual(make_mission.place_preston(off, off, math.dist(player, spot), False, False), "move")
-        self.assertEqual(make_mission.place_preston(off, off, 2.4, False, False, landed=True), "placed, held")
-        self.assertEqual(make_mission.place_preston(off, off, 2.4, False, False, landed=False), "move failed")
-        self.assertEqual(make_mission.place_preston(off, off, 2.4, False, False, held=True, landed=False),
+        self.assertEqual(make_mission.place_at(off, off, math.dist(player, spot), False, False), "move")
+        self.assertEqual(make_mission.place_at(off, off, 2.4, False, False, landed=True), "placed, held")
+        self.assertEqual(make_mission.place_at(off, off, 2.4, False, False, landed=False), "move failed")
+        self.assertEqual(make_mission.place_at(off, off, 2.4, False, False, held=True, landed=False),
                          "move failed, held")
         # in another world while "fighting": moved, but never held in a fight
-        self.assertEqual(make_mission.place_preston(0.0, float("inf"), 2.4, False, True, landed=True), "placed")
+        self.assertEqual(make_mission.place_at(0.0, float("inf"), 2.4, False, True, landed=True), "placed")
         psc = read(PSC)
         body = lambda name: psc[psc.index(f"Function {name}("):psc.index("EndFunction", psc.index(f"Function {name}("))]
-        hold = body("HoldPreston")
-        self.assertIn("bool ok = Preston.SetRestrained(True)", hold)
-        for step in ("prestonHeld = True", "prestonHolds += 1", 'Trace("hold preston by=" + who + " off=" + prestonOff + " ok=" + ok)'):
-            self.assertIn(step, hold)
-        place = body("PlacePreston")
-        self.assertLess(place.index("Debug.Notification("), place.rindex("HoldPreston(who)"))
-        self.assertEqual(place.count("Debug.Notification("), 1)         # the move's, as before
-        for name in ("HoldPreston", "ReleaseInFight", "SetPrestonState"):
+        hold = body("HoldActor")
+        self.assertIn("bool ok = a.SetRestrained(True)", hold)
+        self.assertIn('Trace("hold " + name + " by=" + who + " off=" + off + " ok=" + ok)', hold)
+        self.assertEqual(body("PlaceAt").count("Debug.Notification("), 1)   # the move's, as before
+        for who in ("Preston", "Codsworth"):                            # FAL-163: the same hold for Codsworth
+            low = who.lower()
+            mine = body("Hold" + who)
+            for step in (f'HoldActor({who}, "{low}", who, {low}Off)', f"{low}Held = True", f"{low}Holds += 1"):
+                self.assertIn(step, mine)
+            place = body("Place" + who)
+            self.assertLess(place.index("PlaceAt("), place.index(f"Hold{who}("))   # in the same call, after the move
+            self.assertNotIn("Debug.Notification(", place)
+            for v in (f"bool {low}Held = False", f"int {low}Holds = 0"):   # readable with sqv
+                self.assertRegex(psc, rf"(?m)^{v}$")
+        for name in ("HoldActor", "HoldPreston", "HoldCodsworth", "HoldDue", "ReleaseInFight", "ReleaseCodsworthInFight",
+                     "ReleaseActor", "HeldState"):
             self.assertNotIn("Debug.Notification(", body(name), name)
             self.assertNotIn("GetStage", body(name), name)
-        for v in ("bool prestonHeld = False", "int prestonHolds = 0"):   # readable with sqv
-            self.assertRegex(psc, rf"(?m)^{v}$")
         self.assertRegex(psc, r"(?m)^float Property HeldRadius = 3\.0 Auto Const$")
 
     def test_preston_is_held_at_his_spot(self):
         """FAL-170: at his spot, calm, not yet held and within HeldRadius, he is held without a move (a load whose hold
         the engine did not keep, a save where he already stands there). Up to HoldRadius he is left until his put-back,
         which holds him."""
-        self.assertEqual(make_mission.place_preston(1.5, 4.0, 2.4, False, False), "at spot, held")
-        self.assertEqual(make_mission.place_preston(3.0, 4.0, 2.4, False, False), "at spot, held")
-        self.assertEqual(make_mission.place_preston(1.5, 4.0, 2.4, False, False, held=True), "at spot, held")
-        self.assertEqual(make_mission.place_preston(10.0, 12.0, 2.4, False, False), "at spot")
-        self.assertEqual(make_mission.place_preston(10.0, 12.0, 2.4, False, False, held=True), "at spot, held")
-        self.assertEqual(make_mission.place_preston(26.0, 28.0, 2.4, False, False), "move")
-        self.assertEqual(make_mission.place_preston(1.5, float("inf"), 2.4, False, False), "move")   # another world
+        self.assertEqual(make_mission.place_at(1.5, 4.0, 2.4, False, False), "at spot, held")
+        self.assertEqual(make_mission.place_at(3.0, 4.0, 2.4, False, False), "at spot, held")
+        self.assertEqual(make_mission.place_at(1.5, 4.0, 2.4, False, False, held=True), "at spot, held")
+        self.assertEqual(make_mission.place_at(10.0, 12.0, 2.4, False, False), "at spot")
+        self.assertEqual(make_mission.place_at(10.0, 12.0, 2.4, False, False, held=True), "at spot, held")
+        self.assertEqual(make_mission.place_at(26.0, 28.0, 2.4, False, False), "move")
+        self.assertEqual(make_mission.place_at(1.5, float("inf"), 2.4, False, False), "move")   # another world
         psc = read(PSC)
-        trace = psc[psc.index("Function TracePreston("):psc.index("EndFunction", psc.index("Function TracePreston("))]
-        for field in ('" held=" + prestonHeld', '" holds=" + prestonHolds'):
+        trace = function_body(psc, "TraceSpot")
+        for field in ('" held=" + held', '" holds=" + holds'):
             self.assertIn(field, trace)
+        for who in ("Preston", "Codsworth"):                            # FAL-163: his status line too
+            low = who.lower()
+            self.assertIn(f"{low}Moves, {low}Held, {low}Holds, {low}Fails)", function_body(psc, "Trace" + who))
         self.assertIn('" preston_off=" + prestonOff + " held=" + prestonHeld', psc)   # the mission's status line
-        state = psc[psc.index("Function SetPrestonState("):psc.index("EndFunction", psc.index("Function SetPrestonState("))]
-        self.assertRegex(state, r'if prestonHeld\s+prestonState = s \+ ", held"\s+else\s+prestonState = s')
+        self.assertRegex(function_body(psc, "HeldState"), r'if held\s+return s \+ ", held"\s+endif\s+return s')
 
     def test_a_held_preston_is_let_go_in_a_fight(self):
         """FAL-170: never held in a fight (his death stays the quest's failure path). PC review of 79c9ba81: the release
         trusted this instance's prestonHeld, which can be False while he is held. Now both instances let him go on
         every check of a fight, whatever the flag, before PlacePreston, whatever the budget, interior or stage, with one
         log line per fight and instance; held again once calm."""
-        self.assertEqual(make_mission.place_preston(1.5, 4.0, 2.4, False, True, held=True), "at spot")
-        self.assertEqual(make_mission.place_preston(1.5, 4.0, 2.4, False, True), "at spot")
-        self.assertEqual(make_mission.place_preston(40.0, 42.0, 2.4, False, True, held=True), "off, fighting")
-        self.assertEqual(make_mission.place_preston(1.5, 4.0, 2.4, False, False), "at spot, held")   # calm again
+        self.assertEqual(make_mission.place_at(1.5, 4.0, 2.4, False, True, held=True), "at spot")
+        self.assertEqual(make_mission.place_at(1.5, 4.0, 2.4, False, True), "at spot")
+        self.assertEqual(make_mission.place_at(40.0, 42.0, 2.4, False, True, held=True), "off, fighting")
+        self.assertEqual(make_mission.place_at(1.5, 4.0, 2.4, False, False), "at spot, held")   # calm again
         psc = read(PSC)
         body = lambda name: psc[psc.index(f"Function {name}("):psc.index("EndFunction", psc.index(f"Function {name}("))]
-        release = body("ReleaseInFight")
-        self.assertRegex(release, r"if Preston\.GetCombatState\(\) != 0\s+Preston\.SetRestrained\(False\)\s+"
-                                  r"prestonHeld = False\s+if !prestonFighting\s+prestonFighting = True\s+"
-                                  r"Trace\(\"release preston by=\" \+ who \+ \" reason=fighting\"\)\s+endif\s+"
-                                  r"return True\s+endif\s+prestonFighting = False\s+return False")
+        self.assertRegex(body("ReleaseActor"), r"if a\.GetCombatState\(\) != 0\s+a\.SetRestrained\(False\)\s+"
+                                               r"if !logged\s+Trace\(\"release \" \+ name \+ \" by=\" \+ who \+ "
+                                               r"\" reason=fighting\"\)\s+endif\s+return True\s+endif\s+return False")
+        for who, fn in (("Preston", "ReleaseInFight"), ("Codsworth", "ReleaseCodsworthInFight")):
+            low = who.lower()
+            self.assertRegex(body(fn), rf'if ReleaseActor\({who}, "{low}", who, {low}Fighting\)\s+{low}Held = False\s+'
+                                       rf"{low}Fighting = True\s+return True\s+endif\s+{low}Fighting = False\s+return False")
+            self.assertRegex(psc, rf"(?m)^bool {low}Fighting = False$")
+        # FAL-163: the keeper releases Codsworth on every check, before his placement and whatever his budget
+        self.assertRegex(body("KeepCodsworth"), r'if Codsworth != None\s+ReleaseCodsworthInFight\("keeper"\)\s+endif\s+'
+                                                r"if Codsworth != None && codsworthFails < 10\s+if PlaceCodsworth")
+        self.assertIn("(Codsworth != None && (codsworthFails < 10 || codsworthHolds > 0))", body("KeepCodsworth"))
         self.assertNotIn("ReleasePreston", psc)
         self.assertNotRegex(psc, r"if prestonHeld &&")                   # no release behind the flag
         self.assertNotIn("ReleaseInFight(\"", body("PlacePreston"))      # the callers release, not PlacePreston
@@ -597,7 +817,7 @@ class RelocateContractTests(unittest.TestCase):
                 world[who] = False
             if spent:
                 return
-            state = make_mission.place_preston(off, off + 2.0, 2.4, False, fighting, held=world[who], landed=True)
+            state = make_mission.place_at(off, off + 2.0, 2.4, False, fighting, held=world[who], landed=True)
             if state.endswith(", held") and not world[who]:
                 world["restrained"] = True                              # HoldPreston
             world[who] = state.endswith(", held")
@@ -635,8 +855,10 @@ class RelocateContractTests(unittest.TestCase):
         self.assertIn("prestonHeld = False", load[load.index("prestonFails = 0"):])       # outside Codsworth's guard
         self.assertLess(load.index("prestonHeld = False"), load.index("StartTimer(CodsworthCheck, 2)"))
         self.assertEqual(psc.count('RegisterForRemoteEvent(Game.GetPlayer(), "OnPlayerLoadGame")'), 1)   # the keeper's
+        guarded = load[load.index("if Codsworth != None"):load.index("prestonFails = 0")]
+        self.assertIn("codsworthHeld = False", guarded)                  # FAL-163: Codsworth too
         # held before the save; after the load the flag is False, so the first check at his spot holds him again
-        self.assertEqual(make_mission.place_preston(1.5, 4.0, 2.4, False, False, held=False), "at spot, held")
+        self.assertEqual(make_mission.place_at(1.5, 4.0, 2.4, False, False, held=False), "at spot, held")
 
     def test_held_preston_is_put_back_once(self):
         """In game 10 Nov: 73.7 m off at the load, placed within a second, then 7 put-backs in 175 s while he walked off
@@ -646,7 +868,7 @@ class RelocateContractTests(unittest.TestCase):
         def put_backs(hold_works):
             off, held, moves = 73.7, False, 0
             for _ in range(175):
-                state = make_mission.place_preston(off, off, 2.4, False, False, held=held, landed=True)
+                state = make_mission.place_at(off, off, 2.4, False, False, held=held, landed=True)
                 if state.startswith("placed"):
                     off, moves = 1.5, moves + 1
                 held = hold_works and state.endswith(", held")
@@ -691,13 +913,15 @@ class StageAndInstallTests(unittest.TestCase):
     """Codex review 5563368986: a failed rebuild keeps the earlier stage; the pins are checked before install."""
 
     SPOT = [-811.14, 1002.46, 89.09]                                    # the script's PrestonLocalX/Y/Z
+    CODSWORTH_SPOT = [-1146.709, 1293.837, 111.734]                     # the script's CodsworthLocalX/Y/Z
 
-    def fake_stage(self, d, out, fail_at=None, during_check=None, extra=(), writes=None, preston=None):
+    def fake_stage(self, d, out, fail_at=None, during_check=None, extra=(), writes=None, preston=None, codsworth=None):
         def fake_run(cmd, cwd=None):
             if "points" in cmd:
                 with open(cmd[-1], "w", encoding="utf-8") as f:
                     json.dump({"raiders": [{"src": "046458", "dist_m": 18.9}], "preston": {"pos": preston or self.SPOT},
-                               "codsworth": {"src": "01CA7D", "name": "Codsworth", "pos": [4, 5, 6], "rot": [0, 0, 1]}}, f)
+                               "codsworth": {"src": "01CA7D", "name": "Codsworth", "pos": codsworth or self.CODSWORTH_SPOT,
+                                             "rot": [0, 0, 1]}}, f)
             elif "write" in cmd:
                 if writes is not None:
                     writes.append(cmd)
@@ -877,6 +1101,22 @@ class StageAndInstallTests(unittest.TestCase):
         self.assertIsNone(make_mission.spot_problem(psc, self.SPOT))
         self.assertIsNotNone(make_mission.spot_problem(psc, [-811.14, 1002.46]))           # not a position
         self.assertIsNotNone(make_mission.spot_problem(psc, [-811.14, 1002.46, 90.0]))     # z off by 0.91
+
+    def test_points_that_moved_codsworth_are_refused(self):
+        """FAL-163: the same guard for Codsworth's CodsworthLocalX/Y/Z; a --no-codsworth build has no keeper to drag him,
+        so it is not refused."""
+        with tempfile.TemporaryDirectory() as d:
+            out, writes = os.path.join(d, "m"), []
+            with self.assertRaises(SystemExit) as e:
+                self.fake_stage(d, out, writes=writes, codsworth=[4, 5, 6])
+            self.assertIn("CodsworthLocalX/Y/Z", str(e.exception))
+            self.assertEqual(writes, [])
+            self.assertFalse(os.path.exists(out))
+            self.fake_stage(d, out, codsworth=[4, 5, 6], extra=["--no-codsworth"])
+            self.assertTrue(os.path.exists(os.path.join(out, "plan.json")))
+        psc = read(PSC)
+        self.assertIsNone(make_mission.spot_problem(psc, self.CODSWORTH_SPOT, "Codsworth"))
+        self.assertIsNotNone(make_mission.spot_problem(psc, self.SPOT, "Codsworth"))
 
     def test_master_changed_during_build_is_refused(self):
         with tempfile.TemporaryDirectory() as d:
