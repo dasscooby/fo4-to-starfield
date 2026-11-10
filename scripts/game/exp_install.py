@@ -1,7 +1,9 @@
 """Install / uninstall a staged in-game experiment (a plugin plus loose files) next to the converted build, reversibly.
 
 usage: python exp_install.py install|uninstall|status --exp-dir <staged dir> --starfield <game dir>
-                             [--pack] [--needs door_trip,door_check,plugin_order]
+                             [--pack | --package <package dir>] [--needs door_trip,door_check,plugin_order]
+       python exp_install.py package --exp-dir <staged dir> --starfield <game dir> --package <new package dir>
+                                    [--plugins <comma-separated plugins>]
        python exp_install.py order --starfield <game dir>
 
 The staged dir holds one or more <name>.esm files (only those listed with --plugins are activated, default: the first
@@ -13,6 +15,10 @@ touches FO4Port's own deployment (deploy_starfield.py).
 --pack builds one stored General archive, including terrain overlay masks, outside the staged input folder.
 This matches Claude's current terrain packing policy; runtime terrain acceptance is a separate game test.
 Plugin-only experiments need no archive. --needs refuses queues this runner cannot execute before installing.
+package builds and verifies that archive once, alongside a manifest of member/plugin paths, sizes and SHA256s.
+The new package directory must be outside the staged tree and game Data. install --package verifies the current
+staged set and archive without running Archive2; --pack may also be supplied for existing callers. Its receipt
+adds package_sha256 (the manifest bytes' SHA256, binding the archive identity and the complete staged set).
 order moves every selected experiment plugin after its active masters immediately before launch, using a guarded
 Plugins.txt rewrite. It refuses missing/disabled masters, cycles, changed plugins and incomplete installs.
 """
@@ -32,7 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # cycle.ps1 uses isolated Python, which omits this script's own directory.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import deploy_starfield as deployment  # noqa: E402
-from verify_packed_experiment import verify_archive  # noqa: E402
+from verify_packed_experiment import normalized_name, verify_archive  # noqa: E402
 from experiment_receipts import preserve_receipt  # noqa: E402
 
 RECORD = "FO4SFExp.install.json"
@@ -40,6 +46,7 @@ TOGGLE = "FO4SF.toggle.json"                             # plugin_toggle.py: our
 # bridge_install.py's RECORD and PLUGIN (it imports this module): active checks an installed bridge too
 BRIDGE_RECORD, BRIDGE_PLUGIN = "FO4SFBridge.install.json", "FO4SFBridge.esm"
 PACKING_POLICY = "general-stored-verified-v2"
+PACKAGE_MANIFEST = "FO4SFExp.package.json"
 _UNSET = object()
 
 
@@ -529,6 +536,97 @@ def build_ba2(a, root, out):
     return out
 
 
+def selected_plugins(a):
+    return [p.strip() for p in a.plugins.split(",") if p.strip()] if a.plugins else \
+        sorted(f for f in os.listdir(a.exp_dir) if f.lower().endswith(".esm"))[:1]
+
+
+def package_inventory(a, plugins):
+    """Content identities, not filenames/timestamps, bind a reusable package to its staged set."""
+    if not plugins or any(p != os.path.basename(p) or "/" in p or "\\" in p or ":" in p
+                          or not p.lower().endswith(".esm") for p in plugins):
+        raise ValueError("package requires plugin basenames ending in .esm")
+    if len({p.casefold() for p in plugins}) != len(plugins):
+        raise ValueError("duplicate package plugins")
+    plugin_rows = [{"path": p, **deployment.artifact_identity(os.path.join(a.exp_dir, p))} for p in plugins]
+    members, names = [], set()
+    root = os.path.join(a.exp_dir, "Data")
+    for directory, dirs, files in os.walk(root):
+        dirs.sort()
+        for name in sorted(files):
+            path = os.path.join(directory, name)
+            rel = os.path.relpath(path, root).replace("\\", "/")
+            normalized = normalized_name(rel)
+            if "/" not in rel:
+                raise ValueError("cannot pack root-level Data files")
+            if normalized in names:
+                raise ValueError(f"duplicate package member: {rel}")
+            names.add(normalized)
+            members.append({"path": rel, **deployment.artifact_identity(path)})
+    if not members:
+        raise ValueError("nothing to package under staged Data")
+    return {"schema": 1, "packing_policy": PACKING_POLICY, "plugins": plugin_rows, "members": members}
+
+
+def package_inputs(inventory):
+    return {prefix + row["path"]: row["sha256"]
+            for key, prefix in (("plugins", "plugin/"), ("members", "Data/")) for row in inventory[key]}
+
+
+def package(a):
+    """Create a new package directory; a failed build never publishes a reusable manifest."""
+    if not getattr(a, "package", None):
+        sys.exit("package requires --package <new package dir>")
+    target = os.path.realpath(a.package)
+    for root in (a.exp_dir, os.path.join(a.starfield, "Data")):
+        root = os.path.realpath(root)
+        try:
+            common = os.path.commonpath((root, target))
+        except ValueError:  # Separate Windows drives cannot contain one another.
+            common = None
+        if common in (root, target):
+            sys.exit("package directory must be separate from staged inputs and game Data")
+    if os.path.lexists(target):
+        sys.exit("refusing to overwrite an existing package directory")
+    try:
+        plugins = selected_plugins(a)
+        inventory = package_inventory(a, plugins)
+        name = os.path.splitext(plugins[0])[0] + " - Main.ba2"
+        # Reserve a new directory exclusively. Rename the verified archive within this filesystem,
+        # without another archive copy. Publish the manifest last; interrupted packages cannot install.
+        os.mkdir(target)
+        with tempfile.TemporaryDirectory(prefix=".fo4sf-exp-package-", dir=target) as temporary:
+            built = build_ba2(a, os.path.join(a.exp_dir, "Data"), os.path.join(temporary, name))
+            verify_archive(built, package_inputs(inventory))
+            if package_inventory(a, plugins) != inventory:
+                raise ValueError("experiment source inputs changed during preparation")
+            inventory["archive"] = {"path": name, **deployment.artifact_identity(built)}
+            os.rename(built, os.path.join(target, name))
+            deployment.write_manifest(os.path.join(target, PACKAGE_MANIFEST), inventory)
+        print(f"packaged {name}: {target}")
+    except (OSError, ValueError) as error:
+        sys.exit(f"experiment package failed: {error}")
+
+
+def verified_package(a, plugins):
+    """Revalidate all manifest fields and stored members before any install journal/publication."""
+    try:
+        manifest = read_bytes(os.path.join(a.package, PACKAGE_MANIFEST))
+        if manifest is None:
+            raise ValueError("package manifest is missing")
+        inventory = package_inventory(a, plugins)
+        name = os.path.splitext(plugins[0])[0] + " - Main.ba2"
+        archive = os.path.join(a.package, name)
+        expected = dict(inventory, archive={"path": name, **deployment.artifact_identity(archive)})
+        if json.loads(manifest) != expected:
+            raise ValueError("package manifest differs from staged inputs, archive or packing policy")
+        inputs = package_inputs(inventory)
+        verify_archive(archive, inputs)
+        return archive, expected["archive"]["sha256"], hashlib.sha256(manifest).hexdigest(), inputs
+    except (OSError, ValueError) as error:
+        sys.exit(f"experiment package validation failed; nothing installed: {error}")
+
+
 def held_off(data):
     """The plugins plugin_toggle.py holds off (Data\\FO4SF.toggle.json), casefolded: order, active and the relaunch
     of the same install leave them unticked; a new install or an uninstall refuses until they are back on (their
@@ -561,7 +659,7 @@ def refuse_while_held(data, what):
 
 
 def install(a):
-    if getattr(a, "pack", False):
+    if getattr(a, "pack", False) and not getattr(a, "package", None):
         with tempfile.TemporaryDirectory(prefix="fo4sf-exp-pack-") as packing_dir:
             return _install(a, packing_dir)
     return _install(a)
@@ -574,9 +672,9 @@ def _install(a, packing_dir=None):
         require_complete_master(data)
     except (OSError, ValueError) as error:
         sys.exit(f"experiment not installed: {error}")
-    plugins = [p.strip() for p in a.plugins.split(",") if p.strip()] if a.plugins else \
-        sorted(f for f in os.listdir(a.exp_dir) if f.lower().endswith(".esm"))[:1]
-    requested_pack = bool(getattr(a, "pack", False))
+    plugins = selected_plugins(a)
+    package_dir = getattr(a, "package", None)
+    requested_pack = bool(getattr(a, "pack", False) or package_dir)
     if requested_pack and not plugins:
         sys.exit("packing requires at least one experiment plugin")
     files = staged_files(a.exp_dir, plugins)
@@ -596,6 +694,10 @@ def _install(a, packing_dir=None):
             except (OSError, ValueError) as error:
                 sys.exit(f"experiment not installed: {error}")
             verify_relaunch(a, data, plugins, packed, rec, held)
+            if package_dir:
+                _, _, package_hash, _ = verified_package(a, plugins)
+                if rec.get("package_sha256") != package_hash:
+                    sys.exit("experiment package changed; uninstall before relaunching")
             print("already installed" + (f"; held off: {', '.join(p for p in plugins if p.casefold() in held)}"
                                          if any(p.casefold() in held for p in plugins) else ""))
             return
@@ -617,7 +719,8 @@ def _install(a, packing_dir=None):
     if clash:
         sys.exit(f"refusing to overwrite existing game files: {clash}")
     # Validate all sources and snapshot activation before publishing anything.
-    inputs = source_inventory(a.exp_dir, plugins)
+    prepared = verified_package(a, plugins) if package_dir else None
+    inputs = prepared[3] if prepared else source_inventory(a.exp_dir, plugins)
     plugin_sources = {os.path.abspath(os.path.join(a.exp_dir, name)): name for name in plugins}
     identities = {}
     selected = set()
@@ -632,12 +735,13 @@ def _install(a, packing_dir=None):
         key = "plugin/" + plugin if plugin is not None else "Data/" + relative.replace("\\", "/")
         identities[relative] = inputs[key]
     if packed:
-        built = build_ba2(a, os.path.join(a.exp_dir, "Data"), os.path.join(packing_dir, ba2))
+        built = prepared[0] if prepared else build_ba2(a, os.path.join(a.exp_dir, "Data"),
+                                                     os.path.join(packing_dir, ba2))
         files.append((built, ba2))
-        identities[ba2] = digest(built)
+        identities[ba2] = prepared[1] if prepared else digest(built)
     if source_inventory(a.exp_dir, plugins) != inputs:
         sys.exit("experiment source inputs changed during preparation; nothing installed")
-    if packed:
+    if packed and not prepared:
         try:
             verify_archive(built, inputs)
         except (OSError, ValueError) as error:
@@ -653,6 +757,8 @@ def _install(a, packing_dir=None):
            "published_files": [], "plugins_txt": p,
            "plugins_original": base64.b64encode(original).decode("ascii") if original is not None else None,
            "plugins_restore_pending": False}
+    if prepared:
+        rec["package_sha256"] = prepared[2]
     activated = deployment.render_lines(lines, original)
     rec["plugins_activated"] = base64.b64encode(activated).decode("ascii")
     deployment.write_manifest(rec_p, rec)
@@ -733,13 +839,18 @@ def uninstall(a):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=("install", "uninstall", "status", "order", "active"))
+    ap.add_argument("cmd", choices=("package", "install", "uninstall", "status", "order", "active"))
     ap.add_argument("--exp-dir", default="")
     ap.add_argument("--starfield", required=True)
     ap.add_argument("--plugins", default="", help="comma-separated plugin file names to activate")
     ap.add_argument("--pack", action="store_true", help="install the staged Data tree as '<first plugin> - Main.ba2'")
+    ap.add_argument("--package", help="package directory to create (package) or verify and reuse (install)")
     ap.add_argument("--needs", default="", help="runner features the queue needs (runner_features.py); refuse without")
     a = ap.parse_args(argv)
+    if a.cmd == "package":
+        if not a.exp_dir:
+            sys.exit("--exp-dir is required")
+        return package(a)
     if a.cmd == "install":
         if not a.exp_dir:
             sys.exit("--exp-dir is required")
