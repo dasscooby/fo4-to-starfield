@@ -93,6 +93,7 @@ float prestonOff = -1.0
 string prestonState = "none"
 bool prestonHeld = False
 int prestonHolds = 0
+bool prestonFighting = False
 bool codsworthKept = False
 int applied = 0
 bool prestonFound = False
@@ -219,6 +220,7 @@ Event OnTimer(int aiTimerID)
     endif
     Actor player = Game.GetPlayer()
     KeepCodsworthStart()
+    ReleaseInFight("mission")                            ; every check, whatever the budget or where the player is
     if relocateFails < 10
         Relocate(player)
     endif
@@ -342,7 +344,7 @@ Function KeepCodsworth()
     if KeeperOnly
         KeepPreston(player)
     endif
-    if (Codsworth != None && codsworthFails < 10) || (KeeperOnly && prestonFails < 10)
+    if (Codsworth != None && codsworthFails < 10) || (KeeperOnly && (prestonFails < 10 || prestonHolds > 0))
         StartTimer(CodsworthCheck, 2)
     endif
 EndFunction
@@ -353,7 +355,9 @@ Function KeepPreston(Actor player)
  hypothesis: he returns to his editor location as his cell reloads). So once the mission was complete, nothing put him
  back: the owner's report of 7 Nov, "no preston garvy after misson finshes". No new placement: the same fixed spot and
  rule as the mission (PlacePreston), with its own budget of 10 failed moves; a spent budget is logged and shown on
- screen. Where he is goes to the log every KeeperStatusEvery checks.}
+ screen. Where he is goes to the log every KeeperStatusEvery checks. A fight releases him first, on every check and
+ with a spent budget too (ReleaseInFight).}
+    ReleaseInFight("keeper")
     if prestonFails < 10
         if PlacePreston(player, "keeper")
             prestonFails += 1
@@ -378,16 +382,13 @@ bool Function PlacePreston(Actor player, string who)
  he stood, so a moved actor could be offset a second time, about 2,955 m away (the raiders were, 31 Oct 16:33). The
  state stays readable without a log: sqv shows prestonState, prestonOff and prestonMoves, and each move is on screen.
  FAL-170, in game 10 Nov: once placed he walked off and was put back every 29 s, so he is held (HoldPreston) after
- every move that lands and at his spot within HeldRadius, never in a fight (ReleasePreston first).}
+ every move that lands and at his spot within HeldRadius, never in a fight (the caller's ReleaseInFight runs first).}
     float tx = PrestonLocalX + MergeOffsetX
     float ty = PrestonLocalY + MergeOffsetY
     float tz = PrestonLocalZ
     float dp = player.GetDistance(Preston)                ; float max: another world
     prestonOff = SpotOff(tx, ty, tz)
-    bool fighting = Preston.GetCombatState() != 0
-    if prestonHeld && fighting
-        ReleasePreston(who, "fighting")
-    endif
+    bool fighting = Preston.GetCombatState() != 0         ; released already (ReleaseInFight)
     if prestonOff <= HoldRadius && dp < RelocateGap
         if !prestonHeld && !fighting && prestonOff <= HeldRadius
             HoldPreston(who)
@@ -434,22 +435,37 @@ EndFunction
 Function HoldPreston(string who)
 {Holds Preston where he stands. In game 10 Nov (f9cae827, the 9 Nov save, logging on): placed 1.5 m off his spot, he
  walked off east-north-east at about 0.9 m/s, not fighting, and was put back every 29 s (7 times in 175 s); held from
- the console (setrestrained 1) he stayed, 0 put-backs in 100 s, and the player's activation still completed the
- mission. Papyrus has no getter for it, so prestonHeld is this instance's own flag: the mission and the keeper may both
- hold him, which SetRestrained allows, and the flag only keeps the at-spot hold to one log line. ok= is SetRestrained's
- return, logged as is. No notification: only a move is shown on screen.}
+ the console (setrestrained 1) he stayed, 0 put-backs in 100 s, and the player's activation (check 2) and the 3 m
+ rule (check 2b) still completed the mission. Papyrus has no getter for it, so prestonHeld is this instance's own
+ flag: it limits the at-spot hold to once per instance and session and gives the state its ", held"; the release does
+ not trust it (ReleaseInFight). The mission and the keeper may both hold him, which SetRestrained allows. ok= is
+ SetRestrained's return: False when the state did not change (the game's Actor.psc), that is, he was already held.
+ No notification: only a move is shown on screen.}
     bool ok = Preston.SetRestrained(True)
     prestonHeld = True
     prestonHolds += 1
     Trace("hold preston by=" + who + " off=" + prestonOff + " ok=" + ok)
 EndFunction
 
-Function ReleasePreston(string who, string why)
-{Lets Preston go: he is never held in a fight (his death stays the quest's failure path). Held again at his spot once
- calm, or by his next put-back.}
-    Preston.SetRestrained(False)
-    prestonHeld = False
-    Trace("release preston by=" + who + " reason=" + why)
+bool Function ReleaseInFight(string who)
+{Lets Preston go while he fights (his death stays the quest's failure path), whatever this instance's prestonHeld says:
+ the flag is per instance and can be False while he is held, by the other instance, by this one before a load (the
+ keeper clears its flag; the engine very likely keeps the restraint: the game's own quests set it once and clear it
+ stages later with no load handler), or after a hold 3 to 25 m off. So both instances call this on every check,
+ before PlacePreston and whatever the budget, the interior or the stage: SetRestrained(False) on each check of a
+ fight, one log line per fight and instance (prestonFighting). Held again once calm, at his spot or by his next
+ put-back. Returns whether he fights.}
+    if Preston.GetCombatState() != 0
+        Preston.SetRestrained(False)
+        prestonHeld = False
+        if !prestonFighting
+            prestonFighting = True
+            Trace("release preston by=" + who + " reason=fighting")
+        endif
+        return True
+    endif
+    prestonFighting = False
+    return False
 EndFunction
 
 Function SetPrestonState(string s)

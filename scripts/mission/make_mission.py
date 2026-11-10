@@ -367,11 +367,11 @@ def place_preston(off, dp, to_spot, interior, fighting, held=False, landed=None,
     off is his distance from his fixed merged spot, dp his distance from the player (inf: another world), to_spot the
     player's (x, y) distance from that spot, held the instance's prestonHeld before the check, landed whether a move
     leaves him at his spot (None: the move's outcome is not modelled). Returns the script's prestonState, or "move" when
-    a move is due and landed is None. FAL-170: a held Preston who fights is let go first; at his spot he is held when
-    calm, not yet held and within held_radius; a move that lands holds him unless he fights; the state ends in ", held"
-    while he is held after the check."""
-    if held and fighting:
-        held = False                                    # ReleasePreston
+    a move is due and landed is None. FAL-170: a Preston who fights is let go first, whatever held says (the caller's
+    ReleaseInFight); at his spot he is held when calm, not yet held and within held_radius; a move that lands holds him
+    unless he fights; the state ends in ", held" while this instance holds him after the check."""
+    if fighting:
+        held = False                                    # ReleaseInFight, before PlacePreston
     state = lambda s, h: s + ", held" if h else s       # SetPrestonState
     if off <= hold and dp < gap:
         return state("at spot", held or (not fighting and off <= held_radius))

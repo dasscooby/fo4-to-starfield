@@ -295,19 +295,26 @@ this build line.
 - at his spot, when he is calm, not yet held by this instance and within `HeldRadius` (3 m) of it, with no move: a
   load whose hold the engine did not keep, or a save where he already stands there. From `HeldRadius` to `HoldRadius`
   (25 m) nothing changes: he is put back past 25 m, and that put-back holds him;
-- never in a fight: a held Preston whose combat state is not 0 is let go (`SetRestrained(False)`) before anything else,
-  since his death stays the quest's failure path; once calm he is held again at his spot or by his next put-back.
+- never in a fight: while his combat state is not 0, both instances let him go (`SetRestrained(False)`) on every check,
+  whatever their own `prestonHeld` says, before `PlacePreston` and whatever the budget, the interior or the stage
+  (`ReleaseInFight`), since his death stays the quest's failure path; once calm he is held again at his spot or by his
+  next put-back. The PC's second review of `79c9ba81` found the first rule, "release when this instance's flag says
+  held", missed him: the flag can be False while he is held (the keeper's after a load, with the engine very likely
+  keeping the restraint as the game's own quests assume; the other instance's hold; a hold 3 to 25 m off). The keeper
+  keeps checking with a spent budget once it has held him, so that release still runs.
 
 The keeper clears its `prestonHeld` at every save load (`KeepCodsworthLoad`), so its first check after the load (5 s)
 holds him again, whatever the engine kept. The mission instance has no load hook (it never registers
 `OnPlayerLoadGame`, and the owner's save ran its `OnQuestInit` long before), so its flag can outlive a load; the
-keeper's hold and every put-back cover that. Both instances may hold him: `SetRestrained` is safe to repeat, and the
-flag only keeps the at-spot hold to one log line per instance. Log: `hold preston by=<mission|keeper> off=<m>
-ok=<SetRestrained's return, logged as is>` and `release preston by=<who> reason=fighting`; `held=` in the mission's
+keeper's hold and every put-back cover that. Both instances may hold him: `SetRestrained` is safe to repeat. The flag
+limits the at-spot hold to once per instance and session and gives the state its `, held`; the release does not trust
+it. Log: `hold preston by=<mission|keeper> off=<m> ok=<SetRestrained's return>` (False when the state did not change,
+the game's `Actor.psc`: he was already held) and `release preston by=<who> reason=fighting`, once per fight and
+instance; `held=` in the mission's
 status line, `held=` and `holds=` in `keeper load/status preston ...`. The states (`sqv`) end in `, held` while this
 instance holds him (`placed, held`, `at spot, held`). No notification for a hold or a release: only a move is on
-screen. `make_mission.place_preston` models the same order (`held`, `landed`). Whether the 3 m talk rule fires on a
-held Preston is the PC's check 2b; activation did (check 2).
+screen. `make_mission.place_preston` models the same order (`held`, `landed`). The 3 m talk rule on a
+held Preston: yes, the PC's check 2b (2.5 m completed the mission, 3.2 m did not); activation did too (check 2).
 
 Check 3 (PC, logging on, the 9 Nov save): one put-back at the load, then `preston_off` under 2 m with no further
 `moved preston`, the player within 3 m, completion, and Preston in the screenshot.
