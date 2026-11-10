@@ -39,7 +39,7 @@ class LayoutTests(unittest.TestCase):
             self.assertLessEqual(abs(pos[2] - probe.ground_at(pos[0], pos[1])), 1.0, tag)
         self.assertEqual(set(probe.TEST_TAGS), set(probe.MEANING))
         kinds = {(r[5], r[6], r[2]) for r in probe.REFS if r[0].startswith("T")}
-        self.assertEqual(len(kinds), 6)                         # six different combinations
+        self.assertEqual(len(kinds), 6)                         # six different combinations (T7 repeats T1's)
 
     def test_heights_hold_the_block_north_of_the_arrival(self):
         h = probe.heights()
@@ -55,7 +55,7 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(p["masters"], ["Starfield.esm", records.MASTER])
         self.assertEqual(p["world_biome"], "07F88A:Starfield.esm")
         self.assertEqual(p["templates"]["world"], {"key": "02DF8C:Starfield.esm", "edid": "LC172World"})
-        self.assertEqual([r["tag"] for r in p["refs"]], ["T1", "T2", "T3", "T4", "T5", "T6", "COC"])
+        self.assertEqual([r["tag"] for r in p["refs"]], ["T1", "T2", "T3", "T4", "T5", "T6", "COC", "T7"])
         self.assertEqual(p["refs"][2]["rot"], [0.0, 0.0, probe.FACE_SOUTH])
         self.assertEqual(p["block"]["fnam"], list(range(9)))
         self.assertIsNone(params()["world_biome"])
@@ -87,7 +87,7 @@ class CheckTests(unittest.TestCase):
         self.assertEqual(len(summary["location"]["lcpr"]), 3)
         self.assertEqual({r["tag"]: r["group"] for r in summary["refs"]},
                          {"T1": "persistent", "T2": "persistent", "T3": "temporary", "T4": "persistent",
-                          "T5": "temporary", "T6": "persistent", "COC": "temporary"})
+                          "T5": "temporary", "T6": "persistent", "COC": "temporary", "T7": "persistent"})
         self.assertEqual(summary["quest"]["scripts"], [(probe.SCRIPT, 0)])
 
     def test_a_reference_in_another_cell_gets_its_grid(self):
@@ -153,6 +153,95 @@ class CheckTests(unittest.TestCase):
         self.assertTrue(any(p.startswith("LCTN parent") for p in self.problems(parent)[0]))
 
 
+# what run 1 wrote, pinned: T7 (FAL-192) adds a record and changes none of these
+RUN1_REFS = (
+    ("T1", 0x800, "REFR", "FO4SF_PP_T1_Plain", 0x3B, True, False, (60.0, 50.0, 10.0), 0.0),
+    ("T2", 0x801, "REFR", "FO4SF_PP_T2_Linked", 0x3B, True, True, (64.0, 50.0, 10.0), 0.0),
+    ("T3", 0x802, "ACHR", "FO4SF_PP_T3_TempLinkedActor", 0x2B211C, False, True, (60.0, 64.0, 10.0), probe.FACE_SOUTH),
+    ("T4", 0x803, "ACHR", "FO4SF_PP_T4_PlainActor", 0x2B211C, True, False, (52.0, 62.0, 10.0), probe.FACE_SOUTH),
+    ("T5", 0x804, "REFR", "FO4SF_PP_T5_Temp", 0x3B, False, False, (56.0, 50.0, 10.0), 0.0),
+    ("T6", 0x805, "ACHR", "FO4SF_PP_T6_LinkedActor", 0x2B211C, True, True, (68.0, 62.0, 10.0), probe.FACE_SOUTH),
+    ("COC", 0x806, "REFR", "", 0x32, False, False, (60.0, 50.0, 11.0), 0.0),
+)
+
+
+class T7Tests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = os.path.join(self.tmp.name, probe.PLUGIN)
+
+    def test_layout_of_t7_and_the_run_1_records_unchanged(self):
+        self.assertEqual(probe.REFS[:7], RUN1_REFS)
+        t7 = probe.REFS[7]
+        self.assertEqual(t7, ("T7", 0x815, "REFR", "FO4SF_PP_T7_ExtPersistent", probe.XMARKER, True, False,
+                              (72.0, 50.0, probe.GROUND), 0.0))
+        self.assertEqual((probe.QUEST_ID, probe.NEXT_ID, probe.WORLD_ID, probe.PERSISTENT_CELL_ID), (0x814, 0x816, 0x809, 0x80A))
+        self.assertEqual(probe.SCRIPT_IDS["T7Id"], 0x815)
+        self.assertEqual((probe.SCRIPT_IDS["MergeId"], probe.SCRIPT_IDS["LC172CocId"]), (0x800, 0x10238E))
+        self.assertEqual(probe.EXTERIOR_PERSISTENT, {"T7"})
+        self.assertIn("T7", probe.MEANING)
+        self.assertEqual(probe.cell_of(72.0, 50.0), (0, 0))                  # the spawn cell
+
+    def test_params_flag_only_t7(self):
+        prm = params()
+        self.assertEqual({r["tag"]: r["exterior_persistent"] for r in prm["refs"]},
+                         {"T1": False, "T2": False, "T3": False, "T4": False, "T5": False, "T6": False, "COC": False,
+                          "T7": True})
+        self.assertEqual(prm["next_id"], 0x816)
+
+    def test_t7_is_in_the_spawn_cell_persistent_group_not_the_worlds(self):
+        prm = params()
+        pf.probe_plugin(self.path, prm)
+        problems, summary = probe.check_plugin(self.path, prm)
+        self.assertEqual(problems, [])
+        t7 = next(r for r in summary["refs"] if r["tag"] == "T7")
+        self.assertEqual((t7["group"], t7["flags"], t7["formid"]), ("persistent", "00000400", "02000815"))
+        with esm.Plugin(self.path) as p:
+            hit = [i for i in probe.world_items(p) if i["rec"].formid == 0x02000815]
+        self.assertEqual([(i["group"], i["cell"]) for i in hit], [("persistent", 0x0200080F)])      # not 0x0200080A
+        self.assertEqual(probe.cell_id(0, 0), 0x80F)
+
+    def test_t7_in_the_worlds_persistent_cell_is_found(self):
+        prm = params()
+        t7 = next(r for r in prm["refs"] if r["tag"] == "T7")
+        flat = dict(t7, exterior_persistent=False)                          # the writer's mistake: T1's place
+        pf.probe_plugin(self.path, dict(prm, refs=[flat if r is t7 else r for r in prm["refs"]]))
+        problems, _ = probe.check_plugin(self.path, prm)
+        self.assertTrue(any(p.startswith("T7 in persistent group of") for p in problems), problems)
+
+    def test_t7_as_temporary_is_found(self):
+        prm = params()
+        t7 = next(r for r in prm["refs"] if r["tag"] == "T7")
+        temp = dict(t7, persistent=False, exterior_persistent=False)
+        pf.probe_plugin(self.path, dict(prm, refs=[temp if r is t7 else r for r in prm["refs"]]))
+        problems, _ = probe.check_plugin(self.path, prm)
+        self.assertTrue(any(p.startswith("T7 in temporary group") or "T7 persistent flag" in p for p in problems), problems)
+
+    def test_other_records_are_the_same_with_and_without_t7(self):
+        prm = params()
+        old = dict(prm, refs=[r for r in prm["refs"] if r["tag"] != "T7"])
+        pf.probe_plugin(self.path, old)
+        _, before = probe.check_plugin(self.path, old)
+        pf.probe_plugin(self.path, prm)
+        _, after = probe.check_plugin(self.path, prm)
+        self.assertEqual([r for r in after["refs"] if r["tag"] != "T7"], before["refs"])     # group, flags, pos, XLCN, subrecords
+        for k in ("block", "location", "world", "quest"):
+            self.assertEqual(after[k], before[k], k)
+
+    def test_alignment_option_is_a_parameter_and_checked(self):
+        self.assertEqual(params()["block"]["inam"], 1)
+        prm = probe.params(records.DEFAULT_SYSTEM_ID, records.DEFAULT_PLANET_ID, list(range(9)),
+                           alignment=probe.ALIGNMENTS["relative"])
+        self.assertEqual((prm["block"]["inam"], prm["block"]["hnam"]), (0, 0))
+        pf.probe_plugin(self.path, prm)
+        self.assertEqual(probe.check_plugin(self.path, prm)[0], [])
+        absolute = params()
+        self.assertIn("SFBK INAM", probe.check_plugin(self.path, absolute)[0])      # a relative block, absolute asked
+        with self.assertRaises(probe.ProbeError):
+            probe.params(1, 1, [0] * 9, alignment=2)
+
+
 class ScriptTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -188,6 +277,15 @@ class ScriptTests(unittest.TestCase):
         self.assertIn('Trace(line + " end=true")', self.src)     # so the reader can tell a cut line
         for key in probe_log.CHAIN_V1:                          # version 1's keys are gone from the script
             self.assertNotIn(key, self.src)
+
+    def test_t7_is_the_ninth_entry_and_the_run_1_ones_keep_their_slots(self):
+        self.assertEqual(re.findall(r"= new (string|int|string)\[(\d+)\]", self.src), [("string", "9"), ("int", "9"), ("string", "9")])
+        rows = re.findall(r'^\s*SetRef\((\d+), "(\w+)", (\w+), ([^)]+)\)', self.src, re.M)
+        self.assertEqual(rows, [("0", "T1", "T1Id", "ProbePlugin"), ("1", "T2", "T2Id", "ProbePlugin"),
+                                ("2", "T3", "T3Id", "ProbePlugin"), ("3", "T4", "T4Id", "ProbePlugin"),
+                                ("4", "T5", "T5Id", "ProbePlugin"), ("5", "T6", "T6Id", "ProbePlugin"),
+                                ("6", "MERGE", "MergeId", "MergePlugin"), ("7", "LC172COC", "LC172CocId", '"Starfield.esm"'),
+                                ("8", "T7", "T7Id", "ProbePlugin")])
 
     def test_no_properties(self):
         self.assertNotRegex(self.src, r"(?im)^\s*[\w\[\]]+\s+Property\s")

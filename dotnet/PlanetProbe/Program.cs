@@ -54,7 +54,8 @@ static class PlanetProbe
 
     // ---------------------------------------------------------------- parameters (src/fo4sf/planet/probe.py params())
 
-    public record Ref(uint Id, string Tag, string Edid, string Kind, FormKey Base, bool Persistent, bool Linked, P3Float Pos, P3Float Rot);
+    public record Ref(uint Id, string Tag, string Edid, string Kind, FormKey Base, bool Persistent, bool Linked, P3Float Pos, P3Float Rot,
+        bool ExteriorPersistent = false);
     public record Params(
         ModKey Plugin, ModKey PlanetPlugin, string Author, int SystemId, int PlanetId, FormKey Surface,
         FormKey TWorld, string TWorldEdid, FormKey TBlock, string TBlockEdid, FormKey TLocation, string TLocationEdid,
@@ -96,7 +97,8 @@ static class PlanetProbe
         if (fnam.Length != dnam * dnam) throw new Refusal($"fnam has {fnam.Length} values, DNAM {dnam} x {dnam} needs {dnam * dnam}");
         var refs = r.GetProperty("refs").EnumerateArray().Select(e => new Ref(
             U(e, "id"), S(e, "tag"), S(e, "edid"), S(e, "kind"), Key(S(e, "base")), e.GetProperty("persistent").GetBoolean(),
-            e.GetProperty("linked").GetBoolean(), Vec(e.GetProperty("pos")), Vec(e.GetProperty("rot")))).ToList();
+            e.GetProperty("linked").GetBoolean(), Vec(e.GetProperty("pos")), Vec(e.GetProperty("rot")),
+            e.TryGetProperty("exterior_persistent", out var xp) && xp.GetBoolean())).ToList();
         var cell = sp.GetProperty("cell").EnumerateArray().Select(x => x.GetInt32()).ToArray();
         var biome = r.GetProperty("world_biome");
         return new Params(
@@ -244,7 +246,8 @@ static class PlanetProbe
         foreach (var r in p.Refs)
         {
             var at = CellOf(r.Pos);
-            if (!r.Persistent && !cells.ContainsKey((at.X, at.Y))) throw new Refusal($"{r.Tag} at {P(r.Pos)} lies outside the cells");
+            if (r.ExteriorPersistent && !r.Persistent) throw new Refusal($"{r.Tag}: exterior_persistent needs persistent");
+            if ((!r.Persistent || r.ExteriorPersistent) && !cells.ContainsKey((at.X, at.Y))) throw new Refusal($"{r.Tag} at {P(r.Pos)} lies outside the cells");
             IPlaced placed;
             if (r.Kind == "REFR")
             {
@@ -269,7 +272,8 @@ static class PlanetProbe
                 placed = a;
             }
             else throw new Refusal($"{r.Tag}: kind {r.Kind} (REFR or ACHR)");
-            if (r.Persistent) world.TopCell.Persistent.Add(placed);
+            if (r.ExteriorPersistent) cells[(at.X, at.Y)].Persistent.Add(placed);        // T7: persistent child of its own exterior cell (flag 0x400 set above)
+            else if (r.Persistent) world.TopCell.Persistent.Add(placed);
             else cells[(at.X, at.Y)].Temporary.Add(placed);
             if (r.Linked)
                 loc.MasterPersistLocationReferences!.Add(new LocationReference
@@ -318,7 +322,7 @@ static class PlanetProbe
                           $"overlay system {p.SystemId} planet {p.PlanetId} block {block.EditorID}, LCTN {loc.EditorID} parent {p.Surface} " +
                           $"({loc.MasterPersistLocationReferences?.Count ?? 0} LCPR rows), {cells.Count} cells, {p.Refs.Count} references, QUST {quest.EditorID}");
         foreach (var r in p.Refs)
-            Console.WriteLine($"  {r.Tag,-4} {r.Kind} {Own(r.Id)} {r.Edid} base {r.Base} {(r.Persistent ? "persistent" : "temporary")}{(r.Linked ? " + XLCN/LCPR" : "")} at {P(r.Pos)}");
+            Console.WriteLine($"  {r.Tag,-4} {r.Kind} {Own(r.Id)} {r.Edid} base {r.Base} {(r.ExteriorPersistent ? "persistent in its cell" : r.Persistent ? "persistent" : "temporary")}{(r.Linked ? " + XLCN/LCPR" : "")} at {P(r.Pos)}");
         return 0;
     }
 
@@ -399,9 +403,12 @@ static class PlanetProbe
             foreach (var r in p.Refs)
             {
                 var at = CellOf(r.Pos);
-                var host = r.Persistent ? top?.Persistent : exterior.FirstOrDefault(c => c.Grid?.Point == at)?.Temporary;
+                var ownCell = exterior.FirstOrDefault(c => c.Grid?.Point == at);
+                var host = r.ExteriorPersistent ? ownCell?.Persistent : r.Persistent ? top?.Persistent : ownCell?.Temporary;
+                if (r.ExteriorPersistent)
+                    Need(top?.Persistent.All(x => x.FormKey != Own(r.Id)) ?? true, $"{r.Tag} {Own(r.Id)} is in the world's persistent cell");
                 var got = host?.FirstOrDefault(x => x.FormKey == Own(r.Id));
-                Need(got != null, $"{r.Tag} {Own(r.Id)} not in its {(r.Persistent ? "persistent" : "temporary")} group");
+                Need(got != null, $"{r.Tag} {Own(r.Id)} not in its {(r.ExteriorPersistent ? "exterior persistent" : r.Persistent ? "persistent" : "temporary")} group");
                 if (got == null) continue;
                 Need(((got.MajorRecordFlagsRaw & Persistent) != 0) == r.Persistent, $"{r.Tag} persistent flag");
                 if (r.Kind == "REFR" && got is IPlacedObjectGetter o)

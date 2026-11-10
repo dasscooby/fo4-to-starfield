@@ -26,6 +26,7 @@ int T3Id = 0x802            ; ACHR temporary citizen in the spawn cell + XLCN + 
 int T4Id = 0x803            ; ACHR persistent citizen, no links (our Codsworth)
 int T5Id = 0x804            ; REFR temporary XMarker in the spawn cell, no links (plain cell content)
 int T6Id = 0x805            ; ACHR persistent citizen + XLCN + LCPR row
+int T7Id = 0x815            ; REFR persistent XMarker in the spawn cell's own persistent group, no links (run 2)
 int LocationId = 0x808      ; LCTN FO4SF_PlanetProbeLocation
 int WorldId = 0x809         ; WRLD FO4SF_PlanetProbeWorld
 int MergeId = 0x800         ; REFR FO4SF_MergeProbeMarker of FO4SFMergeProbe.esm (in LC172World's persistent cell)
@@ -63,9 +64,9 @@ int NextReading = 4
 
 Event OnInit()
     Debug.OpenUserLog(LogName)
-    Tags = new string[8]
-    Ids = new int[8]
-    Plugins = new string[8]
+    Tags = new string[9]
+    Ids = new int[9]
+    Plugins = new string[9]
     SetRef(0, "T1", T1Id, ProbePlugin)
     SetRef(1, "T2", T2Id, ProbePlugin)
     SetRef(2, "T3", T3Id, ProbePlugin)
@@ -74,6 +75,7 @@ Event OnInit()
     SetRef(5, "T6", T6Id, ProbePlugin)
     SetRef(6, "MERGE", MergeId, MergePlugin)
     SetRef(7, "LC172COC", LC172CocId, "Starfield.esm")
+    SetRef(8, "T7", T7Id, ProbePlugin)
     if Game.IsPluginInstalled(ProbePlugin)
         ProbeWorld = Game.GetFormFromFile(WorldId, ProbePlugin) as WorldSpace
         ProbeLoc = Game.GetFormFromFile(LocationId, ProbePlugin) as Location

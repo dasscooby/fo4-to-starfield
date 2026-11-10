@@ -274,7 +274,7 @@ def arrivals(rep):
     extra = census.arrivals(rep)
     out = [dict(extra[0], order=1)]
     out.append({"label": "probe", "coc": probe.SPAWN_EDID, "order": 2,
-                "why": "our planet's test world: which of T1..T6 is in the player's world"})
+                "why": "our planet's test world: which of T1..T7 is in the player's world"})
     for i, e in enumerate(extra[1:], 3):
         out.append(dict(e, order=i))
     for e in out:
@@ -346,7 +346,8 @@ def stage(a):
 
     # 4. the probe plugin
     biome, biome_why = world_biome(rep, a.world_biome)
-    prm = probe.params(system_id, planet_id, overlay.fnam_values(t.heights_raw), world_biome=biome)
+    prm = probe.params(system_id, planet_id, overlay.fnam_values(t.heights_raw), world_biome=biome,
+                       alignment=probe.ALIGNMENTS[a.alignment])
     params_path = os.path.join(out, "probe_params.json")
     write_json(params_path, prm)
     tool = ["dotnet", "run", "-c", "Release", "--project", PROJECT, "--"]
@@ -410,7 +411,7 @@ def stage(a):
         "kind": "planet-probe", "version": 1, "plugins": plugins, "archive": os.path.splitext(plugins[0])[0] + " - Main.ba2",
         "outputs": stage_files(out), "inputs": before, "script": {"name": SCRIPT, "pex_sha256": sha256(pex)},
         "options": {"world_biome": a.world_biome, "world_biome_id": probe.key(*biome) if biome else None,
-                    "world_biome_why": biome_why, "merge_probe": a.merge_probe, "mask_writer": a.mask_writer},
+                    "world_biome_why": biome_why, "merge_probe": a.merge_probe, "alignment": a.alignment, "mask_writer": a.mask_writer},
         "system": a.system, "system_id": f"{system_id:#x}", "planet_id": planet_id,
         "system_location": master_report["system_location"], "planet_id_why": (master_report.get("sol") or {}).get(
             "planet_id_why", "route A's own planet id"),
@@ -648,6 +649,8 @@ def main(argv=None):
                    help="the biome the test world names: one of the planet's (default) or the template's Mars biome")
     s.add_argument("--no-merge-probe", dest="merge_probe", action="store_false",
                    help="leave FO4SFMergeProbe.esm out (the LC172 arrival then only reads vanilla's own marker)")
+    s.add_argument("--alignment", choices=tuple(probe.ALIGNMENTS), default="absolute",
+                   help="the overlay block's SFBK INAM: absolute (1, the probe's own, default) or relative (0, vanilla's LC overlays)")
     s.add_argument("--mask-writer", choices=("texconv", "builtin"), default="texconv")
     k = sub.add_parser("check")
     k.add_argument("--stage", required=True)
