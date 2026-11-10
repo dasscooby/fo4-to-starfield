@@ -1,13 +1,14 @@
 """The Pip-Boy probe's empty plugin and its movie (FAL-187; sfse/FO4SFPipboyMenu/README.md).
 
-usage: python scripts/ui/make_pipboy_probe.py stage <dir> [--no-label]   FO4SFPipboyProbe.esm + Interface/<movie>
+usage: python scripts/ui/make_pipboy_probe.py stage <dir> [--no-label]   FO4SFPipboyProbe.esm + Data/Interface/<movie>
        python scripts/ui/make_pipboy_probe.py check <FO4SFPipboyProbe.esm>
 
 The plugin has no records. Its only job is to be active, so the game loads the archive named after it
 ("FO4SFPipboyProbe - Main.ba2"), which holds the stage (b) movie; this PC reads no loose files. It is written by
 fo4sf.planet.esm.PluginWriter, the writer of our planet probe, with Starfield.esm as its only master.
 `check` refuses anything else: not TES4, no ESM flag, another master, or any record or group. Nothing is written into
-the repo; the PC packs the staged folder (pipboy_probe_install.py, a later slice).
+the repo. The staged folder is exp_install.py's shape (the plugin plus a Data tree): `exp_install.py install --pack`
+packs Data into "FO4SFPipboyProbe - Main.ba2" beside the plugin.
 """
 import argparse
 import os
@@ -33,12 +34,12 @@ def plugin_bytes():
 
 
 def stage(out, label=True):
-    """Writes <out>/FO4SFPipboyProbe.esm and <out>/Interface/FO4SF_PipboyMenu.swf; returns the two paths."""
+    """Writes <out>/FO4SFPipboyProbe.esm and <out>/Data/Interface/FO4SF_PipboyMenu.swf; returns the two paths."""
     os.makedirs(out, exist_ok=True)
     esm = os.path.join(out, PLUGIN)
     with open(esm, "wb") as f:
         f.write(plugin_bytes())
-    movie = os.path.join(out, *MOVIE.split("/"))
+    movie = os.path.join(out, "Data", *MOVIE.split("/"))
     make_probe_swf.write_movie(movie, label=make_probe_swf.LABEL if label else None)
     return esm, movie
 

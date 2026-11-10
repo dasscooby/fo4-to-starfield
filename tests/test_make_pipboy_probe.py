@@ -35,7 +35,7 @@ class PluginTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             esm, movie = mpp.stage(tmp)
             self.assertEqual(os.path.basename(esm), "FO4SFPipboyProbe.esm")
-            self.assertEqual(os.path.relpath(movie, tmp).replace(os.sep, "/"), mpp.MOVIE)
+            self.assertEqual(os.path.relpath(movie, tmp).replace(os.sep, "/"), "Data/" + mpp.MOVIE)
             self.assertEqual(mpp.check(esm)["masters"], ["Starfield.esm"])
             with open(movie, "rb") as f:
                 self.assertEqual(f.read(), make_probe_swf.movie_bytes())
