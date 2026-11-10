@@ -1419,3 +1419,14 @@ decided the import path); keeping the order as a parameter (two orders in the co
     failures (a jump near the player, an actor moved out of the world) are silent.
   - Keep every travelling actor near the player and loaded (as P9's follow helper, Shadow, does for one test actor):
     rejected; the loaded area follows the player.
+
+## 2026-11-10 — Launcher recovery delegates to the owning installers (Codex, FAL-247)
+
+Use existing install journals as the Play gate and existing uninstallers as the rollback
+mechanism. The player's explicit Recover install action may preserve a partial/current
+Plugins.txt in a verified exclusive backup and restore its recorded pre-install bytes for
+the same profile. Preview and Play never perform this repair. Keep incomplete journals on
+failure; refuse healthy riders rather than removing them implicitly. This avoids a second
+ownership store or a repair routine that guesses which game files belong to us. Rebuilding
+or reinstalling missing output automatically was rejected: source inputs may have changed,
+and only the owning installers can safely remove their unchanged publications.

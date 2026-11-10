@@ -75,7 +75,7 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "src"))
 from fo4sf.launcher import (bundle, crashwatch, detect, driver, files, instance, locate, manifest,  # noqa: E402
-                            paths, plugin_checks, restore, runtimes, same_ids, selfupdate, settings)
+                            paths, plugin_checks, recovery, restore, runtimes, same_ids, selfupdate, settings)
 
 SOURCES = os.path.join(REPO, "scripts", "launcher_recipes", "known_sources.json")
 
@@ -365,6 +365,27 @@ def cmd_play(a):
     return 0 if r.get("dry_run") or r.get("started") else 1
 
 
+def cmd_recover_install(a):
+    values = settings.load(a.settings or default_settings_path())
+    folder = values["instance"]
+    norm = lambda p: os.path.normcase(os.path.abspath(p))  # noqa: E731
+    if folder and a.starfield and norm(folder) != norm(a.starfield):
+        raise ValueError("Recovery must target the saved FO4SF game folder (setting instance).")
+    starfield = folder or a.starfield or values["starfield"]
+    if not starfield:
+        raise ValueError("Confirm the Starfield folder on the Locations tab before recovery.")
+    env = dict(os.environ)
+    if folder:
+        instance.check_ready(folder)
+        env = instance.env_for(folder)
+    try:
+        recovery.recover(starfield, REPO, apply=a.apply, env=env)
+    except (OSError, restore.RestoreRefused) as error:
+        raise ValueError(f"Recovery stopped: {error}; keep the journal and any backup, "
+                         "resolve the conflict, then choose Recover install again.") from None
+    return 0
+
+
 def cmd_paths(a):
     """Each location the launcher needs: the saved one, or what was found on this PC and is waiting to be confirmed."""
     path = a.settings or default_settings_path()
@@ -540,6 +561,10 @@ def main(argv=None):
     s.add_argument("--starfield", default="", help="default: the saved starfield location")
     s.add_argument("--settings", default="")
     s.add_argument("--dry-run", action="store_true", help="print what play would do; change and start nothing")
+    s = sub.add_parser("recover-install", help="roll back an interrupted installation through its own installer")
+    s.add_argument("--starfield", default="")
+    s.add_argument("--settings", default="")
+    s.add_argument("--apply", action="store_true", help="apply the rollback (default: preview only)")
     s = sub.add_parser("watch", help="watch a game something else starts (the test runner): ProcDump as play attaches it")
     s.add_argument("--settings", default="")
     s.add_argument("--pid", type=int, default=None, help="follow this process only (default: the next Starfield.exe)")
@@ -570,7 +595,7 @@ def main(argv=None):
                 "check-plugins": cmd_check_plugins, "find": cmd_find, "bundle": cmd_bundle, "measure": cmd_measure,
                 "status": cmd_status, "settings": cmd_settings, "play": cmd_play,
                 "watch": cmd_watch, "gui": cmd_gui, "paths": cmd_paths, "update": cmd_update,
-                "instance": cmd_instance}[a.cmd](a)
+                "instance": cmd_instance, "recover-install": cmd_recover_install}[a.cmd](a)
     except driver.RecipeError as e:
         print(f"recipe: {e}")
         return 2
