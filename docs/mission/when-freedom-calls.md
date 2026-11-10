@@ -197,3 +197,124 @@ to Preston's marker (or activate him), read `found preston`, `startcombat raider
 
 Not this mission: Papyrus.0.log's `Cannot call GetSingleRefArray()/Activate() on a None object` at 18:12:01 is the core's
 activator 00DCC6 (DefaultActivateLinkedRefOnActivate with no linked reference), routed separately.
+
+### After the mission (7 Nov owner report): nothing put Preston back (fixed offline: the keeper keeps him)
+
+The owner's report (Ctrl+Alt+K capture, 7 Nov 21:48 PC time, build terrain_core64v6i_l125_keeper_newgame12): "no
+preston garvy after misson finshes but nothings seems broken". The capture is on the core world (the compass reads
+MARS, as for the whole overlay), with no position, no stage and no mission log, so **where** Preston was is unknown.
+
+**Intended behaviour (this doc, not Fallout 4's):** Preston stays at his placement outside the museum after the mission.
+The cut-down mission has no Sanctuary move, no "The First Step" and no dialogue; sending him to Sanctuary after
+stage 200, as Fallout 4 does, would be a new placement and is the owner's decision, not this fix.
+
+**Cause (verified from the script, with the 19 Oct logs):** Relocate, the only thing that moved Preston to his merged
+spot, runs from the mission's 1 s timer, and stage 200 cancels that timer. On 19 Oct Preston read his unmerged spot
+again 5 times in one session (snap-back, a supported hypothesis about why), and Relocate put him back each time. After
+stage 200 nothing does, so once his cell reloads (the player leaves Concord and comes back, or loads a save) he stays at
+his unmerged spot, about 2,955 units from the museum or in the base world.
+
+**Fix (offline, untested in game):** the keeper quest (FO4SF_CodsworthKeeper, timer 2, never cancelled, restarted on
+every save load) also keeps Preston: `KeepPreston`, the same `MoveOver` rule and the same spot as Relocate, outdoors
+only, with its own budget of 10 failed moves (renewed at each load). It logs where he is at each load
+(`keeper load preston d=... at x y z disabled= dead= fails= player=x y z interior=`) and every `KeeperStatusEvery`
+(12) checks, about once a minute (`keeper status preston ...`); `make_mission.py log` reports the last such line as
+`keeper` and the count of `moved preston` lines as `preston_moves`. Only `FO4SF_Min00Quest.pex` changes: the keeper
+already carries the `Preston` property, so the plugin's records are the same, and a save that completed the mission
+gets the new check at its next load. While the mission runs, the keeper and Relocate apply the same rule. Once he has
+been moved, his position + the offset is far from the player, so neither moves him twice. A `--no-codsworth` build has
+no keeper and so does not keep him.
+
+Check in game: finish the mission (or load a save where it is complete), leave Concord, come back to the museum.
+Preston stands outside its door; the log has `moved preston` (if he had snapped back) and `keeper status preston d=`
+small.
+
+### PC evidence 10 Nov: his first placement never held (fixed offline: one fixed spot, FAL-128)
+
+**Verified** (the PC's read-only check, FAL-128 document `pc-evidence-20261110`): the 7 and 9 Nov owner tests ran with
+Papyrus logging off (the launcher's `papyrus_logging=off` writes `bEnableLogging=0` to StarfieldCustom.ini since
+6 Nov), so they say nothing about the keeper. The last logged sessions, four on 31 Oct (keeper build, before
+`2590549e`), each have `keeper init codsworth=[Actor <FO4SF_CodsworthREF (07000811)>]`: the keeper starts and
+Codsworth binds.
+
+**Cause (verified from the script against those logs):**
+- Preston was moved once per session, from 542 to 544 m away (inside `RelocateRadius`, 800), into `cell=None`. The
+  raiders' first moves, 488 to 530 m away, also ended in `cell=None`; they later read their unmerged spot again
+  (`before` 2,727 to 2,889) and were moved a second time from 198 to 353 m away, into a loaded cell (`Surface
+  (04000DEF)`), and stayed.
+- Preston never got that second move: all session he read 100 to 453 m from the player, under `RelocateGap` (1,500),
+  and `MoveOver` takes "under the gap from the player" as "already moved". At 20:59:31 the player stood 9 m from his
+  spot and he was 155.3 m away. He was already off his spot at stage 10 (20:58:49: the player 117 m from the spot,
+  Preston 210 m away), before the fight. Why he drifted there (the move into an unloaded cell, or his AI walking: his
+  distance rose from 152 to 338 m in 100 s with the player nearly still) is not in the logs.
+- **Correction** of the two sections above: "nobody is offset twice" is false. `MoveOver` takes an actor's target
+  from where it stands, so an actor already moved is offset again when the player stands about one offset length
+  (2,955 m) south-west of it: at 16:33:47 (`.1.log`) the five raiders were moved to (-3000 to -3150, -4500 to -4600).
+  `2590549e`'s keeper used the same rule for Preston, so it could send him there too, and nothing brings him back.
+
+**Fix (offline, untested in game):** Preston has one rule, `PlacePreston`, used by the mission (`Relocate`) and the
+keeper (`KeepPreston`), with a **fixed** target: `PrestonLocalX/Y/Z` (the plugin's ACHR 0x802, (-811.14, 1002.46,
+89.09), script defaults, no plugin change) + the merge offset = (-2011.14, -1697.54, 89.09), where the 28 Oct moves
+put him. He is at his spot when he is within `HoldRadius` (25 m) of it and within `RelocateGap` of the player;
+otherwise he is moved there when the player stands outdoors within `PlaceRadius` (300 m, below the 353 m move that held)
+of it, unless he is fighting in the player's world (put back once the fight is over). A failed move leaves him off his
+spot; the mission's and the keeper's budgets of 10 stay. `make_mission.py stage` refuses points whose Preston
+position differs from `PrestonLocalX/Y/Z` by more than 0.5 m, so the spot cannot go stale silently. The raiders keep
+`MoveOver` (their double offset is open, a separate fix).
+
+`KeepCodsworthLoad` and `KeepCodsworth` no longer return early when Codsworth is None: only his own steps need him, and
+Preston's check runs and restarts either way (FO4SF_Min00 itself, with neither, still does nothing on an old timer 2).
+
+**Visible without a log** (both owner tests were blind): the keeper's state is in script variables, `prestonState`
+(`at spot`, `placed`, `move failed`, `off, player away`, `off, player inside`, `off, fighting`, `gave up`),
+`prestonOff` (m from his spot at the last check) and `prestonMoves`, beside `prestonFails` and `keeperChecks`; `sqv
+FO4SF_CodsworthKeeper` should list them (supported hypothesis: sqv shows a quest script's variables, as in Fallout 4).
+On screen: at every save load `FO4SF keeper: Preston <m> m from his spot (last: <state>, moves <n>)`, at every move
+`FO4SF: Preston put back at the museum door (<mission|keeper>, was <m> m off, failed=<bool>)`, and once when the
+budget is spent. The log lines gain `off=`, `state=` and `moves=` (`keeper load/status preston ...`), `off=` and
+`by=` (`moved preston ...`) and `preston_off=` (the mission's status line); `make_mission.py log` reports the last
+keeper line's `off=` as `preston_off`.
+
+Check (logging on, the 9 Nov exit save, wait 70 s at the museum door, capture, quit): PASS is Preston visible at the
+door and `preston_off` at most 25 (`keeper status preston ... off=`); the load notification shows without the log.
+
+### In game 10 Nov: placed, he walked off again (fixed offline: he is held at his spot, FAL-170)
+
+**Verified** (the PC's checks on installed `f9cae827`, logging on, the owner's 9 Nov save; FAL-128 documents
+`ingame-check-1-f9cae827` and `ingame-check-2-restrain`): `PlacePreston` works, 73.7 m off at the load and at the door
+within a second (`preston_off=1.5`). Not fighting, he then walked off east-north-east at about 0.9 m/s and was put back
+every 29 s, 7 times in 175 s, each time with the notification. Held from the console (`setrestrained 1`) after a
+put-back, he stayed: no put-back in 100 s, the same position in every line. The player then activated him: `preston
+activated at stage 30`, stages 40 and 200, `reward credits=100`, `complete stage=200`, the first logged completion on
+this build line.
+
+**Fix (offline, untested in game):** `PlacePreston` holds him with `SetRestrained(True)` (Starfield's `Actor.psc`:
+`bool Function SetRestrained(bool abRestrained = true) native`; Papyrus has no getter, so each instance keeps its own
+`prestonHeld` and counts `prestonHolds`):
+- right after every move that lands (`failed=false`), in the same call, unless he is fighting;
+- at his spot, when he is calm, not yet held by this instance and within `HeldRadius` (3 m) of it, with no move: a
+  load whose hold the engine did not keep, or a save where he already stands there. From `HeldRadius` to `HoldRadius`
+  (25 m) nothing changes: he is put back past 25 m, and that put-back holds him;
+- never in a fight: while his combat state is not 0, both instances let him go (`SetRestrained(False)`) on every check,
+  whatever their own `prestonHeld` says, before `PlacePreston` and whatever the budget, the interior or the stage
+  (`ReleaseInFight`), since his death stays the quest's failure path; once calm he is held again at his spot or by his
+  next put-back. The PC's second review of `79c9ba81` found the first rule, "release when this instance's flag says
+  held", missed him: the flag can be False while he is held (the keeper's after a load, with the engine very likely
+  keeping the restraint as the game's own quests assume; the other instance's hold; a hold 3 to 25 m off). The keeper
+  keeps checking with a spent budget once it has held him, so that release still runs.
+
+The keeper clears its `prestonHeld` at every save load (`KeepCodsworthLoad`), so its first check after the load (5 s)
+holds him again, whatever the engine kept. The mission instance has no load hook (it never registers
+`OnPlayerLoadGame`, and the owner's save ran its `OnQuestInit` long before), so its flag can outlive a load; the
+keeper's hold and every put-back cover that. Both instances may hold him: `SetRestrained` is safe to repeat. The flag
+limits the at-spot hold to once per instance and session and gives the state its `, held`; the release does not trust
+it. Log: `hold preston by=<mission|keeper> off=<m> ok=<SetRestrained's return>` (False when the state did not change,
+the game's `Actor.psc`: he was already held) and `release preston by=<who> reason=fighting`, once per fight and
+instance; `held=` in the mission's
+status line, `held=` and `holds=` in `keeper load/status preston ...`. The states (`sqv`) end in `, held` while this
+instance holds him (`placed, held`, `at spot, held`). No notification for a hold or a release: only a move is on
+screen. `make_mission.place_preston` models the same order (`held`, `landed`). The 3 m talk rule on a
+held Preston: yes, the PC's check 2b (2.5 m completed the mission, 3.2 m did not); activation did too (check 2).
+
+Check 3 (PC, logging on, the 9 Nov save): one put-back at the load, then `preston_off` under 2 m with no further
+`moved preston`, the player within 3 m, completion, and Preston in the screenshot.

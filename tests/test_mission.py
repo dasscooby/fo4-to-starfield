@@ -96,6 +96,28 @@ class LogTests(unittest.TestCase):
         s = make_mission.summarize(lines)
         self.assertEqual((s["found"], s["activated"], s["startcombat"], s["stages"]), ("activated", 1, 1, [20]))
 
+    def test_keeper_reports_preston_after_the_mission(self):
+        """FAL-64: after stage 200 the keeper's lines are the only evidence of where Preston is."""
+        s = make_mission.summarize(self.LINES)
+        self.assertEqual((s["preston_moves"], s["keeper"]), (0, None))
+        after = self.LINES + [
+            "[11/07/2026 - 09:40:00PM] FO4SF_MISSION rt=300.0 keeper load preston d=155.3 off=160.2 state=none moves=0 "
+            "at -1960.0 -1850.0 89.1 disabled=False dead=False fails=0 player=-2011.1 -1697.2 90.0 interior=False",
+            "[11/07/2026 - 09:40:05PM] FO4SF_MISSION rt=305.0 moved preston to -2011.1 -1697.5 89.1 target -2011.1 "
+            "-1697.5 89.1 before=155.3 off=160.2 d=0.3 failed=False by=keeper",
+            "[11/07/2026 - 09:40:05PM] FO4SF_MISSION rt=305.0 moved codsworth to 1 2 3 target 1 2 3 before=1 d=1 failed=False",
+            "[11/07/2026 - 09:41:00PM] FO4SF_MISSION rt=360.0 keeper status preston d=3.2 off=0.4 state=at spot moves=1 "
+            "at -2011.1 -1697.5 89.1 disabled=False dead=False fails=0 player=-2012.0 -1700.0 90.0 interior=False",
+        ]
+        s = make_mission.summarize(after)
+        self.assertEqual(s["preston_moves"], 1)
+        self.assertTrue(s["keeper"].startswith("keeper status preston d=3.2"))
+        self.assertEqual(s["preston_off"], 0.4)                         # FAL-128: the PC check's PASS reads this
+        self.assertEqual(s["stages"], [10, 20, 30, 40, 200])
+        # a 2590549e keeper line has no off=, and an unreadable one is None, never an error
+        self.assertIsNone(make_mission.summarize([after[-1].replace(" off=0.4", "")])["preston_off"])
+        self.assertIsNone(make_mission.summarize([after[-1].replace("off=0.4", "off=nan?")])["preston_off"])
+
 
 class NextStageTests(unittest.TestCase):
     """make_mission.next_stage mirrors the script's NextStage (Codex review 5563368986: progress must not depend on
@@ -274,7 +296,9 @@ class RelocateContractTests(unittest.TestCase):
             psc = f.read()
         keep = psc[psc.index("Function KeepCodsworth()"):psc.index("bool Function MoveOver")]
         self.assertIn("codsworthFails += 1", keep)
-        self.assertRegex(keep, r"if codsworthFails < 10\s+StartTimer\(CodsworthCheck, 2\)")
+        self.assertRegex(keep, r"if \(Codsworth != None && codsworthFails < 10\) \|\| "
+                               r"\(KeeperOnly && \(prestonFails < 10 \|\| prestonHolds > 0\)\)"
+                               r"\s+StartTimer\(CodsworthCheck, 2\)")
         self.assertNotIn("GetStage", keep)
         relocate = psc[psc.index("Function Relocate("):psc.index("Function KeepCodsworth()")]
         self.assertNotIn("MoveOver(Codsworth", relocate)
@@ -305,7 +329,333 @@ class RelocateContractTests(unittest.TestCase):
         self.assertIn("StartTimer(CodsworthCheck, 2)", load)
         self.assertRegex(psc, r"Event Actor.OnPlayerLoadGame\(Actor akSender\)\s+if KeeperOnly\s+KeepCodsworthLoad\(\)")
         keep = psc[psc.index("Function KeepCodsworth()"):psc.index("bool Function MoveOver")]
-        self.assertLess(keep.index("if Codsworth == None"), keep.index("MoveOver(Codsworth"))   # the mission's old timer 2
+        # the mission's old timer 2 (no Codsworth, not the keeper) moves nobody and is not restarted
+        self.assertRegex(keep, r"if Codsworth != None && codsworthFails < 10 && !player\.IsInInterior\(\)\s+"
+                               r"if MoveOver\(Codsworth,")
+
+    def test_a_missing_codsworth_does_not_stop_preston(self):
+        """FAL-128 (2590549e review): KeepCodsworthLoad and KeepCodsworth returned early when Codsworth was None, which
+        also silently stopped Preston's keeping. Only Codsworth's own steps need him now."""
+        psc = read(PSC)
+        body = lambda name: psc[psc.index(f"Function {name}("):psc.index("EndFunction", psc.index(f"Function {name}("))]
+        for name in ("KeepCodsworthLoad", "KeepCodsworth"):
+            self.assertNotIn("Codsworth == None", body(name), name)
+            self.assertNotRegex(body(name), r"(?m)^\s+return\s*$", name)
+        load = body("KeepCodsworthLoad")
+        guarded = load[load.index("if Codsworth != None"):load.index("prestonFails = 0")]
+        for step in ("Codsworth.Enable()", "codsworthFails = 0", "codsworthKept = True"):
+            self.assertIn(step, guarded)
+        rest = load[load.index("prestonFails = 0"):]
+        for step in ('TracePreston("keeper load")', "StartTimer(CodsworthCheck, 2)"):
+            self.assertIn(step, rest)                                   # outside Codsworth's guard
+
+    def test_the_keeper_keeps_preston_after_the_mission(self):
+        """FAL-64, the owner's report of 7 Nov: "no preston garvy after misson finshes". Stage 200 cancels timer 1, the
+        mission's Relocate with it, while Preston snaps back to his unmerged spot (in game 19 Oct: moved 5 times in one
+        session). The keeper (timer 2, not cancelled by stage 200, restarted on every load) puts him back by the same
+        rule and to the same spot as the mission (PlacePreston), with its own budget, and logs where he is; the mission
+        instance never runs KeepPreston."""
+        psc = read(PSC)
+        body = lambda name: psc[psc.index(f"Function {name}("):psc.index("EndFunction", psc.index(f"Function {name}("))]
+        keep, preston, load = body("KeepCodsworth"), body("KeepPreston"), body("KeepCodsworthLoad")
+        self.assertRegex(keep, r"if KeeperOnly\s+KeepPreston\(player\)")                # only the keeper instance
+        self.assertRegex(preston, r"if prestonFails < 10\s+if PlacePreston\(player, \"keeper\"\)")
+        self.assertRegex(body("Relocate"), r"if PlacePreston\(player, \"mission\"\)\s+relocateFails \+= 1")
+        self.assertNotIn("MoveOver(Preston", psc)                       # one rule for him: PlacePreston
+        self.assertIn("prestonFails += 1", preston)
+        self.assertNotIn("GetStage", preston)                           # runs after stage 200, whatever the stage
+        self.assertNotIn("GetStage", body("PlacePreston"))
+        self.assertNotIn("MoveTo(", preston)                            # the same move as Relocate: PlacePreston only
+        self.assertIn('TracePreston("keeper status")', preston)
+        self.assertIn("keeperChecks % KeeperStatusEvery == 0", preston)
+        self.assertIn("prestonFails = 0", load)                         # a fresh budget on every save load
+        self.assertLess(load.index("prestonFails = 0"), load.index("StartTimer(CodsworthCheck, 2)"))
+        self.assertIn('TracePreston("keeper load")', load)
+        self.assertNotIn("CancelTimer(2)", psc)
+        for v in ("int prestonFails = 0", "int keeperChecks = 0"):
+            self.assertRegex(psc, rf"(?m)^{v}$")
+        self.assertRegex(psc, r"(?m)^int Property KeeperStatusEvery = 12 Auto Const$")
+        self.assertNotIn("KeeperStatusEvery", make_mission.mandatory_properties(psc))     # the plugin is unchanged
+        trace = body("TracePreston")
+        for field in ('" preston d="', '" off="', '" state="', '" moves="', '" disabled="', '" dead="', '" fails="',
+                      '" player="', '" interior="'):
+            self.assertIn(field, trace)
+        # the keeper quest carries the mission's properties, Preston among them (no new plugin record)
+        cs = read(CS)
+        keeper = cs[cs.index("var ks = new SF.ScriptEntry"):cs.index("keeper.VirtualMachineAdapter")]
+        self.assertIn("MissionProps(ks);", keeper)
+        self.assertIn('Obj("Preston", prestonRef.FormKey)', cs[cs.index("void MissionProps("):cs.index("MissionProps(script);")])
+
+    def test_keeper_rule_model_after_the_mission(self):
+        """The keeper's rule on plain numbers, after stage 200, with make_mission.place_preston (the script's
+        PlacePreston): Preston snapped back to his local spot, the mission's check is off. He is put back only when the
+        player is outdoors near his merged spot, always to that spot, and a no-op move spends the budget until a load
+        renews it."""
+        ox, oy, local = -1200.0, -2700.0, (-811.14, 1002.46)
+        spot = (local[0] + ox, local[1] + oy)
+
+        def keeper_check(state, player, outdoors, moveto_works, same_world=True):
+            if state["fails"] >= 10:
+                return
+            off = math.dist(state["pos"], spot)
+            dp = math.dist(player, state["pos"]) if same_world else float("inf")
+            if make_mission.place_preston(off, dp, math.dist(player, spot), not outdoors, False) == "move":
+                if moveto_works:
+                    state["pos"] = spot
+                else:
+                    state["fails"] += 1
+
+        street, sanctuary = (-2011.1, -1697.2), (-1146.7, 1293.8)
+        s = {"pos": local, "fails": 0}
+        keeper_check(s, sanctuary, True, True)                          # elsewhere: he stays where he is
+        self.assertEqual(s["pos"], local)
+        keeper_check(s, street, False, True)                            # in the museum: no move from an interior
+        self.assertEqual(s["pos"], local)
+        keeper_check(s, street, True, True)                             # back at the museum: put back
+        self.assertEqual(s["pos"], spot)
+        keeper_check(s, street, True, True)                             # at his spot: left alone
+        self.assertEqual(s["pos"], spot)
+        s = {"pos": local, "fails": 0}
+        for _ in range(12):
+            keeper_check(s, street, True, False)
+        self.assertEqual(s["fails"], 10)                                # budget spent: the keeper stops trying
+        keeper_check(s, street, True, True)
+        self.assertEqual(s["pos"], local)
+        s["fails"] = 0                                                  # a save load renews it
+        keeper_check(s, street, True, True, same_world=False)           # another world (float max) counts as off
+        self.assertEqual(s["pos"], spot)
+
+    def test_preston_off_his_spot_near_the_player_is_put_back(self):
+        """FAL-128, the PC's 31 Oct logs (pc-evidence-20261110): Preston was moved once from 544 m away (cell=None) and
+        then read 100 to 453 m from the player all session; at 20:59:31 the player stood 9 m from the spot and he was
+        155.3 away. Under RelocateGap, MoveOver called that "already moved" and never moved him again. The fixed-spot
+        rule puts him back once the player is within PlaceRadius, but not while he fights or the player is inside."""
+        spot, player, preston = (-2011.14, -1697.54), (-2018.7, -1692.4), (-1960.0, -1850.0)
+        off, dp, to_spot = math.dist(preston, spot), math.dist(player, preston), math.dist(player, spot)
+        self.assertGreater(off, 25.0)
+        self.assertLess(dp, 1500.0)                                     # what MoveOver read as "already there"
+        self.assertEqual(make_mission.place_preston(off, dp, to_spot, False, False), "move")
+        self.assertEqual(make_mission.place_preston(off, dp, to_spot, False, True), "off, fighting")
+        self.assertEqual(make_mission.place_preston(off, dp, to_spot, True, False), "off, player inside")
+        self.assertEqual(make_mission.place_preston(off, dp, 544.4, False, False), "off, player away")   # cell=None range
+        self.assertEqual(make_mission.place_preston(10.0, 9.0, to_spot, False, False), "at spot")
+        # snapped back or in another world: off, also while "fighting" (he cannot fight from there)
+        self.assertEqual(make_mission.place_preston(2955.0, 2955.0, to_spot, False, True), "move")
+        self.assertEqual(make_mission.place_preston(0.0, float("inf"), to_spot, False, False), "move")
+
+    def test_preston_is_never_offset_twice(self):
+        """31 Oct 16:33 (.1.log): with the player about one offset length south-west of them, raiders already moved
+        were offset again by MoveOver, to (-3000..-3150, -4500..-4600). PlacePreston's target is fixed, never his own
+        position + the offset, so the keeper can never send Preston there (2590549e's keeper could)."""
+        psc = read(PSC)
+        place = psc[psc.index("bool Function PlacePreston("):psc.index("EndFunction", psc.index("bool Function PlacePreston("))]
+        self.assertIn("float tx = PrestonLocalX + MergeOffsetX", place)
+        self.assertIn("float ty = PrestonLocalY + MergeOffsetY", place)
+        self.assertIn("float tz = PrestonLocalZ", place)
+        self.assertNotRegex(place, r"\.GetPosition[XY]\(\) \+ MergeOffset")
+        self.assertIn("Preston.MoveTo(player, tx - px, ty - py, tz - pz, True, False)", place)
+        far = (-2011.14 - 1200.0, -1697.54 - 2700.0)                    # MoveOver's second target for him
+        self.assertEqual(make_mission.place_preston(0.0, 2955.0, math.dist(far, (-2011.14, -1697.54)), False, False),
+                         "off, player away")
+
+    def test_script_carries_the_place_rule(self):
+        """make_mission.place_preston is PlacePreston's decision, in the same order (FAL-170: the hold at the spot and
+        after a move that lands; the release is the callers', before it)."""
+        psc = read(PSC)
+        place = psc[psc.index("bool Function PlacePreston("):psc.index("EndFunction", psc.index("bool Function PlacePreston("))]
+        steps = ["bool fighting = Preston.GetCombatState() != 0",
+                 "if prestonOff <= HoldRadius && dp < RelocateGap",
+                 "if !prestonHeld && !fighting && prestonOff <= HeldRadius", "HoldPreston(who)",
+                 'SetPrestonState("at spot")',
+                 "if player.IsInInterior()", 'SetPrestonState("off, player inside")',
+                 "> PlaceRadius * PlaceRadius", 'SetPrestonState("off, player away")',
+                 "if dp < RelocateGap && fighting", 'SetPrestonState("off, fighting")',
+                 "Preston.MoveTo(", "bool failed = off > HoldRadius || d >= RelocateGap", "prestonOff = off",
+                 'SetPrestonState("move failed")', "if !fighting", "HoldPreston(who)", 'SetPrestonState("placed")']
+        at = 0
+        for s in steps:                                                 # each one after the one before
+            at = place.index(s, at) + len(s)
+        self.assertIn("prestonMoves += 1", place)
+        self.assertNotIn("prestonState = ", place)                      # every state goes through SetPrestonState
+
+    def test_place_radii_follow_the_evidence(self):
+        """PlaceRadius below the farthest move that landed in a loaded cell and held (353 m, raider 4, 31 Oct) and so
+        below every move that ended with cell=None (488 m on); HoldRadius above FindRadius (finding him is no move)."""
+        f = make_mission.script_floats(read(PSC))
+        self.assertLess(f["PlaceRadius"], 353.0)
+        self.assertLess(f["PlaceRadius"], f["RelocateRadius"])
+        self.assertGreater(f["HoldRadius"], f["FindRadius"])
+        self.assertLess(f["HoldRadius"], f["PlaceRadius"])
+        self.assertLess(f["HeldRadius"], f["HoldRadius"])               # FAL-170: held only close to the spot...
+        self.assertGreater(f["HeldRadius"], 1.5)                        # ...where the 10 Nov placement landed
+        for name in ("PlaceRadius", "HoldRadius", "HeldRadius", "PrestonLocalX", "PrestonLocalY", "PrestonLocalZ"):
+            self.assertNotIn(name, make_mission.mandatory_properties(read(PSC)))   # the plugin is unchanged
+
+    def test_preston_spot_is_where_the_moves_put_him(self):
+        """In game 28 Oct (new game run 3) the moves put Preston at (-2011.14, -1697.54, 89.09): his spot + the merge
+        offset must be that point."""
+        f = make_mission.script_floats(read(PSC))
+        got = (f["PrestonLocalX"] + f["MergeOffsetX"], f["PrestonLocalY"] + f["MergeOffsetY"], f["PrestonLocalZ"])
+        for a, b in zip(got, (-2011.14, -1697.54, 89.09)):
+            self.assertAlmostEqual(a, b, places=2)
+
+    def test_keeper_state_is_visible_without_a_log(self):
+        """FAL-128: both owner tests (7 and 9 Nov) ran with Papyrus logging off, so nothing showed whether the keeper
+        ran. Its state is in script variables (sqv FO4SF_CodsworthKeeper) and on screen at each load, each move and a
+        spent budget."""
+        psc = read(PSC)
+        for v in ("int prestonMoves = 0", "float prestonOff = -1.0", 'string prestonState = "none"'):
+            self.assertRegex(psc, rf"(?m)^{v}$")
+        body = lambda name: psc[psc.index(f"Function {name}("):psc.index("EndFunction", psc.index(f"Function {name}("))]
+        load = body("KeepCodsworthLoad")
+        self.assertLess(load.index('TracePreston("keeper load")'), load.index("Debug.Notification("))
+        self.assertIn("Debug.Notification(", body("PlacePreston"))
+        self.assertRegex(body("KeepPreston"), r'prestonState = "gave up"[^\n]*\n(.*\n)*\s+Debug\.Notification\(')
+        self.assertIn('" preston_off=" + prestonOff', psc)             # and in the mission's status line
+
+    def test_preston_is_held_after_a_placement(self):
+        """FAL-170, in game 10 Nov (f9cae827, the 9 Nov save, logging on): placed 1.5 m off his spot, he walked off at
+        about 0.9 m/s, not fighting, and was put back every 29 s. A move that lands holds him in the same call (unless he
+        fights); a failed move holds nobody. Only the move is on screen."""
+        spot, player = (-2011.14, -1697.54), (-2013.0, -1696.0)
+        off = 73.7                                                      # at the load, 10 Nov
+        self.assertEqual(make_mission.place_preston(off, off, math.dist(player, spot), False, False), "move")
+        self.assertEqual(make_mission.place_preston(off, off, 2.4, False, False, landed=True), "placed, held")
+        self.assertEqual(make_mission.place_preston(off, off, 2.4, False, False, landed=False), "move failed")
+        self.assertEqual(make_mission.place_preston(off, off, 2.4, False, False, held=True, landed=False),
+                         "move failed, held")
+        # in another world while "fighting": moved, but never held in a fight
+        self.assertEqual(make_mission.place_preston(0.0, float("inf"), 2.4, False, True, landed=True), "placed")
+        psc = read(PSC)
+        body = lambda name: psc[psc.index(f"Function {name}("):psc.index("EndFunction", psc.index(f"Function {name}("))]
+        hold = body("HoldPreston")
+        self.assertIn("bool ok = Preston.SetRestrained(True)", hold)
+        for step in ("prestonHeld = True", "prestonHolds += 1", 'Trace("hold preston by=" + who + " off=" + prestonOff + " ok=" + ok)'):
+            self.assertIn(step, hold)
+        place = body("PlacePreston")
+        self.assertLess(place.index("Debug.Notification("), place.rindex("HoldPreston(who)"))
+        self.assertEqual(place.count("Debug.Notification("), 1)         # the move's, as before
+        for name in ("HoldPreston", "ReleaseInFight", "SetPrestonState"):
+            self.assertNotIn("Debug.Notification(", body(name), name)
+            self.assertNotIn("GetStage", body(name), name)
+        for v in ("bool prestonHeld = False", "int prestonHolds = 0"):   # readable with sqv
+            self.assertRegex(psc, rf"(?m)^{v}$")
+        self.assertRegex(psc, r"(?m)^float Property HeldRadius = 3\.0 Auto Const$")
+
+    def test_preston_is_held_at_his_spot(self):
+        """FAL-170: at his spot, calm, not yet held and within HeldRadius, he is held without a move (a load whose hold
+        the engine did not keep, a save where he already stands there). Up to HoldRadius he is left until his put-back,
+        which holds him."""
+        self.assertEqual(make_mission.place_preston(1.5, 4.0, 2.4, False, False), "at spot, held")
+        self.assertEqual(make_mission.place_preston(3.0, 4.0, 2.4, False, False), "at spot, held")
+        self.assertEqual(make_mission.place_preston(1.5, 4.0, 2.4, False, False, held=True), "at spot, held")
+        self.assertEqual(make_mission.place_preston(10.0, 12.0, 2.4, False, False), "at spot")
+        self.assertEqual(make_mission.place_preston(10.0, 12.0, 2.4, False, False, held=True), "at spot, held")
+        self.assertEqual(make_mission.place_preston(26.0, 28.0, 2.4, False, False), "move")
+        self.assertEqual(make_mission.place_preston(1.5, float("inf"), 2.4, False, False), "move")   # another world
+        psc = read(PSC)
+        trace = psc[psc.index("Function TracePreston("):psc.index("EndFunction", psc.index("Function TracePreston("))]
+        for field in ('" held=" + prestonHeld', '" holds=" + prestonHolds'):
+            self.assertIn(field, trace)
+        self.assertIn('" preston_off=" + prestonOff + " held=" + prestonHeld', psc)   # the mission's status line
+        state = psc[psc.index("Function SetPrestonState("):psc.index("EndFunction", psc.index("Function SetPrestonState("))]
+        self.assertRegex(state, r'if prestonHeld\s+prestonState = s \+ ", held"\s+else\s+prestonState = s')
+
+    def test_a_held_preston_is_let_go_in_a_fight(self):
+        """FAL-170: never held in a fight (his death stays the quest's failure path). PC review of 79c9ba81: the release
+        trusted this instance's prestonHeld, which can be False while he is held. Now both instances let him go on
+        every check of a fight, whatever the flag, before PlacePreston, whatever the budget, interior or stage, with one
+        log line per fight and instance; held again once calm."""
+        self.assertEqual(make_mission.place_preston(1.5, 4.0, 2.4, False, True, held=True), "at spot")
+        self.assertEqual(make_mission.place_preston(1.5, 4.0, 2.4, False, True), "at spot")
+        self.assertEqual(make_mission.place_preston(40.0, 42.0, 2.4, False, True, held=True), "off, fighting")
+        self.assertEqual(make_mission.place_preston(1.5, 4.0, 2.4, False, False), "at spot, held")   # calm again
+        psc = read(PSC)
+        body = lambda name: psc[psc.index(f"Function {name}("):psc.index("EndFunction", psc.index(f"Function {name}("))]
+        release = body("ReleaseInFight")
+        self.assertRegex(release, r"if Preston\.GetCombatState\(\) != 0\s+Preston\.SetRestrained\(False\)\s+"
+                                  r"prestonHeld = False\s+if !prestonFighting\s+prestonFighting = True\s+"
+                                  r"Trace\(\"release preston by=\" \+ who \+ \" reason=fighting\"\)\s+endif\s+"
+                                  r"return True\s+endif\s+prestonFighting = False\s+return False")
+        self.assertNotIn("ReleasePreston", psc)
+        self.assertNotRegex(psc, r"if prestonHeld &&")                   # no release behind the flag
+        self.assertNotIn("ReleaseInFight(\"", body("PlacePreston"))      # the callers release, not PlacePreston
+        tick = psc[psc.index("Event OnTimer("):psc.index("EndEvent", psc.index("Event OnTimer("))]
+        self.assertRegex(tick, r'KeepCodsworthStart\(\)\s+ReleaseInFight\("mission"\)[^\n]*\s+if relocateFails < 10')
+        self.assertRegex(body("KeepPreston"), r'ReleaseInFight\("keeper"\)\s+if prestonFails < 10')
+        # the keeper keeps checking with a spent budget once it has held him, so a fight still releases him
+        self.assertIn("(KeeperOnly && (prestonFails < 10 || prestonHolds > 0))", body("KeepCodsworth"))
+        self.assertRegex(psc, r"(?m)^bool prestonFighting = False$")
+
+    def test_two_instances_a_load_and_a_spent_budget(self):
+        """PC review of 79c9ba81, on plain numbers: the engine's restraint is one, the flags are two (mission, keeper).
+        Each check of an instance: in a fight SetRestrained(False) whatever its flag (ReleaseInFight), then PlacePreston
+        (make_mission.place_preston) unless its budget is spent; a new hold sets the restraint."""
+        def check(world, who, fighting, off=1.5, spent=False):
+            if fighting:
+                world["restrained"] = False                             # ReleaseInFight
+                world[who] = False
+            if spent:
+                return
+            state = make_mission.place_preston(off, off + 2.0, 2.4, False, fighting, held=world[who], landed=True)
+            if state.endswith(", held") and not world[who]:
+                world["restrained"] = True                              # HoldPreston
+            world[who] = state.endswith(", held")
+
+        # the mission holds him; the keeper's flag stays False until its own check: a fight still releases him
+        w = {"restrained": False, "mission": False, "keeper": False}
+        check(w, "mission", False)
+        self.assertEqual(w, {"restrained": True, "mission": True, "keeper": False})
+        check(w, "keeper", True)
+        self.assertFalse(w["restrained"])
+        # held across a load: the keeper clears its flag, the engine keeps the restraint; after stage 200 only the
+        # keeper runs, and a fight releases him
+        w = {"restrained": True, "mission": True, "keeper": False}
+        check(w, "keeper", True)
+        self.assertFalse(w["restrained"])
+        # a spent budget: no PlacePreston, the release still runs
+        w = {"restrained": True, "mission": False, "keeper": False}
+        check(w, "keeper", True, spent=True)
+        self.assertFalse(w["restrained"])
+        check(w, "keeper", False, spent=True)                           # no hold without PlacePreston
+        self.assertFalse(w["restrained"])
+        # a hold 3 to 25 m off (a put-back that landed there): out of HeldRadius, still released in a fight
+        w = {"restrained": False, "mission": False, "keeper": False}
+        check(w, "mission", False, off=60.0)
+        self.assertTrue(w["restrained"])
+        check(w, "keeper", True, off=10.0)
+        self.assertFalse(w["restrained"])
+
+    def test_a_load_holds_him_again(self):
+        """FAL-170: the keeper counts Preston as not held at every save load, Codsworth or not, so its first check after
+        the load holds him again whatever the engine kept. The mission instance registers no load event, so its flag can
+        outlive a load: the keeper's hold and every put-back cover that."""
+        psc = read(PSC)
+        load = psc[psc.index("Function KeepCodsworthLoad()"):psc.index("EndFunction", psc.index("Function KeepCodsworthLoad()"))]
+        self.assertIn("prestonHeld = False", load[load.index("prestonFails = 0"):])       # outside Codsworth's guard
+        self.assertLess(load.index("prestonHeld = False"), load.index("StartTimer(CodsworthCheck, 2)"))
+        self.assertEqual(psc.count('RegisterForRemoteEvent(Game.GetPlayer(), "OnPlayerLoadGame")'), 1)   # the keeper's
+        # held before the save; after the load the flag is False, so the first check at his spot holds him again
+        self.assertEqual(make_mission.place_preston(1.5, 4.0, 2.4, False, False, held=False), "at spot, held")
+
+    def test_held_preston_is_put_back_once(self):
+        """In game 10 Nov: 73.7 m off at the load, placed within a second, then 7 put-backs in 175 s while he walked off
+        at about 0.9 m/s; held from the console, none in 100 s and the same position in every line. On plain numbers,
+        with the mission's 1 s check: without a hold that holds, 7 put-backs; with it, the one at the load (the PC's check
+        3 expects that)."""
+        def put_backs(hold_works):
+            off, held, moves = 73.7, False, 0
+            for _ in range(175):
+                state = make_mission.place_preston(off, off, 2.4, False, False, held=held, landed=True)
+                if state.startswith("placed"):
+                    off, moves = 1.5, moves + 1
+                held = hold_works and state.endswith(", held")
+                if not held:
+                    off += 0.9                                          # he walks off
+            return moves
+
+        self.assertEqual(put_backs(False), 7)
+        self.assertEqual(put_backs(True), 1)
 
     def test_moves_trace_the_worlds(self):
         """Codex's world-identity point (#353): every move logs the player's and the actor's world before it and the
@@ -340,11 +690,13 @@ class RelocateContractTests(unittest.TestCase):
 class StageAndInstallTests(unittest.TestCase):
     """Codex review 5563368986: a failed rebuild keeps the earlier stage; the pins are checked before install."""
 
-    def fake_stage(self, d, out, fail_at=None, during_check=None, extra=(), writes=None):
+    SPOT = [-811.14, 1002.46, 89.09]                                    # the script's PrestonLocalX/Y/Z
+
+    def fake_stage(self, d, out, fail_at=None, during_check=None, extra=(), writes=None, preston=None):
         def fake_run(cmd, cwd=None):
             if "points" in cmd:
                 with open(cmd[-1], "w", encoding="utf-8") as f:
-                    json.dump({"raiders": [{"src": "046458", "dist_m": 18.9}], "preston": {"pos": [1, 2, 3]},
+                    json.dump({"raiders": [{"src": "046458", "dist_m": 18.9}], "preston": {"pos": preston or self.SPOT},
                                "codsworth": {"src": "01CA7D", "name": "Codsworth", "pos": [4, 5, 6], "rot": [0, 0, 1]}}, f)
             elif "write" in cmd:
                 if writes is not None:
@@ -508,6 +860,23 @@ class StageAndInstallTests(unittest.TestCase):
             self.fake_stage(d, second)                          # and a good retry still publishes
             self.assertTrue(os.path.exists(os.path.join(second, "plan.json")))
             self.assertEqual(self.snapshot(os.path.join(d, failed[0])), kept)
+
+    def test_points_that_moved_preston_are_refused(self):
+        """FAL-128: the script keeps Preston at its own PrestonLocalX/Y/Z, so a build whose points put him elsewhere
+        would ship a keeper that drags him to the old spot. stage refuses it before the writer runs."""
+        with tempfile.TemporaryDirectory() as d:
+            out, writes = os.path.join(d, "m"), []
+            with self.assertRaises(SystemExit) as e:
+                self.fake_stage(d, out, writes=writes, preston=[-880.5, 1050.25, 90.0])   # the writer's synthetic spot
+            self.assertIn("PrestonLocalX/Y/Z", str(e.exception))
+            self.assertEqual(writes, [])
+            self.assertFalse(os.path.exists(out))
+            self.fake_stage(d, out, preston=[-811.1, 1002.5, 89.1])     # within SPOT_TOLERANCE: staged
+            self.assertTrue(os.path.exists(os.path.join(out, "plan.json")))
+        psc = read(PSC)
+        self.assertIsNone(make_mission.spot_problem(psc, self.SPOT))
+        self.assertIsNotNone(make_mission.spot_problem(psc, [-811.14, 1002.46]))           # not a position
+        self.assertIsNotNone(make_mission.spot_problem(psc, [-811.14, 1002.46, 90.0]))     # z off by 0.91
 
     def test_master_changed_during_build_is_refused(self):
         with tempfile.TemporaryDirectory() as d:

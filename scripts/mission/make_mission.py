@@ -4,7 +4,8 @@ usage:
   python make_mission.py stage --out <experiment dir> --fo4 <Fallout4.esm> --starfield <Starfield.esm>
                                --core <FO4TerrainCore.esm> --raider <FO4ActorRaider.esm>
                                [--compiler <PapyrusCompiler.exe>] [--content-resources <zip>] [--no-alias]
-      1. dotnet/Mission points: Fallout 4's Concord raiders and the museum door's outside arrival (points.json);
+      1. dotnet/Mission points: Fallout 4's Concord raiders and the museum door's outside arrival (points.json); the
+         script keeps Preston at that arrival from its own PrestonLocalX/Y/Z, so points that differ are refused;
       2. dotnet/Mission write + check: FO4SFMission.esm against the given core and raider plugins (offline_check.txt);
       3. the Papyrus compile of FO4SF_Min00Quest.psc against every base script of ContentResources.zip;
       4. plan.json (the plugin's, the script's and the masters' SHA-256) and README.txt.
@@ -56,6 +57,8 @@ FIRST_WEM = 0x00F4C001
 STAGES = (10, 20, 30, 40, 200)
 # the script properties dotnet/Mission writes (Program.cs, Write): a renamed property would leave the script unbound
 PROPERTIES = ("Preston", "Raiders", "Credits")
+# the script carries Preston's spot as defaults (PrestonLocalX/Y/Z, FAL-128); stage refuses points farther than this (m)
+SPOT_TOLERANCE = 0.5
 STARFIELD = r"D:\SteamLibrary\steamapps\common\Starfield"
 LOG = os.path.join(os.path.expanduser("~"), "Documents", "My Games", "Starfield", "Logs", "Script", "User",
                    "fo4sf_mission.0.log")
@@ -84,6 +87,24 @@ def mandatory_properties(psc_text):
     """The names of the script's Auto Const Mandatory properties (what the plugin must fill), in source order."""
     return [m.group(1) for m in re.finditer(r"^\s*[\w\[\]]+\s+Property\s+(\w+)\s+Auto\s+Const\s+Mandatory\b",
                                             psc_text, re.M | re.I)]
+
+
+def script_floats(psc_text):
+    """The script's float properties with a default (`float Property Name = value Auto Const`), as {name: value}."""
+    return {m.group(1): float(m.group(2)) for m in re.finditer(
+        r"^\s*float\s+Property\s+(\w+)\s*=\s*(-?[\d.]+)\s+Auto\s+Const\b", psc_text, re.M | re.I)}
+
+
+def spot_problem(psc_text, preston_pos):
+    """None when points.json's Preston position is the script's PrestonLocalX/Y/Z (within SPOT_TOLERANCE), else why not:
+    the script puts him back at that spot, so a build whose points moved him must not ship the old one."""
+    f = script_floats(psc_text)
+    want = [f["PrestonLocalX"], f["PrestonLocalY"], f["PrestonLocalZ"]]
+    got = [float(v) for v in preston_pos]
+    if len(got) != 3 or any(abs(a - b) > SPOT_TOLERANCE for a, b in zip(got, want)):
+        return (f"points.json puts Preston at {got} but {SCRIPT}.psc PrestonLocalX/Y/Z are {want}: set them to the "
+                f"points and stage again")
+    return None
 
 
 def extract_sources(zip_path, work):
@@ -117,7 +138,8 @@ def compile_script(compiler, src_dir, out_dir):
 
 def stage(a):
     with open(os.path.join(HERE, SCRIPT + ".psc"), encoding="utf-8") as f:
-        props = mandatory_properties(f.read())
+        psc = f.read()
+    props = mandatory_properties(psc)
     if tuple(props) != PROPERTIES:
         sys.exit(f"{SCRIPT}.psc properties {props} differ from what dotnet/Mission writes {list(PROPERTIES)}")
     final = os.path.abspath(a.out)
@@ -130,6 +152,10 @@ def stage(a):
     tool = ["dotnet", "run", "-c", "Release", "--project", PROJECT, "--"]
     points = os.path.join(work, "points.json")
     run(tool + ["points", a.fo4, points])
+    with open(points, encoding="utf-8") as f:
+        problem = spot_problem(psc, json.load(f)["preston"]["pos"])
+    if problem:
+        sys.exit(f"{problem}; attempt kept in {out}")
     alias = [] if a.alias else ["--no-alias"]
     cods = [] if a.codsworth else ["--no-codsworth"]
     assets = set()
@@ -335,11 +361,41 @@ def next_stage(stage, dead, total, fighting, at_preston, found=False):
     return s
 
 
+def place_preston(off, dp, to_spot, interior, fighting, held=False, landed=None, hold=25.0, gap=1500.0, radius=300.0,
+                  held_radius=3.0):
+    """The script's PlacePreston decision (FO4SF_Min00Quest.psc, FAL-128), the same rule in Python so it can be tested:
+    off is his distance from his fixed merged spot, dp his distance from the player (inf: another world), to_spot the
+    player's (x, y) distance from that spot, held the instance's prestonHeld before the check, landed whether a move
+    leaves him at his spot (None: the move's outcome is not modelled). Returns the script's prestonState, or "move" when
+    a move is due and landed is None. FAL-170: a Preston who fights is let go first, whatever held says (the caller's
+    ReleaseInFight); at his spot he is held when calm, not yet held and within held_radius; a move that lands holds him
+    unless he fights; the state ends in ", held" while this instance holds him after the check."""
+    if fighting:
+        held = False                                    # ReleaseInFight, before PlacePreston
+    state = lambda s, h: s + ", held" if h else s       # SetPrestonState
+    if off <= hold and dp < gap:
+        return state("at spot", held or (not fighting and off <= held_radius))
+    if interior:
+        return state("off, player inside", held)
+    if to_spot > radius:
+        return state("off, player away", held)
+    if dp < gap and fighting:
+        return state("off, fighting", held)
+    if landed is None:
+        return "move"
+    if not landed:
+        return state("move failed", held)
+    return state("placed", held or not fighting)
+
+
 def summarize(lines):
     """The mission log's lines as {"stages": [...], "status": <last status line or None>, "reward": int or None,
-    "startcombat": n, "activated": n, "found": <how the player found Preston before the fight, or None>}; lines of
-    other logs are ignored."""
-    s = {"stages": [], "status": None, "reward": None, "startcombat": 0, "activated": 0, "found": None}
+    "startcombat": n, "activated": n, "found": <how the player found Preston before the fight, or None>,
+    "preston_moves": n, "keeper": <the keeper's last line of where Preston is, or None>, "preston_off": <that line's
+    off=, his distance in m from his spot, or None>}; lines of other logs are ignored. After stage 200 only the keeper
+    moves Preston, so "keeper", "preston_off" and "preston_moves" are the evidence of where he is after the mission."""
+    s = {"stages": [], "status": None, "reward": None, "startcombat": 0, "activated": 0, "found": None,
+         "preston_moves": 0, "keeper": None, "preston_off": None}
     for line in lines:
         m = LINE.search(line)
         if not m:
@@ -357,6 +413,15 @@ def summarize(lines):
             s["activated"] += 1
         elif msg.startswith("found preston ") and s["found"] is None:
             s["found"] = msg[len("found preston "):]
+        elif msg.startswith("moved preston "):
+            s["preston_moves"] += 1
+        elif msg.startswith(("keeper load preston ", "keeper status preston ")):
+            s["keeper"] = msg
+            off = re.search(r" off=(\S+)", msg)
+            try:
+                s["preston_off"] = float(off.group(1)) if off else None
+            except ValueError:
+                s["preston_off"] = None
     return s
 
 
