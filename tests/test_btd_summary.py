@@ -9,6 +9,10 @@ from pathlib import Path
 import zlib
 import numpy as np
 
+import sys as _sys
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "src"))  # run alone: put fo4sf on the path
 from fo4sf.__main__ import main
 from fo4sf.btd import read as read_btd, Btd
 from test_dds_summary import _run_without_numpy

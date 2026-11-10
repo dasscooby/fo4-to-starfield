@@ -5,6 +5,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import sys as _sys
+from pathlib import Path as _Path
+
+_sys.path.insert(0, str(_Path(__file__).resolve().parents[1] / "src"))  # run alone: put fo4sf on the path
 from fo4sf.__main__ import main
 from fo4sf.config import ConfigError, load_config
 
