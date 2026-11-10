@@ -7,7 +7,8 @@
 // UIMessageQueue::AddMessage and BSFixedString, but NOT on its IMenu class: every IMenu virtual there is
 // REL::ID{ 0 } (include/RE/IDs.h), and a lookup of id 0 stops the game with a message box. The menu object is the
 // engine's own: the engine's IMenu constructor, then a copy of the engine's IMenu primary vtable with only our
-// slots replaced (the two other vtables are the engine's, as the constructor set them).
+// slots replaced, and the engine's RTTI locator in the slot before the copy (the two other vtables are the engine's,
+// as the constructor set them).
 //
 // Nothing is called before it is checked (README, "Where every id comes from"):
 //   - the runtime is 1.16.244.0 (SFSE's), else nothing but the refusal line;
@@ -106,6 +107,16 @@ namespace
 	using LoadMovie_t = bool (*)(void*, bool, bool);
 	using ProcessMessage_t = RE::UI_MESSAGE_RESULT (*)(void*, RE::UIMessageData&);
 
+	// the primary vtable copy, with the engine's RTTI complete object locator in the slot before it, where MSVC's
+	// dynamic_cast reads it. The engine casts a shown menu from IMenu to GameMenuBase (FAL-187 hang dump at b3f352b7);
+	// without the locator the cast read the global that happened to lie before the copy, and the game hung
+	struct PrimaryVtable
+	{
+		std::uintptr_t                     locator;
+		std::array<std::uintptr_t, kSlots> slots;
+	};
+	static_assert(sizeof(PrimaryVtable) == (1 + kSlots) * sizeof(std::uintptr_t));   // no padding: locator is slots[-1]
+
 	// INI (FO4SFPipboyMenu.ini next to the dll)
 	int           g_stage = 0;      // 0 off, 1 = (a), 2 = (b)
 	std::uint32_t g_key = 0x79;     // F10
@@ -115,7 +126,7 @@ namespace
 	std::uintptr_t                           g_base = 0;
 	std::size_t                              g_imageSize = 0;
 	std::array<std::uint32_t, kIdCount>      g_rva{};
-	std::array<std::uintptr_t, kSlots>       g_vtbl{};
+	PrimaryVtable                            g_vtbl{};
 	Ctor_t                                   g_ctor = nullptr;
 	Dtor_t                                   g_engineDtor = nullptr;
 	LoadMovie_t                              g_engineLoadMovie = nullptr;
@@ -144,7 +155,7 @@ namespace
 
 	bool IsOurs(const void* a_menu)
 	{
-		return a_menu && *static_cast<const std::uintptr_t*>(a_menu) == reinterpret_cast<std::uintptr_t>(g_vtbl.data());
+		return a_menu && *static_cast<const std::uintptr_t*>(a_menu) == reinterpret_cast<std::uintptr_t>(g_vtbl.slots.data());
 	}
 
 	const void* MovieOf(const void* a_menu)
@@ -231,7 +242,10 @@ namespace
 		                     *reinterpret_cast<const std::uintptr_t*>(base + 0x50) == Address(kVtblSink);
 		auto*      refs = reinterpret_cast<volatile std::uint32_t*>(base + 0x08);   // Scaleform RefCountImplCore
 		const auto ctorRefs = *refs;
-		*reinterpret_cast<std::uintptr_t*>(base) = reinterpret_cast<std::uintptr_t>(g_vtbl.data());
+		*reinterpret_cast<std::uintptr_t*>(base) = reinterpret_cast<std::uintptr_t>(g_vtbl.slots.data());
+		// what the engine's dynamic_cast reads on our object: the locator one slot before its primary vtable
+		const auto rtti = *reinterpret_cast<const std::uintptr_t*>(*reinterpret_cast<const std::uintptr_t*>(base) - 8) ==
+		                  *reinterpret_cast<const std::uintptr_t*>(Address(kVtblPrimary) - 8);
 		auto* imenu = static_cast<RE::IMenu*>(menu);
 		imenu->menuName = MenuName();
 		const auto ctorFlags = imenu->flags;
@@ -242,8 +256,9 @@ namespace
 		if (g_keepAlive && ctorRefs == 1) {
 			REX::W32::InterlockedIncrement(refs);   // a public precedent's count: never released to zero
 		}
-		REX::INFO("step=create n={} menu={} vtables={} refcount={} keep_alive={} ctor_flags={} flags={} depth={}", n,
-			Hex(base), vtables ? "engine" : "UNEXPECTED", ctorRefs, g_keepAlive ? 1 : 0, Hex(ctorFlags), Hex(imenu->flags),
+		REX::INFO("step=create n={} menu={} vtables={} rtti={} refcount={} keep_alive={} ctor_flags={} flags={} depth={}", n,
+			Hex(base), vtables ? "engine" : "UNEXPECTED", rtti ? "engine" : "UNEXPECTED", ctorRefs, g_keepAlive ? 1 : 0,
+			Hex(ctorFlags), Hex(imenu->flags),
 			Hex(*reinterpret_cast<const std::uint8_t*>(base + 0x110)));
 		std::memcpy(static_cast<void*>(a_out), &menu, sizeof(menu));
 		return a_out;
@@ -425,22 +440,23 @@ namespace
 			return false;
 		}
 		const auto* engine = reinterpret_cast<const std::uintptr_t*>(Address(kVtblPrimary));
-		std::copy_n(engine, kSlots, g_vtbl.begin());
+		g_vtbl.locator = *reinterpret_cast<const std::uintptr_t*>(Address(kVtblPrimary) - 8);   // checked by CheckVtable
+		std::copy_n(engine, kSlots, g_vtbl.slots.begin());
 		g_ctor = reinterpret_cast<Ctor_t>(Address(kCtor));
 		g_engineDtor = reinterpret_cast<Dtor_t>(engine[0x00]);
 		g_engineLoadMovie = reinterpret_cast<LoadMovie_t>(engine[0x06]);
 		g_engineProcessMessage = reinterpret_cast<ProcessMessage_t>(engine[0x08]);
-		g_vtbl[0x00] = reinterpret_cast<std::uintptr_t>(&MenuDestroy);
-		g_vtbl[0x03] = reinterpret_cast<std::uintptr_t>(&MenuGetName);
-		g_vtbl[0x04] = reinterpret_cast<std::uintptr_t>(&MenuGetRootPath);
-		g_vtbl[0x05] = reinterpret_cast<std::uintptr_t>(&MenuGetViewScaleMode);
-		g_vtbl[0x06] = reinterpret_cast<std::uintptr_t>(&MenuLoadMovie);
-		g_vtbl[0x08] = reinterpret_cast<std::uintptr_t>(&MenuProcessMessage);
+		g_vtbl.slots[0x00] = reinterpret_cast<std::uintptr_t>(&MenuDestroy);
+		g_vtbl.slots[0x03] = reinterpret_cast<std::uintptr_t>(&MenuGetName);
+		g_vtbl.slots[0x04] = reinterpret_cast<std::uintptr_t>(&MenuGetRootPath);
+		g_vtbl.slots[0x05] = reinterpret_cast<std::uintptr_t>(&MenuGetViewScaleMode);
+		g_vtbl.slots[0x06] = reinterpret_cast<std::uintptr_t>(&MenuLoadMovie);
+		g_vtbl.slots[0x08] = reinterpret_cast<std::uintptr_t>(&MenuProcessMessage);
 		if (g_stage == 1) {
-			g_vtbl[0x0A] = reinterpret_cast<std::uintptr_t>(&MenuIsMovieLoaded);
+			g_vtbl.slots[0x0A] = reinterpret_cast<std::uintptr_t>(&MenuIsMovieLoaded);
 		}
-		REX::INFO("step=ready stage={} replaced=0x00,0x03,0x04,0x05,0x06,0x08{}", g_stage == 1 ? "a" : "b",
-			g_stage == 1 ? ",0x0A" : "");
+		REX::INFO("step=ready stage={} replaced=0x00,0x03,0x04,0x05,0x06,0x08{} locator={}", g_stage == 1 ? "a" : "b",
+			g_stage == 1 ? ",0x0A" : "", Hex(g_vtbl.locator - g_base));
 		return true;
 	}
 
