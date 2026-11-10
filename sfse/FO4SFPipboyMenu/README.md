@@ -37,9 +37,14 @@ engine's primary vtable (the one `step=rtti vtable=primary` checks). MSVC's `dyn
 and the engine casts a shown menu from `IMenu` to `GameMenuBase`. Our object is a plain IMenu, so that cast returns
 null. The shipped movie-less menu of a public precedent gets null there too: its menu carries its plugin's own RTTI,
 and MSVC's cast compares type descriptors by decorated name (`.?AVGameMenuBase@RE@@` is not the game's
-`.?AVGameMenuBase@@`). Whether the engine accepts null there for our object is what the next run shows; if it does
-not, the menu has to be a `GameMenuBase`. The run at `b3f352b7` had no locator in that slot: the cast read whatever
-global lay before the copy, and the game hung right after the show message (PC hang dump, 10 Nov).
+`.?AVGameMenuBase@@`). The engine accepts that null: at `782f944a` both stages passed in the game as a plain IMenu,
+ten toggles each with `match=yes`, and at (b) our movie drawn (owner PC, 10 Nov, 20:02 and 20:06 UTC). The run at
+`b3f352b7` had no locator in that slot: the cast read whatever global lay before the copy, and the game hung right
+after the show message (PC hang dump, 10 Nov). A `GameMenuBase` build exists in history only (`d750f393`, never built
+or run).
+
+With the constructor's own flags (`Flags=0`) the open menu neither pauses the game nor takes its input: the HUD stays
+and the game runs behind it (the same run). Stage (c) records what other flags do.
 
 | Slot | Ours |
 | --- | --- |

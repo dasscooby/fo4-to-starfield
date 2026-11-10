@@ -12,8 +12,9 @@ this card is published with. One build round and one game session cover three te
 **Which steps need a save:** B0-2 makes one save (`focc_b0_a`) and loads it; P1 makes two saves (`focc_p1_a`,
 `focc_p1_b`) and loads one. Test C makes no save; it needs only a loaded game. Use a throwaway character's save.
 
-**Before the session.** FAL-187's stage (b) must have shown the movie (PASS at (b), `sfse/FO4SFPipboyMenu/README.md`);
-stage (c) is that movie with two more children. The PR's independent review must be CLEAR at this head. All three dlls
+**Before the session.** FAL-187's stages (a) and (b) passed at `782f944a` (owner PC, 10 Nov, 20:02 and 20:06 UTC), and
+this head contains #704's head `256b3854`: `eb242b32`, which has that tree, with `main` merged in. Stage (c) is that
+movie with two more children. The PR's independent review must be CLEAR at this head. All three dlls
 come from this one head. The usual rules of `docs/spikes/combined-core-probes.md` hold: game closed for every copy,
 never during a runner run, D: keeps 40 GB free, nothing from the PC goes into Git, a launch that does not reach the
 main menu is a result (remove the dlls first, then report).
@@ -142,7 +143,8 @@ session. Compare with the receipts.
 
 **Load (all three logs).** `FO4SFPipboyMenu.log`: `step=load ... stage=3`, `step=load_c flag_sets=0x0,0x8,0x9
 snapshot_key=0x7a`, 29 `step=id` lines, `step=channel_ids value_functions=sfse_equal rtti_names=ok`, `step=ready
-stage=c`, `step=register result=ok`, `step=key_thread ... snapshot_key=0x7a`. `FOCCPing.log`: `FOCCPing v0.3.0.0`,
+stage=c ... locator=<rva>`, `step=register result=ok`, `step=key_thread ... snapshot_key=0x7a`, and at each open
+`step=create ... vtables=engine rtti=engine ... set=<i>`. `FOCCPing.log`: `FOCCPing v0.3.0.0`,
 14 `step=id` lines, `step=rtti vtable=NativeFunctionBase offset=0x0 slots=0x06,0x0F,0x10,0x14,0x15 match`, `listening
 for PostDataLoad; FOCC.Ping binds then`, `step=object name=GameVM`, `step=object name=VirtualMachine`, `step=bind
 slot=0x1e`, `bound FOCC.Ping`. `FOCCSidecar.log`: `step=load runtime=1.16.244.0 ... enabled=1`, `step=listen`. Any
