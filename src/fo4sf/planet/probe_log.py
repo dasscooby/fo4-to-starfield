@@ -176,6 +176,8 @@ def twin_init(cur, p):
     if any(x["event"] == "arrive" for x in cur):
         return False
     inits = [x for x in cur if x["event"] == "init"]
+    if not inits:                                # a headerless prefix (the log lost its start) is a run of its own
+        return False
     return init_forms(p) < len(INIT_FORMS) or all(init_forms(x) < len(INIT_FORMS) for x in inits)
 
 

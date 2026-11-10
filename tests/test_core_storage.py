@@ -183,6 +183,16 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(len(probe_log.runs([empty, arrive, empty])), 2)           # a later session
         self.assertEqual(len(probe_log.runs([empty, empty, arrive])), 1)           # OnInit twice before the first arrival
 
+    def test_a_headerless_prefix_stays_its_own_run(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from fo4sf.planet import probe_log
+        old_tail = [x for x in cs_lines("with", "with") if " ref n=" in x]          # ref lines only: no init, no arrive
+        new = [x for x in cs_lines("none", "with") if "tag=CS_P" not in x]
+        self.assertEqual(probe_log.core_storage_result(new)[0]["result"], "unknown")
+        both = old_tail + new
+        self.assertEqual(len(probe_log.runs(both)), 2)
+        self.assertEqual(probe_log.core_storage_result(both)[0]["result"], "unknown")   # no borrowed CS_P
+
     def test_install_refuses_another_or_missing_core(self):
         with tempfile.TemporaryDirectory() as d:
             data = Path(d)
