@@ -135,15 +135,46 @@ def _stamp(hour: int) -> str:
     return f"Day {hour // HOURS_PER_DAY + 1}, {hour % HOURS_PER_DAY:02d}:00"
 
 
+class _Wrapper(textwrap.TextWrapper):
+    """textwrap.TextWrapper with one long-word rule on every Python. CPython 3.14 breaks a long word
+    only while the line has room left (space_left > 0); older releases also cut an empty piece off it
+    when the line was already full, so a whitespace chunk before the word survived drop_whitespace
+    (a line " " or "s at "). This is the 3.14 rule, which the C++ port (sfse/FOCCSim/news.cpp) follows."""
+
+    def _handle_long_word(self, reversed_chunks, cur_line, cur_len, width):
+        space_left = 1 if width < 1 else width - cur_len
+        if self.break_long_words and space_left > 0:
+            end = space_left
+            chunk = reversed_chunks[-1]
+            if self.break_on_hyphens and len(chunk) > space_left:
+                hyphen = chunk.rfind("-", 0, space_left)
+                if hyphen > 0 and any(c != "-" for c in chunk[:hyphen]):
+                    end = hyphen + 1
+            cur_line.append(chunk[:end])
+            reversed_chunks[-1] = chunk[end:]
+        elif not cur_line:
+            cur_line.append(reversed_chunks.pop())
+
+
+def wrap(text: str, width: int = 70, subsequent_indent: str = "") -> list[str]:
+    """textwrap.wrap(text, width, subsequent_indent=...), the same on every Python (see _Wrapper)."""
+    return _Wrapper(width, subsequent_indent=subsequent_indent).wrap(text)
+
+
+def shorten(text: str, width: int, placeholder: str = " [...]") -> str:
+    """textwrap.shorten(text, width, placeholder=...), the same on every Python (see _Wrapper)."""
+    return _Wrapper(width, max_lines=1, placeholder=placeholder).fill(" ".join(text.strip().split()))
+
+
 def terminal_page(ws: WorldState, place: str, since: int = 0, limit: int = HEADLINE_LIMIT,
                   width: int = TERMINAL_WIDTH, names: dict[str, str] | None = None) -> str:
     """Plain text for a terminal: a title line, then one wrapped entry per headline, every line at
     most `width` columns. Says so when nothing has reached the place yet."""
     title = f"{display_name(place, names)} news, {_stamp(ws.hour)}"
-    lines = [textwrap.shorten(title, width, placeholder="..."), "-" * min(width, len(title))]
+    lines = [shorten(title, width, placeholder="..."), "-" * min(width, len(title))]
     found = items(ws, place, since, limit, names)
     if not found:
-        lines.extend(textwrap.wrap(f"No news has reached {display_name(place, names)}.", width))
+        lines.extend(wrap(f"No news has reached {display_name(place, names)}.", width))
     for i in found:
-        lines.extend(textwrap.wrap(f"{_stamp(i['hour'])}: {i['text']}", width, subsequent_indent="  "))
+        lines.extend(wrap(f"{_stamp(i['hour'])}: {i['text']}", width, subsequent_indent="  "))
     return "\n".join(lines)
