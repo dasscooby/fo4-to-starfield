@@ -8,6 +8,13 @@ Fallout 4 sources. Starfield therefore wins any name clash (a Fallout 4 copy of
 a base type never shadows Starfield's), and other Fallout 4 scripts a sampled
 script depends on still resolve.
 
+Two rates, never one. Scene and topic scripts (dialogue fragments: TIF__*, SF_* and anything that extends TopicInfo or
+Scene) are short, call a small set of functions and compile far more often than logic scripts (quests, fragments of
+quests and packages, effects, activators). One mixed rate would be read as "quests work". Every script is therefore
+tagged "logic" or "scene" and census.json, the table and the verdict line report both groups separately (`groups`);
+the top-level numbers are kept for the overall sample only. --scene-count adds that many scene/topic scripts to the
+sample (the logic sample is the fragment and --count others, drawn from the logic scripts only).
+
 Nothing from either game belongs in Git. The inputs are the player's own files.
 Raw outputs stay on the player's PC; census.json holds only counts, script
 names and short compiler messages, never script source.
@@ -23,7 +30,11 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-SCHEMA = 1
+SCHEMA = 2
+KINDS = ("logic", "scene")
+SCENE_PREFIXES = ("tif__", "sf_")
+SCENE_EXTENDS = ("topicinfo", "scene")
+EXTENDS = re.compile(r"^\s*scriptname\s+\S+\s+extends\s+(?P<base>[\w:]+)", re.I | re.M)
 BUCKETS = ("unknown_function", "unknown_type", "unknown_property_or_variable",
            "wrong_argument_count", "syntax", "other")
 # Buckets whose errors name a missing thing; the top-names list draws from these.
@@ -112,6 +123,35 @@ def list_scripts(folder):
     return sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.suffix.lower() == ".psc" and p.is_file())
 
 
+def classify_script(rel, head=""):
+    """"scene" for a dialogue scene or topic script (by file name prefix, or by what it extends in the first lines
+    of its source), "logic" for every other script."""
+    stem = Path(rel).stem.lower()
+    if stem.startswith(SCENE_PREFIXES):
+        return "scene"
+    m = EXTENDS.search(head)
+    if m and m.group("base").lower().split(":")[-1] in SCENE_EXTENDS:
+        return "scene"
+    return "logic"
+
+
+def kinds_of(folder, scripts):
+    """{relative path: "logic" | "scene"} for the scripts of a source folder (reads the first 4 KB of each one that
+    the file name alone does not settle)."""
+    out = {}
+    for rel in scripts:
+        if Path(rel).stem.lower().startswith(SCENE_PREFIXES):
+            out[rel] = "scene"
+            continue
+        try:
+            with open(Path(folder) / rel, "r", encoding="utf-8", errors="replace") as f:
+                head = f.read(4096)
+        except OSError:
+            head = ""
+        out[rel] = classify_script(rel, head)
+    return out
+
+
 def pick_sample(scripts, fragment, count, seed):
     """The named fragment plus `count` others chosen with `seed`. Returns a list, fragment first."""
     matches = [s for s in scripts if Path(s).stem.lower() == fragment.lower()]
@@ -136,7 +176,7 @@ def default_runner(cmd, timeout, cwd=None):
 
 
 def run_census(fo4, starfield, shim, compiler, fragment, count, seed, out, flags=DEFAULT_FLAGS,
-               timeout=120, runner=default_runner):
+               timeout=120, runner=default_runner, scene_count=0):
     fo4, starfield, shim, out = (Path(p).resolve() for p in (fo4, starfield, shim, out))
     for folder in (fo4, starfield, shim):
         if not folder.is_dir():
@@ -146,7 +186,16 @@ def run_census(fo4, starfield, shim, compiler, fragment, count, seed, out, flags
     imports = [shim, starfield, fo4]
     if not any((d / flags).is_file() for d in imports):
         raise ValueError(f"flags file {flags} not found in the shim, Starfield or Fallout 4 folder")
-    sample = pick_sample(list_scripts(fo4), fragment, count, seed)
+    every = list_scripts(fo4)
+    kinds = kinds_of(fo4, every)
+    if kinds.get(next((s for s in every if Path(s).stem.lower() == fragment.lower()), ""), "logic") == "scene":
+        raise ValueError(f"the fragment {fragment} is a scene or topic script; name a quest fragment")
+    sample = pick_sample([s for s in every if kinds[s] == "logic"], fragment, count, seed)
+    if scene_count:
+        scenes = [s for s in every if kinds[s] == "scene"]
+        if scene_count > len(scenes):
+            raise ValueError(f"asked for {scene_count} scene/topic scripts but only {len(scenes)} exist")
+        sample += random.Random(seed).sample(scenes, scene_count)
     raw_dir, pex_dir = out / "raw", out / "pex"
     raw_dir.mkdir(parents=True, exist_ok=True)
     pex_dir.mkdir(parents=True, exist_ok=True)
@@ -173,15 +222,23 @@ def run_census(fo4, starfield, shim, compiler, fragment, count, seed, out, flags
             errors.append({"bucket": "other", "name": None, "line": 0, "col": 0,
                            "message": f"exit code {code} without '{SUCCESS}' and no parseable error"})
         results.append({"script": rel, "compiled": code == 0 and SUCCESS in stdout and not errors, "exit_code": code,
-                        "is_fragment": rel == sample[0], "errors": errors, "raw": f"raw/{raw_name}"})
+                        "kind": kinds[rel], "is_fragment": rel == sample[0], "errors": errors, "raw": f"raw/{raw_name}"})
 
     census = summarize(results)
-    census.update(schema=SCHEMA, seed=seed, requested_count=count, fragment=fragment, scripts=results)
+    census.update(schema=SCHEMA, seed=seed, requested_count=count, requested_scene_count=scene_count,
+                  fragment=fragment, scripts=results)
     (out / "census.json").write_text(json.dumps(census, indent=2) + "\n", encoding="utf-8")
     return census
 
 
 def summarize(results):
+    """The overall numbers plus `groups`: the same numbers for "logic" and for "scene" scripts, each its own rate."""
+    out = _summarize(results)
+    out["groups"] = {k: _summarize([r for r in results if r.get("kind", "logic") == k]) for k in KINDS}
+    return out
+
+
+def _summarize(results):
     total = len(results)
     compiled = sum(1 for r in results if r["compiled"])
     buckets = {b: {"errors": 0, "scripts": 0} for b in BUCKETS}
@@ -203,9 +260,16 @@ def summarize(results):
 
 
 def format_table(census):
-    lines = [f"Scripts sampled: {census['total']}   compiled clean: {census['compiled']} "
-             f"({census['compile_share'] * 100:.1f}%)", "",
-             f"{'bucket':<30}{'errors':>8}{'scripts':>9}"]
+    lines = []
+    for k in KINDS:
+        g = census.get("groups", {}).get(k)
+        if g is not None:
+            lines.append(f"{k + ' scripts':<16} sampled {g['total']:>4}   compiled clean {g['compiled']:>4} "
+                         f"({g['compile_share'] * 100:.1f}%)")
+    lines += ["Quote the two rates, not their mix: scene and topic scripts compile more often than logic scripts.",
+              f"Overall (mixed, do not quote): {census['total']} sampled, {census['compiled']} clean "
+              f"({census['compile_share'] * 100:.1f}%)", "",
+              f"{'bucket':<30}{'errors':>8}{'scripts':>9}"]
     for b in BUCKETS:
         v = census["buckets"][b]
         lines.append(f"{b:<30}{v['errors']:>8}{v['scripts']:>9}")
@@ -225,6 +289,7 @@ def main(argv=None):
     p.add_argument("--compiler", required=True, help="path to Starfield's PapyrusCompiler.exe")
     p.add_argument("--fragment", required=True, help="script name of one quest fragment, e.g. QF_Something_01234567")
     p.add_argument("--count", type=int, default=100, help="how many more scripts to sample")
+    p.add_argument("--scene-count", type=int, default=50, help="how many scene/topic scripts to sample as well")
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--out", required=True, help="new or empty output folder")
     p.add_argument("--flags", default=DEFAULT_FLAGS)
@@ -235,7 +300,7 @@ def main(argv=None):
         p.error(f"--out must be new or empty: {out}")
     try:
         census = run_census(a.fo4_sources, a.starfield_sources, a.shim, a.compiler, a.fragment, a.count,
-                            a.seed, out, a.flags, a.timeout)
+                            a.seed, out, a.flags, a.timeout, scene_count=a.scene_count)
     except ValueError as err:
         print(f"error: {err}", file=sys.stderr)
         return 2

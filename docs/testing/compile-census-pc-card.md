@@ -15,7 +15,7 @@ Tool: `scripts/papyrus/compile_census.py`. Tests: `tests/test_compile_census.py`
 | `--fo4-sources` | Fallout 4 Creation Kit script sources: under `<Fallout 4>\Data\Scripts\Source` (a `Base` folder or a `Base.zip`; unzip it into a new folder if it is a zip) | **unverified**: I have not seen the folder. If it differs, point at whatever holds the `.psc` files |
 | `--shim` | New empty folder. Leave it empty for this run | empty first, by design |
 | `--fragment` | The name (no `.psc`) of one Fallout 4 quest fragment script, one that starts `QF_`. Find one: `Get-ChildItem <fo4 sources> -Recurse -Filter QF_*.psc \| Select -First 5` | pick any; say which |
-| `--count`, `--seed` | `--count 200 --seed 1` | same seed gives the same sample |
+| `--count`, `--scene-count`, `--seed` | `--count 200 --scene-count 100 --seed 1` | same seed gives the same sample; `--count` is logic scripts (the fragment and others, never scene/topic), `--scene-count` adds scene and topic scripts (`TIF__*`, `SF_*`, or extending TopicInfo/Scene) |
 
 Everything lives outside the repo. Do not put game files in Git.
 
@@ -29,7 +29,7 @@ PowerShell, from the repo root, with the repo's Python (`$py`):
   --starfield-sources "<new folder with Starfield .psc>" `
   --fo4-sources "<folder with Fallout 4 .psc>" `
   --shim "<new empty folder>" `
-  --fragment "<QF_ script name>" --count 200 --seed 1 `
+  --fragment "<QF_ script name>" --count 200 --scene-count 100 --seed 1 `
   --out "<new empty output folder>"
 ```
 
@@ -43,7 +43,7 @@ extends another Fallout 4 script still resolves it from the Fallout 4 folder.
 
 ## What to send back
 
-1. The printed table (copy it from the console).
+1. The printed table (copy it from the console). It gives two rates, logic and scene/topic: quote those, not the mixed overall line (scene and topic scripts compile more often, so the mix reads as "quests work").
 2. `<out>\census.json`.
 
 Do **not** send the `.psc` files, the `.pex` files or the `raw` folder. `census.json` holds counts, script names,

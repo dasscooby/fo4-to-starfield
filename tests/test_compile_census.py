@@ -162,5 +162,68 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(c["buckets"]["other"]["scripts"], 2)
 
 
+class TwoRates(unittest.TestCase):
+    def test_classify_script(self):
+        self.assertEqual(cc.classify_script("TIF__00012345.psc"), "scene")
+        self.assertEqual(cc.classify_script("Scenes/SF_Fake_00012345.psc"), "scene")
+        self.assertEqual(cc.classify_script("Other.psc", "Scriptname Other Extends TopicInfo Hidden\n"), "scene")
+        self.assertEqual(cc.classify_script("Other.psc", ";x\nScriptName Other extends Scene\n"), "scene")
+        self.assertEqual(cc.classify_script("QF_Fake_0001.psc", "Scriptname QF_Fake_0001 Extends Quest Hidden"), "logic")
+        self.assertEqual(cc.classify_script("Plain.psc"), "logic")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        t = Path(self.tmp.name)
+        self.fo4, self.sf, self.shim = t / "fo4", t / "sf", t / "shim"
+        for d in (self.fo4, self.sf, self.shim):
+            d.mkdir()
+        (self.sf / cc.DEFAULT_FLAGS).write_text("", encoding="utf-8")
+        for n in ("QF_Fake_0001", "Alpha", "Beta"):
+            (self.fo4 / f"{n}.psc").write_text("Scriptname X Extends Quest\n", encoding="utf-8")
+        for n in ("TIF__0001", "SF_Fake_0002"):
+            (self.fo4 / f"{n}.psc").write_text("; made up\n", encoding="utf-8")
+        (self.fo4 / "Odd.psc").write_text("Scriptname Odd Extends TopicInfo\n", encoding="utf-8")
+        self.compiler = t / "fake.exe"
+        self.compiler.write_text("", encoding="utf-8")
+        self.out = t / "out"
+
+    @staticmethod
+    def runner(cmd, timeout, cwd=None):
+        name = Path(cmd[1]).stem
+        if name in ("Alpha", "Beta", "QF_Fake_0001"):                  # every logic script fails
+            return 1, "X.psc(1,1): Foo is not a function or does not exist\n", ""
+        return 0, "Compilation succeeded.\n", ""                       # every scene script compiles
+
+    def test_two_rates_and_the_mix_is_not_the_headline(self):
+        c = cc.run_census(self.fo4, self.sf, self.shim, self.compiler, "QF_Fake_0001", 2, 1, self.out,
+                          runner=self.runner, scene_count=3)
+        g = c["groups"]
+        self.assertEqual((g["logic"]["total"], g["logic"]["compiled"], g["logic"]["compile_share"]), (3, 0, 0.0))
+        self.assertEqual((g["scene"]["total"], g["scene"]["compiled"], g["scene"]["compile_share"]), (3, 3, 1.0))
+        self.assertEqual((c["total"], c["compiled"]), (6, 3))
+        self.assertEqual(g["logic"]["buckets"]["unknown_function"]["scripts"], 3)
+        self.assertEqual(g["scene"]["buckets"]["unknown_function"]["scripts"], 0)
+        self.assertEqual({r["kind"] for r in c["scripts"] if "TIF" in r["script"] or "Odd" in r["script"]}, {"scene"})
+        table = cc.format_table(c)
+        self.assertIn("logic scripts", table)
+        self.assertIn("scene scripts", table)
+        self.assertIn("do not quote", table)
+        self.assertEqual(c["schema"], 2)
+
+    def test_logic_sample_never_takes_a_scene_script(self):
+        c = cc.run_census(self.fo4, self.sf, self.shim, self.compiler, "QF_Fake_0001", 2, 1, self.out,
+                          runner=self.runner)
+        self.assertEqual(c["groups"]["scene"]["total"], 0)
+        self.assertEqual(c["groups"]["logic"]["total"], 3)
+
+    def test_too_many_scene_scripts_and_a_scene_fragment(self):
+        with self.assertRaises(ValueError):
+            cc.run_census(self.fo4, self.sf, self.shim, self.compiler, "QF_Fake_0001", 1, 1, self.out,
+                          runner=self.runner, scene_count=9)
+        with self.assertRaises(ValueError):
+            cc.run_census(self.fo4, self.sf, self.shim, self.compiler, "TIF__0001", 1, 1, self.out, runner=self.runner)
+
+
 if __name__ == "__main__":
     unittest.main()
