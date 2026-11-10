@@ -33,8 +33,8 @@ def change_form(refbytes, xyz, heading, flags=0x10):
             + b"\x00" + struct.pack("<4f", *xyz, heading))
 
 
-def build_plain_save(keeper_object_member=False):
-    """The decompressed save. Returns bytes."""
+def build_plain_save(keeper_object_member=False, ids=None, mission_ref=1, keeper_ref=3):
+    """The decompressed save. Returns bytes. `ids` replaces the form-id array (Preston stays at index 2)."""
     strings = ["Quest", SCRIPT_NAME, "applied", "Int", "ticks", "Int", "found", "Bool", "label", "String",
                "ratio", "Float", "target", "ObjectReference", "hello"]
     s = {v: i for i, v in enumerate(strings)}
@@ -54,7 +54,7 @@ def build_plain_save(keeper_object_member=False):
         out += struct.pack("<II", s[n], s[t])
     out += b"\xff" * 4
     # instances: id(8) name idx(4) 00 00 ff ff ref(3); mission = array index 1, keeper = array index 3
-    for iid, ref in ((MISSION_IID, 1), (KEEPER_IID, 3)):
+    for iid, ref in ((MISSION_IID, mission_ref), (KEEPER_IID, keeper_ref)):
         out += iid + struct.pack("<I", s[SCRIPT_NAME]) + b"\x00\x00\xff\xff" + bytes([0, 0, ref]) + b"\xee" * 3
     # member values: id 0x2B count, then typed values
     mission = (bytes([3]) + struct.pack("<i", 30) + bytes([3]) + struct.pack("<i", 429) + bytes([5, 0])
@@ -71,7 +71,7 @@ def build_plain_save(keeper_object_member=False):
     out += struct.pack("<II", 2500, 1) + MISSION_IID + b"\x00" * 5 + b"\xff" * 4
     out += struct.pack("<II", 8000, 2) + KEEPER_IID + b"\x00" * 5 + b"\xff" * 4
     # form-id array: count then ids; index 1 = mission quest, 2 = Preston, 3 = keeper quest
-    ids = [(PREFIX << 24) | 0x800, (PREFIX << 24) | 0x802, (PREFIX << 24) | 0x814]
+    ids = ids or [(PREFIX << 24) | 0x800, (PREFIX << 24) | 0x802, (PREFIX << 24) | 0x814]
     out += struct.pack("<I", len(ids)) + b"".join(struct.pack("<I", i) for i in ids)
     out += b"\xff" * 16
     return bytes(out)
@@ -134,8 +134,11 @@ class ReportTests(unittest.TestCase):
 
     def test_header(self):
         h = self.report()["header"]
-        self.assertEqual((h["player"], h["level"], h["location"], h["play_time"], h["race"], h["game_version"]),
-                         ("Hero", 42, "Sanctuary Hills", "12h 3m", "Human", "1.14.70.0"))
+        self.assertNotIn("player", h)                      # the character name is off by default
+        rep = save_probe.build_report(build_plain_save(), None, None, "x", show_name=True)
+        self.assertEqual(rep["header"]["player"], "Hero")
+        self.assertEqual((h["level"], h["location"], h["play_time"], h["race"], h["game_version"]),
+                         (42, "Sanctuary Hills", "12h 3m", "Human", "1.14.70.0"))
 
     def test_plugin_index_is_found_from_the_save(self):
         self.assertEqual(self.report()["plugin_index"], "%02X" % PREFIX)
@@ -214,6 +217,60 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(rep["header"]["location"], "Sanctuary Hills")
 
 
+class FormArrayTests(unittest.TestCase):
+    def roles(self, rep):
+        return {i["instance_id"]: i["role"] for i in rep["instances"]}
+
+    def test_decoy_id_in_the_array_does_not_mislabel_the_roles(self):
+        # the reported failure: mission ref 1, keeper ref 4, an unrelated id between them
+        ids = [(PREFIX << 24) | 0x800, (PREFIX << 24) | 0x802, 0x00000010, (PREFIX << 24) | 0x814]
+        rep = save_probe.build_report(build_plain_save(ids=ids, keeper_ref=4), {"Preston": SPOT}, None, "x")
+        self.assertEqual(self.roles(rep), {MISSION_IID.hex(): "mission", KEEPER_IID.hex(): "keeper"})
+        self.assertEqual(rep["script_stage"]["value"], 30)
+        self.assertEqual(rep["plugin_index"], "%02X" % PREFIX)
+        self.assertEqual(rep["warnings"], [])
+
+    def test_false_low_prefix_candidate_is_rejected(self):
+        # a second, inconsistent look-alike (prefix 01, no keeper/Preston) earlier in the file must not win
+        decoy = struct.pack("<I", 7) + struct.pack("<I", 0x01000800) + b"\x00" * 40
+        plain = build_plain_save()
+        rep = save_probe.build_report(plain.replace(b"\xff" * 16, decoy, 1), None, None, "x")
+        self.assertEqual(rep["plugin_index"], "%02X" % PREFIX)
+        self.assertEqual(rep["script_stage"]["value"], 30)
+
+    def test_no_consistent_array_gives_warning_and_no_roles(self):
+        ids = [(PREFIX << 24) | 0x800, (PREFIX << 24) | 0x802, 0x10]          # no xx000814 anywhere
+        rep = save_probe.build_report(build_plain_save(ids=ids, keeper_ref=3), None, None, "x")
+        self.assertIsNone(rep["plugin_index"])
+        self.assertTrue(all(i["role"] == "unknown" for i in rep["instances"]))
+        self.assertIsNone(rep["script_stage"])
+        text = "\n".join(rep["warnings"])
+        self.assertIn("--plugin-index", text)
+        self.assertIn("script_stage could not be read", text)
+
+    def test_two_candidates_are_ambiguous(self):
+        # two arrays with different prefixes, each consistent: the tool must not choose
+        ids2 = [(0x06 << 24) | 0x800, (0x06 << 24) | 0x802, (0x06 << 24) | 0x814]
+        extra = struct.pack("<I", 3) + b"".join(struct.pack("<I", i) for i in ids2)
+        plain = build_plain_save()
+        rep = save_probe.build_report(plain + extra, None, None, "x")
+        self.assertIsNone(rep["plugin_index"])
+        self.assertTrue(any("ambiguous" in x and "--plugin-index" in x for x in rep["warnings"]))
+        self.assertTrue(all(i["role"] == "unknown" for i in rep["instances"]))
+        # naming the index resolves it
+        rep = save_probe.build_report(plain + extra, None, PREFIX, "x")
+        self.assertEqual(rep["plugin_index"], "%02X" % PREFIX)
+        self.assertEqual(rep["script_stage"]["value"], 30)
+
+    def test_both_instances_pointing_at_the_mission_gives_no_roles(self):
+        # both refs hit xx000800: no instance can be the keeper, so no candidate passes and nothing is labelled
+        ids = [(PREFIX << 24) | 0x800, (PREFIX << 24) | 0x802, (PREFIX << 24) | 0x814]
+        rep = save_probe.build_report(build_plain_save(ids=ids, keeper_ref=1), None, None, "x")
+        self.assertTrue(all(i["role"] == "unknown" for i in rep["instances"]))
+        self.assertIsNone(rep["script_stage"])
+        self.assertTrue(any("--plugin-index" in x for x in rep["warnings"]))
+
+
 class CommandLineTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -278,6 +335,20 @@ class CommandLineTests(unittest.TestCase):
     def test_json_may_not_overwrite_the_save(self):
         code, _, _ = self.run_main(self.save, "--json", self.save)
         self.assertEqual(code, 2)
+
+    def test_name_is_left_out_unless_asked(self):
+        code, out, _ = self.run_main(self.save)
+        self.assertNotIn("Hero", out)
+        code, out, _ = self.run_main(self.save, "--show-name")
+        self.assertIn("player='Hero'", out)
+        out_json = os.path.join(self.tmp.name, "o.json")
+        self.run_main(self.save, "--json", out_json)
+        self.assertNotIn("Hero", slurp(out_json).decode())
+
+    def test_error_messages_carry_no_directory(self):
+        code, _, err = self.run_main(os.path.join(self.tmp.name, "absent.sfs"))
+        self.assertEqual(code, 1)
+        self.assertNotIn(self.tmp.name, err)
 
     def test_bad_spot_is_a_usage_error(self):
         code, _, _ = self.run_main(self.save, "--spot", "Preston=1,2")

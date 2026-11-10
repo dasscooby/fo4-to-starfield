@@ -3,7 +3,7 @@
 
 Usage:
     python3 scripts/game/save_probe.py <save.sfs> [--spot NAME=X,Y,Z ...] [--spots spots.json]
-                                       [--plugin-index HEX] [--json out.json]
+                                       [--plugin-index HEX] [--show-name] [--json out.json]
 
 The save is opened 'rb' and handled in memory. The only file this tool ever writes is the optional
 --json report (and it refuses to overwrite the save itself).
@@ -12,6 +12,9 @@ Spots (the places the actors should stand) are never built in: pass --spot NAME=
 small JSON file {"Preston": [x, y, z], ...}. NAME is matched, ignoring case, to an actor label
 (Preston, Codsworth, raider 0..4) or, for the player, every spot is reported. Without spots the
 positions are still reported, just without distances.
+
+The player's character name is left out of the text and JSON unless --show-name is given (reports get pasted
+on public issues); error messages carry file names, not paths.
 
 Exit status: 0 report written, 1 the file is not a save / is truncated / cannot be read, 2 bad arguments.
 
@@ -30,8 +33,11 @@ or "not decoded" in the report; it does not abort the run.
                       and object properties are declared first in the script) has an unknown width, so that
                       member and every member after it are reported as "not decoded".
   * timers:           "u32 ms, u32 timer id, u64 instance id, five 00 bytes", ms in (0, 600000], id 1..15.
-  * form-id array:    u32 count then u32 ids, found by a quest's form id (plugin index x 2^24 + local id)
-                      matching an instance's 1-based ref; the plugin load index comes out of that match.
+  * form-id array:    u32 count then u32 ids. A start is accepted only if it is consistent for all known ids at once:
+                      one instance's ref gives xx000800 (mission), another's gives xx000814 (keeper) and
+                      xx000802 (Preston) is in the same array, with the same plugin index xx. Exactly one such
+                      candidate is accepted; none or several give a warning, no roles, and a request for
+                      --plugin-index.
   * change forms:     "3-byte RefID, u32 flags, vsval A, B, C, A*3 bytes, B*2 bytes, 1 byte, C data bytes
                       starting with x, y, z, heading (floats)", accepted only if the floats are finite and
                       plausible. A 4-byte vsval (kind 3) is read like kind 2 (3 bytes); not verified.
@@ -118,7 +124,7 @@ def load_save(path):
         with open(path, "rb") as f:
             raw = f.read()
     except OSError as e:
-        raise SaveError("cannot read %s: %s" % (path, e))
+        raise SaveError("cannot read %s: %s" % (os.path.basename(path), e.strerror or type(e).__name__))
     return decode_container(raw)
 
 
@@ -345,28 +351,40 @@ def ref_value(ref):
     return (ref[0] << 16) | (ref[1] << 8) | ref[2]
 
 
-def find_form_array(data, instances, local_ids, plugin_index=None):
-    """HEURISTIC. -> (plugin index, array start offset, count) or None.
+def find_form_array(data, instances, plugin_index=None):
+    """HEURISTIC. -> list of candidates (plugin index, array start, count, mission iid, keeper iid).
 
-    A plugin index p and a local id L are right when the instance's 1-based ref r satisfies: the u32 at
-    (array start + 4*(r-1)) is p<<24 | L and the u32 in front of the array start is a count >= r."""
-    prefixes = [plugin_index] if plugin_index is not None else range(1, 0xFE)
-    for prefix in prefixes:
-        for local in local_ids:
-            want = struct.pack("<I", (prefix << 24) | local)
-            k = data.find(want)
-            while k >= 0:
-                for _iid, ref in instances:
-                    if ref_kind(ref) != 0:
-                        continue
-                    r = ref_value(ref)
-                    s = k - 4 * (r - 1)
-                    if r >= 1 and s >= 8:
-                        cnt, = struct.unpack_from("<I", data, s - 4)
-                        if r <= cnt < 4_000_000 and s + 4 * cnt <= len(data):
-                            return prefix, s, cnt
-                k = data.find(want, k + 1)
-    return None
+    A candidate must be consistent for all known ids at once: with plugin index p, the array start s (the u32
+    in front of it is the count) maps one instance's 1-based ref to p<<24|0x800 (the mission quest), a
+    different instance's ref to p<<24|0x814 (the keeper quest), and p<<24|0x802 (Preston) is in the same
+    array. The caller accepts exactly one candidate; none or several means 'ask for --plugin-index'."""
+    refs = [(iid, ref_value(ref)) for iid, ref in instances if ref_kind(ref) == 0 and ref_value(ref) >= 1]
+    found = []
+    seen = set()
+    mission_pat = re.compile(re.escape(struct.pack("<I", MISSION_QUEST_LOCAL)[:3]) + rb"([\x01-\xfd])", re.S)
+    for m in mission_pat.finditer(data):
+        k = m.start()
+        prefix = m.group(1)[0]
+        if plugin_index is not None and prefix != plugin_index:
+            continue
+        for iid_a, r in refs:
+            s = k - 4 * (r - 1)
+            if s < 8:
+                continue
+            cnt, = struct.unpack_from("<I", data, s - 4)
+            if not (r <= cnt < 4_000_000 and s + 4 * cnt <= len(data)):
+                continue
+            keeper = struct.pack("<I", (prefix << 24) | KEEPER_QUEST_LOCAL)
+            for iid_b, r2 in refs:
+                if iid_b == iid_a or r2 > cnt or data[s + 4 * (r2 - 1):s + 4 * r2] != keeper:
+                    continue
+                if refid_for(data, s, cnt, (prefix << 24) | ACTOR_LOCALS[0][1]) is None:
+                    continue
+                key = (prefix, s, iid_a, iid_b)
+                if key not in seen:
+                    seen.add(key)
+                    found.append((prefix, s, cnt, iid_a, iid_b))
+    return found
 
 
 def resolve_ref(data, arr_start, arr_count, ref):
@@ -454,7 +472,7 @@ def _actor_entry(label, fid, hit, spot):
     return e
 
 
-def build_report(data, spots=None, plugin_index=None, file_name=""):
+def build_report(data, spots=None, plugin_index=None, file_name="", show_name=False):
     spots = spots or {}
     rep = {"file": file_name, "header": parse_header(data), "plugin_index": None, "script": None,
            "quest_stage": {"quest": QUEST_NAME, "decoded": False,
@@ -465,6 +483,8 @@ def build_report(data, spots=None, plugin_index=None, file_name=""):
     w = rep["warnings"]
     if rep["header"] is None:
         w.append("header strings not decoded")
+    elif not show_name:
+        del rep["header"]["player"]          # reports get pasted on public issues; --show-name puts it back
 
     st = find_string_table(data, SCRIPT_NAME)
     if not st:
@@ -483,7 +503,9 @@ def build_report(data, spots=None, plugin_index=None, file_name=""):
     if not insts:
         w.append("no script instances found")
 
-    fa = find_form_array(data, insts, [KEEPER_QUEST_LOCAL, MISSION_QUEST_LOCAL], plugin_index) if insts else None
+    cands = find_form_array(data, insts, plugin_index) if insts else []
+    fa = cands[0][:3] if len(cands) == 1 else None
+    roles = {}
     arr_start = arr_count = None
     limit = len(data)
     if fa:
@@ -491,17 +513,17 @@ def build_report(data, spots=None, plugin_index=None, file_name=""):
         _, arr_start, arr_count = fa
         limit = arr_start
         rep["form_array"] = {"offset": arr_start, "count": arr_count}
-    else:
-        w.append("mission plugin load index / form-id array not found")
+        roles = {cands[0][3]: "mission", cands[0][4]: "keeper"}
+    elif insts and not cands:
+        w.append("mission plugin load index / form-id array not found (no start maps one instance to xx000800, "
+                 "another to xx000814, with xx000802 in the same array); roles not set, pass --plugin-index")
+    elif insts:
+        w.append("mission plugin load index is ambiguous (%d candidates: %s); roles not set, pass --plugin-index" % (
+            len(cands), ", ".join("%02X@%d" % (c[0], c[1]) for c in cands[:6])))
 
     for iid, ref in insts:
         fid = resolve_ref(data, arr_start, arr_count, ref) if fa else None
-        local = fid & 0xFFFFFF if fid is not None else None
-        role = "unknown"
-        if local == MISSION_QUEST_LOCAL:
-            role = "mission"
-        elif local == KEEPER_QUEST_LOCAL:
-            role = "keeper"
+        role = roles.get(iid, "unknown")
         vals = read_members(data, iid, members, strs) if members else None
         rep["instances"].append({"instance_id": iid.hex(), "quest_form": "%08X" % fid if fid is not None else None,
                                  "role": role, "members": vals, "timers": find_timers(data, iid)})
@@ -510,12 +532,19 @@ def build_report(data, spots=None, plugin_index=None, file_name=""):
         elif vals and not all(v["decoded"] for v in vals):
             w.append("instance %s: some member values not decoded" % iid.hex())
 
-    for inst in rep["instances"]:
-        if inst["role"] == "mission" and inst["members"]:
+    for inst in [i for i in rep["instances"] if i["role"] == "mission"][:1]:
+        if inst["members"]:
             for m in inst["members"]:
                 if m["name"].lower() == "applied" and m["decoded"]:
                     rep["script_stage"] = {"value": m["value"], "source": "mission script member `applied`",
                                            "description": "the last stage the mission script applied"}
+    missions = [i for i in rep["instances"] if i["role"] == "mission"]
+    if len(missions) > 1:
+        w.append("%d instances resolve to the mission quest; script_stage not set" % len(missions))
+        rep["script_stage"] = None
+    elif insts and rep["script_stage"] is None:
+        w.append("script instances exist but script_stage could not be read (no mission instance with a decoded "
+                 "`applied`)")
     if fa:
         prefix = fa[0]
         for label, local in ACTOR_LOCALS:
@@ -552,8 +581,8 @@ def format_report(rep):
     L = ["FILE %s" % rep["file"]]
     h = rep["header"]
     if h:
-        L.append("header: player=%r level=%d location=%r play time=%r game version=%s" % (
-            h["player"], h["level"], h["location"], h["play_time"], h["game_version"] or "not found"))
+        L.append("header: %slevel=%d location=%r play time=%r game version=%s" % (
+            "player=%r " % h["player"] if "player" in h else "", h["level"], h["location"], h["play_time"], h["game_version"] or "not found"))
     else:
         L.append("header: not decoded")
     L.append("mission plugin load index: %s" % (rep["plugin_index"] or "not found"))
@@ -613,7 +642,7 @@ def load_spots(spot_args, spots_file):
                 x, y, z = (float(c) for c in v)
                 spots[str(k)] = (x, y, z)
         except (OSError, ValueError, TypeError, AttributeError) as e:
-            raise SaveError("cannot use spots file %s: %s" % (spots_file, e))
+            raise SaveError("cannot use spots file %s: %s" % (os.path.basename(spots_file), getattr(e, "strerror", None) or e))
     for name, xyz in spot_args or []:
         spots[name] = xyz
     return spots
@@ -626,6 +655,7 @@ def main(argv=None):
                     help="where an actor should stand; repeatable")
     ap.add_argument("--spots", metavar="FILE", help='JSON file {"Preston": [x, y, z], ...}')
     ap.add_argument("--plugin-index", metavar="HEX", help="mission plugin load index; found from the save if omitted")
+    ap.add_argument("--show-name", action="store_true", help="include the player's character name (left out by default)")
     ap.add_argument("--json", metavar="OUT", help="also write the report as JSON to this file")
     args = ap.parse_args(argv)
     try:
@@ -642,7 +672,7 @@ def main(argv=None):
     except SaveError as e:
         print("save_probe: %s" % e, file=sys.stderr)
         return 1
-    rep = build_report(data, spots, idx, os.path.basename(args.save))
+    rep = build_report(data, spots, idx, os.path.basename(args.save), args.show_name)
     print(format_report(rep))
     if args.json:
         with open(args.json, "w", encoding="utf-8") as f:
