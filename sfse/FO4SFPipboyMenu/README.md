@@ -32,6 +32,15 @@ The plugin is built on libxse/commonlibsf `9d090c4` for SFSE, the Address Librar
 own: memory of ours, the engine's IMenu constructor, then a copy of the engine's primary IMenu vtable with only our
 slots replaced. The two other vtables stay the engine's, as the constructor set them.
 
+The slot before the copy holds the engine's RTTI complete object locator for IMenu, read from the slot before the
+engine's primary vtable (the one `step=rtti vtable=primary` checks). MSVC's `dynamic_cast` reads the locator there,
+and the engine casts a shown menu from `IMenu` to `GameMenuBase`. Our object is a plain IMenu, so that cast returns
+null. The shipped movie-less menu of a public precedent gets null there too: its menu carries its plugin's own RTTI,
+and MSVC's cast compares type descriptors by decorated name (`.?AVGameMenuBase@RE@@` is not the game's
+`.?AVGameMenuBase@@`). Whether the engine accepts null there for our object is what the next run shows; if it does
+not, the menu has to be a `GameMenuBase`. The run at `b3f352b7` had no locator in that slot: the cast read whatever
+global lay before the copy, and the game hung right after the show message (PC hang dump, 10 Nov).
+
 | Slot | Ours |
 | --- | --- |
 | 0x00 | destructor wrapper: the engine's destructor without its delete, then our `free` |
@@ -170,11 +179,11 @@ Take a screenshot while the menu is open after the fifth press, and one after th
 ### PASS at (a), `Stage=1`
 
 1. The log shows, in this order: `step=load runtime=1.16.244.0 stage=1`, then `step=image`, sixteen `step=id` lines,
-   three `step=rtti` lines, `step=slots`, `step=ctor`, `step=ready stage=a`, `step=listen`, `step=post_data_load`,
-   `step=register result=ok`, and `step=key_thread`.
+   three `step=rtti` lines, `step=slots`, `step=ctor`, `step=ready stage=a ... locator=<rva>`, `step=listen`,
+   `step=post_data_load`, `step=register result=ok`, and `step=key_thread`.
 2. Toggles: `step=toggle n=1..10`, alternating `sent=show` and `sent=hide`. Each toggle is followed by
    `step=state n=<same> ... match=yes`.
-3. At least one `step=create ... vtables=engine`, and `step=message ... type=show` and `type=hide` lines.
+3. At least one `step=create ... vtables=engine rtti=engine`, and `step=message ... type=show` and `type=hide` lines.
 4. No crash: the game is still running after the tenth press, and the second screenshot is the game in play.
 5. Nothing of ours is visible at (a), because there is no movie. The open state is the log's `open=1`.
 
@@ -220,6 +229,8 @@ Take a screenshot while the menu is open after the fifth press, and one after th
 | `refuse step=toggle n=<n> reason=no_ui_or_queue` | the key was pressed before the UI or its message queue existed; nothing was sent | press again once in play; report if it repeats |
 | `refuse step=create reason=out_of_memory` | allocation failed on open | report |
 | `step=create ... vtables=UNEXPECTED` | the constructor set other vtables than the checked ones | stop: the layout differs |
+| `step=create ... rtti=UNEXPECTED` | the slot before our object's primary vtable is not the engine's IMenu locator | stop before the next press: the engine's cast will read it |
+| the log ends after `step=message ... type=show`, and the picture freezes | the engine's work after the show did not return (at `b3f352b7`: its cast on an object without a locator) | take a hang dump: each thread's instruction pointer as module plus offset, and the stack of the thread that created the menu |
 | `step=state ... match=no` | the menu did not open or close as asked | read the `step=message` lines around it |
 | `step=load_movie ... result=0` | (b): the engine's loader did not take our movie | check that the plugin is active and the archive is named after it. Then try the variant with an empty ActionScript 3 document class (the generator gains it then) |
 | the log ends without `step=destroy` after a close, then a crash | the engine freed or used our object differently | collect the crash log; try `KeepAlive=1` if it was 0 |
