@@ -2757,3 +2757,16 @@ or coming within 20 m of him before the fight starts it (`found preston`),
 and once the fight is on every loaded living raider is put into combat. Only
 FO4SF_Min00Quest.pex changes. Offline only (playtest row 44,
 docs/mission/when-freedom-calls.md); the in-game check is the next mission run.
+
+## 2026-11-10 — Codex / Lone, FAL-247 item 5: interrupted-install recovery
+
+**Offline tested**, synthetic files only; Windows/game acceptance **NOT_RUN**. A shared
+launcher gate reads the known installer journals before Play can edit settings or start
+anything. Incomplete, cleanup-pending and completed-but-unretired rollback journals block
+Play; unreadable journals fail closed. Healthy receipts with a pending future Plugins.txt
+restore are accepted. The window exposes **Recover install**; `launcher.py recover-install`
+previews the same action, and `--apply` invokes the existing guarded uninstallers. A partial
+or externally edited plugin list is first backed up and read back, then restored from the
+same profile's recorded pre-install bytes. Backup/write/installer failures retain recovery
+state. Healthy dependent installs are refused before rollback. Source and bounded PC
+recipe: `docs/ai/launcher-recovery.md`; exact head and test receipts live on FAL-247.
