@@ -58,7 +58,22 @@ class DumpTests(Base):
 
     def test_missing_edid_is_reported(self):
         d = rw.dump_records(self.sf, ["SPEL"], per_class=2, edids=["Nope"])
-        self.assertEqual(d["classes"]["SPEL"]["missing_edids"], ["nope"])
+        self.assertEqual(d["missing_edids"], ["nope"])
+
+    def test_a_found_edid_is_not_missing_in_any_class(self):
+        # Spell1 is in the first `keep` records; Spell5 is past per_class; Effect2 is in the other class
+        d = rw.dump_records(self.sf, ["SPEL", "MGEF"], per_class=2, keep=2, edids=["Spell1", "Spell5", "Effect2"])
+        self.assertEqual(d["missing_edids"], [])
+        self.assertEqual(d["classes"]["SPEL"]["found_edids"], ["spell1", "spell5"])
+        self.assertEqual(d["classes"]["MGEF"]["found_edids"], ["effect2"])
+        self.assertEqual([r["edid"] for r in d["classes"]["SPEL"]["records"]], ["Spell1", "Spell2", "Spell5"])
+        with open(os.devnull, "w") as sink:
+            import contextlib
+            with contextlib.redirect_stdout(sink):
+                out = os.path.join(self.tmp.name, "o2")
+                self.assertEqual(dump_starfield_records.main(
+                    [self.sf, out, "--classes", "SPEL", "MGEF", "--per-class", "2", "--edid", "Spell5", "--edid", "Effect2"]), 0)
+                self.assertEqual(dump_starfield_records.main([self.sf, out, "--classes", "SPEL", "--edid", "Nope"]), 1)
 
     def test_cli(self):
         out = os.path.join(self.tmp.name, "o")

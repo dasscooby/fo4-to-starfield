@@ -87,27 +87,32 @@ def dump_records(path, classes=CLASSES, per_class=40, edids=(), keep=3):
     (plus every record whose editor id is in `edids`) are written out whole, subrecord by subrecord, in hex."""
     want = {e.casefold() for e in edids}
     out = {"plugin": path, "version": 1, "classes": {}}
+    found_any = set()
     with esm.Plugin(path) as plugin:
         out["masters"] = list(plugin.masters)
         out["localized"] = plugin.localized
         for sig in classes:
-            sample, kept, found = [], [], []
+            sample, kept, found = [], [], set()
             for rec in plugin.records(sig, [sig]):
-                if len(sample) < per_class:
+                counted = len(sample) < per_class
+                if counted:
                     sample.append(rec.subs)
-                    if len(kept) < keep:
-                        kept.append(rec)
-                if rec.edid.casefold() in want and rec not in kept:
+                named = rec.edid.casefold() in want
+                if named:
+                    found.add(rec.edid.casefold())
+                if named or (counted and len(kept) < keep):
                     kept.append(rec)
-                    found.append(rec.edid)
-                if len(sample) >= per_class and not (want - {f.casefold() for f in found}):
+                if not counted and not want:
                     break
+            found_any |= found
             out["classes"][sig] = {
                 "sampled": len(sample),
                 "layout": _layout(sample),
                 "records": [{"formid": f"{r.formid:08X}", "edid": r.edid, "flags": r.flags, "version": r.version,
                              "subs": [[s.decode("latin-1"), len(d), d.hex()] for s, d in r.subs]} for r in kept],
-                "missing_edids": sorted(want - {f.casefold() for f in found}) if want else []}
+                "found_edids": sorted(found)}
+    # an editor id belongs to one class: it is missing only when no requested class holds it
+    out["missing_edids"] = sorted(want - found_any)
     return out
 
 
@@ -124,8 +129,8 @@ def dump_text(dump):
             lines.append(f"  -- {r['formid']} {r['edid']} flags={r['flags']:#x} form version {r['version']}")
             for s, n, h in r["subs"]:
                 lines.append(f"     {s} {n:>4}  {h[:96]}{'...' if len(h) > 96 else ''}")
-        if c["missing_edids"]:
-            lines.append(f"  editor ids not found: {c['missing_edids']}")
+    if dump.get("missing_edids"):
+        lines.append(f"\neditor ids not found in any class: {dump['missing_edids']}")
     return "\n".join(lines)
 
 

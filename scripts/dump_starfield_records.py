@@ -32,7 +32,7 @@ def main(argv=None):
     with open(os.path.join(a.out, "starfield_records.txt"), "w", encoding="utf-8") as f:
         f.write(text + "\n")
     print(text)
-    return 1 if any(c["missing_edids"] for c in dump["classes"].values()) else 0
+    return 1 if dump["missing_edids"] else 0
 
 
 if __name__ == "__main__":
