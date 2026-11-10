@@ -14,8 +14,17 @@
 // In game: `coc FO4Core_RedRocketSpawn` with the roofs on screen; the script's user log FO4SFCoreStorage.0.log holds
 // "FO4SFCS rt=<s> ..." lines 2, 10, 30 and 60 s after the arrival.
 //
-// usage: CoreStorage build --sf <Starfield.esm> --core <FO4TerrainCore.esm> --out <dir> [--plugin FO4SFCoreStorage.esm]
-//        CoreStorage check <plugin> --sf <Starfield.esm> --core <FO4TerrainCore.esm>      exit 1 on a mismatch
+// --variant (FAL-273, the crash of #707: the game died 32 s after the trip with the full plugin, not without it): which part of the
+// override is written, so one game run per variant names the ingredient that kills the game:
+//   full          the world override, the cell override, CS_P in its Persistent group, CS_T in its Temporary group (the default)
+//   persist-only  the world and cell overrides and CS_P only
+//   temp-only     the world and cell overrides and CS_T only
+//   cell-only     the world and cell overrides, no reference at all
+//   world-only    the world override alone, no cell
+// The quest and its script are the same in every variant (the readings of a variant without a reference say "not found").
+//
+// usage: CoreStorage build --sf <Starfield.esm> --core <FO4TerrainCore.esm> --out <dir> [--plugin FO4SFCoreStorage.esm] [--variant <v>]
+//        CoreStorage check <plugin> --sf <Starfield.esm> --core <FO4TerrainCore.esm> [--variant <v>]      exit 1 on a mismatch
 //        CoreStorage fixture <dir>      synthetic Starfield.esm and FO4TerrainCore.esm for tests/test_core_storage.py
 using System.Globalization;
 using Mutagen.Bethesda.Plugins;
@@ -55,6 +64,15 @@ static class CoreStorage
     static string F(float v) => v.ToString("0.###", CultureInfo.InvariantCulture);
     static string P(P3Float p) => $"({F(p.X)}, {F(p.Y)}, {F(p.Z)})";
     static bool Finite(P3Float p) => float.IsFinite(p.X) && float.IsFinite(p.Y) && float.IsFinite(p.Z);
+
+    static readonly string[] Variants = { "full", "persist-only", "temp-only", "cell-only", "world-only" };
+
+    static string Variant(string[] a)
+    {
+        var v = Arg(a, "--variant", "full");
+        if (!Variants.Contains(v)) throw new Refusal($"--variant {v} is not one of {string.Join(", ", Variants)}");
+        return v;
+    }
 
     static string Arg(string[] a, string name, string dflt)
     {
@@ -127,6 +145,7 @@ static class CoreStorage
         var sfPath = Arg(a, "--sf", ""); var corePath = Arg(a, "--core", ""); var outDir = Arg(a, "--out", "");
         if (sfPath == "" || corePath == "" || outDir == "") throw new Refusal("--sf, --core and --out are required");
         var modKey = ModKey.FromFileName(Arg(a, "--plugin", "FO4SFCoreStorage.esm"));
+        var variant = Variant(a);
         using var sf = StarfieldMod.CreateFromBinaryOverlay(sfPath, Release);
         if (sf.ModKey != SfKey) throw new Refusal($"--sf is {sf.ModKey}, not {SfKey}");
         using var core = Open(corePath);
@@ -146,13 +165,13 @@ static class CoreStorage
         var cell = CellOnly(s.Cell);
         var cp = Probe(modKey, PersistentId, PersistentEdid, At(s.Marker, PersistentDx), true);
         var ct = Probe(modKey, TemporaryId, TemporaryEdid, At(s.Marker, TemporaryDx), false);
-        cell.Persistent.Add(cp);
-        cell.Temporary.Add(ct);
+        if (variant is "full" or "persist-only") cell.Persistent.Add(cp);
+        if (variant is "full" or "temp-only") cell.Temporary.Add(ct);
         var blk = new WorldspaceBlock { BlockNumberX = s.Block.BlockNumberX, BlockNumberY = s.Block.BlockNumberY, GroupType = s.Block.GroupType };
         var sub = new WorldspaceSubBlock { BlockNumberX = s.Sub.BlockNumberX, BlockNumberY = s.Sub.BlockNumberY, GroupType = s.Sub.GroupType };
         sub.Items.Add(cell);
         blk.Items.Add(sub);
-        w.SubCells.Add(blk);
+        if (variant != "world-only") w.SubCells.Add(blk);
         mod.Worldspaces.Add(w);
 
         // the quest (dotnet/PlanetProbe's proven shape), no properties
@@ -179,14 +198,20 @@ static class CoreStorage
         {
             Directory.CreateDirectory(tmpDir);
             var tmp = Path.Combine(tmpDir, modKey.FileName);
+            // the master list stays [Starfield.esm, the core] in every variant: without XMarker no record names Starfield.esm and the
+            // writer would drop it, which would make the variants differ in more than the one part under test
+            mod.ModHeader.MasterReferences.Clear();
+            foreach (var m in order) mod.ModHeader.MasterReferences.Add(new MasterReference { Master = m });
             mod.BeginWrite.ToPath(tmp).WithLoadOrder(order)
-                .WithKnownMasters(order.Select(k => new KeyedMasterStyle(k, MasterStyle.Full)).ToArray()).Write();
+                .WithKnownMasters(order.Select(k => new KeyedMasterStyle(k, MasterStyle.Full)).ToArray())
+                .WithMastersListContent(MastersListContentOption.NoCheck).Write();
             File.Move(tmp, path, overwrite: true);
         }
         finally
         {
             if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, true);
         }
+        Console.WriteLine($"variant {variant}");
         Console.WriteLine($"wrote {path} ({new FileInfo(path).Length:N0} bytes): spawn cell {CellEdid} {s.Cell.FormKey} grid {s.Cell.Grid?.Point} in {s.World.EditorID} {s.World.FormKey}");
         Console.WriteLine($"  {PersistentEdid} {cp.FormKey} persistent at {P(cp.Position)}, {TemporaryEdid} {ct.FormKey} temporary at {P(ct.Position)} (COC marker {P(s.Marker)} + ({F(PersistentDx)} / {F(TemporaryDx)}, 0, 0))");
         return 0;
@@ -196,9 +221,12 @@ static class CoreStorage
     {
         var sfPath = Arg(a, "--sf", ""); var corePath = Arg(a, "--core", "");
         if (sfPath == "" || corePath == "") throw new Refusal("--sf and --core are required");
+        var variant = Variant(a);
         using var core = Open(corePath);
         var s = FindSpawn(core);
         using var mod = Open(a[1]);
+        Console.WriteLine($"variant {variant}");
+        bool withCell = variant != "world-only", withP = variant is "full" or "persist-only", withT = variant is "full" or "temp-only";
         var problems = new List<string>();
         void Need(bool ok, string msg) { if (!ok) problems.Add(msg); }
         var masters = mod.ModHeader.MasterReferences.Select(m => m.Master.FileName.String).ToList();
@@ -211,7 +239,7 @@ static class CoreStorage
         {
             Need(w.TopCell == null, "the WRLD override carries a persistent cell");
             var cells = w.SubCells.SelectMany(b => b.Items).SelectMany(x => x.Items).ToList();
-            Need(cells.Count == 1, $"the WRLD override carries {cells.Count} exterior cells (want exactly the spawn cell)");
+            Need(cells.Count == (withCell ? 1 : 0), $"the WRLD override carries {cells.Count} exterior cells (want {(withCell ? "exactly the spawn cell" : "none: world-only")})");
             var c = cells.FirstOrDefault();
             if (c != null)
             {
@@ -220,9 +248,10 @@ static class CoreStorage
                 Need(c.Grid?.Point == s.Cell.Grid?.Point, $"the cell's grid {c.Grid?.Point} differs from the core's {s.Cell.Grid?.Point}");
                 Need(c.MajorRecordFlagsRaw == s.Cell.MajorRecordFlagsRaw, $"the cell's flags 0x{c.MajorRecordFlagsRaw:X} differ from the core's 0x{s.Cell.MajorRecordFlagsRaw:X}");
                 Need(c.NavigationMeshes.Count == 0, "the cell carries navigation meshes");
-                void One(IReadOnlyList<IPlacedGetter> group, string which, uint id, string edid, float dx, bool persistent)
+                void One(IReadOnlyList<IPlacedGetter> group, string which, uint id, string edid, float dx, bool persistent, bool present)
                 {
                     var refs = group.OfType<IPlacedObjectGetter>().ToList();
+                    if (!present) { Need(group.Count == 0, $"the cell's {which} group holds something in variant {variant}"); return; }
                     Need(group.Count == 1 && refs.Count == 1, $"the cell's {which} group does not hold exactly {edid}");
                     var r = refs.FirstOrDefault();
                     if (r == null) return;
@@ -232,8 +261,8 @@ static class CoreStorage
                     Need((r.MajorRecordFlagsRaw & (Persistent | Disabled)) == (persistent ? Persistent : 0), $"{edid} is not {(persistent ? "persistent" : "temporary")} and enabled");
                     Need(Finite(r.Position) && r.Position == At(s.Marker, dx), $"{edid} is at {P(r.Position)}, not {P(At(s.Marker, dx))} (COC marker + ({F(dx)}, 0, 0))");
                 }
-                One(c.Persistent.ToList(), "Persistent", PersistentId, PersistentEdid, PersistentDx, true);
-                One(c.Temporary.ToList(), "Temporary", TemporaryId, TemporaryEdid, TemporaryDx, false);
+                One(c.Persistent.ToList(), "Persistent", PersistentId, PersistentEdid, PersistentDx, true, withP);
+                One(c.Temporary.ToList(), "Temporary", TemporaryId, TemporaryEdid, TemporaryDx, false, withT);
             }
         }
         var q = mod.Quests.SingleOrDefault();

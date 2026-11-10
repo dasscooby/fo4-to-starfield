@@ -104,6 +104,50 @@ class CoreStorageTests(unittest.TestCase):
         self.assertNotIn("SyntheticOtherCell", proc.stdout)
         self.assertIn("records: Worldspace 1, Cell 1, PlacedObject 2, Quest 1", proc.stdout)
 
+    def test_every_variant_writes_its_part_and_keeps_the_same_masters(self):
+        """FAL-273 (#707): one game run per variant; the variants differ in the cell's references and the cell, nothing else."""
+        want = {"full": {b"WRLD", b"CELL", b"REFR", b"QUST"}, "persist-only": {b"WRLD", b"CELL", b"REFR", b"QUST"},
+                "temp-only": {b"WRLD", b"CELL", b"REFR", b"QUST"}, "cell-only": {b"WRLD", b"CELL", b"QUST"}, "world-only": {b"WRLD", b"QUST"}}
+        for v, sigs in want.items():
+            out = self.root / f"variant-{v}"
+            proc = self.run_tool("build", "--sf", self.sf, "--core", self.core, "--out", out, "--variant", v)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            plugin = out / "FO4SFCoreStorage.esm"
+            self.assertEqual(masters(plugin), ["Starfield.esm", "FO4TerrainCore.esm"], v)
+            self.assertEqual({x[0] for x in walk(plugin).values()}, sigs, v)
+            self.assertEqual(self.run_tool("check", plugin, "--sf", self.sf, "--core", self.core, "--variant", v).returncode, 0, v)
+        recs = walk(self.root / "variant-persist-only" / "FO4SFCoreStorage.esm")
+        self.assertEqual(recs[0x800][2], PERSISTENT_CHILDREN)
+        self.assertNotIn(0x801, recs)
+        recs = walk(self.root / "variant-temp-only" / "FO4SFCoreStorage.esm")
+        self.assertEqual(recs[0x801][2], TEMPORARY_CHILDREN)
+        self.assertNotIn(0x800, recs)
+
+    def test_check_follows_the_variant_and_refuses_another_one(self):
+        plugin = self.root / "variant-cell-only" / "FO4SFCoreStorage.esm"
+        if not plugin.exists():
+            self.test_every_variant_writes_its_part_and_keeps_the_same_masters()
+        wrong = self.run_tool("check", plugin, "--sf", self.sf, "--core", self.core)             # checked as the full plugin
+        self.assertEqual(wrong.returncode, 1, wrong.stdout)
+        self.assertIn("does not hold exactly FO4SF_CS_P", wrong.stdout)
+        bad = self.run_tool("build", "--sf", self.sf, "--core", self.core, "--out", self.root / "variant-bad", "--variant", "nonsense")
+        self.assertEqual(bad.returncode, 1)
+        self.assertIn("is not one of full, persist-only, temp-only, cell-only, world-only", bad.stderr)
+
+    def test_the_stage_names_the_variant(self):
+        self.assertIn("--variant", (ROOT / "scripts" / "core_storage" / "make_core_storage.py").read_text(encoding="utf-8"))
+        self.assertEqual(make_core_storage.VARIANTS, ("full", "persist-only", "temp-only", "cell-only", "world-only"))
+
+    def test_the_twin_dump_shows_the_override_beside_the_core_cell(self):
+        import twin_dump
+        plugin = self.built("plugin-twin")
+        lines, summary = twin_dump.report(str(plugin), str(self.core))
+        text = "\n".join(lines)
+        self.assertIn("override records of the core in the plugin: [('WRLD', '000803'), ('CELL', '000901')]", text)
+        self.assertIn("children, core:     cell temporary children: REFR x1", text)
+        self.assertIn("children, override: cell persistent children: REFR x1; cell temporary children: REFR x1", text)
+        self.assertEqual(summary, ["WRLD 000803: no difference in header or subrecords", "CELL 000901: no difference in header or subrecords"])
+
     def test_check_refuses_a_plugin_built_against_another_core(self):
         # a plugin built against another core: the same tool refuses it (the cell id is the core's own)
         plugin = self.built("plugin-other")

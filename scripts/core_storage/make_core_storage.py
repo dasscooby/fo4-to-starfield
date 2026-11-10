@@ -3,6 +3,7 @@
 usage:
   python scripts/core_storage/make_core_storage.py stage --core <installed FO4TerrainCore.esm> --out <NEW folder>
         [--starfield <game dir>] [--sf <Starfield.esm>] [--compiler <PapyrusCompiler.exe>] [--content-resources <zip>]
+        [--variant full|persist-only|temp-only|cell-only|world-only]
       1. dotnet/CoreStorage build: the plugin (a persistent and a temporary XMarker in the core's FO4Core_RedRocketSpawn,
          a quest with no properties);
       2. the Papyrus compile of FO4SF_CoreStorageQuest.psc (base sources from the Creation Kit's ContentResources.zip, as
@@ -32,6 +33,7 @@ SPAWN_CELL = "FO4Core_RedRocketSpawn"
 IDS = {"cs_p": 0x800, "cs_t": 0x801, "quest": 0x802}
 IMPORTS = ("Actor", "Cell", "Debug", "Form", "Game", "ObjectReference", "Quest", "ScriptObject", "Utility", "WorldSpace")
 TOOL = os.path.join(REPO, "dotnet", "CoreStorage")
+VARIANTS = ("full", "persist-only", "temp-only", "cell-only", "world-only")     # dotnet/CoreStorage --variant (FAL-273, #707)
 
 
 def sha256(path):
@@ -57,7 +59,7 @@ def stage(a):
     sf = a.sf or os.path.join(a.starfield, "Data", "Starfield.esm")
     compiler = a.compiler or os.path.join(a.starfield, "Tools", "Papyrus Compiler", "PapyrusCompiler.exe")
     zip_path = a.content_resources or os.path.join(a.starfield, "Tools", "ContentResources.zip")
-    built = make_bridge.run(tool_cmd("build", "--sf", sf, "--core", a.core, "--out", out, "--plugin", PLUGIN))
+    built = make_bridge.run(tool_cmd("build", "--sf", sf, "--core", a.core, "--out", out, "--plugin", PLUGIN, "--variant", a.variant))
     src = os.path.join(work, "Source")
     os.makedirs(src, exist_ok=True)
     want = {f"Scripts/Source/{n}.psc" for n in IMPORTS} | {"Scripts/Source/Starfield_Papyrus_Flags.flg"}
@@ -76,13 +78,13 @@ def stage(a):
     pex = os.path.join(pex_dir, SCRIPT + ".pex")
     if "Compilation succeeded" not in text or not os.path.exists(pex):
         sys.exit(f"the Papyrus compile did not produce {SCRIPT}.pex")
-    check = make_bridge.run(tool_cmd("check", os.path.join(out, PLUGIN), "--sf", sf, "--core", a.core))
+    check = make_bridge.run(tool_cmd("check", os.path.join(out, PLUGIN), "--sf", sf, "--core", a.core, "--variant", a.variant))
     with open(os.path.join(out, "offline_check.txt"), "w", encoding="utf-8") as f:
         f.write(built + check)
     shutil.copy(os.path.join(HERE, SCRIPT + ".psc"), os.path.join(out, SCRIPT + ".psc"))
     plugin_sha = sha256(os.path.join(out, PLUGIN))
     plan = {"kind": "core-storage-probe", "plugin": PLUGIN, "plugins": [PLUGIN], "build_id": plugin_sha[:8],
-            "plugin_sha256": plugin_sha, "spawn_cell": SPAWN_CELL, "script": SCRIPT, "ids": IDS,
+            "plugin_sha256": plugin_sha, "variant": a.variant, "spawn_cell": SPAWN_CELL, "script": SCRIPT, "ids": IDS,
             "log": LOG, "log_prefix": PREFIX, "readings_s": [2, 10, 30, 60],
             "inputs": {"core": {"sha256": sha256(a.core)},
                        "starfield_esm": {"sha256": sha256(sf) if os.path.exists(sf) else None},
@@ -92,7 +94,7 @@ def stage(a):
     with open(os.path.join(out, "plan.json"), "w", encoding="utf-8") as f:
         json.dump(plan, f, indent=1)
     with open(os.path.join(out, "README.txt"), "w", encoding="utf-8") as f:
-        f.write(f"""Core storage probe (FAL-208). {PLUGIN} (build {plugin_sha[:8]}), masters Starfield.esm + FO4TerrainCore.esm.
+        f.write(f"""Core storage probe (FAL-208), variant {a.variant}. {PLUGIN} (build {plugin_sha[:8]}), masters Starfield.esm + FO4TerrainCore.esm.
 FO4SF_CS_P (0x800, persistent) and FO4SF_CS_T (0x801, temporary): XMarkers in {SPAWN_CELL}, at its COC marker + 4 / 8 m east.
 Install (game closed), after the core: python scripts\\core_storage\\core_storage_install.py install --dir "{out}" --starfield <game>
 In game: coc {SPAWN_CELL} with the roofs on screen; stay 75 s; the user log {LOG} holds FO4SFCS lines 2, 10, 30 and 60 s
@@ -149,6 +151,8 @@ def main(argv=None):
     s.add_argument("--sf", default="", help="Starfield.esm (default <starfield>\\Data\\Starfield.esm)")
     s.add_argument("--compiler", default="", help="default <starfield>\\Tools\\Papyrus Compiler\\PapyrusCompiler.exe")
     s.add_argument("--content-resources", default="", help="default <starfield>\\Tools\\ContentResources.zip")
+    s.add_argument("--variant", default="full", choices=VARIANTS,
+                   help="which part of the override is written (the crash of #707: one game run per variant)")
     a = ap.parse_args(argv)
     stage(a)
 
