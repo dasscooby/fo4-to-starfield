@@ -124,6 +124,21 @@ def verify_stage(d):
     return plan, problems
 
 
+def core_pin_problems(plan, data_dir):
+    """Problems with the core the stage was built against (plan.json inputs.core.sha256) against the one installed in
+    data_dir: the plugin names the core's cell and marker position, so another core, a missing one or a plan
+    without the pin is refused (FAL-211)."""
+    want = ((plan.get("inputs") or {}).get("core") or {}).get("sha256")
+    if not want:
+        return ["plan.json does not pin the core it was built against"]
+    path = os.path.join(data_dir, "FO4TerrainCore.esm")
+    if not os.path.exists(path):
+        return [f"{path} is not installed (the plugin masters it)"]
+    if sha256(path) != want:
+        return ["the installed FO4TerrainCore.esm is not the core this stage was built against (re-stage)"]
+    return []
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)

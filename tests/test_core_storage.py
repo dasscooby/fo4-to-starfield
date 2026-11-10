@@ -160,6 +160,74 @@ class ReaderTests(unittest.TestCase):
         self.assertEqual(self.result("with", "behind"), "PASS")
 
 
+class SessionTests(unittest.TestCase):
+    INIT = "[11/10/2026 - 06:00:00PM] FO4SFCS rt=1.0 init quest=-2080373758 installed=true"
+
+    def test_a_later_session_never_borrows_an_earlier_one(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from fo4sf.planet import probe_log
+        good, cut = cs_lines("with", "with"), cs_lines("none", "with")
+        cut = [x for x in cut if "tag=CS_P" not in x]              # a later session that never read CS_P
+        both = good + cut
+        self.assertEqual(probe_log.core_storage_result(good)[0]["result"], "PASS")
+        self.assertEqual(probe_log.core_storage_result(cut)[0]["result"], "unknown")
+        self.assertEqual(probe_log.core_storage_result(both)[0]["result"], "unknown")      # the last run only
+        self.assertEqual(probe_log.core_storage_result(both, run=0)[0]["result"], "PASS")
+        self.assertEqual(probe_log.core_storage_result([]), [])
+
+    def test_an_empty_init_after_arrivals_starts_a_new_run(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from fo4sf.planet import probe_log
+        empty = "[10/29/2026 - 03:00:00AM] FO4SFPP rt=9.0 init version=2 quest=1 world=none loc=none planet=none surface=none planetloc=none merge=true"
+        arrive = "[10/29/2026 - 03:00:00AM] FO4SFPP rt=2.0 arrive n=1 world=1 cell=none x=0 y=0 z=0 probeworld=false"
+        self.assertEqual(len(probe_log.runs([empty, arrive, empty])), 2)           # a later session
+        self.assertEqual(len(probe_log.runs([empty, empty, arrive])), 1)           # OnInit twice before the first arrival
+
+    def test_install_refuses_another_or_missing_core(self):
+        with tempfile.TemporaryDirectory() as d:
+            data = Path(d)
+            core = data / "FO4TerrainCore.esm"
+            plan = {"inputs": {"core": {"sha256": ""}}}
+            self.assertEqual(make_core_storage.core_pin_problems({}, str(data)), ["plan.json does not pin the core it was built against"])
+            plan["inputs"]["core"]["sha256"] = "0" * 64
+            self.assertIn("is not installed", make_core_storage.core_pin_problems({"inputs": {"core": {"sha256": "0" * 64}}}, str(data))[0])
+            core.write_bytes(b"core B")
+            pinned_a = {"inputs": {"core": {"sha256": "0" * 64}}}
+            self.assertIn("not the core this stage was built against", make_core_storage.core_pin_problems(pinned_a, str(data))[0])
+            pinned_b = {"inputs": {"core": {"sha256": make_core_storage.sha256(str(core))}}}
+            self.assertEqual(make_core_storage.core_pin_problems(pinned_b, str(data)), [])
+
+
+class InstallPreflightTests(unittest.TestCase):
+    def test_a_stage_pinned_to_core_a_never_reaches_the_installer_on_core_b(self):
+        import core_storage_install
+        from types import SimpleNamespace
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            stage, game = d / "stage", d / "game"
+            (stage / "Data" / "Scripts").mkdir(parents=True)
+            (game / "Data").mkdir(parents=True)
+            (stage / make_core_storage.PLUGIN).write_bytes(b"plugin")
+            (stage / "Data" / "Scripts" / "x.pex").write_bytes(b"pex")
+            (game / "Data" / "FO4TerrainCore.esm").write_bytes(b"core B")
+            plan = {"kind": "core-storage-probe", "plugin": make_core_storage.PLUGIN, "plugins": [make_core_storage.PLUGIN],
+                    "inputs": {"core": {"sha256": make_core_storage.sha256(str(stage / make_core_storage.PLUGIN))}},   # core A
+                    "outputs": {make_core_storage.PLUGIN: make_core_storage.sha256(str(stage / make_core_storage.PLUGIN)),
+                                "Data/Scripts/x.pex": make_core_storage.sha256(str(stage / "Data" / "Scripts" / "x.pex"))}}
+            (stage / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
+            args = SimpleNamespace(dir=str(stage), starfield=str(game))
+            with mock.patch.object(core_storage_install, "installer") as inst:
+                with self.assertRaises(SystemExit) as cm:
+                    core_storage_install.install(args)
+                self.assertIn("not the core this stage was built against", str(cm.exception))
+                inst.assert_not_called()
+                plan["inputs"]["core"]["sha256"] = make_core_storage.sha256(str(game / "Data" / "FO4TerrainCore.esm"))
+                (stage / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
+                core_storage_install.install(args)
+                inst.assert_called_once()
+
+
 class ScriptTests(unittest.TestCase):
     def test_script_ids_and_names_match_the_plugin(self):
         psc = (ROOT / "scripts" / "core_storage" / "FO4SF_CoreStorageQuest.psc").read_text(encoding="utf-8")

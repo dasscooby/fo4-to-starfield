@@ -39,6 +39,9 @@ def install(a):
     plan, problems = make_core_storage.verify_stage(d)
     if problems:
         sys.exit("core storage probe not installed: the stage does not match its plan.json (re-stage): " + "; ".join(problems))
+    problems = make_core_storage.core_pin_problems(plan, os.path.join(a.starfield, "Data"))
+    if problems:
+        sys.exit("core storage probe not installed: " + "; ".join(problems))
     names = sorted(n for n in os.listdir(d) if n.lower().endswith(".esm"))
     if sorted(plan["plugins"]) != names:
         sys.exit(f"core storage probe not installed: the stage holds {names}, plan.json lists {plan['plugins']}")

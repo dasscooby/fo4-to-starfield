@@ -152,8 +152,7 @@ def runs(lines):
         p = parse_line(line)
         if p is None:
             continue
-        if p["event"] == "init" and cur and not (init_forms(p) == 0 or all(
-                x["event"] == "init" and init_forms(x) < len(INIT_FORMS) for x in cur)):
+        if p["event"] == "init" and cur and not twin_init(cur, p):
             out.append(cur)
             cur = []
         cur.append(p)
@@ -168,6 +167,16 @@ INIT_FORMS = ("world", "loc", "planet", "surface", "planetloc")     # the init l
 def init_forms(p):
     """How many of the init line's forms it holds (the others read none: GetFormFromFile found nothing)."""
     return sum(1 for k in INIT_FORMS if p.get(k) is not None)
+
+
+def twin_init(cur, p):
+    """Whether the init line p is OnInit logging a second time in the run cur (probe run 2: an empty second line):
+    only before the run's first arrival (a later init is a new session, which must not borrow this run's init or
+    control), and only when p or every init so far is incomplete (a complete line never joins an earlier complete one)."""
+    if any(x["event"] == "arrive" for x in cur):
+        return False
+    inits = [x for x in cur if x["event"] == "init"]
+    return init_forms(p) < len(INIT_FORMS) or all(init_forms(x) < len(INIT_FORMS) for x in inits)
 
 
 def best_init(lines):
@@ -375,18 +384,19 @@ def t7_result(refs, control=None):
     return "unknown"
 
 
-def core_storage_result(lines):
+def core_storage_result(lines, run=-1):
     """The core storage probe's verdict per arrival (FAL-208, scripts/core_storage/FO4SF_CoreStorageQuest.psc: lines
     "FO4SFCS rt=... player|ref n=.. at=.. tag=CS_P|CS_T ...", read like the planet probe's) at each arrival's last
     reading: [{"n", "cs_p", "cs_t", "result"}], the result by the control first: CS_T not loaded is "cell not loaded"
     (the cell never loaded: CS_P is not judged); CS_T found and CS_P with player is PASS; CS_T found and CS_P left
     behind or not loaded is FAIL; "not installed" for a missing plugin; "unknown" for anything else (a cut line, a
-    tag unread, CS_T in an interior). The offset of CS_P is for the reader of the log (core merge about -1200, -2700)."""
+    tag unread, CS_T in an interior). One run only (default the last; runs() splits at each init line), so an earlier
+    session's readings never complete a later, cut one. The offset of CS_P is for the reader of the log (core merge about -1200, -2700)."""
     last = {}
     order = []
-    for line in lines:
-        p = parse_line(line)
-        if p is None or p["event"] != "ref" or not isinstance(p.get("tag"), str) or p["tag"] not in ("CS_P", "CS_T"):
+    rs = runs(lines)
+    for p in (rs[run] if rs else []):
+        if p["event"] != "ref" or not isinstance(p.get("tag"), str) or p["tag"] not in ("CS_P", "CS_T"):
             continue
         n = p.get("n")
         if n not in last:
