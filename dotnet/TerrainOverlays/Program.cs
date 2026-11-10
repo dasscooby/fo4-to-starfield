@@ -192,7 +192,7 @@ foreach (var o in overlays)
                       $"{(cmax - cmin + 1) * (cmax - cmin + 1)} cells {cmin}..{cmax}, COC {coc} in ({spawnCell[0]}, {spawnCell[1]})");
     idx++;
 }
-int nStat = 0, nDoor = 0, nOpenDoor = 0, nRef = 0, nDisabled = 0, nNav = 0, nNavTri = 0, nNavLink = 0, nNavDoor = 0, nCont = 0, nMisc = 0,
+int nStat = 0, nMstt = 0, nDoor = 0, nOpenDoor = 0, nRef = 0, nDisabled = 0, nNav = 0, nNavTri = 0, nNavLink = 0, nNavDoor = 0, nCont = 0, nMisc = 0,
     nActi = 0, nTerm = 0, nWkshp = 0, nFlor = 0, nBench = 0;
 var refIds = new Dictionary<string, string>();                 // placed reference source -> this plugin's id (6 hex)
 Dictionary<string, object>? ids = null;                        // formids.json
@@ -253,10 +253,22 @@ if (Has(prm, "objects"))
         }
         else
         {
-            var stat = new Static(NewKey(), release) { EditorID = edid, Model = new Model { File = model } };
-            mod.Statics.Add(stat);
-            baseKeys.Add(stat.FormKey);
-            nStat++;
+            if (b.TryGetProperty("movable", out _))
+            {
+                // FAL-171: a loose item converted with a dynamic body (manifest "movable") is a MoveableStatic outdoors as in
+                // PluginSpike (DATA 4); a Static never simulates, so it could not be carried
+                var ms = new MoveableStatic(NewKey(), release) { EditorID = edid, Model = new Model { File = model }, DATA = 4 };
+                mod.MoveableStatics.Add(ms);
+                baseKeys.Add(ms.FormKey);
+                nMstt++;
+            }
+            else
+            {
+                var stat = new Static(NewKey(), release) { EditorID = edid, Model = new Model { File = model } };
+                mod.Statics.Add(stat);
+                baseKeys.Add(stat.FormKey);
+                nStat++;
+            }
         }
         baseIds[edid] = baseKeys[^1].ID.ToString("X6");
     }
@@ -1229,7 +1241,7 @@ var path = Path.Combine(outDir, modKey.FileName);
 mod.BeginWrite.ToPath(path).WithLoadOrderFromHeaderMasters().WithDataFolder(sfData)
     .WithKnownMasters(new KeyedMasterStyle(sfEsm, MasterStyle.Full)).Write();
 Console.WriteLine($"wrote {path} ({new FileInfo(path).Length:N0} bytes): {worlds.Count} overlays, next FormID 0x{next:X}" +
-                  (Has(prm, "objects") ? $"; objects: {nStat} STAT, {nDoor} DOOR, {nCont} CONT, {nMisc} MISC, {nActi} ACTI, {nTerm} TERM + {nTerm} TMLM, {nWkshp} workshop ACTI, {nFlor} FLOR, {nBench} bench REFR on vanilla FURN, {nRef} REFR ({nDisabled} initially disabled, {nOpenDoor} doors open by default)" : "") +
+                  (Has(prm, "objects") ? $"; objects: {nStat} STAT, {nMstt} MSTT, {nDoor} DOOR, {nCont} CONT, {nMisc} MISC, {nActi} ACTI, {nTerm} TERM + {nTerm} TMLM, {nWkshp} workshop ACTI, {nFlor} FLOR, {nBench} bench REFR on vanilla FURN, {nRef} REFR ({nDisabled} initially disabled, {nOpenDoor} doors open by default)" : "") +
                   (Has(prm, "navmesh") ? $"; navmesh: {nNav} NAVM, {nNavTri} triangles, {nNavLink} edge links, {nNavDoor} door triangles, NAVI override with {nNav} NVMI" : "") +
                   (nLightRef > 0 ? $"; lights: {nLight} LIGH, {nLightRef} REFR" : "") +
                   (doorEntries.Count > 0 ? $"; doors: {doorEntries.Count} scripted REFR on {nDoorActi} ACTI, {doorEntries.Count} arrival markers" : "") +
