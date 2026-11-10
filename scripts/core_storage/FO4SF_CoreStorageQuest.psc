@@ -1,5 +1,5 @@
 Scriptname FO4SF_CoreStorageQuest extends Quest
-{The core storage probe (fo4-to-starfield, FAL-208; dotnet/CoreStorage). Attached to QUST FO4SF_CoreStorage (0x802 of
+{The core storage probe (fo4-to-starfield, FAL-208; dotnet/CoreStorage). Attached to QUST FO4SF_CoreStorageProbe (0x802 of
  FO4SFCoreStorage.esm: start game enabled, no stages, NO properties). Every form is found with Game.GetFormFromFile at
  the moment it is read, because a script property would make a temporary reference persistent and spoil the test.
  CS_P (0x800) is a persistent XMarker in the persistent group of the core's spawn cell FO4Core_RedRocketSpawn, CS_T (0x801)

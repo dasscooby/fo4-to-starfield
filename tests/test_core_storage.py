@@ -128,6 +128,38 @@ class CoreStorageTests(unittest.TestCase):
         self.assertFalse((self.root / "none" / "FO4SFCoreStorage.esm").exists())
 
 
+def cs_lines(p, t):
+    """A FO4SFCS log, one arrival read at 60 s: p / t are "with", "behind", "none" (not loaded) or "no" (not installed)."""
+    def ref(tag, v, lid):
+        head = f"[11/10/2026 - 06:00:00PM] FO4SFCS rt=70.0 ref n=1 at=60 tag={tag} local={lid} plugin=FO4SFCoreStorage.esm"
+        if v == "no":
+            return head + " installed=False"
+        if v == "none":
+            return head + " found=False"
+        w = "-16777000" if v == "with" else "-2113925120"
+        same = "true" if v == "with" else "false"
+        return head + f" found=True id=-2080373760 world={w} cell=none x=-985.0 y=1146.0 z=107.0 loaded=true disabled=false dist=4.0 sameworld={same}"
+    return ["[11/10/2026 - 06:00:00PM] FO4SFCS rt=1.0 init quest=-2080373758 installed=true",
+            "[11/10/2026 - 06:00:00PM] FO4SFCS rt=2.0 arrive n=1 world=-16777000 cell=none x=0 y=0 z=0",
+            ref("CS_P", p, 2048), ref("CS_T", t, 2049)]
+
+
+class ReaderTests(unittest.TestCase):
+    def result(self, p, t):
+        from fo4sf.planet import probe_log
+        return probe_log.core_storage_result(cs_lines(p, t))[0]["result"]
+
+    def test_verdicts(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        self.assertEqual(self.result("none", "none"), "cell not loaded")     # the control first: CS_P is not judged
+        self.assertEqual(self.result("with", "none"), "cell not loaded")
+        self.assertEqual(self.result("with", "with"), "PASS")
+        self.assertEqual(self.result("behind", "with"), "FAIL")
+        self.assertEqual(self.result("none", "with"), "FAIL")
+        self.assertEqual(self.result("with", "no"), "not installed")
+        self.assertEqual(self.result("with", "behind"), "PASS")
+
+
 class ScriptTests(unittest.TestCase):
     def test_script_ids_and_names_match_the_plugin(self):
         psc = (ROOT / "scripts" / "core_storage" / "FO4SF_CoreStorageQuest.psc").read_text(encoding="utf-8")
@@ -142,6 +174,7 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(make_core_storage.PREFIX, "FO4SFCS rt=")
         src = (ROOT / "dotnet" / "CoreStorage" / "Program.cs").read_text(encoding="utf-8")
         self.assertIn(f'Script = "{make_core_storage.SCRIPT}"', src)
+        self.assertIn('QuestEdid = "FO4SF_CoreStorageProbe"', src)           # run-2 section 3
         self.assertIn(f'CellEdid = "{make_core_storage.SPAWN_CELL}"', src)
 
     def test_verify_stage_pins_every_output(self):

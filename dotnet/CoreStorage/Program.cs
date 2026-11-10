@@ -9,7 +9,7 @@
 //         the cell's override lives in them. No persistent cell, no other cell.
 //   0x800 REFR FO4SF_CS_P  XMarker 00003B, flag 0x400, in the spawn cell's PERSISTENT group, at the COC marker + (4, 0, 0)
 //   0x801 REFR FO4SF_CS_T  XMarker 00003B, temporary, in the spawn cell's TEMPORARY group, at the COC marker + (8, 0, 0)
-//   0x802 QUST FO4SF_CoreStorage  start game enabled, no stages, script FO4SF_CoreStorageQuest, NO properties (the script
+//   0x802 QUST FO4SF_CoreStorageProbe  start game enabled, no stages, script FO4SF_CoreStorageQuest, NO properties (the script
 //         finds both references with Game.GetFormFromFile: a property would make CS_T persistent and spoil the test)
 // In game: `coc FO4Core_RedRocketSpawn` with the roofs on screen; the script's user log FO4SFCoreStorage.0.log holds
 // "FO4SFCS rt=<s> ..." lines 2, 10, 30 and 60 s after the arrival.
@@ -46,7 +46,7 @@ static class CoreStorage
     const StarfieldRelease Release = StarfieldRelease.Starfield;
     const uint PersistentId = 0x800, TemporaryId = 0x801, QuestId = 0x802, XMarker = 0x3B;
     const string CellEdid = "FO4Core_RedRocketSpawn", MarkerEdid = "FO4Core_RedRocketSpawnMarker";
-    const string PersistentEdid = "FO4SF_CS_P", TemporaryEdid = "FO4SF_CS_T", QuestEdid = "FO4SF_CoreStorage", Script = "FO4SF_CoreStorageQuest";
+    const string PersistentEdid = "FO4SF_CS_P", TemporaryEdid = "FO4SF_CS_T", QuestEdid = "FO4SF_CoreStorageProbe", Script = "FO4SF_CoreStorageQuest";
     const float PersistentDx = 4f, TemporaryDx = 8f;
     const int Persistent = 0x400, Disabled = 0x800;
     static readonly ModKey SfKey = ModKey.FromFileName("Starfield.esm");

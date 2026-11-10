@@ -56,7 +56,7 @@ returns the largest float, 3.4e38 (verified: probe run 1, 31 of 33 readings), wh
 """
 import re
 
-LINE = re.compile(r"FO4SFPP rt=(?P<rt>[-+\d.eE]+) (?P<event>\w+)(?P<rest>.*)$", re.IGNORECASE)
+LINE = re.compile(r"FO4SF(?:PP|CS) rt=(?P<rt>[-+\d.eE]+) (?P<event>\w+)(?P<rest>.*)$", re.IGNORECASE)
 TOKEN = re.compile(r"(\w+)=(\S*)")
 EVENTS = ("init", "chain", "arrive", "player", "planet", "ref", "location")
 ID_KEYS = {"quest", "world", "loc", "planet", "surface", "planetloc", "cell", "id", "editorloc", "type", "atmos",
@@ -373,6 +373,41 @@ def t7_result(refs, control=None):
     if t7 == "with player" and t1 == "with player":
         return "confounded"
     return "unknown"
+
+
+def core_storage_result(lines):
+    """The core storage probe's verdict per arrival (FAL-208, scripts/core_storage/FO4SF_CoreStorageQuest.psc: lines
+    "FO4SFCS rt=... player|ref n=.. at=.. tag=CS_P|CS_T ...", read like the planet probe's) at each arrival's last
+    reading: [{"n", "cs_p", "cs_t", "result"}], the result by the control first: CS_T not loaded is "cell not loaded"
+    (the cell never loaded: CS_P is not judged); CS_T found and CS_P with player is PASS; CS_T found and CS_P left
+    behind or not loaded is FAIL; "not installed" for a missing plugin; "unknown" for anything else (a cut line, a
+    tag unread, CS_T in an interior). The offset of CS_P is for the reader of the log (core merge about -1200, -2700)."""
+    last = {}
+    order = []
+    for line in lines:
+        p = parse_line(line)
+        if p is None or p["event"] != "ref" or not isinstance(p.get("tag"), str) or p["tag"] not in ("CS_P", "CS_T"):
+            continue
+        n = p.get("n")
+        if n not in last:
+            last[n] = {}
+            order.append(n)
+        last[n][p["tag"]] = ref_verdict(p)
+    out = []
+    for n in order:
+        p_v, t_v = last[n].get("CS_P"), last[n].get("CS_T")
+        if "not installed" in (p_v, t_v):
+            res = "not installed"
+        elif t_v == "not loaded":
+            res = "cell not loaded"
+        elif t_v in ("with player", "left behind") and p_v == "with player":
+            res = "PASS"
+        elif t_v in ("with player", "left behind") and p_v in ("left behind", "not loaded"):
+            res = "FAIL"
+        else:
+            res = "unknown"
+        out.append({"n": n, "cs_p": p_v, "cs_t": t_v, "result": res})
+    return out
 
 
 def local_positions(plan):

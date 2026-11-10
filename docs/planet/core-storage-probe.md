@@ -17,7 +17,7 @@ cleared), with
 |---|---|---|---|
 | `0x800` | REFR `FO4SF_CS_P`, XMarker `00003B`, flag `0x400` | the spawn cell's Persistent group | COC marker + (4, 0, 0) |
 | `0x801` | REFR `FO4SF_CS_T`, XMarker `00003B` | the spawn cell's Temporary group | COC marker + (8, 0, 0) |
-| `0x802` | QUST `FO4SF_CoreStorage`, start game enabled, no stages, script `FO4SF_CoreStorageQuest`, no properties | | |
+| `0x802` | QUST `FO4SF_CoreStorageProbe`, start game enabled, no stages, script `FO4SF_CoreStorageQuest`, no properties | | |
 
 The script finds both references with `Game.GetFormFromFile` (a property would make CS_T persistent) and logs
 `FO4SFCS rt=...` lines 2, 10, 30 and 60 s after each arrival to `FO4SFCoreStorage.0.log`.
@@ -31,5 +31,7 @@ PC session (Claude): `coc FO4Core_RedRocketSpawn` with roofs on screen.
 * CS_T not found: `cell not loaded` (not a failure).
 * PASS: CS_T found and CS_P with the player (runtime world, core merge offset about -1200, -2700).
 * FAIL: CS_T found and CS_P left behind or not loaded.
+
+Reader: `probe_log.core_storage_result(lines)` reads the FO4SFCS log (control first: CS_T not loaded = cell not loaded).
 
 Out of scope: probe-overlay retarget, core rebuild. Status: offline only; not tested in game.
