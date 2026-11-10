@@ -107,7 +107,7 @@ class EndToEnd(unittest.TestCase):
     def runner(self, cmd, timeout, cwd=None):
         self.cwds.append(cwd)
         self.cmds.append(cmd)
-        name = Path(cmd[1]).stem
+        name = cmd[1].split(":")[-1]
         if name == "Alpha":
             return 1, "X.psc(1,1): Foo is not a function or does not exist\nX.psc(2,1): Foo is not a function or does not exist\n", ""
         if name == "Beta":
@@ -131,13 +131,13 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(len(list((self.out / "raw").iterdir())), 4)
         # Import order: shim, Starfield, then Fallout 4.
         imports = self.cmds[0][3].removeprefix("-i=").split(";")
-        self.assertEqual([Path(i).name for i in imports], ["shim", "sf", "fo4"])
+        self.assertEqual([Path(i).name for i in imports], ["shim", "overlay", "sf", "fo4"])
         self.assertIn("Foo", cc.format_table(c))
-        # Bare file name, run from the script's own folder (a path is rejected by the compiler).
+        # Named by script name, run from an empty folder that is not the Fallout 4 sources.
         for cmd, cwd in zip(self.cmds, self.cwds):
-            self.assertEqual(cmd[1], Path(cmd[1]).name)
-            self.assertTrue(cmd[1].endswith(".psc"))
-            self.assertEqual(cwd, str(self.fo4))
+            self.assertFalse(cmd[1].endswith(".psc"))
+            self.assertEqual(Path(cwd), self.out.resolve() / "work")
+            self.assertEqual(list(Path(cwd).iterdir()), [])
 
     def test_exit_zero_without_success_line_is_not_a_pass(self):
         c = cc.run_census(self.fo4, self.sf, self.shim, self.compiler, "QF_Fake_0001", 0, 1, self.out,
@@ -190,7 +190,7 @@ class TwoRates(unittest.TestCase):
 
     @staticmethod
     def runner(cmd, timeout, cwd=None):
-        name = Path(cmd[1]).stem
+        name = cmd[1].split(":")[-1]
         if name in ("Alpha", "Beta", "QF_Fake_0001"):                  # every logic script fails
             return 1, "X.psc(1,1): Foo is not a function or does not exist\n", ""
         return 0, "Compilation succeeded.\n", ""                       # every scene script compiles
@@ -209,7 +209,8 @@ class TwoRates(unittest.TestCase):
         self.assertIn("logic scripts", table)
         self.assertIn("scene scripts", table)
         self.assertIn("do not quote", table)
-        self.assertEqual(c["schema"], 2)
+        self.assertNotIn("compile more often", table)
+        self.assertEqual(c["schema"], 3)
 
     def test_logic_sample_never_takes_a_scene_script(self):
         c = cc.run_census(self.fo4, self.sf, self.shim, self.compiler, "QF_Fake_0001", 2, 1, self.out,
@@ -223,6 +224,55 @@ class TwoRates(unittest.TestCase):
                           runner=self.runner, scene_count=9)
         with self.assertRaises(ValueError):
             cc.run_census(self.fo4, self.sf, self.shim, self.compiler, "TIF__0001", 1, 1, self.out, runner=self.runner)
+
+
+class NamespaceAndClashes(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        t = Path(self.tmp.name)
+        self.fo4, self.sf, self.shim, self.out = t / "fo4", t / "sf", t / "shim", t / "out"
+        for d in (self.fo4, self.sf, self.shim):
+            d.mkdir()
+        (self.sf / cc.DEFAULT_FLAGS).write_text("", encoding="utf-8")
+        (self.fo4 / "Fragments" / "Quests").mkdir(parents=True)
+        (self.fo4 / "Fragments" / "Quests" / "QF__0100.psc").write_text("Scriptname Fragments:Quests:QF__0100 Extends Quest\n")
+        (self.fo4 / "Other.psc").write_text("Scriptname Other Extends Quest\n")
+        (self.fo4 / "REScript.psc").write_text("Scriptname REScript extends Quest ; fo4's own\n")
+        (self.fo4 / "Game.psc").write_text("Scriptname Game Native Hidden\n")
+        (self.sf / "REScript.psc").write_text("ScriptName REScript extends Quest\n")
+        (self.sf / "Game.psc").write_text("ScriptName Game Native Hidden\n")
+        self.compiler = t / "fake.exe"
+        self.compiler.write_text("")
+        self.cmds = []
+
+    def runner(self, cmd, timeout, cwd=None):
+        self.cmds.append(cmd)
+        return 0, "Compilation succeeded.\n", ""
+
+    def test_script_name_and_native(self):
+        self.assertEqual(cc.script_name("Fragments/Quests/QF__0100.psc"), "Fragments:Quests:QF__0100")
+        self.assertEqual(cc.script_name("Other.psc"), "Other")
+        self.assertTrue(cc.is_native(self.sf / "Game.psc"))
+        self.assertFalse(cc.is_native(self.sf / "REScript.psc"))
+
+    def test_namespaced_name_and_the_clash_rule(self):
+        c = cc.run_census(self.fo4, self.sf, self.shim, self.compiler, "QF__0100", 3, 1, self.out, runner=self.runner)
+        self.assertEqual(self.cmds[0][1], "Fragments:Quests:QF__0100")
+        self.assertEqual(c["clashes"]["count"], 2)                       # Game and REScript
+        self.assertEqual(c["clashes"]["engine_base_starfield_wins"], 1)  # Game is Native in Starfield
+        self.assertEqual(c["clashes"]["overlaid_fo4_wins"], 1)
+        self.assertEqual(c["clashes"]["overlaid_names"], ["REScript"])
+        overlay = self.out.resolve() / "overlay"
+        self.assertEqual(sorted(p.name for p in overlay.rglob("*.psc")), ["REScript.psc"])
+        self.assertIn("fo4's own", (overlay / "REScript.psc").read_text())
+        self.assertIn(f"Name clashes between the games: 2", cc.format_table(c))
+        flags = {r["script"]: r for r in c["scripts"]}
+        self.assertTrue(flags["Fragments/Quests/QF__0100.psc"]["is_named_fragment"])
+        self.assertTrue(flags["Fragments/Quests/QF__0100.psc"]["is_fragment"])
+        self.assertFalse(flags["Other.psc"]["is_fragment"])
+        self.assertTrue(flags["REScript.psc"]["clash_overlaid"])
+        self.assertTrue(flags["Game.psc"]["clash"] and not flags["Game.psc"]["clash_overlaid"])
 
 
 if __name__ == "__main__":

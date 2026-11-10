@@ -3,10 +3,22 @@
 Runs Starfield's PapyrusCompiler once per sampled script, keeps each raw output,
 and sorts every error into a bucket. Writes census.json and prints a table.
 
-Import order given to the compiler is: shim folder, Starfield sources, then the
-Fallout 4 sources. Starfield therefore wins any name clash (a Fallout 4 copy of
-a base type never shadows Starfield's), and other Fallout 4 scripts a sampled
-script depends on still resolve.
+Import order given to the compiler is: shim folder, the clash overlay, Starfield sources, then the Fallout 4
+sources. Starfield therefore wins an engine base type (Game, Actor, ...: a Fallout 4 copy never shadows it), and
+other Fallout 4 scripts a sampled script depends on still resolve.
+
+How a script is compiled (PC run of 94a7ae03, FAL-245): the compiler is started in a new EMPTY working folder
+(<out>/work), never inside the Fallout 4 sources, because it finds the files of its current folder before its
+import list and would compile every script against Fallout 4's own Game.psc, Actor.psc and so on. And a script is
+named by its namespaced name (Fragments:Quests:QF__010020E0), not by its bare file name: a script in a sub-folder
+is refused as "filename does not match script name" otherwise.
+
+Name clashes: a script name that exists in both games' sources is a clash (317 of them on the PC). Where
+Starfield's copy is `Native` it is an engine base type and Starfield's wins. Where it is not (REScript, a
+Fallout 4 quest script that Starfield also happens to name) the script is Fallout 4's own, so Fallout 4's copy is
+copied into <out>/overlay, which comes first in the import list; otherwise the 29 random-encounter fragments that
+cast to REScript fail on Starfield's REScript, which has other functions. census.json lists the clashes
+("clashes") and marks the sampled scripts that are one.
 
 Two rates, never one. Scene and topic scripts (dialogue fragments: TIF__*, SF_* and anything that extends TopicInfo or
 Scene) are short, call a small set of functions and compile far more often than logic scripts (quests, fragments of
@@ -30,10 +42,12 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-SCHEMA = 2
+SCHEMA = 3
 KINDS = ("logic", "scene")
 SCENE_PREFIXES = ("tif__", "sf_")
 SCENE_EXTENDS = ("topicinfo", "scene")
+FRAGMENT_PREFIXES = ("qf_", "pf_", "tif_", "sf_", "term_", "scene_", "pack_")
+NATIVE = re.compile(r"^\s*scriptname\s+\S+(?:\s+\w+)*?\s+native\b", re.I | re.M)
 EXTENDS = re.compile(r"^\s*scriptname\s+\S+\s+extends\s+(?P<base>[\w:]+)", re.I | re.M)
 BUCKETS = ("unknown_function", "unknown_type", "unknown_property_or_variable",
            "wrong_argument_count", "syntax", "other")
@@ -165,9 +179,48 @@ def pick_sample(scripts, fragment, count, seed):
     return [matches[0]] + random.Random(seed).sample(rest, count)
 
 
-def build_command(compiler, script_name, flags, imports, out_dir):
-    """The compiler rejects a path: pass the bare .psc file name and run it from the script's own folder."""
-    return [str(compiler), script_name, f"-f={flags}", f"-i={';'.join(map(str, imports))}", f"-o={out_dir}"]
+def script_name(rel):
+    """The namespaced script name of a relative source path: Fragments/Quests/QF__0100.psc -> Fragments:Quests:QF__0100."""
+    return Path(rel).with_suffix("").as_posix().replace("/", ":")
+
+
+def is_native(path):
+    """True when the source file's Scriptname line declares the script Native (an engine base type)."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return bool(NATIVE.search(f.read(2048)))
+    except OSError:
+        return False
+
+
+def find_clashes(fo4, starfield, fo4_scripts):
+    """({lower-case relative path: (fo4 relative path, starfield relative path)} of the scripts both games name,
+    the same list split into engine base types (Starfield's copy is Native) and overlaid ones)."""
+    sf = {s.lower(): s for s in list_scripts(starfield)}
+    both = {}
+    for rel in fo4_scripts:
+        if rel.lower() in sf:
+            both[rel.lower()] = (rel, sf[rel.lower()])
+    native = {k for k, (_, srel) in both.items() if is_native(Path(starfield) / srel)}
+    return both, native
+
+
+def build_overlay(fo4, both, native, overlay):
+    """Copy Fallout 4's version of every clash whose Starfield copy is not Native into overlay; returns their names."""
+    names = []
+    for key in sorted(set(both) - set(native)):
+        rel = both[key][0]
+        dst = Path(overlay) / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes((Path(fo4) / rel).read_bytes())
+        names.append(script_name(rel))
+    return names
+
+
+def build_command(compiler, name, flags, imports, out_dir):
+    """The script is named by its namespaced name and the compiler runs in an empty folder (see the module doc)."""
+    script_name_ = name
+    return [str(compiler), script_name_, f"-f={flags}", f"-i={';'.join(map(str, imports))}", f"-o={out_dir}"]
 
 
 def default_runner(cmd, timeout, cwd=None):
@@ -183,10 +236,15 @@ def run_census(fo4, starfield, shim, compiler, fragment, count, seed, out, flags
             raise ValueError(f"not a folder: {folder}")
     if not Path(compiler).is_file():
         raise ValueError(f"compiler not found: {compiler}")
-    imports = [shim, starfield, fo4]
+    work, overlay = out / "work", out / "overlay"
+    work.mkdir(parents=True, exist_ok=True)
+    overlay.mkdir(parents=True, exist_ok=True)
+    imports = [shim, overlay, starfield, fo4]
     if not any((d / flags).is_file() for d in imports):
         raise ValueError(f"flags file {flags} not found in the shim, Starfield or Fallout 4 folder")
     every = list_scripts(fo4)
+    both, native = find_clashes(fo4, starfield, every)
+    overlaid = build_overlay(fo4, both, native, overlay)
     kinds = kinds_of(fo4, every)
     if kinds.get(next((s for s in every if Path(s).stem.lower() == fragment.lower()), ""), "logic") == "scene":
         raise ValueError(f"the fragment {fragment} is a scene or topic script; name a quest fragment")
@@ -194,7 +252,9 @@ def run_census(fo4, starfield, shim, compiler, fragment, count, seed, out, flags
     if scene_count:
         scenes = [s for s in every if kinds[s] == "scene"]
         if scene_count > len(scenes):
-            raise ValueError(f"asked for {scene_count} scene/topic scripts but only {len(scenes)} exist")
+            raise ValueError(f"asked for {scene_count} scene/topic scripts but only {len(scenes)} exist (is "
+                             "--fo4-sources the root that holds Fragments\\ and the other namespace folders, not a "
+                             "sub-folder of it?)")
         sample += random.Random(seed).sample(scenes, scene_count)
     raw_dir, pex_dir = out / "raw", out / "pex"
     raw_dir.mkdir(parents=True, exist_ok=True)
@@ -202,17 +262,16 @@ def run_census(fo4, starfield, shim, compiler, fragment, count, seed, out, flags
 
     results = []
     for rel in sample:
-        script_file = fo4 / rel
-        cmd = build_command(compiler, script_file.name, flags, imports, pex_dir)
+        cmd = build_command(compiler, script_name(rel), flags, imports, pex_dir)
         try:
-            code, stdout, stderr = runner(cmd, timeout, str(script_file.parent))
+            code, stdout, stderr = runner(cmd, timeout, str(work))
             note = None
         except subprocess.TimeoutExpired:
             code, stdout, stderr, note = None, "", "", f"timed out after {timeout}s"
         except OSError as err:
             code, stdout, stderr, note = None, "", "", f"could not run compiler: {err}"
         raw_name = rel.replace("/", "__") + ".txt"
-        (raw_dir / raw_name).write_text(f"$ (cwd {script_file.parent}) {' '.join(cmd)}\nexit={code}\n--stdout--\n{stdout}\n--stderr--\n{stderr}\n"
+        (raw_dir / raw_name).write_text(f"$ (cwd {work}) {' '.join(cmd)}\nexit={code}\n--stdout--\n{stdout}\n--stderr--\n{stderr}\n"
                                         f"{note or ''}\n", encoding="utf-8")
         errors = parse_output(stdout + "\n" + stderr)
         if note:
@@ -222,10 +281,14 @@ def run_census(fo4, starfield, shim, compiler, fragment, count, seed, out, flags
             errors.append({"bucket": "other", "name": None, "line": 0, "col": 0,
                            "message": f"exit code {code} without '{SUCCESS}' and no parseable error"})
         results.append({"script": rel, "compiled": code == 0 and SUCCESS in stdout and not errors, "exit_code": code,
-                        "kind": kinds[rel], "is_fragment": rel == sample[0], "errors": errors, "raw": f"raw/{raw_name}"})
+                        "kind": kinds[rel], "is_named_fragment": rel == sample[0],
+                        "is_fragment": Path(rel).stem.lower().startswith(FRAGMENT_PREFIXES),
+                        "clash": rel.lower() in both, "clash_overlaid": rel.lower() in both and rel.lower() not in native, "errors": errors, "raw": f"raw/{raw_name}"})
 
     census = summarize(results)
-    census.update(schema=SCHEMA, seed=seed, requested_count=count, requested_scene_count=scene_count,
+    census.update(clashes={"count": len(both), "engine_base_starfield_wins": len(native),
+                           "overlaid_fo4_wins": len(overlaid), "overlaid_names": overlaid},
+                  schema=SCHEMA, seed=seed, requested_count=count, requested_scene_count=scene_count,
                   fragment=fragment, scripts=results)
     (out / "census.json").write_text(json.dumps(census, indent=2) + "\n", encoding="utf-8")
     return census
@@ -266,7 +329,11 @@ def format_table(census):
         if g is not None:
             lines.append(f"{k + ' scripts':<16} sampled {g['total']:>4}   compiled clean {g['compiled']:>4} "
                          f"({g['compile_share'] * 100:.1f}%)")
-    lines += ["Quote the two rates, not their mix: scene and topic scripts compile more often than logic scripts.",
+    c = census.get("clashes")
+    if c:
+        lines.append(f"Name clashes between the games: {c['count']} ({c['engine_base_starfield_wins']} engine base "
+                     f"types where Starfield's copy wins, {c['overlaid_fo4_wins']} where Fallout 4's copy wins)")
+    lines += ["Quote the two rates, not their mix.",
               f"Overall (mixed, do not quote): {census['total']} sampled, {census['compiled']} clean "
               f"({census['compile_share'] * 100:.1f}%)", "",
               f"{'bucket':<30}{'errors':>8}{'scripts':>9}"]
