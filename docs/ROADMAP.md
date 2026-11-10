@@ -7,7 +7,42 @@ comes after the current testing, and it is the brief Codex and Grok work from. S
 Two independent reviews of this document (17 Oct) are folded in; their corrections are the reason several claims
 below are narrower than the first draft.
 
-## Current update, 3 November 2026
+## Current update, 10 November 2026: the order of work
+
+The owner's direction of 10 November (about 15:26 UTC), in their words: "We shouldn't be focusing on Preston and stuff
+so much the roadmap should be getting the core of things working that will take more effort, like fixing the map,
+getting the pipboy, like the actually hard things then getting the stuff we know we we can get working that will just
+take a lot of commission interior doors and animations will come after And/or will come as needed" ("commission" is
+read as "conversion"). This section sets the order. The dated ledgers below keep their results; where they name a next
+step that this order parks, this order wins.
+
+**1. The hard core first.** The step that removes the largest unknown comes first, not the easiest one.
+
+| Track | State | First step |
+|---|---|---|
+| The map | The Commonwealth's icons draw only through a workaround: a quest moves the markers into the played world after arrival, then one reload behind a dark screen of about 31 s ([map-markers.md](terrain/map-markers.md), Dark hold; the owner's play test of 31 Oct). The cause: persistent references of our world stay in the base world, while a plugin's persistent reference in a vanilla world merges (planet probe run 1, 29 Oct, [planet-probe.md](planet/planet-probe.md) section 8). All 309 markers carry one icon type, copied from the vanilla marker they were modelled on, so every place draws the same icon. | A field-by-field comparison of our world, persistent cell and location chain with the vanilla world's, and one record change as a new test reference for probe run 2 (research, then a writer; the run needs the owner's release). Beside it: an icon type per marker from a table (source; it shows at the next restage of the markers plugin). |
+| The Pip-Boy | Nothing is built or run (10 Nov). Research only: [ui-pipboy-vats.md](research/framework/engine-mechanics-notes/ui-pipboy-vats.md). | A probe plugin that registers a menu of our own and shows a movie of our own: first with no movie, then with a generated one-shape movie. A pass makes the map page the first real screen, drawn from our own marker list. A fail sends the work to changing the game's own menu files instead. |
+| Our own planet in place of the overlay on Mars | Run 1 was partial (29 Oct); route B (Sol) is offline only. | Probe run 2, in the same session as the tests above. |
+| The script-to-plugin bridge and the save sidecar (B0, P1) | Built, never run in the game ([combined-core-probes.md](spikes/combined-core-probes.md)). It gates the living-world port in game. | B0-2, in the same session. |
+
+Each of these first steps ends in a short probe session in the owner's game. Every such session installs something
+for minutes, needs the owner's release, and ends with the owner's set put back and compared against receipts taken
+before it (issue #628 is the fix that lets the launcher's restore do this with the map markers installed).
+
+**2. Then the work with a proven recipe that is mostly volume.** The 253 interiors that are built and staged offline
+(16 are in the game), the exterior record classes that pass offline (activators, terminals, benches), and map content
+(quest-only places hidden until their quest, the two city markers that are missing).
+
+**3. Later, or as needed.** Interior door wiring at scale and the animated load doors (both wait on a core rebuild,
+which this phase does not plan), actor animation, distant object LOD, and polish of Preston, Codsworth and the
+mission (#700 gets its review and is then left).
+
+**What this changes in older text.** [PLAN.md](PLAN.md) lists re-implementing the Pip-Boy as a non-goal, and the
+new-game notes of 19 October say "no Pip-Boy in phase 1" ([newgame.md](research/framework/newgame.md), NG-D2). The
+direction above puts the Pip-Boy on the list of things to build. PLAN.md is changed once the owner confirms the first
+deliverable (asked on 10 Nov: the map page).
+
+## Update, 3 November 2026
 
 The conversion is the Commonwealth-first foundation for the broader GAMMA-style framework. The detailed phase
 ledgers below retain their dated results; use this summary for changes since the 1 November update.
