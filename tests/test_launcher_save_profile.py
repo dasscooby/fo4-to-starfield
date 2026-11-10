@@ -12,7 +12,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tests"))
-from fo4sf.launcher import crashwatch, gui, save_release as sr, settings  # noqa: E402
+from fo4sf.launcher import crashwatch, gui, release_install as ri, save_release as sr, settings  # noqa: E402
 from test_launcher_crashwatch import FakeSystem  # noqa: E402
 
 
@@ -32,12 +32,18 @@ class SaveProfileTests(unittest.TestCase):
             dict(sr.identity(self.data / "FO4Port.esm"), name="FO4Port.esm")], "state_layouts": {}}
         self.marker = self.data / sr.RELEASE_FILE
         self.marker.write_text(json.dumps(self.release))
+        self.own_declaration()
         self.values = settings.defaults()
         self.values.update(instance=str(self.game), starfield=str(self.game), my_games=str(self.my_games),
                            route="exe", load_order="off")
 
     def reason(self):
         return sr.play_reason(self.values, self.game)
+
+    def own_declaration(self):
+        (self.game / "FO4SF-instance.json").write_bytes(ri.encode({"schema": 1, "complete": True,
+            "save_release": {"schema": 1, "complete": True, "previous": None,
+                             "declaration": ri.pin(self.marker.read_bytes())}}))
 
     def bound(self, name="player.sfs"):
         save = self.saves / name
@@ -64,6 +70,7 @@ class SaveProfileTests(unittest.TestCase):
 
     def test_legacy_absence_is_explicitly_not_a_managed_release(self):
         self.marker.unlink()
+        (self.game / "FO4SF-instance.json").write_text('{"schema":1,"complete":true}')
         (self.saves / "old.sfs").write_bytes(b"old unbound")
         self.assertEqual(self.reason(), "")
 
@@ -88,6 +95,7 @@ class SaveProfileTests(unittest.TestCase):
         changed = copy.deepcopy(self.release)
         changed["state_layouts"] = {"focc": {"format": "focc", "envelope_schema": 1, "payload_schema": "v2"}}
         self.marker.write_text(json.dumps(changed))
+        self.own_declaration()
         self.assertIn("layout changed", self.reason())
 
     def test_unconfirmed_profile_and_custom_save_override_refuse(self):
@@ -149,6 +157,7 @@ class SaveProfileTests(unittest.TestCase):
         (self.game / "Starfield.exe").write_bytes(b"")
         # Consumer is inactive before settings, then sees a declaration appear.
         self.marker.unlink()
+        (self.game / "FO4SF-instance.json").write_text('{"schema":1,"complete":true}')
         def installed(*args):
             self.marker.write_text(json.dumps(self.release))
         system = FakeSystem([])

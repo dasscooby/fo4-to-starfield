@@ -60,10 +60,30 @@ launch worker, not the Tk process-status polling path. A second check runs after
 settings, before load-order changes or game start. Symlink/redirected profile roots
 and linked bindings refuse; inventories above 4096 saves refuse.
 
-This remains an incomplete draft: installers do not yet publish the declaration,
-and absence retains legacy behavior. Deleting a declaration is therefore not yet
-detected as a broken managed install. The mandatory ownership/installation link,
-active master-set/order validation, and provenance-safe publication for newly
-produced saves are required before item 7 is complete or the PR can integrate.
-Part 2 supplies the refusal consumer, not a supported workflow for manually
-creating a declaration or retroactively binding old saves. No PC card is ready.
+Part 3 adds the metadata installer:
+
+```
+python scripts/launcher.py install-release --declaration release.json --settings settings.json
+python scripts/launcher.py install-release --declaration release.json --settings settings.json --apply
+```
+
+Preview is read-only. Apply requires a finished confirmed FO4SF instance, matching
+installed master bytes, no interrupted component installer and a closed game. It
+normalizes the explicit release declaration and pins its exact bytes under
+`save_release` in the existing `FO4SF-instance.json` receipt, preserving other
+instance fields. It records pending publication first, replaces the owned
+declaration atomically, and marks complete last. A stop after either durable step
+blocks Play; repeat the same `install-release` command to resume. A different
+pending declaration, unknown existing bytes or observed concurrent edits refuse.
+Missing/changed owned declarations and corrupt ownership metadata block Play;
+unowned declarations are not adopted or overwritten. Writes refuse linked metadata
+and use temporary files, fsync, replacement and byte checks. Identical completed
+publication writes nothing. Saves and their bindings are never touched.
+
+This remains an incomplete draft. Legacy instances with neither declaration nor
+ownership retain their existing behavior; explicit release publication does not
+make their unbound saves safe. The packaging/component-install workflow must still
+invoke this finalization step for managed releases. Active master-set/order
+validation and provenance-safe atomic publication for newly produced saves remain
+required before item 7 is complete or this PR integrates. No old-save adoption
+command or PC-ready card is offered.

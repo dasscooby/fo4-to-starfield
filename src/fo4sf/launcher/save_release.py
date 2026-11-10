@@ -3,8 +3,8 @@
 Saves are opaque bytes. No save headers are parsed, migrated or adopted. A future
 publisher must establish that a newly produced save belongs to the running release;
 snapshot_binding only captures bytes and is not itself proof of that provenance.
-An installed declaration activates a read-only profile gate. Declaration and binding
-publication remain a later part of item 7; absence does not retrofit legacy installs.
+An instance-owned declaration activates a read-only profile gate. Binding publication
+remains a later part of item 7; legacy instances are not retroactively adopted.
 """
 import hashlib
 import json
@@ -235,20 +235,15 @@ def check_files(release_path, binding_path, save, starfield, state_dir):
 def play_reason(values, starfield):
     """Gate a declared FO4SF instance, including dry runs. Never publish or adopt saves.
 
-    This staged consumer activates only when an installer declaration exists. The
-    publisher must make that declaration mandatory for managed releases in a later
-    part. Legacy installs without one retain their existing behavior for now.
+    An installer ownership pin makes a missing/changed declaration or interrupted
+    publication refuse too. Legacy instances with neither record retain their
+    existing behavior; publication never retroactively binds their old saves.
     """
     try:
-        release_path = Path(starfield) / "Data" / RELEASE_FILE
-        try:
-            release_path.lstat()
-        except FileNotFoundError:
+        from . import release_install
+        release = release_install.installed(starfield)
+        if release is None:
             return ""
-        if release_path.is_symlink():
-            raise BindingError("release declaration is a link")
-        raw = read_metadata(release_path)
-        release = declaration(raw)
         if not values.get("instance") or not values.get("my_games"):
             raise BindingError("confirm the FO4SF instance and My Games folder before playing this release")
         from . import instance

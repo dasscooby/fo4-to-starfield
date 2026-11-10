@@ -1454,3 +1454,14 @@ FO4SF-Runtime state root. Hash files in the Play worker rather than on the Tk
 polling path; check installed masters once per inventory. This staged consumer
 does not complete the mandatory installer ownership or publication contract:
 legacy declaration absence remains unchanged only while PR #716 stays draft.
+
+### 2026-11-10 — Codex / Lone: own release metadata through the instance receipt
+
+Keep the declaration's byte identity and pending/complete publication state in
+FO4SF-instance.json, rather than inferring a legacy install when Data's declaration
+vanishes. Record pending before replacing the declaration; complete only after
+byte verification and another closed-game check. Resume only the same declaration
+and known previous/new bytes. Existing saves remain unbound until separate proof
+of new-save provenance is available. The explicit install-release metadata step
+is not yet automatically invoked by packaging/component installers, and does not
+claim to serialize every unrelated installer: observed metadata edits refuse.

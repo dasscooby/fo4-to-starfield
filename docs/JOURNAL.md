@@ -2794,3 +2794,15 @@ GUI delegates hashing to its existing CLI worker. Unknown/unbound/changed files
 refuse; no old save adoption. Mandatory installer declaration ownership, active
 master-set validation and new-save provenance/publication remain unfinished in
 the same draft PR. Synthetic checks only; Windows/native/Tk/game NOT_RUN.
+
+### 2026-11-10 — Codex / Lone: instance-owned release declaration (item 7 part 3)
+
+Following Scribe CLEAR of part 2, added install-release preview/--apply for a
+finished FO4SF instance. The instance receipt records pending declaration identity
+before publication and complete afterwards. Missing/changed owned declarations,
+unknown pending input, incomplete publication or observed concurrent edits refuse;
+repeating the same explicit input resumes interrupted publication. Metadata is
+atomic, linked files refuse, instance fields and all saves/bindings stay intact.
+This does not publish save bindings. Managed release finalization wiring, active
+master-set/order validation and new-save provenance remain in draft #716.
+Windows/native/Tk/game NOT_RUN. Exact-head review/evidence tracked on FAL-247.
