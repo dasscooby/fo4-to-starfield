@@ -58,7 +58,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, os.path.join(REPO, "src"))
 sys.path.insert(0, os.path.join(REPO, "scripts", "terrain"))
-from fo4sf import ba2, btd, overlay  # noqa: E402
+from fo4sf import ba2, btd, overlay, plugin_verify  # noqa: E402
 from fo4sf.planet import biom, census, esm, probe, probe_log, records  # noqa: E402
 
 PROJECT = os.path.join(REPO, "dotnet", "PlanetProbe")
@@ -251,6 +251,15 @@ def stage_files(out):
     return files
 
 
+def load_check(stage_dir, data=None):
+    """Offline plugin-load problems of the stage's plugins as a kit (fo4sf.plugin_verify; a clean result is not a game PASS)."""
+    names = [n for n in (records.MASTER, probe.PLUGIN, records.REGISTRATION, MERGE_PLUGIN)
+             if os.path.exists(os.path.join(stage_dir, n))]
+    known = [n for n in os.listdir(data) if n.lower().endswith((".esm", ".esp", ".esl"))] if data and os.path.isdir(data) else []
+    reports = plugin_verify.verify_kit([os.path.join(stage_dir, n) for n in names], known=known)
+    return [t for r in reports for t in r.problems]
+
+
 def known_ids(rep, master_report=None):
     """{label: hex id} of the vanilla records the log reader names (Starfield.esm ids load at index 00): the census's,
     and with route B the system location our planet names as its parent (route A's is ours: the reader finds it
@@ -403,6 +412,9 @@ def stage(a):
                 "btd": {"file": probe.BTD_REL, "bytes": len(data), "worst_m": worst}})
     if raw_problems:
         sys.exit(f"{probe.PLUGIN} raw check: {raw_problems}; attempt kept in {out}")
+    load_problems = load_check(out, a.data)
+    if load_problems:
+        sys.exit(f"offline plugin-load check: {load_problems}; attempt kept in {out}")
     drift = [n for n, v in input_pins(a.data).items() if v != before[n]]
     if drift:
         sys.exit(f"an input changed during the build ({', '.join(drift)}), nothing published; attempt kept in {out}")
@@ -500,6 +512,7 @@ def verify_stage(stage_dir, plan, data=None):
     with open(prm_path, encoding="utf-8") as f:
         prm = json.load(f)
     problems += [f"{probe.PLUGIN}: {x}" for x in probe.check_plugin(os.path.join(stage_dir, probe.PLUGIN), prm)[0]]
+    problems += [f"load check: {x}" for x in load_check(stage_dir, data)]
     master = os.path.join(stage_dir, records.MASTER)
     route_b = plan.get("system") == "sol"                      # a stage from before route B is route A's
     problems += [f"{records.MASTER}: {x}" for x in records.check_master(
