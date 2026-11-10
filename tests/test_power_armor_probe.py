@@ -21,6 +21,7 @@ import make_power_armor_probe as mpa  # noqa: E402
 
 PSC = (ROOT / "scripts" / "planet" / "FO4SF_PAProbeQuest.psc").read_text(encoding="utf-8")
 TOOL_SRC = (ROOT / "dotnet" / "PowerArmorProbe" / "Program.cs").read_text(encoding="utf-8")
+HAND_PSC = (ROOT / "scripts" / "planet" / "FO4SF_PAHandQuest.psc").read_text(encoding="utf-8")
 PLUGIN = "FO4SFPowerArmorProbe.esm"
 
 
@@ -31,6 +32,50 @@ def const_ids(text):
         for name, val in re.findall(r"(\w+) = (0x[0-9A-Fa-f]+)", m.group(1)):
             out[name] = int(val, 16)
     return out
+
+
+class HandScriptTests(unittest.TestCase):
+    """The by-hand mode (FAL-273): a second quest of the same plugin that shows the engine's answers on screen."""
+
+    def test_the_hand_scripts_ids_are_the_tools(self):
+        ids = const_ids(TOOL_SRC)
+        for name in ("CellId", "SuitRefId", "ControlRefId", "CocRefId"):
+            m = re.search(rf"^int {name} = (0x[0-9A-Fa-f]+)", HAND_PSC, re.M)
+            self.assertIsNotNone(m, name)
+            self.assertEqual(int(m.group(1), 16), ids[name], name)
+        self.assertEqual(ids["HandQuestId"], 0x807)
+        self.assertIn(f'string ProbePlugin = "{PLUGIN}"', HAND_PSC)
+        self.assertIn('HandScript = "FO4SF_PAHandQuest"', TOOL_SRC)
+        self.assertTrue(HAND_PSC.startswith("Scriptname FO4SF_PAHandQuest extends Quest"))
+
+    def test_the_hand_script_has_no_properties_and_no_stages(self):
+        self.assertIsNone(re.search(r"^\s*\w+(\[\])?\s+\w+\s+Auto\b", HAND_PSC, re.M | re.I))
+        self.assertNotIn(" Property ", HAND_PSC)
+        self.assertNotIn("GetStageDone", HAND_PSC)
+
+    def test_the_question_is_asked_and_the_answers_are_on_screen(self):
+        self.assertEqual(HAND_PSC.count("p.SwitchToPowerArmor(suit)"), 2)       # near the suit, or 60 s in the room
+        self.assertNotIn("p.SetRace(", HAND_PSC)                               # the race swap stays with the console probe
+        self.assertIn("Debug.Notification(msg)", HAND_PSC)
+        for reading in ("InPowerArmor(p)", "FurnId(p)", "SitState(p)", "Camera()", "WornCount(p)"):
+            self.assertIn(reading, HAND_PSC.split("Function Wording")[1])
+        self.assertIn("not in this game's scripts", HAND_PSC)                  # an unavailable reading is said in words
+        self.assertIn("1 s after the call", HAND_PSC)
+        self.assertIn("4 s after the call", HAND_PSC)
+
+    def test_without_a_move_call_the_screen_gives_the_one_console_line(self):
+        self.assertIn("coc FO4SF_PAProbeCell", HAND_PSC.split("Function Poll")[1])
+        self.assertEqual(mpa.optional_names(HAND_PSC), ["Actor.GetFurnitureReference", "Actor.GetSitState", "Actor.IsInPowerArmor",
+                                                        "Game.GetCameraState", "Actor.GetWornItem", "ObjectReference.MoveTo"])
+        self.assertEqual(mpa.enable(HAND_PSC, []), HAND_PSC)
+
+    def test_the_hand_log_lines_end(self):
+        self.assertIn('"FO4SFPAHAND rt="', HAND_PSC)
+        self.assertIn('" end=true"', HAND_PSC)
+        self.assertIn('string LogName = "FO4SFPAHand"', HAND_PSC)
+
+    def test_the_required_list_has_the_notification(self):
+        self.assertIn("Notification", mpa.REQUIRED["Debug"])
 
 
 class ScriptTests(unittest.TestCase):
@@ -85,14 +130,14 @@ class ScriptTests(unittest.TestCase):
 
 BASES = {
     "Form": "Scriptname Form\nint Function GetFormID() native\n",
-    "ObjectReference": "Scriptname ObjectReference extends Form\nfloat Function GetPositionX() native\nfloat Function GetPositionY() native\n"
+    "ObjectReference": "Scriptname ObjectReference extends Form\nfloat Function GetPositionX() native\nfloat Function GetPositionY() native\nFunction MoveTo(ObjectReference a) native\n"
                        "float Function GetPositionZ() native\nfloat Function GetDistance(ObjectReference a) native\nCell Function GetParentCell() native\n",
     "Actor": "Scriptname Actor extends ObjectReference\nFunction SwitchToPowerArmor(ObjectReference a) native\nFunction SetRace(Race r) native\n"
              "Race Function GetRace() native\nObjectReference Function GetFurnitureReference() native\nint Function GetSitState() native\n"
              "Actor:WornItem Function GetWornItem(int i) native\n",
     "Game": "Scriptname Game\nActor Function GetPlayer() native global\nForm Function GetFormFromFile(int i, string p) native global\n"
             "bool Function IsPluginInstalled(string p) native global\n",
-    "Debug": "Scriptname Debug\nbool Function OpenUserLog(string n) native global\nbool Function TraceUser(string n, string t) native global\n",
+    "Debug": "Scriptname Debug\nFunction Notification(string s) native global\nbool Function OpenUserLog(string n) native global\nbool Function TraceUser(string n, string t) native global\n",
     "Utility": "Scriptname Utility\nfloat Function GetCurrentRealTime() native global\n",
     "ScriptObject": "Scriptname ScriptObject\nFunction StartTimer(float f, int i) native\n",
     "Quest": "Scriptname Quest extends ScriptObject\nbool Function GetStageDone(int i) native\n",
@@ -115,11 +160,12 @@ class PrecheckTests(unittest.TestCase):
     def test_inherited_names_are_found_and_undeclared_optional_ones_are_reported(self):
         z = os.path.join(self.tmp.name, "cr.zip")
         fake_sources(z)
-        r = mpa.precheck_sources(mpa.read_sources(z), PSC)
+        r = mpa.precheck_sources(mpa.read_sources(z), PSC, HAND_PSC)
         self.assertEqual(r["missing"], [])
         self.assertTrue(r["required"]["Actor.GetDistance"])                  # declared on ObjectReference
         self.assertEqual(r["optional"], {"Actor.GetWornItem": True, "Actor.GetFurnitureReference": True,
-                                         "Actor.GetSitState": True, "Actor.IsInPowerArmor": False, "Game.GetCameraState": False})
+                                         "Actor.GetSitState": True, "Actor.IsInPowerArmor": False, "Game.GetCameraState": False,
+                                         "ObjectReference.MoveTo": True})
 
     def test_a_missing_required_native_is_named(self):
         z = os.path.join(self.tmp.name, "cr.zip")
@@ -188,6 +234,7 @@ class StageTests(unittest.TestCase):
         self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
         self.assertIn("masters [Starfield.esm]", check.stdout)
         self.assertIn("QUST FO4SF_PAProbeQuest flags StartGameEnabled stages [10,20,30]", check.stdout)
+        self.assertIn("QUST FO4SF_PAHandQuest flags StartGameEnabled scripts [FO4SF_PAHandQuest (0 properties)]", check.stdout)
         self.assertIn("(0 properties)", check.stdout)
 
     def test_the_plugin_adds_records_and_overrides_none(self):
@@ -214,7 +261,7 @@ class StageTests(unittest.TestCase):
                 i += 24 + size
         walk(data, 0, len(data))
         self.assertTrue(ids and all(f >> 24 == 1 for f in ids), [hex(f) for f in ids if f >> 24 != 1])
-        for sig, n in ((b"CELL", 1), (b"FURN", 1), (b"RACE", 1), (b"QUST", 1)):
+        for sig, n in ((b"CELL", 1), (b"FURN", 1), (b"RACE", 1), (b"QUST", 2)):
             self.assertEqual(kinds.get(sig), n, sig)
         self.assertEqual(kinds.get(b"REFR"), 16)           # coc marker, suit, control, 9 floor tiles, 4 lights
 
@@ -255,13 +302,15 @@ class StageTests(unittest.TestCase):
         plan = json.loads((final / "plan.json").read_text())
         self.assertEqual(plan["kind"], "power-armor-probe")
         self.assertEqual(plan["plugins"], [PLUGIN])
-        self.assertEqual(sorted(plan["outputs"]), sorted([PLUGIN, "Data/Scripts/FO4SF_PAProbeQuest.pex"]))
+        self.assertEqual(sorted(plan["outputs"]), sorted([PLUGIN, "Data/Scripts/FO4SF_PAProbeQuest.pex", "Data/Scripts/FO4SF_PAHandQuest.pex"]))
         self.assertEqual(plan["inputs"]["Starfield.esm"]["sha256"], mpa.sha256(str(self.master)))
         self.assertEqual(plan["optional"]["Actor.GetWornItem"], "kept")
         self.assertEqual(plan["optional"]["Actor.GetFurnitureReference"], "kept")
         self.assertTrue(plan["optional"]["Actor.GetSitState"].startswith("declared but did not compile"))
         self.assertEqual(plan["optional"]["Actor.IsInPowerArmor"], "not declared in the base scripts")
         self.assertEqual(plan["optional"]["Game.GetCameraState"], "not declared in the base scripts")
+        self.assertEqual(plan["optional_hand"]["ObjectReference.MoveTo"], "kept")
+        self.assertIn("p.MoveTo(coc)", (final / "FO4SF_PAHandQuest.psc").read_text())
         kept = (final / "FO4SF_PAProbeQuest.psc").read_text()
         self.assertIn("p.GetFurnitureReference()", kept)
         self.assertNotIn(";OPT Actor.GetFurnitureReference", kept)

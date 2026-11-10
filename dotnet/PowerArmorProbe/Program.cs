@@ -9,6 +9,8 @@
 //   REFR  control                the vanilla control furniture itself, 2.5 m to the left (temporary): the player must
 //                                be able to sit on it, or the session proves nothing
 //   RACE  FO4SF_PARace           a copy of HumanRace (name replaced by a plain string)
+//   QUST  FO4SF_PAHandQuest      the by-hand mode (FAL-273): start game enabled, NO properties, script FO4SF_PAHandQuest: moves the player
+//                                into the cell, says on screen what stands where and what the engine answered to SwitchToPowerArmor
 //   QUST  FO4SF_PAProbeQuest     start game enabled, stages 10 / 20 / 30, script FO4SF_PAProbeQuest with NO properties
 //                                (the script finds every form with Game.GetFormFromFile; a property would make the
 //                                temporary references persistent)
@@ -60,9 +62,9 @@ static class PowerArmorProbe
 
     // the layout (scripts/planet/FO4SF_PAProbeQuest.psc carries the same ids)
     const uint CellId = 0x800, SuitId = 0x801, RaceId = 0x802, QuestId = 0x803, SuitRefId = 0x804, ControlRefId = 0x805,
-        CocRefId = 0x806, FirstTileId = 0x810;
+        CocRefId = 0x806, HandQuestId = 0x807, FirstTileId = 0x810;
     const string CellEdid = "FO4SF_PAProbeCell", SuitEdid = "FO4SF_PAProbeSuit", RaceEdid = "FO4SF_PARace",
-        QuestEdid = "FO4SF_PAProbeQuest", Script = "FO4SF_PAProbeQuest";
+        QuestEdid = "FO4SF_PAProbeQuest", Script = "FO4SF_PAProbeQuest", HandQuestEdid = "FO4SF_PAHandQuest", HandScript = "FO4SF_PAHandQuest";
     const string KeywordEdid = "FurnitureTypePowerArmor", HumanRaceEdid = "HumanRace";
     // dotnet/TestCell's vanilla forms
     const uint Floor = 0x050776, Omni = 0x03D38C, CocMarker = 0x000032, LightingTemplate = 0x006658, ImageSpace = 0x122393;
@@ -154,13 +156,28 @@ static class PowerArmorProbe
         };
         quest.VirtualMachineAdapter.Scripts.Add(new ScriptEntry { Name = Script, Flags = ScriptEntry.Flag.Local });
         mod.Quests.Add(quest);
+
+        // the by-hand quest: one stage, no properties (the script finds every form with Game.GetFormFromFile)
+        var handQuest = new Quest(Own(HandQuestId), Release)
+        {
+            EditorID = HandQuestEdid, Name = "FO4SF power armor by hand", FormVersion = 581, Version2 = 12,
+            Data = new QuestData { Flags = Quest.Flag.StartGameEnabled, Priority = 30 },
+        };
+        handQuest.Stages.Add(new QuestStage { Index = 10 });
+        handQuest.VirtualMachineAdapter = new QuestAdapter
+        {
+            Version = 6, ObjectFormat = 2, ExtraBindDataVersion = 3,
+            Script = new ScriptEntry { Name = "", Flags = ScriptEntry.Flag.Local },
+        };
+        handQuest.VirtualMachineAdapter.Scripts.Add(new ScriptEntry { Name = HandScript, Flags = ScriptEntry.Flag.Local });
+        mod.Quests.Add(handQuest);
         mod.ModHeader.Stats.NextFormID = next;
 
         Write(mod, outDir, SfEsm);
         var path = Path.Combine(outDir, Plugin.FileName);
         Console.WriteLine($"wrote {path} ({new FileInfo(path).Length:N0} bytes): CELL {CellEdid} {cell.FormKey}, FURN {SuitEdid} = copy of " +
                           $"{control.EditorID} {control.FormKey} + {kw.EditorID} {kw.FormKey}, control reference of {control.EditorID}, " +
-                          $"RACE {RaceEdid} = copy of {humanRace.EditorID} {humanRace.FormKey}, QUST {QuestEdid} stages [{string.Join(",", Stages)}]");
+                          $"RACE {RaceEdid} = copy of {humanRace.EditorID} {humanRace.FormKey}, QUST {HandQuestEdid}, QUST {QuestEdid} stages [{string.Join(",", Stages)}]");
         return 0;
     }
 
@@ -244,7 +261,17 @@ static class PowerArmorProbe
             Console.WriteLine($"  CELL {cell.EditorID} {cell.FormKey}: {objs.Count} temporary references");
         }
 
-        var quest = mod.Quests.SingleOrDefault();
+        Need(mod.Quests.Count() == 2, "not exactly two QUST (the probe's and the by-hand one)");
+        var hand = mod.Quests.FirstOrDefault(q => q.FormKey == Own(HandQuestId));
+        Need(hand?.EditorID == HandQuestEdid, "no QUST FO4SF_PAHandQuest");
+        if (hand != null)
+        {
+            var hs = hand.VirtualMachineAdapter?.Scripts.ToList() ?? new();
+            Console.WriteLine($"  QUST {hand.EditorID} flags {hand.Data?.Flags} scripts [{string.Join(", ", hs.Select(s => $"{s.Name} ({s.Properties.Count} properties)"))}]");
+            Need(hand.Data?.Flags.HasFlag(Quest.Flag.StartGameEnabled) == true, "the by-hand QUST is not start game enabled");
+            Need(hs.Count == 1 && hs[0].Name == HandScript && hs[0].Properties.Count == 0, $"the by-hand QUST script is not {HandScript} without properties");
+        }
+        var quest = mod.Quests.FirstOrDefault(q => q.FormKey == Own(QuestId));
         Need(quest?.FormKey == Own(QuestId) && quest.EditorID == QuestEdid, "not exactly our QUST");
         if (quest != null)
         {

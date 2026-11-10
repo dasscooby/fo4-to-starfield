@@ -112,3 +112,29 @@ naming only the fields it saw change.
 * Stage 20 sets the race: `SetRace` works at runtime on the player (A3), so a power armor race can carry a skeleton and graph.
   Restored at stage 30 means the swap is reversible in this session; whether a save survives it is **not** tested here.
 * Both fail: the combined core's climb-in suit is a worn-suit design only until SFSE or another route is researched.
+
+## By hand (FAL-273): no console, the answers on screen
+
+The same plugin carries a second quest, `FO4SF_PAHandQuest` (0x807, script `FO4SF_PAHandQuest.psc`, no properties). It asks
+the probe's stage 10 question, `SwitchToPowerArmor` on the suit furniture, and shows what the engine answered as messages on
+screen. **The furniture is not in the vanilla world**: it stands in the probe's own cell `FO4SF_PAProbeCell`, so the smallest
+thing the owner can use is that room. The script moves the player there itself 30 s after the quest starts
+(`ObjectReference.MoveTo` on the arrival marker, an optional name: when the game has no such call the screen says to type
+`coc FO4SF_PAProbeCell`, the one console line left). The race swap (stages 20 and 30) is **not** in the hand version, because
+it can break a save; it stays with the console probe.
+
+In the room, on screen: what stands where; every change of the furniture the player is on (the control chair: "Sitting
+works"; the suit: sit state and `in power armor`); and, when the player walks within 2 units of the suit (or after 60 s in the
+room), the call and its answer 1 s and 4 s later: in power armor, furniture, sit state, camera, race unchanged or not, worn
+armor slots. A reading the game has no call for says `not in this game's scripts`. Every message is also a line of
+`FO4SFPAHand.0.log`. Offline only: the Papyrus compile and the game are the PC's.
+
+### Owner card (seven steps, no console)
+
+1. Tick `FO4SFPowerArmorProbe.esm`. Load a save of a **throwaway** character already in the world (not the opening); do not save.
+2. Wait. Message: "Power armor test: in 30 s you are moved into a small test room." Then "Moving you into the test room." (If instead you read "type coc FO4SF_PAProbeCell", do that, nothing else.)
+3. In the room a message names the two furnitures: vanilla chair on your left (control), suit on your right. Walk to the left one and sit (activate it). Message "You are on the control chair ... Sitting works." If you cannot sit, say so and stop.
+4. Stand up. Walk up to the right-hand furniture and stand next to it (do not activate it yet). Message "You walked up to the suit: calling SwitchToPowerArmor on it now."
+5. Watch the screen and the character for 5 s: any climb-in animation, camera change, or HUD change. Two messages follow ("Suit 1 s after the call: ...", "Suit 4 s after the call: ..."). Screenshot each.
+6. Now activate the suit furniture once. Does a message say "You are on the SUIT furniture ..."? Did anything animate?
+7. Quit without saving. Tell: step 3 worked or not; the two "Suit ..." messages as read; what you saw at steps 5 and 6.

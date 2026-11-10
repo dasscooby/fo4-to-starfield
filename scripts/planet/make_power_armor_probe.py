@@ -40,6 +40,8 @@ PROJECT = os.path.join(REPO, "dotnet", "PowerArmorProbe")
 PLUGIN = "FO4SFPowerArmorProbe.esm"
 SCRIPT = "FO4SF_PAProbeQuest"
 PSC = os.path.join(HERE, SCRIPT + ".psc")
+HAND_SCRIPT = "FO4SF_PAHandQuest"        # the by-hand mode (FAL-273): same plugin, its own quest and script
+HAND_PSC = os.path.join(HERE, HAND_SCRIPT + ".psc")
 DEFAULT_CONTROL = "NPCChairTech03_Free_270"
 STARFIELD = r"D:\SteamLibrary\steamapps\common\Starfield"
 LOG = os.path.join(os.path.expanduser("~"), "Documents", "My Games", "Starfield", "Logs", "Script", "User", "FO4SFPAProbe.0.log")
@@ -48,7 +50,7 @@ REQUIRED = {
     "Actor": ["SwitchToPowerArmor", "SetRace", "GetRace", "GetPositionX", "GetPositionY", "GetPositionZ", "GetDistance",
               "GetParentCell"],
     "Game": ["GetPlayer", "GetFormFromFile", "IsPluginInstalled"],
-    "Debug": ["OpenUserLog", "TraceUser"],
+    "Debug": ["OpenUserLog", "TraceUser", "Notification"],
     "Utility": ["GetCurrentRealTime"],
     "Quest": ["GetStageDone"],
     "ScriptObject": ["StartTimer"],
@@ -90,17 +92,19 @@ def read_sources(zip_path):
     return sources
 
 
-def precheck_sources(sources, text):
+def precheck_sources(sources, text, hand_text=""):
     """{"required": {"Base.Name": bool}, "optional": {"Base.Name": bool}, "missing": [required names not declared]}."""
     req = {f"{b}.{f}": declares(sources, b, f) for b, fs in REQUIRED.items() for f in fs}
-    opt = {n: declares(sources, *n.split(".")) for n in optional_names(text)}
+    opt = {n: declares(sources, *n.split(".")) for n in dict.fromkeys(optional_names(text) + optional_names(hand_text))}
     return {"required": req, "optional": opt, "missing": [k for k, ok in req.items() if not ok]}
 
 
 def precheck(a):
     with open(PSC, encoding="utf-8") as f:
         text = f.read()
-    r = precheck_sources(read_sources(a.content_resources), text)
+    with open(HAND_PSC, encoding="utf-8") as f:
+        hand_text = f.read()
+    r = precheck_sources(read_sources(a.content_resources), text, hand_text)
     for k, ok in r["required"].items():
         print(f"{'ok  ' if ok else 'MISSING'}  {k}")
     for k, ok in r["optional"].items():
@@ -113,15 +117,15 @@ def precheck(a):
     return 0 if not r["missing"] else 1
 
 
-def compile_text(compiler, text, src_dir, out_dir):
+def compile_text(compiler, text, src_dir, out_dir, script=SCRIPT):
     """Compile the script's text; (True, "") or (False, the compiler's first error line)."""
     with tempfile.TemporaryDirectory(prefix="fo4sf-pa-compile-") as work:
-        with open(os.path.join(work, SCRIPT + ".psc"), "w", encoding="utf-8", newline="\n") as f:
+        with open(os.path.join(work, script + ".psc"), "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
         os.makedirs(out_dir, exist_ok=True)
-        r = subprocess.run([compiler, SCRIPT + ".psc", "-f=Starfield_Papyrus_Flags.flg", f"-i={work};{src_dir}", f"-o={out_dir}"],
+        r = subprocess.run([compiler, script + ".psc", "-f=Starfield_Papyrus_Flags.flg", f"-i={work};{src_dir}", f"-o={out_dir}"],
                            cwd=work, capture_output=True, text=True)
-    ok = r.returncode == 0 and "Compilation succeeded" in r.stdout and os.path.exists(os.path.join(out_dir, SCRIPT + ".pex"))
+    ok = r.returncode == 0 and "Compilation succeeded" in r.stdout and os.path.exists(os.path.join(out_dir, script + ".pex"))
     if ok:
         return True, ""
     err = next((l.strip() for l in (r.stdout + r.stderr).splitlines() if "error" in l.lower()), "no compiler output")
@@ -191,32 +195,41 @@ def stage(a):
         f.write(wrote + check)
     with open(PSC, encoding="utf-8") as f:
         text = f.read()
+    with open(HAND_PSC, encoding="utf-8") as f:
+        hand_text = f.read()
     src = extract_sources(a.content_resources, work)
-    pre = precheck_sources(read_sources(a.content_resources), text)
+    pre = precheck_sources(read_sources(a.content_resources), text, hand_text)
     if pre["missing"]:
         sys.exit(f"the base scripts do not declare {pre['missing']}: do not stage (attempt kept in {out})")
-    # each optional reading on its own: declared, then compiles
-    fate, keep = {}, []
-    for name, declared in pre["optional"].items():
-        if not declared:
-            fate[name] = "not declared in the base scripts"
-            continue
-        ok, err = compile_text(a.compiler, enable(text, [name]), src, os.path.join(work, "try"))
-        fate[name] = "kept" if ok else f"declared but did not compile: {err}"
-        if ok:
-            keep.append(name)
     scripts = os.path.join(out, "Data", "Scripts")
-    final_text = enable(text, keep)
-    ok, err = compile_text(a.compiler, final_text, src, scripts)
-    if not ok:
-        sys.exit(f"the Papyrus compile of {SCRIPT}.psc with {keep or 'no optional reading'} failed: {err}")
-    with open(os.path.join(out, SCRIPT + ".psc"), "w", encoding="utf-8", newline="\n") as f:
-        f.write(final_text)
+
+    def build_script(name, source_text):
+        """Each optional reading of the script on its own (declared, then compiles), then the script with the kept ones:
+        the fate of every optional reading. Exits when the script does not compile."""
+        fate, keep = {}, []
+        for opt in optional_names(source_text):
+            if not pre["optional"][opt]:
+                fate[opt] = "not declared in the base scripts"
+                continue
+            ok, err = compile_text(a.compiler, enable(source_text, [opt]), src, os.path.join(work, "try"), name)
+            fate[opt] = "kept" if ok else f"declared but did not compile: {err}"
+            if ok:
+                keep.append(opt)
+        final_text = enable(source_text, keep)
+        ok, err = compile_text(a.compiler, final_text, src, scripts, name)
+        if not ok:
+            sys.exit(f"the Papyrus compile of {name}.psc with {keep or 'no optional reading'} failed: {err}")
+        with open(os.path.join(out, name + ".psc"), "w", encoding="utf-8", newline="\n") as f:
+            f.write(final_text)
+        return fate
+
+    fate = build_script(SCRIPT, text)
+    hand_fate = build_script(HAND_SCRIPT, hand_text)
     shutil.rmtree(work)
     if sha256(a.starfield) != before:
         sys.exit(f"Starfield.esm changed during the build, nothing published; attempt kept in {out}")
     plan = {"kind": "power-armor-probe", "version": 1, "plugins": [PLUGIN], "outputs": stage_files(out),
-            "inputs": {"Starfield.esm": {"sha256": before}}, "control": a.control, "optional": fate,
+            "inputs": {"Starfield.esm": {"sha256": before}}, "control": a.control, "optional": fate, "optional_hand": hand_fate,
             "log": "<My Games>/Starfield/Logs/Script/User/FO4SFPAProbe.0.log"}
     with open(os.path.join(out, "plan.json"), "w", encoding="utf-8") as f:
         json.dump(plan, f, indent=1)
@@ -224,9 +237,10 @@ def stage(a):
         f.write(f"""Power armor probe ({datetime.date.today().isoformat()}). docs/research/power-armor-probe.md
 {PLUGIN} (sha256 {plan['outputs'][PLUGIN]}): CELL FO4SF_PAProbeCell (coc FO4SF_PAProbeCell), FURN FO4SF_PAProbeSuit (a copy of
 {a.control} with FurnitureTypePowerArmor added), the vanilla {a.control} beside it as the control, RACE FO4SF_PARace
-(a copy of HumanRace), QUST FO4SF_PAProbeQuest (start game enabled, stages 10 / 20 / 30). Master Starfield.esm only; adds
+(a copy of HumanRace), QUST FO4SF_PAProbeQuest (start game enabled, stages 10 / 20 / 30), QUST FO4SF_PAHandQuest (by hand:
+no console; moves you into the room and shows on screen what the engine answered). Master Starfield.esm only; adds
 records, overrides none. Checked against Starfield.esm {before}. Re-stage after a game update.
-Optional readings: {', '.join(f'{k}: {v}' for k, v in fate.items()) or 'none'}.
+Optional readings: {', '.join(f'{k}: {v}' for k, v in fate.items()) or 'none'}; by hand: {', '.join(f'{k}: {v}' for k, v in hand_fate.items()) or 'none'}.
 Install (the owner's word, game closed; loose scripts are not read, the installer packs them into a ba2):
   python scripts\\planet\\power_armor_probe_install.py install --dir <this folder> --starfield <game dir>
 Remove:  python scripts\\planet\\power_armor_probe_install.py uninstall --starfield <game dir>
@@ -234,7 +248,7 @@ Read:    python scripts\\planet\\make_power_armor_probe.py log
 Session card: docs/research/power-armor-probe.md. THROWAWAY STATE ONLY, NO SAVE (the race swap can break a save).
 """)
     os.replace(out, final)
-    print(f"staged {final}: {PLUGIN}, {SCRIPT}.pex, offline_check.txt, plan.json, README.txt; optional readings: {fate}")
+    print(f"staged {final}: {PLUGIN}, {SCRIPT}.pex, {HAND_SCRIPT}.pex, offline_check.txt, plan.json, README.txt; optional readings: {fate}")
     return 0
 
 
