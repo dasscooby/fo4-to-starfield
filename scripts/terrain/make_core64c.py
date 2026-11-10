@@ -140,6 +140,9 @@ def select_bands(paths):
 
 
 ITEM_TYPES = ("MiscItem", "Ingestible", "Weapon")     # make_cluster.ITEM_TYPES: the references the core places as MISC
+# FAL-171: models that keep a dynamic body (and so a MoveableStatic outdoors). A FO4 Book is a loose item the interior
+# batch converts dynamic, so it does here too (owner may overrule: Book out of this tuple makes it static outdoors again).
+DYNAMIC_BODY_TYPES = ITEM_TYPES + ("Book",)
 
 
 def convert_list(kept):
@@ -157,7 +160,7 @@ def convert_list(kept):
         if r.get("teleports"):
             e.update(type="Door", teleport_destination=True)
         items.setdefault(exterior.source_key(r["model"]), False)
-        if r["type"] in ITEM_TYPES:
+        if r["type"] in DYNAMIC_BODY_TYPES:
             items[exterior.source_key(r["model"])] = True
     for k, e in by_model.items():
         if not items[k]:
@@ -2720,7 +2723,7 @@ def cmd_stage(a):
                   f"{e['destination']['id']:06X} (interior door {e['destination']['ref']} in CELL {e['destination']['cell']}); "
                   f"arrival marker at {e['arrival']['pos']} rot {e['arrival']['rot']} cell {e['arrival']['cell']}")
     objects = {"world": ov["world"], "edid_prefix": EDID_PREFIX,
-               "bases": [{k: b[k] for k in ("edid", "model", "door", "source", "collision") if k in b} for b in bases],
+               "bases": [{k: b[k] for k in ("edid", "model", "door", "source", "collision", "movable") if k in b} for b in bases],
                "refs": [{k: p[k] for k in ("src", "base", "cell", "pos", "rot", "scale", "disabled", "open_by_default")
                          if k in p} for p in placed]}
     for k, _sig in ALL_PROMOTED:
@@ -3129,8 +3132,8 @@ def cmd_check(a):
     own = len(new["masters"]) << 24
     recs = new["records"]
     animated = animated_door_bases(objects, ids)
-    stats = [r for r in recs if r["sig"] in ("STAT", "DOOR") and r["fid"] & 0xFFFFFF not in animated]
-    need(len(stats) == len(objects["bases"]), f"{len(stats):,} STAT/DOOR = {len(objects['bases']):,} bases")
+    stats = [r for r in recs if r["sig"] in ("STAT", "MSTT", "DOOR") and r["fid"] & 0xFFFFFF not in animated]
+    need(len(stats) == len(objects["bases"]), f"{len(stats):,} STAT/MSTT/DOOR = {len(objects['bases']):,} bases")
     if animated:
         # step C: the animated doors' DOORs (judged in promotion_checks) carry the rigged model of FO4Port's archive,
         # so they are neither bases of objects.json nor in this build's Data\meshes
@@ -3147,7 +3150,7 @@ def cmd_check(a):
         light_ids = {int(v["ref"], 16) for v in (ids.get("lights") or {}).values()}    # appended after the NAVMs
         light_ids |= appended_ids(ids)                                                   # (the doors' markers and ACTIs too)
         light_ids |= map_marker_ids(ids)                                                 # (and the map markers)
-        last_obj = max((r["fid"] & 0xFFFFFF for r in recs if r["sig"] in ("STAT", "DOOR", "REFR", "CONT", "MISC", "ACTI",
+        last_obj = max((r["fid"] & 0xFFFFFF for r in recs if r["sig"] in ("STAT", "MSTT", "DOOR", "REFR", "CONT", "MISC", "ACTI",
                                                                           "TERM", "TMLM")
                         and r["fid"] & 0xFFFFFF not in light_ids), default=0)
         need(navms and min(r["fid"] & 0xFFFFFF for r in navms) > last_obj, f"every NAVM FormID after the last object (0x{last_obj:06X})")
