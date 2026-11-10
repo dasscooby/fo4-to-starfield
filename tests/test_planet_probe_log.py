@@ -151,6 +151,64 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(probe_log.runs(["FO4SFPP rt=1 arrive n=1"])[0][0]["event"], "arrive")
 
 
+def t7_lines(t1, t7, control=True, t7_found=True):
+    """log_lines() with T7 read at the second arrival: t1 / t7 True = with player (the played world), False = the base
+    world (left behind); control False makes MERGE left behind at the LC172 arrival."""
+    out = []
+    for x in log_lines():
+        out.append(x)
+        if " ref n=2 at=" in x and " tag=T1 " in x:
+            at = re.search(r"at=(\d+)", x).group(1)
+            body = ref(2, int(at), "T7", RUNTIME + 1 if t7 else PROBE_WORLD, 72.0 if not t7 else 0.0, 50.0, t7,
+                       found=t7_found, local=0x815)
+            out.append("[10/29/2026 - 03:00:00AM] FO4SFPP rt=" + re.search(r"rt=([\d.]+)", x).group(1) + " " + body)
+    if t1:
+        out = [re.sub(r"(tag=T1 .*)world=" + sid(PROBE_WORLD), lambda m: m.group(1) + "world=" + sid(RUNTIME + 1), x)
+               if " ref n=2 at=" in x and " tag=T1 " in x else x for x in out]
+        out = [x.replace("sameworld=false", "sameworld=true") if " ref n=2 " in x and " tag=T1 " in x else x for x in out]
+    if not control:
+        out = [x.replace("sameworld=true", "sameworld=false") if " ref n=1 " in x and " tag=MERGE " in x else x for x in out]
+    return out
+
+
+class T7Tests(unittest.TestCase):
+    def result(self, **kw):
+        s = probe_log.summarize(t7_lines(**kw), PLAN)
+        a1, a2 = s["arrivals"]
+        self.assertIsNone(a1["t7"])                                         # only our planet's arrival is judged
+        return a2["t7"], a2["refs"]
+
+    def test_pass_fail_confounded_words(self):
+        self.assertEqual(self.result(t1=False, t7=True)[0], "PASS")
+        self.assertEqual(self.result(t1=False, t7=False)[0], "FAIL")           # left behind
+        self.assertEqual(self.result(t1=False, t7=False, t7_found=False)[0], "FAIL")   # not loaded
+        self.assertEqual(self.result(t1=True, t7=True)[0], "confounded")
+        self.assertEqual(self.result(t1=True, t7=False)[0], "FAIL")
+
+    def test_control_failure_comes_first_and_t7_is_read_as_a_tag(self):
+        res, refs = self.result(t1=False, t7=True, control=False)
+        self.assertEqual(res, "control failed")
+        self.assertEqual(refs["T7"]["verdict"], "with player")
+        self.assertEqual(self.result(t1=False, t7=True)[1]["T7"]["local_id"], 0x815)
+
+    def test_no_t7_reading_gives_none_and_the_table_lists_it(self):
+        s = probe_log.summarize(log_lines(), PLAN)
+        self.assertIsNone(s["arrivals"][1]["t7"])
+        s = probe_log.summarize(t7_lines(t1=False, t7=True), PLAN)
+        self.assertIn("T7", [row.split()[0] for row in probe_log.verdict_table(s)[1:]])
+
+    def test_unknown_when_t1_is_not_read(self):
+        self.assertEqual(probe_log.t7_result({"T7": {"verdict": "with player"}}, True), "unknown")
+        self.assertEqual(probe_log.t7_result({"T7": {"verdict": "with player"}, "T1": {"verdict": "left behind"}}, True), "PASS")
+
+    def test_no_pass_when_the_lc172_control_was_never_read(self):
+        both = {"T7": {"verdict": "with player"}, "T1": {"verdict": "left behind"}}
+        self.assertEqual(probe_log.t7_result(both), "control not read")
+        lines = [x for x in t7_lines(t1=False, t7=True) if " tag=MERGE " not in x and " tag=LC172COC " not in x]
+        s = probe_log.summarize(lines, PLAN)
+        self.assertEqual(s["arrivals"][1]["t7"], "control not read")
+
+
 class SummaryTests(unittest.TestCase):
     def test_verdicts_offsets_and_kinds(self):
         s = probe_log.summarize(log_lines(), PLAN)
