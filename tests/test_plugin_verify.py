@@ -100,6 +100,44 @@ class RecordTests(Base):
         self.assertTrue(any("QUST" in w and "NEXT" in w for w in r.warnings), r.warnings)
 
 
+def avif(fid):
+    return esm.Record(b"AVIF", fid, [(b"EDID", z("T_Av"))])
+
+
+def mgef_with(fid, words):
+    data = bytearray(136)
+    for i, v in words.items():
+        struct.pack_into("<I", data, 4 * i, v)
+    return esm.Record(b"MGEF", fid, [(b"EDID", z("T_Mg")), (b"DATA", bytes(data)), (b"DNAM", b"\0" * 4)])
+
+
+class MgefValueTests(Base):
+    def test_own_actor_value_in_word_0_and_none_in_word_14_is_the_cast_crash(self):
+        r = self.problems("A.esp", ["Starfield.esm"], [avif(0x01000800), mgef_with(0x01000801, {0: 0x01000800})])
+        self.assertTrue(any("crashed the game on Cast" in t for t in r.problems), r.problems)
+
+    def test_actor_value_in_word_14_is_clean(self):
+        r = self.problems("A.esp", ["Starfield.esm"], [avif(0x01000800), mgef_with(0x01000801, {14: 0x01000800})])
+        self.assertEqual(r.problems, [])
+        v = self.problems("B.esp", ["Starfield.esm"], [mgef_with(0x01000801, {14: 0x00000123, 16: 0x00000124})])
+        self.assertEqual(v.problems, [])                  # a vanilla actor value: not resolvable offline, not refused
+
+    def test_own_form_id_that_is_not_an_avif(self):
+        r = self.problems("A.esp", ["Starfield.esm"], [mgef(0x01000800), mgef_with(0x01000801, {14: 0x01000800, 16: 0x01000899})])
+        text = "\n".join(r.problems)
+        self.assertIn("word 14 (actor value) 01000800 is a MGEF record, not an AVIF", text)
+        self.assertIn("word 16 (resist value) 01000899 is not a record of this plugin", text)
+
+    def test_short_data_is_a_warning(self):
+        r = self.problems("A.esp", ["Starfield.esm"], [mgef(0x01000800)])
+        self.assertEqual(r.problems, [])
+        self.assertTrue(any("DATA is 8 bytes" in w for w in r.warnings), r.warnings)
+
+    def test_the_unknown_master_message_names_the_flag(self):
+        r = self.problems("A.esp", ["Starfield.esm", "FO4TerrainCore.esm"], [mgef(0x02000800)])
+        self.assertTrue(any("--known FO4TerrainCore.esm" in t for t in r.problems), r.problems)
+
+
 class MasterTests(Base):
     def test_master_rules(self):
         cases = {
