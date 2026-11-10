@@ -1,8 +1,8 @@
 """FO4SFPipboyMenu's stage (c), the data channel (FAL-216), as text: the PR #704 plugin keeps every check and refusal
-line of stages (a) and (b) and their 16 ids, stage (c) checks its 13 more ids (and only stage (c) does), the Scaleform
-Value functions against SFSE's own addresses, the RTTI ids by name, and every object before it is used; the instance
-names the plugin looks for are the ones make_probe_swf.py --channel writes; the ini, README and session card agree.
-No compiler here: the PC build is the compile check."""
+line of stages (a) and (b) and their 16 ids, stage (c) checks its 16 more ids (13 for the channel, 3 for FAL-246's click
+to quest; only stage (c) does), the Scaleform Value functions against SFSE's own addresses, the RTTI ids by name, and
+every object before it is used; the instance names the plugin looks for are the ones make_probe_swf.py --channel
+writes; the ini, README and session card agree. No compiler here: the PC build is the compile check."""
 import os
 import re
 import sys
@@ -12,7 +12,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "sfse" / "FO4SFPipboyMenu"
 sys.path.insert(0, os.path.join(ROOT, "scripts", "ui"))
+sys.path.insert(0, os.path.join(ROOT, "src"))
 import make_probe_swf as swf  # noqa: E402
+from fo4sf.combined import probes  # noqa: E402
 
 IDS_B = [("UI.Singleton", 937580), ("UI.RegisterMenu", 130463), ("UI.IsMenuOpen", 130475),
          ("UIMessageQueue.Singleton", 937897), ("UIMessageQueue.AddMessage", 130659),
@@ -25,6 +27,7 @@ IDS_C = [("Main.Singleton", 883591), ("PlayerCharacter.Singleton", 922868), ("Co
          ("GFx.MovieImpl.RTTI", 841612), ("GFx.AS3.MovieRoot.RTTI", 842209), ("GFx.Value.ObjectAddRef", 169745),
          ("GFx.Value.ObjectRelease", 169746), ("GFx.Value.GetMember", 169748), ("GFx.Value.SetMember", 169749),
          ("GFx.Value.Invoke", 169750)]
+IDS_VM = [("GameVM.Singleton", 937585), ("GameVM.RTTI", 865426), ("BSScript.Internal.VirtualMachine.RTTI", 870795)]
 SFSE_RVAS = [("kValueAddRef", "0x3352400"), ("kValueRelease", "0x33524A0"), ("kValueGetMember", "0x33528A0"),
              ("kValueSetMember", "0x3352C90"), ("kValueInvoke", "0x33530B0")]
 
@@ -44,7 +47,7 @@ class ChannelPluginTests(unittest.TestCase):
 
     def test_the_ids_in_order_and_stages_a_and_b_read_only_theirs(self):
         found = re.findall(r'\{ "([A-Za-z0-9_.]+)", (\d+), "', self.main)
-        self.assertEqual([(n, int(i)) for n, i in found], IDS_B + IDS_C)
+        self.assertEqual([(n, int(i)) for n, i in found], IDS_B + IDS_C + IDS_VM)
         enum = self.main[self.main.index("kUISingleton,"):self.main.index("kIdCount\n")]
         self.assertIn("kIsMovieLoaded,\n\t\tkIdCountB,", enum)
         self.assertIn("kMainSingleton = kIdCountB,", enum)
@@ -62,8 +65,10 @@ class ChannelPluginTests(unittest.TestCase):
             self.assertIn(f"`{rva}`", self.readme)
         for constant, tail in (("kMainRtti", "Main@@"), ("kPlayerRtti", "PlayerCharacter@@"),
                                ("kControlMapRtti", "ControlMap@@"), ("kMovieImplRtti", "MovieImpl@GFx@Scaleform@@"),
-                               ("kMovieRootRtti", "MovieRoot@AS3@GFx@Scaleform@@")):
+                               ("kMovieRootRtti", "MovieRoot@AS3@GFx@Scaleform@@"), ("kGameVmRtti", "GameVM@@"),
+                               ("kVmRtti", "VirtualMachine@Internal@BSScript@@")):
             self.assertIn(f'{{ {constant}, "{tail}"sv }}', self.main)
+        self.assertIn("std::array<std::pair<std::size_t, std::string_view>, 7> kRttiNames", self.main)
         check = function(self.main, "bool CheckChannelIds()")
         self.assertIn("if (g_rva[id] != rva) {", check)
         self.assertIn("if (!NameIs(name, tail)) {", check)
@@ -139,8 +144,87 @@ class ChannelPluginTests(unittest.TestCase):
         self.assertIn("-replace '^Stage=0','Stage=3'", self.card)
         self.assertIn("-replace '^bEnabled=0','bEnabled=1'", self.card)
         self.assertLess(self.card.index('Copy-Item "$logs\\focc.0.log" $out'),
-                        self.card.index("Then relaunch through the loader"))
-        self.assertIn(f"{len(IDS_B) + len(IDS_C)} `step=id` lines", self.card)
+                        self.card.index("Relaunch through the loader."))
+        self.assertIn(f"{len(IDS_B) + len(IDS_C) + len(IDS_VM)} `step=id` lines", self.card)
+        self.assertIn("\nClickCall=\n", self.ini)
+        self.assertIn("click_call=none", self.card)
+        self.assertIn("click_call=none", self.readme)
+
+
+class ClickToQuestTests(unittest.TestCase):
+    """FAL-246, B0-3: a click in our menu reaches the probe quest's script through the VM's DispatchStaticCall, on the
+    main thread, with no arguments (libxse 9d090c4 states ScrapHeap::Allocate as id 0) and only after the VM is checked."""
+    main = ChannelPluginTests.main
+    ini = ChannelPluginTests.ini
+    readme = ChannelPluginTests.readme
+    card = ChannelPluginTests.card
+    b0 = (ROOT / "scripts" / "combined_probes" / "FOCC_B0.psc").read_text(encoding="utf-8")
+
+    def test_the_vm_is_checked_before_the_call(self):
+        self.assertIn("constexpr std::size_t   kGameVmImplAt = 0xE0;", self.main)
+        self.assertIn("constexpr std::size_t   kDispatchStaticCallSlot = 0x2F;", self.main)
+        vm = function(self.main, "RE::BSScript::IVirtualMachine* ScriptVm()")
+        self.assertLess(vm.index('CheckSingleton("GameVM", kGameVmSingleton, kGameVmRtti, g_gameVmOk)'),
+                        vm.index("Peek(Singleton(kGameVmSingleton) + kGameVmImplAt, vm)"))
+        self.assertIn("type.descriptor != Address(kVmRtti) || type.offset != 0", vm)
+        self.assertIn("!InImage(vt, (kDispatchStaticCallSlot + 1) * 8)", vm)
+        self.assertIn("for (std::size_t i = 0; i <= kDispatchStaticCallSlot; ++i) {", vm)
+        self.assertEqual(vm.count("g_vmOff = true;"), 2)
+        self.assertLess(vm.index("g_checkedVm = vm;"), vm.index("return reinterpret_cast<RE::BSScript::IVirtualMachine*>(vm);"))
+        dispatch = function(self.main, "void DispatchClick(")
+        self.assertLess(dispatch.index("ScriptVm()"), dispatch.index("DispatchStaticCall("))
+        self.assertIn("if (!vm) {", dispatch)
+
+    def test_no_arguments_no_callback_main_thread(self):
+        dispatch = function(self.main, "void DispatchClick(")
+        self.assertIn("const auto noArguments = [](RE::BSScrapArray<RE::BSScript::Variable>&) { return true; };",
+                      dispatch)
+        self.assertNotIn("resize", dispatch)
+        self.assertIn("const RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> noCallback{};", dispatch)
+        self.assertIn("vm->DispatchStaticCall(script, function, noArguments, noCallback, 0)", dispatch)
+        self.assertIn('"step=dispatch n={} call={}.{} queued={}"', dispatch)
+        click = self.main[self.main.index("class ClickHandler final"):self.main.index("ClickHandler g_clickHandler;")]
+        self.assertIn("if (!g_clickScript.empty()) {", click)
+        self.assertIn("g_task->AddTask([n]() { DispatchClick(n); });", click)
+        self.assertIn("REL::ID{ 0 }", self.readme)
+
+    def test_the_ini_key_is_checked_at_load(self):
+        parse = function(self.main, "bool ParseClickCall(")
+        self.assertIn("a_name.size() > kMaxName", parse)
+        self.assertIn("a_call.find('.')", parse)
+        load = self.main[self.main.index("SFSE_PLUGIN_LOAD("):]
+        self.assertIn('clickCall = ReadText(ini, L"ClickCall");', load)
+        self.assertLess(load.index('Refuse("ini", std::format("click_call='), load.index("CheckEverything(dir)"))
+        self.assertIn("refuse step=ini click_call=", self.readme)
+
+    def test_the_script_and_the_card(self):
+        self.assertIn("Function Click() global", self.b0)
+        click = self.b0[self.b0.index("Function Click() global"):]
+        self.assertIn('FOCC_ProbeQuest q = FOCC_Probe.Q("b0")', click)
+        self.assertIn('q.Trace("b0 click")', click)
+        # the session turns the call on only in the relaunch, after the first launch's logs are collected
+        on = self.card.index("-replace '^ClickCall=.*','ClickCall=FOCC_B0.Click'")
+        self.assertLess(self.card.index('Copy-Item "$logs\\focc.0.log" $out'), on)
+        self.assertIn("ClickCall=` (empty: no click reaches a script in the\nfirst launch)", self.card)
+        self.assertIn("### The three menu answers (item 12 of the stage additions, FAL-246)", self.card)
+        for question in ("Does the game pause?", "Who has the keys?", "Does time slow?"):
+            self.assertIn(question, self.card)
+        self.assertIn("GetGlobalValue GameDaysPassed", self.card)
+
+    def test_the_b0_judge_ignores_click_lines(self):
+        def judge(lines):
+            return probes.check_b0(probes.Collection(logs={"focc.0.log": ["FOCC init variant=default"] + lines}))
+
+        def ping(sent, rt):
+            return [f"FOCC rt={rt} b0 ping sent={sent}", f"FOCC rt={rt + 0.1} b0 pong sent={sent} got={sent + 1}"]
+
+        gmst = "FOCC rt=5.0 b0 gmst name=iFOCC_Pong value=7"
+        v = judge([gmst, "FOCC rt=6.0 b0 click"] + ping(41, 10.0) + ["FOCC rt=30.0 b0 click"] + ping(43, 60.0) +
+                  ["FOCC rt=61.0 b0 click"])
+        self.assertEqual(v.verdict, probes.PASS, v.reasons)
+        self.assertEqual([(r["sent"], r["native_ok"]) for r in v.extra["pings"]], [(41, True), (43, True)])
+        self.assertEqual(judge(["FOCC rt=6.0 b0 click"]).verdict, probes.INCONCLUSIVE)
+        self.assertIn("the judge `probes b0` ignores the `b0 click` lines", " ".join(self.card.split()))
 
 
 if __name__ == "__main__":
