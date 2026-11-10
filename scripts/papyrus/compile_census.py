@@ -50,9 +50,11 @@ FRAGMENT_PREFIXES = ("qf_", "pf_", "tif_", "sf_", "term_", "scene_", "pack_")
 NATIVE = re.compile(r"^\s*scriptname\s+\S+(?:\s+\w+)*?\s+native\b", re.I | re.M)
 EXTENDS = re.compile(r"^\s*scriptname\s+\S+\s+extends\s+(?P<base>[\w:]+)", re.I | re.M)
 BUCKETS = ("unknown_function", "unknown_type", "unknown_property_or_variable",
-           "wrong_argument_count", "syntax", "other")
+           "wrong_argument_count", "signature_mismatch", "self_only_function", "type_mismatch", "follow_on",
+           "syntax", "other")
 # Buckets whose errors name a missing thing; the top-names list draws from these.
-NAMED_BUCKETS = ("unknown_function", "unknown_type", "unknown_property_or_variable")
+NAMED_BUCKETS = ("unknown_function", "unknown_type", "unknown_property_or_variable", "signature_mismatch",
+                 "self_only_function")
 DEFAULT_FLAGS = "Starfield_Papyrus_Flags.flg"
 MAX_MESSAGE = 200
 TOP_NAMES = 20
@@ -60,13 +62,20 @@ TOP_NAMES = 20
 # file(line,col): message
 LOCATED = re.compile(r"^(?P<file>.*?)\((?P<line>\d+),(?P<col>\d+)\):\s*(?P<msg>.*\S)\s*$")
 # The compiler's own trailer lines are not errors: they restate failures already counted.
-SUMMARY = re.compile(r"(?:compilation (?:succeeded|failed)|batch compile\b|no output generated|"
+SUMMARY = re.compile(r"(?:compilation (?:succeeded|failed)|batch compile\b|no output generated|failed on\b|"
                      r"starting \d+ compile threads)", re.I)
 SUCCESS = "Compilation succeeded"
 UNLOCATED = re.compile(r"\b(error|failed)\b", re.I)
 
 # Checked in order; the first match wins. Name group is optional.
 RULES = (
+    # PC run of cb2c7539: the largest real group of the old "other" bucket. A changed event or function signature:
+    # "the parameter types of function OnDeath in the empty state on script X do not match the original script Y".
+    ("signature_mismatch", re.compile(r"the parameter types of function\s+'?(?P<name>\w+)'?.*?do not match the original", re.I)),
+    ("self_only_function", re.compile(r"cannot access self-only function\s+'?(?P<name>\w+)'?", re.I)),
+    ("type_mismatch", re.compile(r"type mismatch while assigning", re.I)),
+    # a follow-on of an unknown function: the member call is rejected because its target never resolved
+    ("follow_on", re.compile(r"cannot call the member function\s+'?(?P<name>\w+)'?\s+alone or on a type", re.I)),
     ("unknown_type", re.compile(r"unknown type\s+'?(?P<name>[\w:]+)'?", re.I)),
     ("unknown_type", re.compile(r"(?P<name>[\w:]+)\s+is not a known (?:user-defined )?(?:type|script)", re.I)),
     ("unknown_type", re.compile(r"(?:extends unknown script|unable to locate script|could not (?:find|locate) script|"
@@ -305,17 +314,19 @@ def _summarize(results):
     total = len(results)
     compiled = sum(1 for r in results if r["compiled"])
     buckets = {b: {"errors": 0, "scripts": 0} for b in BUCKETS}
-    names = Counter()
+    names, shown = Counter(), {}
     for r in results:
         seen = set()
         for e in r["errors"]:
             buckets[e["bucket"]]["errors"] += 1
             seen.add(e["bucket"])
             if e["bucket"] in NAMED_BUCKETS and e["name"]:
-                names[(e["bucket"], e["name"])] += 1
+                key = (e["bucket"], e["name"].casefold())          # SetAvailableToBeCompanion == SetAvailabletoBeCompanion
+                names[key] += 1
+                shown.setdefault(key, e["name"])
         for b in seen:
             buckets[b]["scripts"] += 1
-    top = [{"bucket": b, "name": n, "count": c}
+    top = [{"bucket": b, "name": shown[(b, n)], "count": c}
            for (b, n), c in sorted(names.items(), key=lambda kv: (-kv[1], kv[0]))[:TOP_NAMES]]
     return {"total": total, "compiled": compiled,
             "compile_share": round(compiled / total, 4) if total else 0.0,

@@ -39,6 +39,13 @@ class Classify(unittest.TestCase):
             "no viable alternative at input 'x'": ("syntax", None),
             "mismatched input 'y' expecting NEWLINE": ("syntax", None),
             "something nobody planned for": ("other", None),
+            "the parameter types of function OnDeath in the empty state on script Foo do not match the original "
+            "script actor": ("signature_mismatch", "OnDeath"),
+            "Cannot access self-only function GotoState declared in scriptobject": ("self_only_function", "GotoState"),
+            "type mismatch while assigning to a objectreference[] (cast missing or types unrelated)":
+                ("type_mismatch", None),
+            "cannot call the member function GetFoo alone or on a type, must call it on a variable":
+                ("follow_on", "GetFoo"),
         }
         for msg, want in cases.items():
             self.assertEqual(cc.classify(msg), want, msg)
@@ -65,6 +72,23 @@ class Parse(unittest.TestCase):
 
     def test_clean_output_has_no_errors(self):
         self.assertEqual(cc.parse_output("Starting 1 compile threads\nBatch compile of 1 files finished. 1 succeeded, 0 failed.\n"), [])
+
+
+class PcRunPatterns(unittest.TestCase):
+    def test_failed_on_is_a_trailer_not_an_error(self):
+        text = ("Fragments\\Quests\\QF_X.psc(3,1): Foo is not a function or does not exist\n"
+                "Failed on Fragments:Quests:QF_X\n")
+        self.assertEqual([e["bucket"] for e in cc.parse_output(text)], ["unknown_function"])
+
+    def test_names_are_counted_with_case_folded(self):
+        def res(name):
+            return {"script": name + ".psc", "compiled": False, "kind": "logic", "errors": [
+                {"bucket": "unknown_function", "name": name, "line": 1, "col": 1, "message": "m"}]}
+        census = cc.summarize([res("SetAvailableToBeCompanion"), res("SetAvailabletoBeCompanion"), res("Other")])
+        top = census["top_missing_names"]
+        self.assertEqual(top[0], {"bucket": "unknown_function", "name": "SetAvailableToBeCompanion", "count": 2})
+        self.assertEqual(len(top), 2)
+        self.assertEqual(census["buckets"]["unknown_function"], {"errors": 3, "scripts": 3})
 
 
 class Sampling(unittest.TestCase):
