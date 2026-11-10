@@ -143,6 +143,19 @@ print("Compilation succeeded.")
 """
 
 
+def fake_compiler(root):
+    """A runnable stand-in for PapyrusCompiler.exe: a script under sys.executable, behind a .cmd on Windows (a shebang
+    file is not an executable there) and executable as it is elsewhere."""
+    script = Path(root) / "fakec.py"
+    script.write_text(FAKE_COMPILER.format(python=sys.executable), encoding="utf-8")
+    if os.name != "nt":
+        script.chmod(0o755)
+        return script
+    cmd = Path(root) / "fakec.cmd"
+    cmd.write_text(f'@"{sys.executable}" "{script}" %*\r\n', encoding="utf-8")
+    return cmd
+
+
 class StageTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -245,9 +258,7 @@ class StageTests(unittest.TestCase):
     def test_stage_publishes_a_plan_with_the_optional_readings_fate(self):
         z = self.root / "cr.zip"
         fake_sources(z)
-        compiler = self.root / "fakec"
-        compiler.write_text(FAKE_COMPILER.format(python=sys.executable))
-        compiler.chmod(0o755)
+        compiler = fake_compiler(self.root)
         final = self.root / "stage"
         old_path = os.environ.get("PATH", "")
         os.environ["PATH"] = str(Path(self.dotnet).parent) + os.pathsep + old_path
