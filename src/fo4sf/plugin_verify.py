@@ -66,6 +66,12 @@ REF_FIELDS = (
     (("CELL",), "LTMP"),
     (("LCTN",), "PNAM"),
 )
+# MGEF DATA, 136 bytes read as 32-bit words (PC measurement of the real Starfield.esm, FAL-213/FAL-245: 853 vanilla
+# MGEFs): word 0 the associated item, word 14 (offset 0x38) the effect's actor value (321 of 853 carry an AVIF form id
+# there), word 16 (0x40) the resist value (72). The FAL-213 kit had its own AVIF in word 0 and zero in word 14, and
+# the game crashed on Cast. What the rule can prove offline is the shape: an own AVIF in word 0 with nothing in
+# word 14, and an own form id in word 14 or 16 that is not an AVIF in this plugin.
+MGEF_DATA_SIZE, MGEF_ASSOC, MGEF_ACTOR_VALUE, MGEF_RESIST = 136, 0, 14, 16
 GROUP_PERSISTENT, GROUP_TEMPORARY = 8, 9
 GROUP_WORLD_CHILDREN, GROUP_CELL_CHILDREN = 1, 6
 
@@ -119,7 +125,8 @@ def _masters(rep, plugin, load_order, known, game):
         if f in game or f in known or (order and f in order):
             pass
         else:
-            rep.bad(f"master {m} is not a game master, not in the kit and not given as known")
+            rep.bad(f"master {m} is not a game master, not in the kit and not given as known "
+                    f"(if it is installed with the kit, pass --known {m})")
         if order and me in order and f in order and order.index(f) > order.index(me):
             rep.bad(f"master {m} loads after this plugin in the load order (masters must come first)")
     # the order of the master list itself: a master the kit loads later than another must not be listed before it
@@ -143,6 +150,26 @@ def _check_ref(rep, rec, sub, data, n_masters, own_ids, seen_dangling):
     elif idx == n_masters and ref not in own_ids and ref not in seen_dangling:
         seen_dangling.add(ref)
         rep.bad(f"{rec.sig.decode()} {rec.formid:08X}: {sub} {ref:08X} names a record of this plugin that is not in it")
+
+
+def _mgef_value_rules(rep, rec, n_masters, sig_of):
+    data = rec.get(b"DATA")
+    if data is None or len(data) != MGEF_DATA_SIZE:
+        if data is not None:
+            rep.warn(f"MGEF {rec.formid:08X} {rec.edid}: DATA is {len(data)} bytes, vanilla MGEFs have "
+                     f"{MGEF_DATA_SIZE}")
+        return
+    word = lambda i: struct.unpack_from("<I", data, 4 * i)[0]            # noqa: E731
+    own = lambda v: v != 0 and v >> 24 == n_masters                       # noqa: E731
+    where = f"MGEF {rec.formid:08X} {rec.edid}"
+    if own(word(MGEF_ASSOC)) and sig_of.get(word(MGEF_ASSOC)) == "AVIF" and word(MGEF_ACTOR_VALUE) == 0:
+        rep.bad(f"{where}: its own actor value {word(MGEF_ASSOC):08X} is in DATA word 0 (associated item) and word 14 "
+                "(the effect's actor value, offset 0x38) is zero: the shape that crashed the game on Cast (FAL-213)")
+    for i, name in ((MGEF_ACTOR_VALUE, "actor value"), (MGEF_RESIST, "resist value")):
+        v = word(i)
+        if own(v) and sig_of.get(v) != "AVIF":
+            rep.bad(f"{where}: DATA word {i} ({name}) {v:08X} is "
+                    f"{'a ' + sig_of[v] + ' record' if v in sig_of else 'not a record of this plugin'}, not an AVIF")
 
 
 def verify(path, load_order=None, known=(), game=(STARFIELD,), deep=True):
@@ -192,6 +219,7 @@ def verify(path, load_order=None, known=(), game=(STARFIELD,), deep=True):
         for fid in sorted(dup):
             rep.bad(f"own form id {fid:08X} used by two records")
         dangling = set()
+        sig_of = {r.formid: r.sig.decode("latin-1") for _, r in recs}
         for it, rec in recs:
             sig = rec.sig.decode("latin-1")
             idx, local = rec.formid >> 24, rec.formid & 0xFFFFFF
@@ -211,6 +239,8 @@ def verify(path, load_order=None, known=(), game=(STARFIELD,), deep=True):
             if miss:
                 rep.warn(f"{sig} {rec.formid:08X} {rec.edid or ''}: lacks {', '.join(miss)} (on every sampled "
                          f"vanilla {sig}; not proven needed)")
+            if sig == "MGEF" and not overrides:
+                _mgef_value_rules(rep, rec, n_masters, sig_of)
             for sigs, sub in REF_FIELDS:
                 if sig in sigs:
                     for d in rec.all(sub):

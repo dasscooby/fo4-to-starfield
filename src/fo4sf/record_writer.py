@@ -86,7 +86,7 @@ def dump_records(path, classes=CLASSES, per_class=40, edids=(), keep=3):
     """Real records of a plugin as a dict. Per class: the first `per_class` records feed the layout; `keep` of them
     (plus every record whose editor id is in `edids`) are written out whole, subrecord by subrecord, in hex."""
     want = {e.casefold() for e in edids}
-    out = {"plugin": path, "version": 1, "classes": {}}
+    out = {"plugin": os.path.basename(path), "version": 1, "classes": {}}
     found_any = set()
     with esm.Plugin(path) as plugin:
         out["masters"] = list(plugin.masters)

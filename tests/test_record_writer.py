@@ -54,6 +54,7 @@ class DumpTests(Base):
         self.assertIn(0, lay["ETYP"]["constant"])
         self.assertEqual([r["edid"] for r in d["classes"]["SPEL"]["records"]], ["Spell1", "Spell2", "Spell5"])
         self.assertTrue(d["localized"])
+        self.assertEqual(d["plugin"], "Starfield.esm")                 # the file name only: the dump travels
         self.assertIn("SPIT", rw.dump_text(d))
 
     def test_missing_edid_is_reported(self):
