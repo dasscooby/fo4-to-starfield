@@ -425,8 +425,9 @@ our GAMMA." New items continue the design's numbering (CC-60 to CC-62 are in the
   would take its progress from the real actor's position projected onto the straight line between the two anchors
   (an approximation: a multi-hop route and the navmesh path are not that line) and recompute the eta. The
   module changes neither WorldState nor the tick, sits outside the C++ parity path and becomes a later port step. The
-  in-game check is a proposed probe P11 (card to follow): create the actor at the simulated position inside 400 m,
-  hand over with the P9 Link driver, dissolve it beyond 500 m and re-materialize it from L2 with continuity.
+  in-game check is probe P11 ([card](spikes/combined-core-probes.md), not written or run): create the actor at the
+  simulated position inside 400 m, hand over with the P9 Link driver, dissolve it beyond 500 m and re-materialize it
+  from L2 with continuity.
 - **CC-64. Travel between areas without walking paths.** The converted worlds (L0) will be separate worldspaces or
   interiors, not one continuous map, so the core needs a travel layer between them: the player moves area to area,
   and the sim moves squads, caravans and news along the same links. Open: how the player travels (map, vertibird or
