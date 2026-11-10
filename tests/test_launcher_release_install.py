@@ -1,6 +1,9 @@
 """Synthetic release metadata publication, interruptions and ownership; no game."""
 import copy
 import json
+import importlib.util
+import contextlib
+import io
 import os
 from pathlib import Path
 import subprocess
@@ -49,6 +52,154 @@ class ReleaseInstallTests(unittest.TestCase):
     def snapshot(self):
         return {str(p): (p.read_bytes(), p.stat().st_mtime_ns)
                 for p in self.root.rglob("*") if p.is_file()}
+
+    def managed(self, call=None, **kwargs):
+        command = kwargs.pop("command", ["synthetic-installer", "--starfield", str(self.game)])
+        return ri.run(self.values, self.candidate, command, call=call or (lambda *a, **k: 0),
+                      running=kwargs.pop("running", lambda: False), say=lambda *_: None, **kwargs)
+
+    def test_managed_command_has_pending_pin_before_replacing_old_master(self):
+        self.publish(apply=True)
+        old = self.target.read_bytes()
+        new_bytes = b"new synthetic master for new release"
+        self.release["release_id"] = "B"
+        self.release["masters"][0].update(ri.pin(new_bytes))
+        self.candidate.write_bytes(ri.encode(self.release))
+        seen = []
+        def install(command, cwd, env):
+            self.assertFalse(json.loads(self.receipt.read_bytes())[ri.FIELD]["complete"])
+            self.assertEqual(self.target.read_bytes(), old)
+            self.assertIn("repeat install-release", sr.play_reason(self.values, self.game))
+            self.assertEqual(env["LOCALAPPDATA"], instance.local_dir(self.game))
+            seen.append(command)
+            (self.data / "FO4Port.esm").write_bytes(new_bytes)
+            return 0
+        self.assertEqual(self.managed(install), 0)
+        self.assertEqual(ri.installed(self.game), sr.declaration(self.release))
+        self.assertEqual(len(seen), 1)
+        self.assertEqual({k: json.loads(self.receipt.read_bytes())[k] for k in self.original}, self.original)
+
+    def test_managed_failure_or_exception_stays_pending_then_resumes(self):
+        for failure in (7, OSError("synthetic stop")):
+            self.receipt.write_bytes(ri.encode(self.original))
+            self.target.unlink(missing_ok=True)
+            def install(*args, **kwargs):
+                if isinstance(failure, Exception):
+                    raise failure
+                return failure
+            if isinstance(failure, Exception):
+                with self.assertRaisesRegex(OSError, "synthetic stop"):
+                    self.managed(install)
+            else:
+                self.assertEqual(self.managed(install), failure)
+            self.assertFalse(json.loads(self.receipt.read_bytes())[ri.FIELD]["complete"])
+            self.assertFalse(self.target.exists())
+            self.assertIn("repeat install-release", sr.play_reason(self.values, self.game))
+            self.assertEqual(self.managed(), 0)
+            self.assertEqual(ri.installed(self.game), sr.declaration(self.release))
+
+    def test_managed_target_refused_before_any_write_or_command(self):
+        before = self.snapshot()
+        call = mock.Mock(return_value=0)
+        for command in ([], ["x"], ["x", "--starfield", str(self.root)],
+                        ["x", "--starfield", str(self.game), "--starf", str(self.game)]):
+            with self.assertRaises(ValueError):
+                self.managed(call, command=command)
+        call.assert_not_called()
+        self.assertEqual(before, self.snapshot())
+
+    def test_managed_running_or_failed_query_refuses_before_writes(self):
+        before = self.snapshot()
+        call = mock.Mock(return_value=0)
+        for running in (lambda: True, mock.Mock(side_effect=ValueError("query unavailable"))):
+            with self.assertRaises(ValueError):
+                self.managed(call, running=running)
+        call.assert_not_called()
+        self.assertEqual(before, self.snapshot())
+
+    def test_managed_game_appearing_after_pending_never_runs_command(self):
+        call = mock.Mock(return_value=0)
+        with self.assertRaisesRegex(ValueError, "remains pending"):
+            self.managed(call, running=mock.Mock(side_effect=[False, False, True]))
+        call.assert_not_called()
+        self.assertFalse(json.loads(self.receipt.read_bytes())[ri.FIELD]["complete"])
+
+    def test_managed_omitted_declaration_refuses_legacy_runner(self):
+        self.publish(apply=True)
+        call = mock.Mock(return_value=0)
+        before = self.snapshot()
+        with self.assertRaisesRegex(ValueError, "needs --declaration"):
+            instance.run(str(self.game), ["x", "--starfield", str(self.game)], call=call)
+        call.assert_not_called()
+        self.assertEqual(before, self.snapshot())
+
+    def test_managed_changed_candidate_refuses_and_original_can_resume(self):
+        original = self.candidate.read_bytes()
+        def change(*args, **kwargs):
+            self.candidate.write_bytes(ri.encode(dict(self.release, release_id="unexpected")))
+            return 0
+        with self.assertRaisesRegex(ValueError, "input changed"):
+            self.managed(change)
+        self.assertFalse(json.loads(self.receipt.read_bytes())[ri.FIELD]["complete"])
+        self.assertFalse(self.target.exists())
+        with self.assertRaisesRegex(ValueError, "different release"):
+            self.managed()
+        self.candidate.write_bytes(original)
+        self.assertEqual(self.managed(), 0)
+
+    def test_managed_concurrent_receipt_edit_preserved(self):
+        changed = []
+        def change(*args, **kwargs):
+            rec = json.loads(self.receipt.read_bytes())
+            rec["other_writer"] = True
+            changed.append(ri.encode(rec))
+            self.receipt.write_bytes(changed[0])
+            return 0
+        with self.assertRaisesRegex(ValueError, "receipt changed"):
+            self.managed(change)
+        self.assertEqual(self.receipt.read_bytes(), changed[0])
+        self.assertFalse(self.target.exists())
+
+    def test_managed_incomplete_component_or_wrong_final_bytes_cannot_finalize(self):
+        def incomplete(*args, **kwargs):
+            (self.data / "FO4SFExp.install.json").write_text('{"complete":false}')
+            return 0
+        with self.assertRaisesRegex(ValueError, "Installation incomplete"):
+            self.managed(incomplete)
+        self.assertFalse(json.loads(self.receipt.read_bytes())[ri.FIELD]["complete"])
+        (self.data / "FO4SFExp.install.json").unlink()
+        def wrong(*args, **kwargs):
+            (self.data / "FO4Port.esm").write_bytes(b"wrong final master")
+            return 0
+        with self.assertRaisesRegex(ValueError, "installed bytes"):
+            self.managed(wrong)
+        self.assertFalse(json.loads(self.receipt.read_bytes())[ri.FIELD]["complete"])
+
+    def test_managed_my_games_confirmation_required_before_writes(self):
+        self.values["my_games"] = ""
+        before = self.snapshot()
+        call = mock.Mock(return_value=0)
+        with self.assertRaisesRegex(ValueError, "My Games"):
+            self.managed(call)
+        self.assertEqual(before, self.snapshot())
+        call.assert_not_called()
+
+    def test_managed_cli_routes_declaration_and_refuses_unconfirmed_target(self):
+        spec = importlib.util.spec_from_file_location("managed_launcher_cli", ROOT / "scripts/launcher.py")
+        cli = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cli)
+        command = ["python", "synthetic.py", "--starfield", str(self.game)]
+        argv = ["instance", "run", "--settings", str(self.settings_path),
+                "--declaration", str(self.candidate), "--", *command]
+        with mock.patch.object(ri, "run", return_value=0) as run:
+            self.assertEqual(cli.main(argv), 0)
+            self.assertEqual(run.call_args.args[:3], (self.values, str(self.candidate), command))
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(cli.main(argv[:-len(command)-1] + ["--at", str(self.root), "--", *command]), 2)
+            self.assertEqual(run.call_count, 1)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(cli.main(["instance", "plan", "--declaration", str(self.candidate)]), 2)
+            self.assertEqual(run.call_count, 1)
 
     def test_preview_is_read_only(self):
         before = self.snapshot()

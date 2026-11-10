@@ -152,3 +152,17 @@ Default off: until the setting `instance` is set, play, the window and every too
   the folder.
 - The player's own Starfield keeps its mods, Plugins.txt order and saves, apart from the shared INIs in section 1
   and a write in place into a linked Data or Tools file (step 1).
+
+
+## Managed release component commands (FAL-247 item 7, draft)
+
+An instance with an owned save-release declaration requires `instance run
+--settings <settings.json> --declaration <release.json> -- <installer command>`.
+The saved instance must match `--at` when supplied; the installer must still name
+that instance exactly once via `--starfield`. Pending ownership precedes the
+installer; exit zero triggers release validation/publication. A failed/interrupted
+command leaves Play blocked and can resume using the same declaration. Legacy
+unmanaged instance commands retain their existing behavior. See
+[save-release-bindings.md](save-release-bindings.md) for the remaining packaging,
+new-save provenance and native acceptance gates. No live install/game is tested by
+these synthetic source checks.

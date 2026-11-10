@@ -446,6 +446,8 @@ def cmd_update(a):
 
 
 def cmd_instance(a):
+    if a.declaration and a.action != "run":
+        raise ValueError("--declaration applies only to instance run")
     if a.action == "recover":                          # found without the folder or the settings (instance.journal_path)
         done = instance.recover(instance.player_plugins_txt(), restore.game_running)
         print("done" if done else "nothing to put back")
@@ -454,6 +456,11 @@ def cmd_instance(a):
     if a.action == "run":
         if not folder:
             raise ValueError("no FO4SF game folder: pass --at or set the setting instance")
+        if a.declaration:
+            values = settings.load(a.settings or default_settings_path())
+            if os.path.normcase(os.path.abspath(values.get("instance", ""))) != os.path.normcase(os.path.abspath(folder)):
+                raise ValueError("managed instance run must match the confirmed settings instance")
+            return release_install.run(values, a.declaration, a.command, running=restore.game_running, cwd=REPO)
         return instance.run(folder, a.command, running=restore.game_running, cwd=REPO)
     if not a.starfield or not a.at:
         raise ValueError(f"instance {a.action} needs --starfield <Steam's game folder> and --at <new folder>")
@@ -605,6 +612,7 @@ def main(argv=None):
     s.add_argument("--check", action="store_true", help="only say how far behind GitHub's main this checkout is")
     s = sub.add_parser("instance", help="the FO4SF game folder beside the player's own Starfield")
     s.add_argument("action", choices=("plan", "create", "run", "recover"))
+    s.add_argument("--declaration", default="", help="run: pending release before command, finalize after success")
     s.add_argument("--starfield", default="", help="plan/create: the Steam Starfield folder it is made from (read only)")
     s.add_argument("--at", default="", help="the FO4SF game folder (default for run/recover: the setting instance)")
     s.add_argument("--settings", default="")

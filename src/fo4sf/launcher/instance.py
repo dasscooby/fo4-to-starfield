@@ -504,12 +504,11 @@ def custom_ini_problems(my_games, values):
     return out
 
 
-def run(folder, cmd, *, running=lambda: False, cwd=None, call=None):
+def check_run(folder, cmd, *, running=lambda: False, cwd=None):
     """Run one of our tools (an installer, plugin_toggle.py, load_order.py) on the folder, with its own Plugins.txt.
     Refused while Starfield runs, and unless the command names this folder by exactly one --starfield (or a prefix of it
     that argparse would take, --starf), resolved from the command's own working folder: a tool's default --starfield is
-    the player's install, so the target is never left to it. Returns the command's exit code."""
-    import subprocess
+    the player's install, so the target is never left to it. Validation only; no writes or command execution."""
     check_ready(folder)
     if not cmd:
         raise InstanceRefused("instance run needs a command after --")
@@ -526,4 +525,13 @@ def run(folder, cmd, *, running=lambda: False, cwd=None, call=None):
     target = os.path.join(cwd or os.getcwd(), targets[0])
     if os.path.normcase(os.path.abspath(target)) != os.path.normcase(os.path.abspath(folder)):
         raise InstanceRefused(f"the command's --starfield {targets[0]} is not the FO4SF game folder {folder}")
+
+
+def run(folder, cmd, *, running=lambda: False, cwd=None, call=None):
+    """Legacy command runner; a managed release must use release_install.run."""
+    import subprocess
+    check_run(folder, cmd, running=running, cwd=cwd)
+    from . import release_install
+    if release_install.installed(folder) is not None:
+        raise InstanceRefused("managed instance run needs --declaration and confirmed settings")
     return (call or subprocess.call)(cmd, cwd=cwd, env=env_for(folder))

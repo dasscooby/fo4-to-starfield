@@ -1,8 +1,8 @@
-# Per-save release binding: item 7, draft parts 1–5
+# Per-save release binding: item 7, draft parts 1–6
 
 FAL-247, Codex / The Lone Wanderer. This draft provides a read-only verifier,
 CLI, Play enforcement and owned declaration publication. Automatic save-binding
-publication and managed installer finalization remain unfinished. No existing save is automatically adopted.
+publication and package/recipe integration remain unfinished. No existing save is automatically adopted.
 No game-save header is read or modified; saves and native state are opaque files.
 
 Each release declaration now has schema 2, a release_id, ordered masters (name,
@@ -136,3 +136,36 @@ This pins configuration identity, not native built-in indexes or CCC interpretat
 Native runtime/order acceptance, installer finalization, newly produced save
 provenance and atomic binding publication remain required. Keep PR #716 draft;
 Windows/native/Tk/game NOT_RUN. Saves and native state remain untouched.
+
+
+Part 6 connects a component command to release publication:
+
+```text
+python scripts/launcher.py instance run --settings settings.json --declaration release.json -- python scripts/game/exp_install.py install --starfield <confirmed-instance> ...
+```
+
+The command must name the confirmed instance exactly once, under the existing
+`instance run` target rules. Settings must name that same instance and an absolute,
+existing My Games folder. After validating the command, closed game, instance and
+explicit declaration ownership, the launcher writes pending ownership **before**
+starting the installer. The installer receives the instance's own LOCALAPPDATA.
+Its nonzero exit, exception or interrupted run leaves pending ownership, so Play
+refuses even if the installer stopped before writing its own component journal.
+Repeating the same command and declaration can resume; a different pending
+release input refuses. After exit zero, the input and instance receipt must still
+match, and existing `publish` validates installed master bytes, active/CCC inputs
+and completed component journals before completing the declaration. A zero exit
+alone cannot finalize wrong or incomplete installed files. Existing saves, bindings
+and state are untouched. Restore a changed input/configuration before resuming.
+The existing `install-release` command can finalize metadata after a component has
+already been completed separately, subject to the same installed-state checks.
+
+Once an instance owns a declaration, ordinary `instance run` without `--declaration`
+refuses before command execution. A legacy instance with neither ownership nor
+declaration retains its previous runner. This is an explicit managed command path;
+packaging/recipe selection must still require the release input when installing a
+managed package, rather than relying on the legacy path. No packaged release is
+newly enabled here. Native runtime/implicit-order acceptance and provenance-safe
+new-save publication remain mandatory. Keep #716 draft; Windows/native/Tk/game
+NOT_RUN. No cross-process installation lock or arbitrary command authenticity is
+claimed by this wrapper; it retains the existing command/target contract.

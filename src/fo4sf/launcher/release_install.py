@@ -94,8 +94,7 @@ def _write(path, raw, expected):
             os.unlink(temporary)
 
 
-def publish(values, candidate_path, *, apply=False, running=restore.game_running, say=print):
-    """Preview, or install, declaration metadata only. Existing saves stay untouched."""
+def _input(values, candidate_path):
     root = Path(values.get("instance", ""))
     if not values.get("instance") or not root.is_absolute():
         raise sr.BindingError("install-release needs an absolute confirmed FO4SF instance")
@@ -109,19 +108,11 @@ def publish(values, candidate_path, *, apply=False, running=restore.game_running
     if not isinstance(receipt, dict) or receipt.get("schema") != instance.SCHEMA or receipt.get("complete") is not True:
         raise sr.BindingError("unknown or incomplete instance receipt")
     instance.check_ready(str(root))
-    reason = recovery.play_reason(str(root))
-    if reason:
-        raise sr.BindingError(reason)
     candidate_raw = read(candidate_path)
     if candidate_raw is None:
         raise sr.BindingError("release declaration input is missing")
     release = sr.declaration(decode(candidate_raw))
     raw = encode(release)
-    problems = sr._installed_masters(release, root)
-    if problems:
-        raise sr.BindingError(problems[0])
-    from . import release_load
-    release_load.check(release, root, values.get("my_games"))
     old_raw = read(target)
     old = receipt.get(FIELD)
     if FIELD not in receipt:
@@ -138,6 +129,21 @@ def publish(values, candidate_path, *, apply=False, running=restore.game_running
             raise sr.BindingError("different release publication is pending; resume its original declaration")
         elif (None if old_raw is None else pin(old_raw)) not in (previous, pin(raw)):
             raise sr.BindingError("pending declaration has unknown bytes; preserve receipt")
+    return root, receipt_path, receipt_raw, receipt, target, release, raw, old_raw, old, previous
+
+
+def publish(values, candidate_path, *, apply=False, running=restore.game_running, say=print):
+    """Preview, or install, declaration metadata only. Existing saves stay untouched."""
+    (root, receipt_path, receipt_raw, receipt, target, release, raw,
+     old_raw, old, previous) = _input(values, candidate_path)
+    reason = recovery.play_reason(str(root))
+    if reason:
+        raise sr.BindingError(reason)
+    problems = sr._installed_masters(release, root)
+    if problems:
+        raise sr.BindingError(problems[0])
+    from . import release_load
+    release_load.check(release, root, values.get("my_games"))
     say(f"Release {release['release_id']}: publish declaration only; no saves adopted or changed")
     if not apply:
         say("Preview only; --apply publishes after the game-closed check")
@@ -162,3 +168,38 @@ def publish(values, candidate_path, *, apply=False, running=restore.game_running
                                      "declaration": pin(raw), "previous": None}})
     _write(receipt_path, encode(complete), pending_raw)
     say("Release declaration published; Play still checks every save binding")
+
+
+def run(values, candidate_path, command, *, running=restore.game_running, cwd=None, call=None, say=print):
+    """Run a managed component command with a durable pending release, then finalize.
+
+    No save binding is created. Any interruption retains the intended declaration
+    pin, so subsequent Play cannot fall back to a legacy/unmanaged instance.
+    """
+    import subprocess
+    folder = values.get("instance", "")
+    instance.check_run(folder, command, running=running, cwd=cwd)
+    (root, receipt_path, receipt_raw, receipt, target, release, raw,
+     old_raw, old, previous) = _input(values, candidate_path)
+    my_games = values.get("my_games")
+    if not my_games or not Path(my_games).is_absolute() or not Path(my_games).is_dir():
+        raise sr.BindingError("confirm an absolute existing My Games folder before managed installation")
+    if running():
+        raise sr.BindingError("close Starfield before managed installation")
+    pending = dict(receipt, **{FIELD: {"schema": 1, "complete": False,
+                                     "declaration": pin(raw), "previous": previous}})
+    pending_raw = encode(pending)
+    _write(receipt_path, pending_raw, receipt_raw)
+    if running() or read(receipt_path) != pending_raw:
+        raise sr.BindingError("game or instance changed; managed installation remains pending")
+    result = (call or subprocess.call)(command, cwd=cwd, env=instance.env_for(folder))
+    if result != 0:
+        say(f"Installer exited {result}; release remains pending. Repeat the same managed command to resume")
+        return result
+    current = read(candidate_path)
+    if current is None or encode(sr.declaration(decode(current))) != raw:
+        raise sr.BindingError("release input changed during installation; original release remains pending")
+    if read(receipt_path) != pending_raw:
+        raise sr.BindingError("instance receipt changed during installation; preserve it and the release input")
+    publish(values, candidate_path, apply=True, running=running, say=say)
+    return 0

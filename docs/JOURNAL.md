@@ -2830,3 +2830,17 @@ post-tool refusal. No game formats parsed, assets, saves or state modified.
 Exact-head receipt/review on FAL-247 and draft #716. Native runtime/implicit-order
 acceptance, installer finalization and new-save provenance/publication remain.
 Windows/native/Tk/game NOT_RUN.
+
+
+### 2026-11-10 — Codex / Lone: managed component finalization (item 7 part 6)
+
+Following Scribe CLEAR2e1ed745 on FAL-271, instance run --declaration now records
+pending release ownership before command execution and invokes the existing
+publisher after exit zero. Failed/interrupted commands remain pending; changed
+input/receipt or wrong/incomplete final state refuses. Owned instances cannot omit
+the declaration. Synthetic fixtures cover target/game checks before writes,
+pre-command pending, new-master install, failure/resume, concurrent inputs and CLI
+routing. No real installer, game assets, saves or state touched. Exact-head receipt
+and independent review are on FAL-247 / draft #716. Package/recipe policy, native
+runtime/order acceptance and new-save provenance/publication remain; Windows/native/
+Tk/game NOT_RUN.

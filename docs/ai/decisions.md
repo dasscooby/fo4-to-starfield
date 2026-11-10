@@ -1487,3 +1487,16 @@ loader inputs; unchanged declarations must not accept different CCC bytes.
 Alternative rejected: infer native load indexes from a text list without PC evidence.
 This is configuration pinning only; native interpretation/runtime acceptance,
 managed finalization and save provenance remain separate unfinished gates.
+
+
+### 2026-11-10 — Codex / Lone: journal managed component release before execution (FAL-247 part 6)
+
+Use the existing instance runner's target validation, record pending declaration
+ownership before invoking the component command, then reuse installed-state
+publication after success. Managed instances cannot omit the explicit declaration.
+Why: finalizing only after the subprocess leaves a first-install gap if it stops
+before writing its own journal. Legacy unmanaged calls remain available until
+package/recipe policy is wired; do not claim all packages are managed yet.
+Alternative rejected: infer a release or save provenance from an installer's zero
+exit. Packaging policy, native runtime/order acceptance and new-save publication
+remain later parts of the same draft.
