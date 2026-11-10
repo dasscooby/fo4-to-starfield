@@ -677,9 +677,9 @@ namespace
 		if (g_keepAlive && ctorRefs == 1) {
 			REX::W32::InterlockedIncrement(refs);   // a public precedent's count: never released to zero
 		}
-		REX::INFO("step=create n={} menu={} vtables={} refcount={} keep_alive={} ctor_flags={} flags={} depth={}{}", n,
+		REX::INFO("step=create n={} menu={} vtables={} refcount={} keep_alive={} ctor_flags={} flags={} depth={}", n,
 			Hex(base), vtables ? "engine" : "UNEXPECTED", ctorRefs, g_keepAlive ? 1 : 0, Hex(ctorFlags), Hex(imenu->flags),
-			Hex(*reinterpret_cast<const std::uint8_t*>(base + 0x110)), g_stage == 3 ? std::format(" set={}", FlagSetIndex(n)) : "");
+			Hex(*reinterpret_cast<const std::uint8_t*>(base + 0x110)));
 		std::memcpy(static_cast<void*>(a_out), &menu, sizeof(menu));
 		return a_out;
 	}
@@ -894,7 +894,7 @@ namespace
 		if (g_stage == 1) {
 			g_vtbl[0x0A] = reinterpret_cast<std::uintptr_t>(&MenuIsMovieLoaded);
 		}
-		REX::INFO("step=ready stage={} replaced=0x00,0x03,0x04,0x05,0x06,0x08{}", g_stage == 1 ? "a" : g_stage == 2 ? "b" : "c",
+		REX::INFO("step=ready stage={} replaced=0x00,0x03,0x04,0x05,0x06,0x08{}", g_stage == 1 ? "a" : "b",
 			g_stage == 1 ? ",0x0A" : "");
 		return true;
 	}
