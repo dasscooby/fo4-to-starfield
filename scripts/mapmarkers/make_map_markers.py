@@ -173,9 +173,12 @@ def stage(a):
         ov, ground = core_terrain(a.core_stage, core_sha256, os.path.basename(a.core))
     if a.fo4_map_markers:
         path, kept, dropped = fo4_extra(a.fo4_map_markers, a.core_stage, ov, ground, out)
+        with open(path, encoding="utf-8") as f:
+            from fo4sf import map_markers      # fo4_extra put src on sys.path
+            icons = map_markers.format_type_counts(json.load(f)["markers"])
         lift += ["--extra", path]                                     # build and check take the same markers
         extra_note = (f"\n  Plus {kept} markers of its own (extra_markers.json, from {os.path.abspath(a.fo4_map_markers)}; "
-                      f"{dropped} left out, map_markers_left_out.json),\n  each with an LCSR row in its override of the core's Location.")
+                      f"{dropped} left out, map_markers_left_out.json),\n  each with an LCSR row in its override of the core's Location.\n  Icon types (from the FO4 type table, src/fo4sf/map_marker_types.json):\n" + icons)
     if a.landing:
         path, spot = landing(a.landing, a.landing_name, a.core_stage, ov, ground, DEFAULT_Z_LIFT if a.z_lift is None else a.z_lift, out)
         lift += ["--landing", path]                                   # build and check take the same spot

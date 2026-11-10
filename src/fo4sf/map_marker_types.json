@@ -1,0 +1,583 @@
+{
+ "_about": "FO4 map-marker type (TNAM, the export's type_id) -> Starfield surface-map icon number (position in the map screen's list of 94 kinds, 0-93). Names are xEdit's wbDefinitionsFO4 TNAM enum. 0-9 are emblems of Starfield's own places and are never used. fair=false: no honest match, the row is a case for an own Pip-Boy icon.",
+ "default": {
+  "sf_type": 85,
+  "reason": "an FO4 type not listed here (custom ids 81+, mods): landmark"
+ },
+ "fixed_markers": {
+  "RedRocket": 27,
+  "Sanctuary": 12,
+  "Vault111": 15,
+  "Concord": 49
+ },
+ "fixed_markers_note": "the core's four hand-placed markers have no export row here; their FO4 type is assumed (Red Rocket 27 filling station, Sanctuary 12, Vault 111 15, Concord 49 town), not read from Fallout4.esm",
+ "types": [
+  {
+   "fo4_id": 0,
+   "fo4_name": "Cave",
+   "sf_type": 10,
+   "fair": true,
+   "reason": "cave"
+  },
+  {
+   "fo4_id": 1,
+   "fo4_name": "City",
+   "sf_type": 70,
+   "fair": true,
+   "reason": "generic city"
+  },
+  {
+   "fo4_id": 2,
+   "fo4_name": "Diamond City",
+   "sf_type": 70,
+   "fair": true,
+   "reason": "generic city; no own emblem (0-9 are Starfield's own places)"
+  },
+  {
+   "fo4_id": 3,
+   "fo4_name": "Encampment",
+   "sf_type": 12,
+   "fair": true,
+   "reason": "small camp reads as an outpost"
+  },
+  {
+   "fo4_id": 4,
+   "fo4_name": "Factory / Industrial Site",
+   "sf_type": 21,
+   "fair": true,
+   "reason": "industrial site"
+  },
+  {
+   "fo4_id": 5,
+   "fo4_name": "Gov't Building / Monument",
+   "sf_type": 85,
+   "fair": true,
+   "reason": "landmark"
+  },
+  {
+   "fo4_id": 6,
+   "fo4_name": "Metro Station",
+   "sf_type": 86,
+   "fair": false,
+   "reason": "no transit or underground-entrance kind; generic structure"
+  },
+  {
+   "fo4_id": 7,
+   "fo4_name": "Military Base",
+   "sf_type": 22,
+   "fair": true,
+   "reason": "military base"
+  },
+  {
+   "fo4_id": 8,
+   "fo4_name": "Natural Landmark",
+   "sf_type": 14,
+   "fair": true,
+   "reason": "natural landmark"
+  },
+  {
+   "fo4_id": 9,
+   "fo4_name": "Office / Civic Building",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "generic structure"
+  },
+  {
+   "fo4_id": 10,
+   "fo4_name": "Ruins - Town",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "generic structure"
+  },
+  {
+   "fo4_id": 11,
+   "fo4_name": "Ruins - Urban",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "generic structure"
+  },
+  {
+   "fo4_id": 12,
+   "fo4_name": "Sanctuary",
+   "sf_type": 35,
+   "fair": true,
+   "reason": "settlement"
+  },
+  {
+   "fo4_id": 13,
+   "fo4_name": "Settlement",
+   "sf_type": 35,
+   "fair": true,
+   "reason": "settlement"
+  },
+  {
+   "fo4_id": 14,
+   "fo4_name": "Sewer / Utility Tunnels",
+   "sf_type": 71,
+   "fair": false,
+   "reason": "closest is an entrance (door); no sewer kind"
+  },
+  {
+   "fo4_id": 15,
+   "fo4_name": "Vault",
+   "sf_type": 86,
+   "fair": false,
+   "reason": "no vault or bunker emblem; generic structure"
+  },
+  {
+   "fo4_id": 16,
+   "fo4_name": "Airfield",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "generic structure"
+  },
+  {
+   "fo4_id": 17,
+   "fo4_name": "Bunker Hill",
+   "sf_type": 35,
+   "fair": true,
+   "reason": "trading settlement"
+  },
+  {
+   "fo4_id": 18,
+   "fo4_name": "Camper",
+   "sf_type": 12,
+   "fair": true,
+   "reason": "camp as outpost"
+  },
+  {
+   "fo4_id": 19,
+   "fo4_name": "Car",
+   "sf_type": 85,
+   "fair": true,
+   "reason": "landmark"
+  },
+  {
+   "fo4_id": 20,
+   "fo4_name": "Church",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "generic structure"
+  },
+  {
+   "fo4_id": 21,
+   "fo4_name": "Country Club",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "generic structure"
+  },
+  {
+   "fo4_id": 22,
+   "fo4_name": "Custom House",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "generic structure"
+  },
+  {
+   "fo4_id": 23,
+   "fo4_name": "Drive-In",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "generic structure"
+  },
+  {
+   "fo4_id": 24,
+   "fo4_name": "Elevated Highway",
+   "sf_type": 85,
+   "fair": true,
+   "reason": "landmark"
+  },
+  {
+   "fo4_id": 25,
+   "fo4_name": "Faneuil Hall",
+   "sf_type": 85,
+   "fair": true,
+   "reason": "landmark"
+  },
+  {
+   "fo4_id": 26,
+   "fo4_name": "Farm",
+   "sf_type": 20,
+   "fair": true,
+   "reason": "farm"
+  },
+  {
+   "fo4_id": 27,
+   "fo4_name": "Filling Station",
+   "sf_type": 86,
+   "fair": false,
+   "reason": "no fuel-station kind; generic structure"
+  },
+  {
+   "fo4_id": 28,
+   "fo4_name": "Forested",
+   "sf_type": 14,
+   "fair": true,
+   "reason": "natural landmark"
+  },
+  {
+   "fo4_id": 29,
+   "fo4_name": "Goodneighbor",
+   "sf_type": 70,
+   "fair": true,
+   "reason": "generic city; no own emblem"
+  },
+  {
+   "fo4_id": 30,
+   "fo4_name": "Graveyard",
+   "sf_type": 85,
+   "fair": true,
+   "reason": "landmark"
+  },
+  {
+   "fo4_id": 31,
+   "fo4_name": "Hospital",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "generic structure"
+  },
+  {
+   "fo4_id": 32,
+   "fo4_name": "Industrial Dome",
+   "sf_type": 21,
+   "fair": true,
+   "reason": "industrial site"
+  },
+  {
+   "fo4_id": 33,
+   "fo4_name": "Industrial Stacks",
+   "sf_type": 21,
+   "fair": true,
+   "reason": "industrial site"
+  },
+  {
+   "fo4_id": 34,
+   "fo4_name": "Institute",
+   "sf_type": 13,
+   "fair": false,
+   "reason": "science lab is the nearest kind; the Institute's own emblem has no match"
+  },
+  {
+   "fo4_id": 35,
+   "fo4_name": "Irish Pride",
+   "sf_type": 21,
+   "fair": true,
+   "reason": "industrial site"
+  },
+  {
+   "fo4_id": 36,
+   "fo4_name": "Junkyard",
+   "sf_type": 21,
+   "fair": true,
+   "reason": "industrial site"
+  },
+  {
+   "fo4_id": 37,
+   "fo4_name": "Observatory",
+   "sf_type": 13,
+   "fair": true,
+   "reason": "science lab"
+  },
+  {
+   "fo4_id": 38,
+   "fo4_name": "Pier",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "generic structure"
+  },
+  {
+   "fo4_id": 39,
+   "fo4_name": "Pond / Lake",
+   "sf_type": 14,
+   "fair": true,
+   "reason": "natural landmark"
+  },
+  {
+   "fo4_id": 40,
+   "fo4_name": "Quarry",
+   "sf_type": 11,
+   "fair": true,
+   "reason": "mining site"
+  },
+  {
+   "fo4_id": 41,
+   "fo4_name": "Radioactive Area",
+   "sf_type": 32,
+   "fair": true,
+   "reason": "radiation zone"
+  },
+  {
+   "fo4_id": 42,
+   "fo4_name": "Radio Tower",
+   "sf_type": 86,
+   "fair": false,
+   "reason": "no tower kind; generic structure"
+  },
+  {
+   "fo4_id": 43,
+   "fo4_name": "Salem",
+   "sf_type": 35,
+   "fair": true,
+   "reason": "settlement"
+  },
+  {
+   "fo4_id": 44,
+   "fo4_name": "School",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "generic structure"
+  },
+  {
+   "fo4_id": 45,
+   "fo4_name": "Shipwreck",
+   "sf_type": 19,
+   "fair": true,
+   "reason": "crashed ship"
+  },
+  {
+   "fo4_id": 46,
+   "fo4_name": "Submarine",
+   "sf_type": 19,
+   "fair": true,
+   "reason": "wreck read as a crashed ship"
+  },
+  {
+   "fo4_id": 47,
+   "fo4_name": "Swan Pond",
+   "sf_type": 14,
+   "fair": true,
+   "reason": "natural landmark"
+  },
+  {
+   "fo4_id": 48,
+   "fo4_name": "Synth Head",
+   "sf_type": 86,
+   "fair": false,
+   "reason": "faction/quest emblem with no match; generic structure"
+  },
+  {
+   "fo4_id": 49,
+   "fo4_name": "Town",
+   "sf_type": 35,
+   "fair": true,
+   "reason": "settlement"
+  },
+  {
+   "fo4_id": 50,
+   "fo4_name": "Brotherhood of Steel",
+   "sf_type": 22,
+   "fair": false,
+   "reason": "faction emblem; military base is the nearest kind"
+  },
+  {
+   "fo4_id": 51,
+   "fo4_name": "Brownstone Townhouse",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "generic structure"
+  },
+  {
+   "fo4_id": 52,
+   "fo4_name": "Bunker",
+   "sf_type": 86,
+   "fair": false,
+   "reason": "no bunker kind; generic structure"
+  },
+  {
+   "fo4_id": 53,
+   "fo4_name": "Castle",
+   "sf_type": 22,
+   "fair": true,
+   "reason": "fortified military site (Fort Independence / Castle)"
+  },
+  {
+   "fo4_id": 54,
+   "fo4_name": "Skyscraper",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "generic structure"
+  },
+  {
+   "fo4_id": 55,
+   "fo4_name": "Libertalia",
+   "sf_type": 35,
+   "fair": true,
+   "reason": "settlement"
+  },
+  {
+   "fo4_id": 56,
+   "fo4_name": "Low-Rise Building",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "generic structure"
+  },
+  {
+   "fo4_id": 57,
+   "fo4_name": "Minutemen",
+   "sf_type": 35,
+   "fair": false,
+   "reason": "faction emblem; settlement is the nearest kind"
+  },
+  {
+   "fo4_id": 58,
+   "fo4_name": "Police Station",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "generic structure"
+  },
+  {
+   "fo4_id": 59,
+   "fo4_name": "Prydwen",
+   "sf_type": 22,
+   "fair": false,
+   "reason": "airship; military base is the nearest kind"
+  },
+  {
+   "fo4_id": 60,
+   "fo4_name": "Railroad - Faction",
+   "sf_type": 86,
+   "fair": false,
+   "reason": "faction emblem with no match; generic structure"
+  },
+  {
+   "fo4_id": 61,
+   "fo4_name": "Railroad",
+   "sf_type": 86,
+   "fair": false,
+   "reason": "faction emblem with no match; generic structure"
+  },
+  {
+   "fo4_id": 62,
+   "fo4_name": "Satellite",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "generic structure"
+  },
+  {
+   "fo4_id": 63,
+   "fo4_name": "Sentinel",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "generic structure"
+  },
+  {
+   "fo4_id": 64,
+   "fo4_name": "USS Constitution",
+   "sf_type": 85,
+   "fair": true,
+   "reason": "landmark"
+  },
+  {
+   "fo4_id": 65,
+   "fo4_name": "Mechanist Lair",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "generic structure"
+  },
+  {
+   "fo4_id": 66,
+   "fo4_name": "Raider settlement",
+   "sf_type": 12,
+   "fair": true,
+   "reason": "outpost"
+  },
+  {
+   "fo4_id": 67,
+   "fo4_name": "Vassal settlement",
+   "sf_type": 35,
+   "fair": true,
+   "reason": "settlement"
+  },
+  {
+   "fo4_id": 68,
+   "fo4_name": "Potential Vassal settlement",
+   "sf_type": 35,
+   "fair": true,
+   "reason": "settlement"
+  },
+  {
+   "fo4_id": 69,
+   "fo4_name": "Bottling Plant",
+   "sf_type": 21,
+   "fair": true,
+   "reason": "industrial site"
+  },
+  {
+   "fo4_id": 70,
+   "fo4_name": "Galactic",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "Nuka-World zone; generic structure"
+  },
+  {
+   "fo4_id": 71,
+   "fo4_name": "HUB",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "Nuka-World zone; generic structure"
+  },
+  {
+   "fo4_id": 72,
+   "fo4_name": "Kiddie Kingdom",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "Nuka-World zone; generic structure"
+  },
+  {
+   "fo4_id": 73,
+   "fo4_name": "Monorail",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "Nuka-World zone; generic structure"
+  },
+  {
+   "fo4_id": 74,
+   "fo4_name": "Rides",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "Nuka-World zone; generic structure"
+  },
+  {
+   "fo4_id": 75,
+   "fo4_name": "Safari",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "Nuka-World zone; generic structure"
+  },
+  {
+   "fo4_id": 76,
+   "fo4_name": "Wild West",
+   "sf_type": 86,
+   "fair": true,
+   "reason": "Nuka-World zone; generic structure"
+  },
+  {
+   "fo4_id": 77,
+   "fo4_name": "POI",
+   "sf_type": 85,
+   "fair": true,
+   "reason": "landmark"
+  },
+  {
+   "fo4_id": 78,
+   "fo4_name": "Disciples",
+   "sf_type": 12,
+   "fair": true,
+   "reason": "Nuka-World raider gang as an outpost"
+  },
+  {
+   "fo4_id": 79,
+   "fo4_name": "Operators",
+   "sf_type": 12,
+   "fair": true,
+   "reason": "Nuka-World raider gang as an outpost"
+  },
+  {
+   "fo4_id": 80,
+   "fo4_name": "Pack",
+   "sf_type": 12,
+   "fair": true,
+   "reason": "Nuka-World raider gang as an outpost"
+  }
+ ]
+}

@@ -4,7 +4,9 @@ Map markers are REFR of STAT MapMarker (00000010) with an empty XMRK. A Location
 (MasterSpecialReferences) in a 5 x u32 stride and usually LCID (MasterInitiallyDisabledReferences) = that REFR.
 Synthetic only: no game files.
 """
+import json
 import math
+import os
 import struct
 
 MAPMARKER_STAT = 0x00000010
@@ -18,8 +20,70 @@ LC172_WORLD = 0x0002DF8C
 LC172_LOCATION = 0x003807BE
 LC172_MAP_MARKER = 0x003E5E12
 LC172_FNAM = 0x1B
-LC172_TNAM = 0x17
+LC172_TNAM = 0x17     # the vanilla template's type (its world's own agency landmark); the writers overwrite it per marker
 LANDMARK_SNOW_GLOBE_REF_TYPE = 0x00009A42
+
+# Starfield's surface map draws a marker's icon from its type: a position 0-93 in a fixed list inside the map screen.
+# 0-9 are emblems of Starfield's own places. The FO4 type (TNAM, the export's type_id) -> that number table is data:
+# src/fo4sf/map_marker_types.json, one reason per row.
+SF_TYPE_MAX = 93
+SF_TYPE_OWN_PLACES = range(10)
+MAP_MARKER_TYPES_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "map_marker_types.json")
+
+
+def load_type_table(path=MAP_MARKER_TYPES_JSON):
+    """The type table as {"by_fo4": {fo4 id: row}, "default": sf number, "fixed": {tag: FO4 id}}; every number is checked
+    to lie in 0-93 and outside 0-9."""
+    with open(path, encoding="utf-8") as f:
+        doc = json.load(f)
+    by_fo4 = {}
+    for row in doc["types"]:
+        if row["fo4_id"] in by_fo4:
+            raise ValueError(f"map marker type table: FO4 type {row['fo4_id']} twice")
+        by_fo4[row["fo4_id"]] = row
+    default = doc["default"]["sf_type"]
+    for n in [default] + [r["sf_type"] for r in by_fo4.values()]:
+        if not (isinstance(n, int) and 0 <= n <= SF_TYPE_MAX and n not in SF_TYPE_OWN_PLACES):
+            raise ValueError(f"map marker type table: Starfield type {n!r} is not in 10-{SF_TYPE_MAX}")
+    return {"by_fo4": by_fo4, "default": default, "fixed": dict(doc["fixed_markers"])}
+
+
+_TYPE_TABLE = None
+
+
+def _table():
+    global _TYPE_TABLE
+    if _TYPE_TABLE is None:
+        _TYPE_TABLE = load_type_table()
+    return _TYPE_TABLE
+
+
+def starfield_type(fo4_type_id, table=None):
+    """The Starfield icon number for an FO4 marker type id (None or an unlisted id: the table's default)."""
+    table = table or _table()
+    row = table["by_fo4"].get(fo4_type_id)
+    return row["sf_type"] if row else table["default"]
+
+
+def fixed_marker_type(tag):
+    """The icon number of one of the core's fixed four (COMMONWEALTH_MARKERS) by tag."""
+    table = _table()
+    return starfield_type(table["fixed"].get(tag), table)
+
+
+def type_counts(entries):
+    """{Starfield icon number: how many of these overlay_markers entries carry it}, by number."""
+    counts = {}
+    for e in entries:
+        counts[e["type"]] = counts.get(e["type"], 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def format_type_counts(entries):
+    """A small table of type_counts: number, count."""
+    rows = type_counts(entries)
+    return "  Starfield type  markers\n" + "\n".join(f"  {t:>14}  {n:>7}" for t, n in rows.items())
+
 
 LCSR_STRIDE = 20
 LCSR_PAD = 0
@@ -84,7 +148,7 @@ def overlay_markers(spawn, bounds_m, ground, markers=COMMONWEALTH_MARKERS, keep=
     always contains these four, and a silent drop would ship a map without one of them."""
     lo, hi = bounds_m
     out = []
-    for tag, name, src, fx, fy in markers:
+    for tag, name, src, fx, fy, *rest in markers:
         if fx is None:
             x, y, z = (float(v) for v in spawn)
         else:
@@ -93,8 +157,10 @@ def overlay_markers(spawn, bounds_m, ground, markers=COMMONWEALTH_MARKERS, keep=
                 raise ValueError(f"map marker {tag} at ({x:.1f}, {y:.1f}) m is not {keep:.0f} m inside the overlay "
                                  f"[{lo}, {hi}]")
             z = float(ground(x, y))
+        # an exported marker carries its FO4 type id as a sixth element; the core's fixed four are typed by tag
+        sf_type = starfield_type(rest[0]) if rest else fixed_marker_type(tag)
         out.append({"tag": tag, "name": name, "src": f"{src:06X}:Fallout4.esm",
-                    "pos": [round(x, 4), round(y, 4), round(z, 4)], "cell": sf_cell(x, y)})
+                    "pos": [round(x, 4), round(y, 4), round(z, 4)], "cell": sf_cell(x, y), "type": sf_type})
     if len({m["tag"] for m in out}) != len(out):
         raise ValueError("map marker tags repeat")
     return out
@@ -102,24 +168,25 @@ def overlay_markers(spawn, bounds_m, ground, markers=COMMONWEALTH_MARKERS, keep=
 
 def load_fo4_markers(doc):
     """The rows of a Fo4Land export-mapmarkers document (dotnet/Fo4Land/MapMarkersExport.cs) as overlay_markers
-    tuples (tag, name, src, FO4 x, FO4 y), FormID order. A marker without a name is left out (no label to show), and
+    tuples (tag, name, src, FO4 x, FO4 y, FO4 type id or None), FormID order. A marker without a name is left out (no label to show), and
     so are the core's fixed four (COMMONWEALTH_MARKERS, by source REFR): they stay first, as written before. Returns
-    (markers, left out: [{"src", "reason"}])."""
+    (markers, left out: [{"src", "editor_id", "type_id", "reason"}])."""
     if doc.get("world") != "Commonwealth":
         raise ValueError(f"map markers export of world {doc.get('world')!r}, not Commonwealth")
-    fixed = {src for _t, _n, src, _x, _y in COMMONWEALTH_MARKERS}
+    fixed = {m[2] for m in COMMONWEALTH_MARKERS}
     out, left = [], []
     for r in doc.get("markers") or []:
         fid = int(r["fid"], 16)
         src = f"{fid:06X}:{doc.get('plugin', 'Fallout4.esm')}"
+        who = {"src": src, "editor_id": r.get("editor_id"), "type_id": r.get("type_id")}   # to find a place that went missing
         if fid in fixed:
-            left.append({"src": src, "reason": "one of the core's fixed markers"})
+            left.append(dict(who, reason="one of the core's fixed markers"))
         elif not r.get("name"):
-            left.append({"src": src, "reason": "no name"})
+            left.append(dict(who, reason="no name"))
         elif r.get("pos") is None or len(r["pos"]) < 2 or not all(math.isfinite(v) for v in r["pos"][:2]):
-            left.append({"src": src, "reason": "no finite position"})
+            left.append(dict(who, reason="no finite position"))
         else:
-            out.append((f"M{fid:06X}", r["name"], fid, float(r["pos"][0]), float(r["pos"][1])))
+            out.append((f"M{fid:06X}", r["name"], fid, float(r["pos"][0]), float(r["pos"][1]), r.get("type_id")))
     return out, left
 
 
@@ -137,7 +204,7 @@ def extra_markers(markers, bounds_m, ground, keep=EDGE_KEEP_M, fixed=(), near_m=
     Returns (entries, left out: [{"src", "reason"}])."""
     lo, hi = bounds_m
     inside, left = [], []
-    for tag, name, src, fx, fy in markers:
+    for tag, name, src, fx, fy, *rest in markers:
         x, y = fx / FO4_UNITS_PER_M, fy / FO4_UNITS_PER_M
         near = next((f for f in fixed if f["name"].casefold() == name.casefold()
                      and math.hypot(f["pos"][0] - x, f["pos"][1] - y) < near_m), None)
@@ -152,7 +219,7 @@ def extra_markers(markers, bounds_m, ground, keep=EDGE_KEEP_M, fixed=(), near_m=
             left.append({"src": f"{src:06X}:Fallout4.esm", "reason": f"{name}: within {near_m:.0f} m of the kept "
                          f"marker {twin[0]}"})
         else:
-            inside.append((tag, name, src, fx, fy))
+            inside.append((tag, name, src, fx, fy, *rest))
     return overlay_markers(None, bounds_m, ground, markers=inside, keep=keep), left
 
 
