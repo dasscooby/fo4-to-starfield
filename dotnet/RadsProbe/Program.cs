@@ -7,6 +7,10 @@
 //                            below uses it at +100, RadAway at -200 (the magnitude lives in the effect entry, not here).
 //   SPEL  FO4SF_RadsSpell    "FO4SF Rads": FireAndForget, Self, one effect entry: FO4SF_RadsEffect, magnitude +100
 //   ALCH  FO4SF_RadAway      the consumable "RadAway" (Medicine): one effect entry: FO4SF_RadsEffect, magnitude -200
+//   ALCH  FO4SF_RadDose      the test item "Rad Dose" (Medicine, a copy of the same template): one entry, FO4SF_RadsEffect at +100
+//   QUST  FO4SF_RadsHandQuest    the by-hand mode (FAL-273): start game enabled, no console: gives three RadAway and three Rad Dose
+//                            and shows every change of the rads on screen; script FO4SF_RadsHandQuest, four properties: RadsAV,
+//                            HealthAV, RadAway, RadDose. Idle quest FO4SF_RadsProbeQuest below is untouched by it.
 //   QUST  FO4SF_RadsProbeQuest   start game enabled, stages 10 / 20 / 30 / 40, script FO4SF_RadsProbeQuest with four
 //                            properties: RadsAV (ours), HealthAV (Starfield's, found by EditorID), RadsSpell, RadAway
 // No hazard record (no writer exists for one). The route from rads to maximum health is the SCRIPT's (a permanent modifier
@@ -73,13 +77,15 @@ static class RadsProbe
     static readonly ModKey SfEsm = ModKey.FromFileName("Starfield.esm");
     public static readonly ModKey Plugin = ModKey.FromFileName("FO4SFRadsProbe.esm");
 
-    const uint AvifId = 0x800, EffectId = 0x801, SpellId = 0x802, RadAwayId = 0x803, QuestId = 0x804;
+    const uint AvifId = 0x800, EffectId = 0x801, SpellId = 0x802, RadAwayId = 0x803, QuestId = 0x804, DoseId = 0x805, HandQuestId = 0x806;
     const string AvifEdid = "FO4SF_Rads", EffectEdid = "FO4SF_RadsEffect", SpellEdid = "FO4SF_RadsSpell", RadAwayEdid = "FO4SF_RadAway",
-        QuestEdid = "FO4SF_RadsProbeQuest", Script = "FO4SF_RadsProbeQuest";
-    const float SpellMagnitude = 100f, RadAwayMagnitude = -200f, RadsMax = 1000f;
+        QuestEdid = "FO4SF_RadsProbeQuest", Script = "FO4SF_RadsProbeQuest",
+        DoseEdid = "FO4SF_RadDose", HandQuestEdid = "FO4SF_RadsHandQuest", HandScript = "FO4SF_RadsHandQuest";
+    const float SpellMagnitude = 100f, RadAwayMagnitude = -200f, DoseMagnitude = 100f, RadsMax = 1000f;
     static readonly ushort[] Stages = { 10, 20, 30, 40 };
     // the script's property names, in the order the writer adds them
     static readonly string[] PropNames = { "RadsAV", "HealthAV", "RadsSpell", "RadAway" };
+    static readonly string[] HandPropNames = { "RadsAV", "HealthAV", "RadAway", "RadDose" };
 
     public record Templates(string SpellEdid, string AidEdid);
 
@@ -253,6 +259,33 @@ static class RadsProbe
         }
         mod.Ingestibles.Add(radAway);
 
+        // the by-hand test item: the same template as RadAway, the same effect, +100 instead of -200
+        Ingestible dose;
+        if (found.Aid != null)
+        {
+            dose = (Ingestible)found.Aid.Duplicate(Own(DoseId), new Ingestible.TranslationMask(defaultOn: true));
+            dose.EditorID = DoseEdid;
+            dose.Name = "Rad Dose";
+            dose.Description = "Raises FO4SF Rads by 100. A test item.";
+            dose.VirtualMachineAdapter = null;
+            dose.Keywords = null;
+            dose.Addiction.SetToNull();
+            dose.AddictionChance = 0f;
+            dose.AddictionName = null;
+            dose.Effects.Clear();
+            dose.Effects.Add(Entry(DoseMagnitude, found.Aid.Effects[0]));
+        }
+        else
+        {
+            dose = new Ingestible(Own(DoseId), Release)
+            {
+                EditorID = DoseEdid, Name = "Rad Dose", Weight = 0.5f, Value = 10, Flags = Ingestible.Flag.Medicine,
+                MajorFlags = Ingestible.MajorFlag.Medicine,
+            };
+            dose.Effects.Add(Entry(DoseMagnitude, null));
+        }
+        mod.Ingestibles.Add(dose);
+
         var quest = new Quest(Own(QuestId), Release)
         {
             EditorID = QuestEdid, Name = "FO4SF rads probe", FormVersion = 581, Version2 = 12,
@@ -275,13 +308,32 @@ static class RadsProbe
         };
         quest.VirtualMachineAdapter.Scripts.Add(script);
         mod.Quests.Add(quest);
-        mod.ModHeader.Stats.NextFormID = 0x805;
+
+        var handQuest = new Quest(Own(HandQuestId), Release)
+        {
+            EditorID = HandQuestEdid, Name = "FO4SF rads by hand", FormVersion = 581, Version2 = 12,
+            Data = new QuestData { Flags = Quest.Flag.StartGameEnabled, Priority = 30 },
+        };
+        handQuest.Stages.Add(new QuestStage { Index = 10 });
+        var handScript = new ScriptEntry { Name = HandScript, Flags = ScriptEntry.Flag.Local };
+        handScript.Properties.Add(Prop(HandPropNames[0], avif.FormKey));
+        handScript.Properties.Add(Prop(HandPropNames[1], health.FormKey));
+        handScript.Properties.Add(Prop(HandPropNames[2], radAway.FormKey));
+        handScript.Properties.Add(Prop(HandPropNames[3], dose.FormKey));
+        handQuest.VirtualMachineAdapter = new QuestAdapter
+        {
+            Version = 6, ObjectFormat = 2, ExtraBindDataVersion = 3,
+            Script = new ScriptEntry { Name = "", Flags = ScriptEntry.Flag.Local },
+        };
+        handQuest.VirtualMachineAdapter.Scripts.Add(handScript);
+        mod.Quests.Add(handQuest);
+        mod.ModHeader.Stats.NextFormID = 0x807;
 
         Write(mod, outDir, SfEsm);
         var path = Path.Combine(outDir, Plugin.FileName);
         Console.WriteLine($"wrote {path} ({new FileInfo(path).Length:N0} bytes): AVIF {AvifEdid} {avif.FormKey} ({avType}, 0 to {RadsMax}), " +
-                          $"MGEF {EffectEdid}, SPEL {SpellEdid} (+{SpellMagnitude}), ALCH {RadAwayEdid} ({RadAwayMagnitude}), " +
-                          $"QUST {QuestEdid} stages [{string.Join(",", Stages)}], HealthAV = {health.EditorID} {health.FormKey}");
+                          $"MGEF {EffectEdid}, SPEL {SpellEdid} (+{SpellMagnitude}), ALCH {RadAwayEdid} ({RadAwayMagnitude}), ALCH {DoseEdid} (+{DoseMagnitude}), " +
+                          $"QUST {HandQuestEdid}, QUST {QuestEdid} stages [{string.Join(",", Stages)}], HealthAV = {health.EditorID} {health.FormKey}");
         return 0;
     }
 
@@ -381,7 +433,8 @@ static class RadsProbe
                 Need(spell.Effects.All(e => e.Conditions.Count == 0) && spell.VirtualMachineAdapter == null && (spell.Keywords?.Count ?? 0) == 0, "the spell still carries conditions, a script or keywords of its template");
             }
         }
-        var radAway = mod.Ingestibles.SingleOrDefault();
+        Need(mod.Ingestibles.Count() == 2, "not exactly two ALCH (RadAway and the Rad Dose)");
+        var radAway = mod.Ingestibles.FirstOrDefault(i => i.FormKey == Own(RadAwayId));
         Need(radAway?.FormKey == Own(RadAwayId) && radAway.EditorID == RadAwayEdid && radAway.Name?.String == "RadAway", "not exactly our ALCH named RadAway");
         if (radAway != null)
         {
@@ -395,7 +448,37 @@ static class RadsProbe
             }
         }
 
-        var quest = mod.Quests.SingleOrDefault();
+        var dose = mod.Ingestibles.FirstOrDefault(i => i.FormKey == Own(DoseId));
+        Need(dose?.EditorID == DoseEdid && dose.Name?.String == "Rad Dose", "no ALCH named Rad Dose (FO4SF_RadDose)");
+        if (dose != null)
+        {
+            Console.WriteLine($"  ALCH {dose.EditorID} {dose.FormKey} \"{dose.Name?.String}\" flags {dose.Flags}, {dose.Effects.Count} effect(s) at {string.Join(",", dose.Effects.Select(e => e.Data?.Magnitude))}");
+            Entry(dose.Effects.ToList(), DoseMagnitude, "the Rad Dose");
+            var td = found.Aid;
+            if (td != null)
+            {
+                Need(dose.Model?.File.GivenPath == td.Model?.File.GivenPath && dose.Flags == td.Flags && dose.MajorFlags == td.MajorFlags, $"the Rad Dose's model or flags differ from its template {td.EditorID}");
+                Need(dose.Addiction.IsNull && dose.VirtualMachineAdapter == null && (dose.Keywords?.Count ?? 0) == 0 && dose.Effects.All(e => e.Conditions.Count == 0), "the Rad Dose still carries an addiction, a script, keywords or conditions of its template");
+            }
+        }
+
+        Need(mod.Quests.Count() == 2, "not exactly two QUST (the probe's and the by-hand one)");
+        var hand = mod.Quests.FirstOrDefault(q => q.FormKey == Own(HandQuestId));
+        Need(hand?.EditorID == HandQuestEdid, "no QUST FO4SF_RadsHandQuest");
+        if (hand != null)
+        {
+            var hs = hand.VirtualMachineAdapter?.Scripts.ToList() ?? new();
+            var hp = hs.Count == 1 ? hs[0].Properties.OfType<ScriptObjectProperty>().ToDictionary(p => p.Name, p => p.Object.FormKey) : new();
+            Console.WriteLine($"  QUST {hand.EditorID} flags {hand.Data?.Flags} scripts [{string.Join(", ", hs.Select(s => $"{s.Name} ({s.Properties.Count} properties)"))}]");
+            Need(hand.Data?.Flags.HasFlag(Quest.Flag.StartGameEnabled) == true, "the by-hand QUST is not start game enabled");
+            Need(hs.Count == 1 && hs[0].Name == HandScript && hs[0].Properties.Count == HandPropNames.Length, $"the by-hand QUST script is not {HandScript} with exactly {HandPropNames.Length} properties");
+            void HP(string name, FormKey want) => Need(hp.TryGetValue(name, out var fk) && fk == want, $"by-hand property {name} is not {want}");
+            HP(HandPropNames[0], Own(AvifId));
+            HP(HandPropNames[1], health.FormKey);
+            HP(HandPropNames[2], Own(RadAwayId));
+            HP(HandPropNames[3], Own(DoseId));
+        }
+        var quest = mod.Quests.FirstOrDefault(q => q.FormKey == Own(QuestId));
         Need(quest?.FormKey == Own(QuestId) && quest.EditorID == QuestEdid, "not exactly our QUST");
         if (quest != null)
         {

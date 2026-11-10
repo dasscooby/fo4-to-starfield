@@ -21,7 +21,57 @@ import make_rads_probe as mrp  # noqa: E402
 
 PSC = (ROOT / "scripts" / "planet" / "FO4SF_RadsProbeQuest.psc").read_text(encoding="utf-8")
 TOOL_SRC = (ROOT / "dotnet" / "RadsProbe" / "Program.cs").read_text(encoding="utf-8")
+HAND_PSC = (ROOT / "scripts" / "planet" / "FO4SF_RadsHandQuest.psc").read_text(encoding="utf-8")
 PLUGIN = "FO4SFRadsProbe.esm"
+
+
+class HandScriptTests(unittest.TestCase):
+    """The by-hand mode (FAL-273): a second quest of the same plugin that shows every change on screen."""
+
+    def test_the_hand_scripts_properties_are_the_tools(self):
+        m = re.search(r"HandPropNames = \{([^}]*)\}", TOOL_SRC)
+        tool = re.findall(r'"(\w+)"', m.group(1))
+        psc = re.findall(r"^(\w+) Property (\w+) Auto Const Mandatory", HAND_PSC, re.M)
+        self.assertEqual([n for _, n in psc], tool)
+        self.assertEqual([t for t, _ in psc], ["ActorValue", "ActorValue", "Form", "Form"])
+        self.assertTrue(HAND_PSC.startswith("Scriptname FO4SF_RadsHandQuest extends Quest"))
+        self.assertIn('HandScript = "FO4SF_RadsHandQuest"', TOOL_SRC)
+
+    def test_every_change_is_an_on_screen_message_in_the_owners_words(self):
+        self.assertIn("Debug.Notification(msg)", HAND_PSC)
+        self.assertIn('return "Rads " + (p.GetValue(RadsAV) as int) + ", " + MaxText(p)', HAND_PSC)
+        self.assertIn('"max health "', HAND_PSC)
+        # the change path: a different value than the last one shown is applied to the route and said
+        self.assertRegex(HAND_PSC, r"if rads != LastRads\n\s+ApplyRoute\(p\)\n\s+Say\(Describe\(p\)\)")
+        # the failure path says so on screen and sets the value
+        self.assertIn('" used, but rads stayed "', HAND_PSC)
+        self.assertIn("p.SetValue(RadsAV, WantRads)", HAND_PSC)
+
+    def test_no_console_is_needed_the_items_come_with_the_quest(self):
+        self.assertIn("p.AddItem(RadAway, GiveCount, true)", HAND_PSC)
+        self.assertIn("p.AddItem(RadDose, GiveCount, true)", HAND_PSC)
+        self.assertIn("int GiveCount = 3", HAND_PSC)
+        self.assertNotIn("GetStageDone", HAND_PSC)               # no stage numbers
+
+    def test_the_numbers_are_the_writers_and_the_probes(self):
+        self.assertIn("float DoseMagnitude = 100.0", HAND_PSC)
+        self.assertIn("float RadAwayMagnitude = -200.0", HAND_PSC)
+        self.assertIn("DoseMagnitude = 100f", TOOL_SRC)
+        self.assertIn("RadAwayMagnitude = -200f", TOOL_SRC)
+        self.assertIn("float PenaltyPerRad = 0.1", HAND_PSC)
+        self.assertIn("float RadsMaxValue = 1000.0", HAND_PSC)
+        self.assertIn("RadsMax = 1000f", TOOL_SRC)
+
+    def test_the_hand_log_lines_end_and_the_optional_lines_are_comments(self):
+        self.assertIn('"FO4SFRADSHAND rt="', HAND_PSC)
+        self.assertIn('" end=true"', HAND_PSC)
+        self.assertEqual(mrp.enable(HAND_PSC, []), HAND_PSC)
+        self.assertEqual(mrp.optional_names(HAND_PSC), ["Actor.GetValueMax", "Actor.ModValue"])
+        self.assertEqual(len(re.findall(r"^;OPT Actor\.ModValue +p\.ModValue\(HealthAV, delta\)", HAND_PSC, re.M)), 1)
+
+    def test_nothing_the_script_calls_is_missing_from_the_required_list(self):
+        for base, name in (("Actor", "GetItemCount"), ("Debug", "Notification")):
+            self.assertIn(name, mrp.REQUIRED[base])
 
 
 class ScriptTests(unittest.TestCase):
@@ -86,7 +136,7 @@ class ScriptTests(unittest.TestCase):
 
 BASES = {
     "Form": "Scriptname Form\nint Function GetFormID() native\n",
-    "ObjectReference": "Scriptname ObjectReference extends Form\nfloat Function GetValue(ActorValue a) native\n"
+    "ObjectReference": "Scriptname ObjectReference extends Form\nfloat Function GetValue(ActorValue a) native\nint Function GetItemCount(Form f) native\n"
                        "Function SetValue(ActorValue a, float f) native\nFunction ModValue(ActorValue a, float f) native\n"
                        "float Function GetBaseValue(ActorValue a) native\n"
                        "ObjectReference Function AddItem(Form f, int n, bool b) native\n",
@@ -94,7 +144,7 @@ BASES = {
              "ActiveMagicEffect[] Function GetActiveEffects() native\n",
     "Spell": "Scriptname Spell extends Form\nFunction Cast(ObjectReference s, ObjectReference t) native\n",
     "Game": "Scriptname Game\nActor Function GetPlayer() native global\nbool Function IsPluginInstalled(string p) native global\n",
-    "Debug": "Scriptname Debug\nbool Function OpenUserLog(string n) native global\nbool Function TraceUser(string n, string t) native global\n",
+    "Debug": "Scriptname Debug\nFunction Notification(string s) native global\nbool Function OpenUserLog(string n) native global\nbool Function TraceUser(string n, string t) native global\n",
     "Utility": "Scriptname Utility\nfloat Function GetCurrentRealTime() native global\n",
     "ScriptObject": "Scriptname ScriptObject\nFunction StartTimer(float f, int i) native\n",
     "Quest": "Scriptname Quest extends ScriptObject\nbool Function GetStageDone(int i) native\n",
@@ -195,6 +245,9 @@ class StageTests(unittest.TestCase):
         self.assertIn("1 effect(s) at 100", check.stdout)
         self.assertIn('ALCH FO4SF_RadAway 000803:FO4SFRadsProbe.esm "RadAway"', check.stdout)
         self.assertIn("1 effect(s) at -200", check.stdout)
+        self.assertIn('ALCH FO4SF_RadDose 000805:FO4SFRadsProbe.esm "Rad Dose"', check.stdout)
+        self.assertIn("1 effect(s) at 100", check.stdout)
+        self.assertIn("QUST FO4SF_RadsHandQuest flags StartGameEnabled scripts [FO4SF_RadsHandQuest (4 properties)]", check.stdout)
         self.assertIn("QUST FO4SF_RadsProbeQuest flags StartGameEnabled stages [10,20,30,40]", check.stdout)
         self.assertIn("(4 properties)", check.stdout)
         self.assertIn("property HealthAV = 00A02D:Starfield.esm", check.stdout)
@@ -203,7 +256,7 @@ class StageTests(unittest.TestCase):
         out = self.root / "b1b"
         self.assertEqual(self.run_tool("build", self.master, out).returncode, 0)
         check = self.run_tool("check", out / PLUGIN, self.master).stdout
-        self.assertIn("records: MagicEffect 1, Spell 1, Ingestible 1, Quest 1, ActorValueInformation 1", check)
+        self.assertIn("records: MagicEffect 1, Spell 1, Ingestible 2, Quest 2, ActorValueInformation 1", check)
 
     def test_the_plugin_adds_records_and_overrides_none(self):
         """Raw bytes: every record carries load index 1 (our own plugin; Starfield.esm is master 0), no hazard record."""
@@ -228,7 +281,7 @@ class StageTests(unittest.TestCase):
                 i += 24 + size
         walk(data, 0, len(data))
         self.assertTrue(ids and all(f >> 24 == 1 for f in ids), [hex(f) for f in ids if f >> 24 != 1])
-        self.assertEqual(kinds, {b"TES4": 1, b"AVIF": 1, b"MGEF": 1, b"SPEL": 1, b"ALCH": 1, b"QUST": 1})
+        self.assertEqual(kinds, {b"TES4": 1, b"AVIF": 1, b"MGEF": 1, b"SPEL": 1, b"ALCH": 2, b"QUST": 2})
         self.assertNotIn(b"HAZD", kinds)
 
     def test_the_effect_spell_and_radaway_are_copies_of_vanilla_records(self):
@@ -358,7 +411,7 @@ class StageTests(unittest.TestCase):
         self.assertEqual(plan["kind"], "rads-probe")
         self.assertEqual(plan["plugins"], [PLUGIN])
         self.assertEqual((plan["health"], plan["avif_type"]), ("Health", "Variable"))
-        self.assertEqual(sorted(plan["outputs"]), sorted([PLUGIN, "Data/Scripts/FO4SF_RadsProbeQuest.pex"]))
+        self.assertEqual(sorted(plan["outputs"]), sorted([PLUGIN, "Data/Scripts/FO4SF_RadsProbeQuest.pex", "Data/Scripts/FO4SF_RadsHandQuest.pex"]))
         self.assertEqual(plan["inputs"]["Starfield.esm"]["sha256"], mrp.sha256(str(self.master)))
         self.assertTrue(plan["templates"].startswith("strict: SPEL SynthSelfSpell"))
         self.assertEqual(plan["optional"]["Actor.ModValue"], "kept")
@@ -366,6 +419,8 @@ class StageTests(unittest.TestCase):
         self.assertTrue(plan["optional"]["Actor.GetBaseValue"].startswith("declared but did not compile"))
         self.assertEqual(plan["optional"]["Actor.GetValueMax"], "not declared in the base scripts")
         self.assertEqual(plan["optional"]["Actor.GetActiveMagicEffects"], "not declared in the base scripts")
+        self.assertEqual(plan["optional_hand"], {"Actor.GetValueMax": "not declared in the base scripts", "Actor.ModValue": "kept"})
+        self.assertIn("p.ModValue(HealthAV, delta)", (final / "FO4SF_RadsHandQuest.psc").read_text())
         kept = (final / "FO4SF_RadsProbeQuest.psc").read_text()
         self.assertIn("p.ModValue(HealthAV, delta)", kept)
         self.assertNotIn(";OPT Actor.ModValue", kept)
