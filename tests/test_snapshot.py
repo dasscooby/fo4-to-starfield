@@ -1,9 +1,11 @@
 """snapshot.ps1: the owner's "look": a screenshot, the bridge's newest line and the log tail, nothing sent to the game."""
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -181,6 +183,91 @@ class SnapshotTests(unittest.TestCase):
         self.assertIn("ask=True", run("-TestAsk").stdout, "the second key always asks")
         run("-SetAsk", "off")
         self.assertIn("ask=False", run("-TestFire").stdout)
+
+    # the mission's own log (FAL-144): an isolated profile (USERPROFILE and LOCALAPPDATA in the temp folder, never the
+    # owner's) and a stub capture that succeeds, so a mission-log problem can never pass for a screenshot failure
+    MISSION_LINES = ("[10/28/2026 - 06:12:45PM] FO4SF_MISSION rt=200.0 preston activated at stage 10\r\n"
+                     "[10/28/2026 - 06:12:46PM] FO4SF_MISSION rt=201.0 stage 20\r\n")
+
+    def mission_log(self, profile, onedrive=False):
+        folder = os.path.join(profile, *(["OneDrive"] if onedrive else []), "Documents", "My Games", "Starfield", "Logs",
+                              "Script", "User")
+        os.makedirs(folder, exist_ok=True)
+        return os.path.join(folder, "fo4sf_mission.0.log")
+
+    def run_in_profile(self, d, out):
+        stub = os.path.join(d, "shot_ok.ps1")
+        open(stub, "w").write("param([string]$Out)\nSet-Content -LiteralPath $Out -Value 'png'\nexit 0\n")
+        env = dict(os.environ, FO4SF_SHOT_SCRIPT=stub, USERPROFILE=os.path.join(d, "profile"), LOCALAPPDATA=d)
+        return subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", SCRIPT, "-Out", out,
+                               "-MaxAge", "1"], capture_output=True, text=True, timeout=120, env=env)
+
+    def test_the_mission_log_is_copied_whole_with_its_record(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "snap")
+            log = self.mission_log(os.path.join(d, "profile"))
+            data = self.MISSION_LINES.encode()
+            open(log, "wb").write(data)
+            old = time.time() - 7200
+            os.utime(log, (old, old))                                   # the session last wrote two hours ago
+            folder = os.path.dirname(log)
+            open(os.path.join(folder, "fo4sf_mission.1.log"), "w").write("an earlier session\n")
+            open(os.path.join(folder, "another_mod.0.log"), "w").write("not the mission's\n")
+            with open(log, "ab"):                                       # the running game holds it open for writing
+                r = self.run_in_profile(d, out)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertEqual(open(os.path.join(out, "fo4sf_mission.0.log"), "rb").read(), data)
+            self.assertEqual(sorted(os.listdir(out)), ["fo4sf_mission.0.log", "screen.png", "state.json"],
+                             "only the mission's current log, nothing else from the folder")
+            state = json.load(open(os.path.join(out, "state.json"), encoding="utf-8-sig"))
+            self.assertEqual(state["screen"], "screen.png")
+            m = state["mission_log"]
+            self.assertEqual(m["file"], "fo4sf_mission.0.log")
+            self.assertEqual(m["from"], r"Documents\My Games\Starfield\Logs\Script\User\fo4sf_mission.0.log")  # no user name
+            self.assertEqual(m["bytes"], len(data))
+            self.assertGreaterEqual(m["age_s"], 7000)
+
+    def test_the_onedrive_mission_log_comes_first_as_papyrus_does(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "snap")
+            profile = os.path.join(d, "profile")
+            open(self.mission_log(profile, onedrive=True), "w").write("the OneDrive Documents log\n")
+            open(self.mission_log(profile), "w").write("the plain Documents log\n")
+            r = self.run_in_profile(d, out)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertEqual(open(os.path.join(out, "fo4sf_mission.0.log")).read(), "the OneDrive Documents log\n")
+            state = json.load(open(os.path.join(out, "state.json"), encoding="utf-8-sig"))
+            self.assertEqual(state["mission_log"]["from"],
+                             r"OneDrive\Documents\My Games\Starfield\Logs\Script\User\fo4sf_mission.0.log")
+
+    def test_a_missing_mission_log_is_recorded_and_the_snapshot_still_succeeds(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "snap")
+            os.makedirs(out)
+            open(os.path.join(out, "fo4sf_mission.0.log"), "w").write("the previous capture's log\n")   # a reused folder
+            log = self.mission_log(os.path.join(d, "profile"))
+            open(os.path.join(os.path.dirname(log), "fo4sf_mission.1.log"), "w").write("an earlier session\n")
+            r = self.run_in_profile(d, out)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            state = json.load(open(os.path.join(out, "state.json"), encoding="utf-8-sig"))
+            self.assertEqual(state["screen"], "screen.png")
+            self.assertIsNone(state["mission_log"]["file"])
+            self.assertIn("no fo4sf_mission.0.log", state["mission_log"]["why"])
+            self.assertFalse(os.path.exists(os.path.join(out, "fo4sf_mission.0.log")), "the stale copy must be gone")
+
+
+class SnapshotMissionLogSourceTests(unittest.TestCase):
+    """FAL-144 on any system (the tests above need Windows): the mission log is looked up as Papyrus.0.log is."""
+
+    def test_the_mission_log_follows_the_papyrus_lookup(self):
+        with open(SCRIPT, encoding="utf-8") as f:
+            src = f.read()
+        pap = re.findall(r"'((?:OneDrive\\)?Documents)\\My Games\\Starfield\\Logs\\Script\\Papyrus\.0\.log'", src)
+        mis = re.findall(r'"((?:OneDrive\\)?Documents)\\My Games\\Starfield\\Logs\\Script\\User\\\$misName"', src)
+        self.assertEqual(pap, ["OneDrive\\Documents", "Documents"])
+        self.assertEqual(mis, pap, "the same two folders, OneDrive first")
+        self.assertIn("$misName = 'fo4sf_mission.0.log'", src)        # the current session's log only
+        self.assertIn("[System.IO.File]::Open($misSrc, 'Open', 'Read', 'ReadWrite')", src)   # the game may be writing it
 
 
 if __name__ == "__main__":
