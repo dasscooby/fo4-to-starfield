@@ -1,8 +1,9 @@
 # snapshot.ps1 (Claude, 2026-10-16): what the owner is looking at, for Claude to read. Sends NOTHING to the game: one
 # screenshot of the whole screen (shot.ps1), the bridge's newest line (bridge_log.py latest: position, cell, worldspace,
 # loaded; the owner's session must have FO4SFBridge.esm active, as every pinned build does), the game's newest Papyrus
-# log tail, and the installed experiment record. Everything goes to -Out (default C:\Modding\snapshots\<timestamp>):
-# screen.png, state.json, papyrus_tail.txt, and one summary line on stdout. The owner says "look" and what they see;
+# log tail, the mission's own log, and the installed experiment record. Everything goes to -Out (default
+# C:\Modding\snapshots\<timestamp>): screen.png, state.json, papyrus_tail.txt, fo4sf_mission.0.log, and one summary line
+# on stdout. The owner says "look" and what they see;
 # Claude runs this and reads screen.png. docs/owner/in-game-test-sheet.md section 7.
 # -Ask (2026-10-18): after the screenshot (so the box is never in the picture) a small box asks "what is wrong?"; the text
 # goes to description.txt and state.json's description. "Screenshot only" or an empty box keeps the plain snapshot.
@@ -49,6 +50,31 @@ if ($b -and $b.ok) {
 $pap = Join-Path $env:USERPROFILE 'OneDrive\Documents\My Games\Starfield\Logs\Script\Papyrus.0.log'
 if (-not (Test-Path $pap)) { $pap = Join-Path $env:USERPROFILE 'Documents\My Games\Starfield\Logs\Script\Papyrus.0.log' }
 if (Test-Path $pap) { Get-Content $pap -Tail 40 | Set-Content (Join-Path $Out 'papyrus_tail.txt'); $state.papyrus_tail = 'papyrus_tail.txt' }
+# the mission's own log, whole (FO4SF_Min00Quest's Debug.TraceUser: every stage, each keeper move of Preston and Codsworth,
+# a status line every 5 s), for the Preston diagnosis (FAL-144). Found as Papyrus.0.log is, OneDrive first, and only that
+# one file: fo4sf_mission.1.log and older are earlier sessions, and nothing else in the folder is read. state.json's
+# mission_log says where it came from relative to the profile (no user name) and how old it is. A reused folder's copy
+# goes first; a missing or unreadable log is recorded in mission_log.why and never fails the snapshot.
+$misName = 'fo4sf_mission.0.log'
+$mis = Join-Path (Get-Item -LiteralPath $Out).FullName $misName   # a full path: .NET resolves a relative one elsewhere
+Remove-Item -LiteralPath $mis -Force -ErrorAction SilentlyContinue
+$misFrom = "OneDrive\Documents\My Games\Starfield\Logs\Script\User\$misName"
+if (-not (Test-Path -LiteralPath (Join-Path $env:USERPROFILE $misFrom))) { $misFrom = "Documents\My Games\Starfield\Logs\Script\User\$misName" }
+$misSrc = Join-Path $env:USERPROFILE $misFrom
+if (Test-Path -LiteralPath $misSrc) {
+  try {
+    # shared read and write, as Get-Content opens it: Copy-Item's open does not share writing, so the running game, which
+    # holds the log open, could make it refuse
+    $src = [System.IO.File]::Open($misSrc, 'Open', 'Read', 'ReadWrite')
+    try { $dst = [System.IO.File]::Create($mis); try { $src.CopyTo($dst) } finally { $dst.Dispose() } } finally { $src.Dispose() }
+    $misT = (Get-Item -LiteralPath $misSrc).LastWriteTime
+    $state.mission_log = [ordered]@{ file = $misName; from = $misFrom; bytes = (Get-Item -LiteralPath $mis).Length
+                                     modified = $misT.ToString('s'); age_s = [int]((Get-Date) - $misT).TotalSeconds }
+  } catch {
+    Remove-Item -LiteralPath $mis -Force -ErrorAction SilentlyContinue
+    $state.mission_log = [ordered]@{ file = $null; why = "copy failed: $($_.Exception.Message)" }
+  }
+} else { $state.mission_log = [ordered]@{ file = $null; why = "no $misName under OneDrive\Documents or Documents\My Games\Starfield\Logs\Script\User" } }
 # what is installed (exp_install's record) and active
 $rec = 'D:\SteamLibrary\steamapps\common\Starfield\Data\FO4SFExp.install.json'
 if (Test-Path $rec) { try { $r = Get-Content $rec -Raw | ConvertFrom-Json; $state.installed = [ordered]@{ exp_dir = $r.exp_dir; plugins = @($r.files.PSObject.Properties.Name | Where-Object { $_ -like '*.esm' }) } } catch { } }
