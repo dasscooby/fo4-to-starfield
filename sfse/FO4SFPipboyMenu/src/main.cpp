@@ -395,9 +395,9 @@ namespace
 			std::string    name = "fault";
 			if (Peek(stack.data + 8ull * i, menu) && menu && Peek(menu, vt)) {
 				ObjectType type;
-				name = vt == reinterpret_cast<std::uintptr_t>(g_vtbl.data()) ? "ours" :
-				       TypeOf(menu, type)                                   ? ShortName(type.name) :
-				                                                              "unknown";
+				name = vt == reinterpret_cast<std::uintptr_t>(g_vtbl.slots.data()) ? "ours" :
+				       TypeOf(menu, type)                                         ? ShortName(type.name) :
+				                                                                    "unknown";
 			}
 			const bool hasFlags = menu && Peek(menu + kMenuFlagsAt, flags);
 			out += std::format("{}{}/{}", i ? "," : "", name, hasFlags ? Hex(flags) : "?");
@@ -691,10 +691,10 @@ namespace
 		if (g_keepAlive && ctorRefs == 1) {
 			REX::W32::InterlockedIncrement(refs);   // a public precedent's count: never released to zero
 		}
-		REX::INFO("step=create n={} menu={} vtables={} rtti={} refcount={} keep_alive={} ctor_flags={} flags={} depth={}", n,
-			Hex(base), vtables ? "engine" : "UNEXPECTED", rtti ? "engine" : "UNEXPECTED", ctorRefs, g_keepAlive ? 1 : 0,
-			Hex(ctorFlags), Hex(imenu->flags),
-			Hex(*reinterpret_cast<const std::uint8_t*>(base + 0x110)));
+		REX::INFO("step=create n={} menu={} vtables={} rtti={} refcount={} keep_alive={} ctor_flags={} flags={} depth={}{}",
+			n, Hex(base), vtables ? "engine" : "UNEXPECTED", rtti ? "engine" : "UNEXPECTED", ctorRefs, g_keepAlive ? 1 : 0,
+			Hex(ctorFlags), Hex(imenu->flags), Hex(*reinterpret_cast<const std::uint8_t*>(base + 0x110)),
+			g_stage == 3 ? std::format(" set={}", FlagSetIndex(n)) : "");
 		std::memcpy(static_cast<void*>(a_out), &menu, sizeof(menu));
 		return a_out;
 	}
@@ -910,8 +910,8 @@ namespace
 		if (g_stage == 1) {
 			g_vtbl.slots[0x0A] = reinterpret_cast<std::uintptr_t>(&MenuIsMovieLoaded);
 		}
-		REX::INFO("step=ready stage={} replaced=0x00,0x03,0x04,0x05,0x06,0x08{} locator={}", g_stage == 1 ? "a" : "b",
-			g_stage == 1 ? ",0x0A" : "", Hex(g_vtbl.locator - g_base));
+		REX::INFO("step=ready stage={} replaced=0x00,0x03,0x04,0x05,0x06,0x08{} locator={}",
+			g_stage == 1 ? "a" : g_stage == 2 ? "b" : "c", g_stage == 1 ? ",0x0A" : "", Hex(g_vtbl.locator - g_base));
 		return true;
 	}
 
