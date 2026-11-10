@@ -10,7 +10,8 @@ usage:
       read only: the records the probe copies and every fact the plan leans on (census.py), printed and saved.
   python make_planet_probe.py stage --data <Starfield Data> --out <dir> [--content-resources <zip>] [--compiler <exe>]
                                     [--system sol|own] [--world-biome planet|keep] [--no-merge-probe]
-                                    [--mask-writer texconv|builtin]
+                                    [--alignment absolute|relative] [--mask-writer texconv|builtin]
+      --alignment: the overlay block's INAM, absolute (1, default) or relative (0, as vanilla LC overlays).
       builds in a new <out>.partial-<time>-<pid>, renamed to <out> only when every step passed (an existing <out> is
       refused):
         1. the census (census.json; a record the probe copies that is missing or renamed stops the stage);
