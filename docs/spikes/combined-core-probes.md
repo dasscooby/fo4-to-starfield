@@ -787,6 +787,32 @@ save name SFSE passes does not equal any `.sfs` stem (display name vs file stem 
 lists and leaves the orphan question open rather than guessing). Send back: `focc_sidecar.log`, the `.focc` files,
 `saves.json`, the verdict, the loader output, and which file names the archive used.
 
+### P12: encounter conservation across leave, return, save and load (card, 6 Nov 2026; nothing written or run)
+
+Settles: the encounter-conservation contract in [combined-core.md](../combined-core.md) (under **Lifecycle
+fixture**, after **Contracts the modules do not have yet**): one live copy per squad member with stable member
+indices, a death counted once, survivors only on dissolve, and the live encounter kept in the save. It needs P1's sidecar and the tagged `OnDeath` path, so it belongs to port step 6 (the
+20-place slice), not to step 4. No kit, session or judge exists for it yet. The native run needs a fresh owner
+release and runs on the PC.
+
+Legs, one launch, one squad of 3 on the slice:
+1. Materialize the squad near the player (generation 1, keys 0 to 2). Kill member 0. Expect one death event and
+   `size` 2.
+2. Save S1. Walk beyond 500 m so the squad dissolves. Expect `size` 2 written back, no live tagged actors.
+3. Return inside 400 m. Expect generation 2 with 2 live actors, keys 1 and 2 (indices kept), and no key 0.
+4. Save S2. Kill member 1, which also raises `OnKill`. Expect `size` 1 and one logged death.
+5. Load S1. Expect `size` 2, dead set {0}, and exactly the actors S1 holds (member 0's corpse kept, not removed;
+   members 1 and 2 alive), adopted by key, with no extra spawn. Replay member 0's death event. Expect `size` still 2.
+   Load S2. Expect `size` 2 and 2 live actors.
+6. Fire one new death event twice for the same key (a scripted replay). Expect `size` to drop once.
+7. Kill the remaining member. Expect `size` 0, the squad removed from L2, and the removal logged.
+
+Judge `probes p12` (to write). PASS: every expectation above holds, no sample ever shows more live tagged actors for
+the squad than its `size`, and every applied death names a distinct key. FAIL: a duplicate live key, a dead index
+spawned again, a death applied twice (including a replay of a death the loaded save counts, or an `OnKill` counted
+as a second death), `size` rising on a dissolve, an extra spawn or a removed corpse after a load, or a squad left in
+L2 at `size` 0. INCONCLUSIVE: a missing save, a missing sidecar record, or a death the log doesn't show.
+
 ## B0: the plugin bridge, Papyrus to the SFSE plugin and back (after P1)
 
 Settles: whether a value crosses from a quest script into our SFSE plugin and back on 1.16.244, the link the C++ port
@@ -890,6 +916,7 @@ value and is INCONCLUSIVE, never a PASS; on a rerun in the same launch pick a ne
 | P11 | Does the far-travel loop keep one squad as one actor on one line (materialize inside 400 m, dissolve beyond 500 m, re-materialize with continuity)? | FAIL = `travel.py` stays offline; a second copy or lost progress needs its fix before any in-game use |
 | P10 | SendStoryEvent + our SM branch for radiant quests | FAIL = quests started from script directly |
 | B0 | Can Papyrus call our SFSE plugin and read its answer on 1.16.244 (the C++ port's bridge)? | PASS on stack A = CommonLibSF natives; PASS on B only = the setting bridge; FAIL of B0-1 = no return leg for B |
+| P12 | Does an encounter stay conserved across leave, return, save and load (one live copy, a death counted once)? | FAIL = no 20-place slice with live squads until the contract holds |
 
 ## What to send back, always
 

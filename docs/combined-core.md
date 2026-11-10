@@ -498,6 +498,35 @@ cases.
 - Single-fire staging: `present.plan` lists everything in radius within the budget; there is no ordered chain that
   stages at most one encounter on arrival with exclusions (indoors, in a scene, a live fight).
 
+**Encounter conservation (design contract, 6 Nov 2026; not built, nothing run).** The risk register's off-screen
+factions row (`docs/research/framework/travel-and-runtime-risks-oct25.md`) names two failures: a load spawns a
+second copy of a squad, and an actor's death never reaches the simulation. FO4's Kill Actor story event is gone in
+Starfield, so deaths come from our own `OnDeath` scripts (`combined-core-notes/engine-feasibility.md`). Today a
+`Squad` has `size` and no per-member state, and the tick never sees a death (`sim.tick`). The contract a port step 6
+encounter must keep:
+1. **One live copy, stable members.** Every materialized actor carries a key: squad id and member index. The first
+   materialization numbers the members 0 to size - 1; after that, survivors keep their index on every later
+   materialization and a dead index is never spawned again, so indices are not renumbered to fit `size`. L2 keeps
+   the squad's dead indices (`size` = members numbered minus dead). Each actor also carries the squad's
+   materialization generation, which goes up by one each time L3 materializes it, so an actor from an earlier
+   materialization can be told apart. L3 spawns a key only if it is not dead and no live actor holds it.
+2. **A death counts once.** A tagged actor's `OnDeath` sends one event (key, game hour, killer's faction if known).
+   L2 applies it only if the index isn't already in the squad's dead set: it adds the index, `size` drops by one and
+   the event is logged. A repeated or replayed event, including one for a death the loaded state already counts,
+   changes nothing. `OnKill` for the same actor never decrements; it can only add the killer to that death's record.
+   A squad that reaches size 0 is removed and that is logged.
+3. **Dissolve writes back survivors only.** On dissolve L2 takes `size` = the live tagged members. Dissolving never
+   raises `size`. What happens to a caravan's cargo when members die is open (a design choice, not settled here).
+4. **Saves carry the live encounter.** The sidecar records, per materialized squad, its generation, the live member
+   keys and the dead set at save time (the mid-encounter state the list above says L2 lacks). On load, live actors
+   the save restored are adopted by key and no key is spawned twice. A tagged corpse whose key is in the dead set is
+   left as a corpse and not counted again. A tagged actor whose key is in neither list is a stray and is removed.
+   Loading an older save restores that save's `size` and dead set along with its actors.
+
+The proof is probe P12 in the [probes runbook](spikes/combined-core-probes.md): the leave, return and save case the
+risk register names. It needs the P1 sidecar and the tagged-death path, so it runs with the 20-place slice, not
+before. Save identity beyond the file name and in-game tick timing are a separate card.
+
 One thing the modules have that SSaW does not: place-based protection of story places (`Place.story_lock`,
 `sim._story_shielded`), which the review found SSaW approximates by the player's own state.
 
