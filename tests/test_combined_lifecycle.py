@@ -1,7 +1,7 @@
 """The lifecycle fixture (3 Nov 2026, from the reference review on #32): one resupply job followed from its offer
 to its one outcome through every way it can go wrong, plus the planner's materialize-once rule and the simulation's
 reservation and catch-up properties. The cases are the rules the reference mods describe (SSaW's encounter tokens
-and load recovery, StarSim's reservation and elapsed-time catch-up), written against what jobs.py, present.py and
+and load recovery, plus reservation and elapsed-time catch-up), written against what jobs.py, present.py and
 sim.py do today. A case the modules did not honour was marked expectedFailure with the missing contract named; the
 superseded-instance case was built from its mark on 4 Nov 2026 (Offer.read_at), so no mark is left.
 Some cases restate tests of the module suites on purpose: the fixture reads as one story. Synthetic REGION packs;
@@ -258,7 +258,7 @@ class ResupplyLifecycleTests(unittest.TestCase):
 
 class CatchUpTests(unittest.TestCase):
     def test_the_same_hours_in_any_batching_give_the_same_world_and_offers(self):
-        """StarSim advances unloaded activity by elapsed time and SSaW's turns run on game time; a throttled or
+        """Unloaded activity advances by elapsed time and SSaW's turns run on game time; a throttled or
         paused simulation catches up later. Our ticks give one world whether 48 hours pass as one call, two or
         eight (the RNG is seeded per hour), so a catch-up changes nothing but when it ran."""
         worlds = []
@@ -273,7 +273,7 @@ class CatchUpTests(unittest.TestCase):
 
 class ReservationTests(unittest.TestCase):
     def test_a_caravan_takes_its_cargo_out_of_stock_at_dispatch(self):
-        """StarSim reserves stock per job until pickup or loss. Here the cargo leaves the source's stock when the
+        """A job reserves its stock until pickup or loss. Here the cargo leaves the source's stock when the
         caravan leaves, so no second job can carry the same food, and one caravan per source is out at a time."""
         ws = quiet(world())
         s = ws.settlements["farm_a"]
@@ -292,7 +292,7 @@ class ReservationTests(unittest.TestCase):
 
 class MaterializeOnceTests(unittest.TestCase):
     def test_a_plan_names_each_group_once_and_replanning_spawns_nothing(self):
-        """StarSim pools and re-activates objects by identity. A slot's id is the L2 entity's own id, so the same
+        """Objects are pooled and re-activated by identity. A slot's id is the L2 entity's own id, so the same
         world planned twice is one set of slots and the difference is empty: a duplicate activation is one slot."""
         ws = world(2)
         sim.run(ws, 10 * 24)
