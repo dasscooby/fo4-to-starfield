@@ -301,6 +301,20 @@ class StageTests(unittest.TestCase):
         with open(os.path.join(self.out, "probe_params.json"), encoding="utf-8") as f:
             self.assertIsNone(json.load(f)["world_biome"])
 
+    def test_alignment_option_defaults_to_absolute(self):
+        code, text = self.stage()
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self.plan()["options"]["alignment"], "absolute")
+        with open(os.path.join(self.out, "probe_params.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["block"]["inam"], 1)
+
+    def test_alignment_relative_changes_only_the_block_inam(self):
+        code, text = self.stage("--alignment", "relative")
+        self.assertEqual(code, 0, text)
+        self.assertEqual(self.plan()["options"]["alignment"], "relative")
+        with open(os.path.join(self.out, "probe_params.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["block"]["inam"], 0)
+
     def test_a_failed_tool_check_publishes_nothing(self):
         mpp.run = Tools(check_text="1 problem(s)").run
         code, text = self.stage()

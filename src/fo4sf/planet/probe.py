@@ -15,6 +15,7 @@ FO4SFPlanetProbe.esm, masters Starfield.esm and FO4SFPlanet.esm (our planet's ma
                  and block; climate kept
   0x80A CELL     the persistent cell;  0x80B..0x813  the nine exterior cells -1..1, (0, 0) = FO4SF_PlanetProbeSpawn
   0x814 QUST     FO4SF_PlanetProbe: start game enabled, script FO4SF_PlanetProbeQuest, no properties
+  0x815 REFR T7  persistent XMarker stored in the spawn cell's own persistent group (run 2: FAL-192)  rank 2 of merge-diff
 The citizen is Starfield.esm's EncCitizen01Template (2B211C), the calm NPC the combined-core probes placed.
 
 Why these six (docs/planet/planet-probe.md section 2): the player plays a runtime copy of the planet's world that the
@@ -61,6 +62,8 @@ GROUND = 10.0
 BLOCK_AREA = (45.0, 75.0, 80.0, 95.0)   # x0, x1, y0, y1
 BLOCK_TOP = 35.0
 ALIGNMENT_ABSOLUTE = 1
+ALIGNMENT_RELATIVE = 0                  # INAM 0: vanilla LC overlays (stage option --alignment relative)
+ALIGNMENTS = {"absolute": ALIGNMENT_ABSOLUTE, "relative": ALIGNMENT_RELATIVE}
 HNAM = 0
 
 XMARKER, COC_MARKER, CITIZEN = 0x00003B, 0x000032, 0x2B211C          # Starfield.esm
@@ -81,11 +84,14 @@ REFS = (
     ("T5", 0x804, "REFR", "FO4SF_PP_T5_Temp", XMARKER, False, False, (56.0, 50.0, GROUND), 0.0),
     ("T6", 0x805, "ACHR", "FO4SF_PP_T6_LinkedActor", CITIZEN, True, True, (68.0, 62.0, GROUND), FACE_SOUTH),
     ("COC", 0x806, "REFR", "", COC_MARKER, False, False, COC_POS, 0.0),
+    ("T7", 0x815, "REFR", "FO4SF_PP_T7_ExtPersistent", XMARKER, True, False, (72.0, 50.0, GROUND), 0.0),
 )
+# tags stored as a persistent child of their own exterior cell, not in the world's persistent cell (merge-diff, T7)
+EXTERIOR_PERSISTENT = frozenset({"T7"})
 TEST_TAGS = tuple(r[0] for r in REFS if r[0].startswith("T"))
 BLOCK_ID, LOCATION_ID, WORLD_ID, PERSISTENT_CELL_ID, FIRST_CELL_ID = 0x807, 0x808, 0x809, 0x80A, 0x80B
 QUEST_ID = 0x814
-NEXT_ID = QUEST_ID + 1
+NEXT_ID = 0x816                         # after T7 (0x815)
 # what each tag stands for (the log reader's verdict table)
 MEANING = {
     "T1": "persistent marker, no links (our core's markers)",
@@ -94,8 +100,10 @@ MEANING = {
     "T4": "persistent actor, no links (our Codsworth)",
     "T5": "temporary marker, no links (control: cell content)",
     "T6": "persistent actor + location links",
+    "T7": "persistent marker in the spawn cell's own persistent group, no links (merge-diff rank 2)",
 }
 SCRIPT_IDS = {"T1Id": 0x800, "T2Id": 0x801, "T3Id": 0x802, "T4Id": 0x803, "T5Id": 0x804, "T6Id": 0x805,
+              "T7Id": 0x815,
               "LocationId": LOCATION_ID, "WorldId": WORLD_ID, "MergeId": 0x800, "LC172CocId": LC172_COC,
               "PlanetLocId": records.PLANET_LOC, "SurfaceLocId": records.SURFACE_LOC, "PlanetId": records.PLANET,
               "StarSystemKwId": records.KEYWORDS["LocTypeStarSystem"],          # Starfield.esm keywords: the stage
@@ -153,16 +161,21 @@ def key(plugin, local):
     return f"{local:06X}:{plugin}"
 
 
-def params(system_id, planet_id, fnam, world_biome=None, templates=None, plugin=PLUGIN, planet_plugin=records.MASTER):
+def params(system_id, planet_id, fnam, world_biome=None, templates=None, plugin=PLUGIN, planet_plugin=records.MASTER,
+           alignment=ALIGNMENT_ABSOLUTE):
     """probe_params.json for dotnet/PlanetProbe. fnam: the SFBK FNAM values (overlay.fnam_values of the BTD).
-    world_biome: (plugin, local id) of the biome the world record names, None to keep the template's."""
+    world_biome: (plugin, local id) of the biome the world record names, None to keep the template's.
+    alignment: the SFBK INAM (ALIGNMENT_ABSOLUTE, the default, or ALIGNMENT_RELATIVE)."""
+    if alignment not in ALIGNMENTS.values():
+        raise ProbeError(f"alignment {alignment}: INAM 0 (relative) or 1 (absolute)")
     t = dict(TEMPLATES)
     t.update(templates or {})
     if len(fnam) != N * N:
         raise ProbeError(f"fnam has {len(fnam)} values, {N * N} expected")
     refs = [{"id": i, "tag": tag, "edid": edid, "kind": kind, "base": key("Starfield.esm", base), "persistent": pers,
              "linked": linked, "pos": list(pos), "rot": [0.0, 0.0, rz],
-             "cell": list(cell_of(pos[0], pos[1])), "meaning": MEANING.get(tag, "arrival marker")}
+             "cell": list(cell_of(pos[0], pos[1])), "exterior_persistent": tag in EXTERIOR_PERSISTENT,
+             "meaning": MEANING.get(tag, "arrival marker")}
             for tag, i, kind, edid, base, pers, linked, pos, rz in REFS]
     return {
         "kind": "planet_probe_params", "version": 1, "plugin": plugin, "planet_plugin": planet_plugin,
@@ -172,7 +185,7 @@ def params(system_id, planet_id, fnam, world_biome=None, templates=None, plugin=
         "keyword_overlay": key("Starfield.esm", LOC_TYPE_OVERLAY),
         "world_biome": key(*world_biome) if world_biome else None,
         "block": {"id": BLOCK_ID, "edid": BLOCK_EDID, "anam": BTD_ANAM, "dnam": N, "fnam": [int(v) for v in fnam],
-                  "inam": ALIGNMENT_ABSOLUTE, "hnam": HNAM},
+                  "inam": alignment, "hnam": HNAM},
         "location": {"id": LOCATION_ID, "edid": LOCATION_EDID, "name": LOCATION_NAME},
         "world": {"id": WORLD_ID, "edid": WORLD_EDID, "name": WORLD_NAME, "cell_min": CELL_MIN, "cell_max": CELL_MAX},
         "persistent_cell": PERSISTENT_CELL_ID, "first_cell": FIRST_CELL_ID,
@@ -416,7 +429,9 @@ def check_plugin(path, prm, template_masters=None):
                 continue
             rec = it["rec"]
             f = ref_fields(rec)
-            want_cell = pcell if r["persistent"] else own(cell_id(*r["cell"]))
+            ext = bool(r.get("exterior_persistent"))
+            need(not ext or r["persistent"], f"{r['tag']} is exterior_persistent but not persistent")
+            want_cell = pcell if r["persistent"] and not ext else own(cell_id(*r["cell"]))
             need(rec.sig == r["kind"].encode(), f"{r['tag']} is {rec.sig.decode()}, not {r['kind']}")
             need(it["group"] == ("persistent" if r["persistent"] else "temporary") and it["cell"] == want_cell,
                  f"{r['tag']} in {it['group']} group of {it['cell']}, expected cell {want_cell:08X}")
@@ -430,6 +445,8 @@ def check_plugin(path, prm, template_masters=None):
             need(f["xlrl"] is None, f"{r['tag']} has an XLRL")
             if r["edid"]:
                 need(rec.edid == r["edid"], f"{r['tag']} EditorID {rec.edid!r}")
+            if ext:                                      # T7: the spawn cell's persistent group, not the world's
+                need(it["cell"] != pcell, f"{r['tag']} is in the world's persistent cell")
             refs_out.append({"tag": r["tag"], "formid": f"{rec.formid:08X}", "sig": rec.sig.decode(),
                              "group": it["group"], "flags": f"{rec.flags:08X}", "pos": f["pos"],
                              "xlcn": f"{f['xlcn']:08X}" if f["xlcn"] else None,
