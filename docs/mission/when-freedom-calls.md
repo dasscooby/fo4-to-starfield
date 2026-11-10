@@ -228,3 +228,52 @@ no keeper and so does not keep him.
 Check in game: finish the mission (or load a save where it is complete), leave Concord, come back to the museum.
 Preston stands outside its door; the log has `moved preston` (if he had snapped back) and `keeper status preston d=`
 small.
+
+### PC evidence 10 Nov: his first placement never held (fixed offline: one fixed spot, FAL-128)
+
+**Verified** (the PC's read-only check, FAL-128 document `pc-evidence-20261110`): the 7 and 9 Nov owner tests ran with
+Papyrus logging off (the launcher's `papyrus_logging=off` writes `bEnableLogging=0` to StarfieldCustom.ini since
+6 Nov), so they say nothing about the keeper. The last logged sessions, four on 31 Oct (keeper build, before
+`2590549e`), each have `keeper init codsworth=[Actor <FO4SF_CodsworthREF (07000811)>]`: the keeper starts and
+Codsworth binds.
+
+**Cause (verified from the script against those logs):**
+- Preston was moved once per session, from 542 to 544 m away (inside `RelocateRadius`, 800), into `cell=None`. The
+  raiders' first moves, 488 to 530 m away, also ended in `cell=None`; they later read their unmerged spot again
+  (`before` 2,727 to 2,889) and were moved a second time from 198 to 353 m away, into a loaded cell (`Surface
+  (04000DEF)`), and stayed.
+- Preston never got that second move: all session he read 100 to 453 m from the player, under `RelocateGap` (1,500),
+  and `MoveOver` takes "under the gap from the player" as "already moved". At 20:59:31 the player stood 9 m from his
+  spot and he was 155.3 m away. He was already off his spot at stage 10 (20:58:49: the player 117 m from the spot,
+  Preston 210 m away), before the fight. Why he drifted there (the move into an unloaded cell, or his AI walking: his
+  distance rose from 152 to 338 m in 100 s with the player nearly still) is not in the logs.
+- **Correction** of the two sections above: "nobody is offset twice" is false. `MoveOver` takes an actor's target
+  from where it stands, so an actor already moved is offset again when the player stands about one offset length
+  (2,955 m) south-west of it: at 16:33:47 (`.1.log`) the five raiders were moved to (-3000 to -3150, -4500 to -4600).
+  `2590549e`'s keeper used the same rule for Preston, so it could send him there too, and nothing brings him back.
+
+**Fix (offline, untested in game):** Preston has one rule, `PlacePreston`, used by the mission (`Relocate`) and the
+keeper (`KeepPreston`), with a **fixed** target: `PrestonLocalX/Y/Z` (the plugin's ACHR 0x802, (-811.14, 1002.46,
+89.09), script defaults, no plugin change) + the merge offset = (-2011.14, -1697.54, 89.09), where the 28 Oct moves
+put him. He is at his spot when he is within `HoldRadius` (25 m) of it and within `RelocateGap` of the player;
+otherwise he is moved there when the player stands outdoors within `PlaceRadius` (300 m, below the 353 m move that held)
+of it, unless he is fighting in the player's world (put back once the fight is over). A failed move leaves him off his
+spot; the mission's and the keeper's budgets of 10 stay. `make_mission.py stage` refuses points whose Preston
+position differs from `PrestonLocalX/Y/Z` by more than 0.5 m, so the spot cannot go stale silently. The raiders keep
+`MoveOver` (their double offset is open, a separate fix).
+
+`KeepCodsworthLoad` and `KeepCodsworth` no longer return early when Codsworth is None: only his own steps need him, and
+Preston's check runs and restarts either way (FO4SF_Min00 itself, with neither, still does nothing on an old timer 2).
+
+**Visible without a log** (both owner tests were blind): the keeper's state is in script variables, `prestonState`
+(`at spot`, `placed`, `move failed`, `off, player away`, `off, player inside`, `off, fighting`, `gave up`),
+`prestonOff` (m from his spot at the last check) and `prestonMoves`, beside `prestonFails` and `keeperChecks`; `sqv
+FO4SF_CodsworthKeeper` should list them (supported hypothesis: sqv shows a quest script's variables, as in Fallout 4).
+On screen: at every save load `FO4SF keeper: Preston <m> m from his spot (last: <state>, moves <n>)`, at every move
+`FO4SF: Preston put back at the museum door (<mission|keeper>, was <m> m off, failed=<bool>)`, and once when the
+budget is spent. The log lines gain `off=`, `state=` and `moves=` (`keeper load/status preston ...`), `off=` and
+`by=` (`moved preston ...`) and `preston_off=` (the mission's status line); `make_mission.py log` reports the last
+keeper line's `off=` as `preston_off`.
+
+Check (logging on, the 9 Nov exit save, wait 70 s at the museum door, capture, quit): PASS is Preston visible at the
+door and `preston_off` at most 25 (`keeper status preston ... off=`); the load notification shows without the log.
