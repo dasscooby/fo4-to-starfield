@@ -1,7 +1,9 @@
 // The combined core's news, step C5 of docs/combined-core-cpp-port.md, ported from src/fo4sf/combined/news.py: the
 // simulation's events as short lines of our own writing (the templates are ours, as news.py says), for terminals and
 // on-screen text. An event reaches a place only after it has had time to travel there along the routes
-// (sim.news_for). The terminal page wraps its lines as Python's textwrap does. Python stays the reference.
+// (sim.news_for). The terminal page wraps its lines as news.py's wrapper does: Python's textwrap with CPython 3.14's
+// long-word rule on every Python (a full line doesn't cut an empty piece off the next long word). Python stays the
+// reference.
 //
 // Known difference: for characters outside ASCII and Latin-1, Python's textwrap asks Unicode which characters are
 // letters and digits (for where a hyphenated word may break). This port knows the common letter blocks and a few digit

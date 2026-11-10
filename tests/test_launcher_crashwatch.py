@@ -914,6 +914,45 @@ class CrashWatchTests(unittest.TestCase):
         self.play(self.values(bridge="off"), sys_)                 # not installed: nothing to do
         self.assertEqual(len(sys_.ran), 1)
 
+    def _logging_case(self, plugins, ini_by_dir, **kw):
+        sys_ = FakeSystem([(5, 0, 100, 0)])
+        sys_.entries = [(n, True) for n in plugins]
+        mg = os.path.join(self.dir, "mgl")
+        os.makedirs(mg, exist_ok=True)
+        for d, text in ini_by_dir.items():
+            with open(os.path.join(mg if d == "mg" else self.game, d == "mg" and "StarfieldCustom.ini" or "Starfield.ini"),
+                      "w") as f:
+                f.write(text)
+        self.play(self.values(bridge="off", my_games=mg, **kw), sys_)
+
+    ON = "[Papyrus]\nbEnableLogging=1\nbEnableTrace=1\nbLoadDebugInformation=1\n"
+    OFF = "[Papyrus]\nbEnableLogging=0\nbEnableTrace=0\nbLoadDebugInformation=0\n"
+
+    def test_script_logging_notice(self):
+        from fo4sf.launcher.crashwatch import SCRIPT_LOGGING_OFF as N
+        self._logging_case(["FO4SFMission.esm"], {}, papyrus_logging="off")
+        self.assertEqual(self.said.count(N), 1)
+        self.said.clear()
+        self._logging_case(["FO4SFMission.esm"], {}, papyrus_logging="on")
+        self.assertNotIn(N, self.said)
+        self.said.clear()
+        self._logging_case(["Other.esm"], {}, papyrus_logging="off")
+        self.assertNotIn(N, self.said)
+        self.said.clear()
+        self._logging_case(["FO4SFMission.esm"], {"game": self.ON, "mg": self.OFF})    # custom overrides game ini
+        self.assertEqual(self.said.count(N), 1)
+        self.said.clear()
+        self._logging_case(["FO4SFMission.esm"], {"game": self.OFF, "mg": self.ON})
+        self.assertNotIn(N, self.said)
+
+    def test_script_logging_notice_in_dry_run(self):
+        from fo4sf.launcher.crashwatch import SCRIPT_LOGGING_OFF as N
+        sys_ = FakeSystem([(5, 0, 100, 0)])
+        sys_.entries = [("FO4SFBridge.esm", True)]
+        r = self.play(self.values(bridge="off", papyrus_logging="off", my_games=self.dir), sys_, dry_run=True)
+        self.assertEqual(self.said.count(N), 1)
+        self.assertEqual(sys_.calls, [])
+
     def test_papyrus_setting_edits_only_its_keys_and_keeps_a_copy(self):
         mg = os.path.join(self.dir, "My Games", "Starfield")
         os.makedirs(mg)

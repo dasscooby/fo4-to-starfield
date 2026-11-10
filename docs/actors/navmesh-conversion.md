@@ -3,9 +3,32 @@
 Author: Claude, 2026-10-11. Branch `claude/terrain-navmesh`, stacked on PR #66 (`claude/terrain-exterior-statics`, which
 contains #64, #60, #57, #56) and PR #68 (`claude/runner-npc-nav`, which contains #59). Research base: PR #61
 (`docs/actors/npc-navigation.md` there). Starfield 1.16.244, Mutagen 0.55.0-alpha.67.
-Status (checked 2026-11-06, Mountain): **converted, written and checked offline; N1a / N1c subsequently ran in game**;
-see [npc-navigation.md, section 5.3](npc-navigation.md#53-how-far-actors-moved-without-a-command-verified-obsjson-of-npc_nav_n0-npc_nav_n1a-npc_nav_n1c)
-(section 5 dated 2026-10-12). No command was shown to walk an actor; these runs do not establish commanded navigation.
+Status (checked 2026-11-07, Mountain): **converted, written and checked offline; N1a / N1c ran in game without a
+command; P9 / P9u later walked one linked citizen in game on this converter's whole-core output**.
+- N1, on this page's exp2d plugin: see [npc-navigation.md, section 5.3](npc-navigation.md#53-how-far-actors-moved-without-a-command-verified-obsjson-of-npc_nav_n0-npc_nav_n1a-npc_nav_n1c)
+  (section 5 dated 2026-10-12). No command was shown to walk an actor there; those runs do not establish commanded
+  navigation.
+- P9 / P9u, 2 Nov 2026 (receipts on #644, judges #663 and #669; [combined-core.md](../combined-core.md) CC-63, lines
+  391-409). Navmesh: the installed `FO4TerrainCore.esm`, worldspace `FO4Core_Commonwealth`, 12,104 NAVM and 3,749,066
+  triangles ([#644 offline check](https://github.com/fo4sf/fo4-to-starfield/issues/644#issuecomment-6567945885)), the
+  counts of this converter's core64n run ([navmesh-core64n-convert.md](navmesh-core64n-convert.md); JOURNAL.md,
+  2026-10-16). Driver: `FOCC_P9Drive.Link`, a linked ref plus `EvaluatePackage` that Starfield's
+  `DefaultMaster_PatrolPackage` then walks, not `PathToReference` (combined-core.md:392-393;
+  [combined-core-probes.md](../spikes/combined-core-probes.md):575-585). The `PathToReference` and console rungs
+  stayed INCONCLUSIVE (combined-core-probes.md:172, 180-181).
+  - P9 PASS twice, loaded: the go found the actor 439 m from a target picked offline 447 m north-west of the start;
+    7 cells; arrived in 440 s and 443 s; kit #663 `a2c67b26`
+    ([#644](https://github.com/fo4sf/fo4-to-starfield/issues/644#issuecomment-6572484090)).
+  - P9u PASS once, the actor spawned 643 m south-south-west of the Red Rocket start, 149 m walked unloaded, branch
+    `claude/p9-unloaded` ([#644](https://github.com/fo4sf/fo4-to-starfield/issues/644#issuecomment-6573465163)). From
+    710 m and 899 m it was INCONCLUSIVE: the actor moved in one jump, or was parked outside the world
+    ([#644 ladder](https://github.com/fo4sf/fo4-to-starfield/issues/644#issuecomment-6580035484);
+    combined-core.md:407-409; the P9u judge, combined-core-probes.md:639-641).
+  - Not stated in the receipts: the core plugin's build or hash, and the ids of the cells walked.
+- Not shown in game: any walk on this page's exp2d plugin (`FO4TerrainExp2.esm`, `FO4CW_Commonwealth`); core64c's
+  `FO4TerrainCore.esm`, which had 0 NAVM (JOURNAL.md, 2026-10-16 night, R06); any other route, worldspace or
+  interior; more than one actor; a `PathToReference` or console-command walk.
+
 Labels: **verified** = checked here on files, number given; **supported** = supported hypothesis; **unresolved**;
 **refuted**. Offline checks are not in-game acceptance.
 

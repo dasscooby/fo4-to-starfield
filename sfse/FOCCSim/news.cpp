@@ -271,19 +271,21 @@ std::vector<U> wrap_chunks(std::vector<U> chunks, Int width_all, const U& initia
                 break;
             }
         }
-        if (!chunks.empty() && static_cast<Int>(len(chunks.back())) > width) {   // _handle_long_word
-            Int space_left = width < 1 ? 1 : width - cur_len;
+        // _handle_long_word as CPython 3.14 has it (news.py's _Wrapper pins it on every Python): a long word is
+        // broken only while the line has room left; on a full line it waits for the next one
+        Int space_left = width < 1 ? 1 : width - cur_len;
+        if (!chunks.empty() && static_cast<Int>(len(chunks.back())) > width && space_left > 0) {
             Int end = space_left;
             U& chunk = chunks.back();
             if (static_cast<Int>(len(chunk)) > space_left) {
-                std::size_t limit = static_cast<std::size_t>(std::max<Int>(0, space_left));
+                std::size_t limit = static_cast<std::size_t>(space_left);
                 std::size_t hyphen = chunk.substr(0, limit).rfind(U'-');
                 if (hyphen != U::npos && hyphen > 0 &&
                     std::any_of(chunk.begin(), chunk.begin() + static_cast<std::ptrdiff_t>(hyphen),
                                 [](char32_t c) { return c != '-'; }))
                     end = static_cast<Int>(hyphen) + 1;
             }
-            std::size_t cut = static_cast<std::size_t>(std::max<Int>(0, end));
+            std::size_t cut = static_cast<std::size_t>(end);
             cur_line.push_back(chunk.substr(0, cut));
             chunk = chunk.substr(std::min(cut, chunk.size()));
             cur_len = 0;
