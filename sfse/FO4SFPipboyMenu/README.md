@@ -20,25 +20,22 @@ and logs every step. Two stages, picked by `Stage` in `FO4SFPipboyMenu.ini`:
 | `scripts/ui/make_pipboy_probe.py` | stages the empty `FO4SFPipboyProbe.esm` and the movie; `check` checks the plugin |
 | `scripts/ui/pipboy_probe_install.py` | stage (b) install with its own record (test `tests/test_pipboy_probe_install.py`) |
 
-## Design: the engine's GameMenuBase object, not libxse's menu classes
+## Design: the engine's menu object, not libxse's IMenu class
 
 The plugin is built on libxse/commonlibsf `9d090c4` for SFSE, the Address Library, the logger, `UI::RegisterMenu`,
-`UI::IsMenuOpen`, `UIMessageQueue::AddMessage` and `BSFixedString`. It does **not** use libxse's `IMenu` or
-`GameMenuBase` classes: every `IMenu` virtual there is `REL::ID{ 0 }`, and a lookup of id 0 stops the game. Instead
-the menu object is the engine's own `GameMenuBase`:
+`UI::IsMenuOpen`, `UIMessageQueue::AddMessage` and `BSFixedString`. It does **not** use libxse's `IMenu` class: every
+`IMenu` virtual there is `REL::ID{ 0 }`, and a lookup of id 0 stops the game. Instead the menu object is the engine's
+own: memory of ours, the engine's IMenu constructor, then a copy of the engine's primary IMenu vtable with only our
+slots replaced. The two other vtables stay the engine's, as the constructor set them.
 
-1. memory of ours and the engine's IMenu constructor (1.16.244 has no separate `GameMenuBase` constructor: the game's
-   menu factories run the IMenu constructor and then set up `GameMenuBase` inline);
-2. `+0x128` and `+0x130` cleared, as a public precedent's `GameMenuBase` constructor does (`+0x130` is the
-   pause-request state);
-3. a copy of the engine's `GameMenuBase` primary vtable, with only our slots replaced, and the engine's RTTI complete
-   object locator for it in the slot before the copy;
-4. the engine's own `GameMenuBase` vtables at `+0x10` and `+0x50`.
-
-Why `GameMenuBase`: right after our creator returns, the engine reference-casts the new menu to `GameMenuBase`. With a
-plain IMenu (`b3f352b7`) that cast threw `std::bad_cast`, nothing caught it, and the game stopped (the PC's crash
-watcher dump, 10 Nov; what first looked like a freeze was that unhandled error being recorded). With the locator in
-place our object's RTTI says `GameMenuBase`, so the cast succeeds.
+The slot before the copy holds the engine's RTTI complete object locator for IMenu, read from the slot before the
+engine's primary vtable (the one `step=rtti vtable=primary` checks). MSVC's `dynamic_cast` reads the locator there,
+and the engine casts a shown menu from `IMenu` to `GameMenuBase`. Our object is a plain IMenu, so that cast returns
+null. The shipped movie-less menu of a public precedent gets null there too: its menu carries its plugin's own RTTI,
+and MSVC's cast compares type descriptors by decorated name (`.?AVGameMenuBase@RE@@` is not the game's
+`.?AVGameMenuBase@@`). Whether the engine accepts null there for our object is what the next run shows; if it does
+not, the menu has to be a `GameMenuBase`. The run at `b3f352b7` had no locator in that slot: the cast read whatever
+global lay before the copy, and the game hung right after the show message (PC hang dump, 10 Nov).
 
 | Slot | Ours |
 | --- | --- |
@@ -48,9 +45,6 @@ place our object's RTTI says `GameMenuBase`, so the cast succeeds.
 | 0x06 | `LoadMovie`: (a) returns true with no movie; (b) the engine's, logged, with the event dispatcher off |
 | 0x08 | `ProcessMessage`: the engine's, logged; at (a) our own answer to show |
 | 0x0A | (a) only: `IsMovieLoaded` true |
-| 0x10, 0x11 | (a) only: IMenu's `OnAddedToMenuStack` and `OnRemovedFromMenuStack`; `GameMenuBase`'s assume a movie, as a public precedent's movie-less menu notes. (b) keeps `GameMenuBase`'s |
-
-`LoadMovie` and `ProcessMessage` call IMenu's functions (the ids `step=slots` checks), as the public precedents do.
 
 ## Game version and where every id comes from
 
@@ -77,10 +71,6 @@ image, and libxse's own lookup must return the same offset.
 | IMenu::LoadMovie | 130618 | a public precedent | slot 0x06, and equal to SFSE 0.2.21's own hook address `0x2551AB0` |
 | IMenu::ProcessMessage | 130624 | a public precedent | slot 0x08 |
 | IMenu::IsMovieLoaded | 130619 | a public precedent | slot 0x0A |
-| GameMenuBase vtables | 434723, 434725, 434721 | libxse `VTABLE_GameMenuBase[0..2]` | ordered by their locators' offsets (0, 0x10, 0x50), then RTTI: type `.?AVGameMenuBase@@` |
-| GameMenuBase RTTI type descriptor | 852954 | libxse `RTTI_GameMenuBase` | the three locators point at it |
-| GameMenuBase::OnAddedToMenuStack | 93620 | a public precedent | `GameMenuBase` primary slot 0x10 |
-| GameMenuBase::OnRemovedFromMenuStack | 93621 | a public precedent | `GameMenuBase` primary slot 0x11 |
 
 libxse's `VTABLE_IMenu` array is `{ 475519, 475517, 475515 }`, not in subobject order. Read on the PC from the
 1.16.244.0 executable (FAL-187, 10 Nov): 475519 at rva `0x4d7e938` has locator offset 0x50, 475517 at rva `0x4d7e950`
@@ -136,13 +126,12 @@ Take a screenshot while the menu is open after the fifth press, and one after th
 
 ### PASS at (a), `Stage=1`
 
-1. The log shows, in this order: `step=load runtime=1.16.244.0 stage=1`, then `step=image`, twenty-two `step=id`
-   lines, three IMenu `step=rtti` lines, `step=slots`, `step=ctor`, `step=gmb_order`, three `GameMenuBase` `step=rtti`
-   lines, `step=gmb_slots`, `step=ready stage=a class=GameMenuBase ... locator=<rva>`, `step=listen`,
+1. The log shows, in this order: `step=load runtime=1.16.244.0 stage=1`, then `step=image`, sixteen `step=id` lines,
+   three `step=rtti` lines, `step=slots`, `step=ctor`, `step=ready stage=a ... locator=<rva>`, `step=listen`,
    `step=post_data_load`, `step=register result=ok`, and `step=key_thread`.
 2. Toggles: `step=toggle n=1..10`, alternating `sent=show` and `sent=hide`. Each toggle is followed by
    `step=state n=<same> ... match=yes`.
-3. At least one `step=create ... class=GameMenuBase vtables=engine rtti=engine`, and `step=message ... type=show` and `type=hide` lines.
+3. At least one `step=create ... vtables=engine rtti=engine`, and `step=message ... type=show` and `type=hide` lines.
 4. No crash: the game is still running after the tenth press, and the second screenshot is the game in play.
 5. Nothing of ours is visible at (a), because there is no movie. The open state is the log's `open=1`.
 
@@ -167,16 +156,14 @@ Take a screenshot while the menu is open after the fifth press, and one after th
 | `refuse step=rtti` | a vtable id does not name an IMenu vtable at that subobject offset | the vtable ids are stale: look them up again |
 | `refuse step=slots` | a slot is not the function its id names, or LoadMovie is not SFSE's hook address | the precedent's function ids are stale |
 | `refuse step=ctor` | the constructor id does not load the primary vtable | the constructor id is stale |
-| `refuse step=rtti vtable=GameMenuBase ... reason=offset` | a `GameMenuBase` vtable id has no locator at 0, 0x10 or 0x50, or two share one | `NEEDS-PC lookup` the three ids |
-| `refuse step=gmb_slots` | `GameMenuBase`'s primary slots 0x10, 0x11 are not the precedent's stack callbacks, or its destructor is outside the image | the layout differs: report the line |
 | `refuse step=listen` | SFSE gave no messaging or task interface | report the SFSE version |
 | `refuse step=register reason=name_taken` / `not_taken` / `no_ui` | the menu name is in use, the engine did not take our registration, or no UI singleton | report the log |
 | `refuse step=key_thread` | the key thread could not start | report |
 | `refuse step=toggle n=<n> reason=no_ui_or_queue` | the key was pressed before the UI or its message queue existed; nothing was sent | press again once in play; report if it repeats |
 | `refuse step=create reason=out_of_memory` | allocation failed on open | report |
 | `step=create ... vtables=UNEXPECTED` | the constructor set other vtables than the checked ones | stop: the layout differs |
-| `step=create ... rtti=UNEXPECTED` | the slot before our object's primary vtable is not the engine's `GameMenuBase` locator | stop before the next press: the engine's cast will read it |
-| the log ends after `step=message ... type=show`, and the game stops answering | an unhandled error after the show (at `b3f352b7`: `std::bad_cast` from the engine's cast to `GameMenuBase`) | read the crash watcher's dump first: the exception record of the thread that created the menu |
+| `step=create ... rtti=UNEXPECTED` | the slot before our object's primary vtable is not the engine's IMenu locator | stop before the next press: the engine's cast will read it |
+| the log ends after `step=message ... type=show`, and the picture freezes | the engine's work after the show did not return (at `b3f352b7`: its cast on an object without a locator) | take a hang dump: each thread's instruction pointer as module plus offset, and the stack of the thread that created the menu |
 | `step=state ... match=no` | the menu did not open or close as asked | read the `step=message` lines around it |
 | `step=load_movie ... result=0` | (b): the engine's loader did not take our movie | check that the plugin is active and the archive is named after it. Then try the variant with an empty ActionScript 3 document class (the generator gains it then) |
 | the log ends without `step=destroy` after a close, then a crash | the engine freed or used our object differently | collect the crash log; try `KeepAlive=1` if it was 0 |
