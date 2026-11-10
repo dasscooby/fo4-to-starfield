@@ -426,8 +426,9 @@ our GAMMA." New items continue the design's numbering (CC-60 to CC-62 are in the
   would take its progress from the real actor's position projected onto the straight line between the two anchors
   (an approximation: a multi-hop route and the navmesh path are not that line) and recompute the eta. The
   module changes neither WorldState nor the tick, sits outside the C++ parity path and becomes a later port step. The
-  in-game check is a proposed probe P11 (card to follow): create the actor at the simulated position inside 400 m,
-  hand over with the P9 Link driver, dissolve it beyond 500 m and re-materialize it from L2 with continuity.
+  in-game check is probe P11 ([card](spikes/combined-core-probes.md), not written or run): create the actor at the
+  simulated position inside 400 m, hand over with the P9 Link driver, dissolve it beyond 500 m and re-materialize it
+  from L2 with continuity.
 - **CC-64. Travel between areas without walking paths.** The converted worlds (L0) will be separate worldspaces or
   interiors, not one continuous map, so the core needs a travel layer between them: the player moves area to area,
   and the sim moves squads, caravans and news along the same links. Open: how the player travels (map, vertibird or
@@ -437,6 +438,13 @@ our GAMMA." New items continue the design's numbering (CC-60 to CC-62 are in the
   Building note (owner): a large place may be better built as an interior than as an exterior; check how Starfield
   and its mods build their big city spaces (the owner named Cydonia and the city people compare to Cyberpunk) before
   choosing, place by place.
+  **Owner decisions, 7 Nov 2026:** scripted transitions at fixed exits first (map selection a later layer, vertibird
+  or ship a future option); a trip costs the inter-world route hours, the same for the player and squads; a simulation
+  roll at departure for an encounter at arrival or a fixed waypoint, inside encounter conservation, with no new full
+  ambush interiors; explicit gateway pairs per
+  world with per-pair hours; off-screen travel shown only at the endpoints. Exterior or interior stays open per
+  place, after a survey of Cydonia and Neon. The first source step is the gateway-pair data contract,
+  docs/combined-core-gateways.md (design only, not implemented).
 - **CC-65. The overall GAMMA-style game system.** Tie the pillars (settlements, factions, connected wasteland,
   survival, stories) into one way to play: start options, difficulty and mode presets (`modes.py`), progression and
   what the player works toward. Open: what a run's goal is, and which systems are on by default.
@@ -446,7 +454,7 @@ our GAMMA." New items continue the design's numbering (CC-60 to CC-62 are in the
 
 `tests/test_combined_lifecycle.py` follows one resupply job from its offer to its one outcome through every way it
 can go wrong, and checks three cross-module properties. The cases are the rules the reference mods describe
-(the review on #32: SSaW's encounter tokens and load recovery, StarSim's reservation and elapsed-time catch-up),
+(the review on #32: SSaW's encounter tokens and load recovery, plus reservation and elapsed-time catch-up),
 written against what `jobs.py`, `present.py` and `sim.py` do today:
 
 - one outcome per job: a hand-in pays once; a replay, a cancel after a hand-in or a hand-in after a cancel is
@@ -484,12 +492,41 @@ cases.
 
 - Acceptance: nothing in the world state says the player is on a job (SSaW keeps one accepted operation at a
   time). Offers are read on demand and only outcomes are logged.
-- Engine acknowledgement: a slot has no applied/failed channel back from the adapter (StarSim's package-to-task
+- Engine acknowledgement: a slot has no applied/failed channel back from the adapter (a package-to-task
   handshake); the planner's diff is the whole contract.
 - A live encounter at save time: L2 has no mid-encounter state, so there is nothing to recover on load (SSaW
   cleans up a battle or patrol that a save left live). This becomes real once L3 stages fights.
 - Single-fire staging: `present.plan` lists everything in radius within the budget; there is no ordered chain that
   stages at most one encounter on arrival with exclusions (indoors, in a scene, a live fight).
+
+**Encounter conservation (design contract, 6 Nov 2026; not built, nothing run).** The risk register's off-screen
+factions row (`docs/research/framework/travel-and-runtime-risks-oct25.md`) names two failures: a load spawns a
+second copy of a squad, and an actor's death never reaches the simulation. FO4's Kill Actor story event is gone in
+Starfield, so deaths come from our own `OnDeath` scripts (`combined-core-notes/engine-feasibility.md`). Today a
+`Squad` has `size` and no per-member state, and the tick never sees a death (`sim.tick`). The contract a port step 6
+encounter must keep:
+1. **One live copy, stable members.** Every materialized actor carries a key: squad id and member index. The first
+   materialization numbers the members 0 to size - 1; after that, survivors keep their index on every later
+   materialization and a dead index is never spawned again, so indices are not renumbered to fit `size`. L2 keeps
+   the squad's dead indices (`size` = members numbered minus dead). Each actor also carries the squad's
+   materialization generation, which goes up by one each time L3 materializes it, so an actor from an earlier
+   materialization can be told apart. L3 spawns a key only if it is not dead and no live actor holds it.
+2. **A death counts once.** A tagged actor's `OnDeath` sends one event (key, game hour, killer's faction if known).
+   L2 applies it only if the index isn't already in the squad's dead set: it adds the index, `size` drops by one and
+   the event is logged. A repeated or replayed event, including one for a death the loaded state already counts,
+   changes nothing. `OnKill` for the same actor never decrements; it can only add the killer to that death's record.
+   A squad that reaches size 0 is removed and that is logged.
+3. **Dissolve writes back survivors only.** On dissolve L2 takes `size` = the live tagged members. Dissolving never
+   raises `size`. What happens to a caravan's cargo when members die is open (a design choice, not settled here).
+4. **Saves carry the live encounter.** The sidecar records, per materialized squad, its generation, the live member
+   keys and the dead set at save time (the mid-encounter state the list above says L2 lacks). On load, live actors
+   the save restored are adopted by key and no key is spawned twice. A tagged corpse whose key is in the dead set is
+   left as a corpse and not counted again. A tagged actor whose key is in neither list is a stray and is removed.
+   Loading an older save restores that save's `size` and dead set along with its actors.
+
+The proof is probe P12 in the [probes runbook](spikes/combined-core-probes.md): the leave, return and save case the
+risk register names. It needs the P1 sidecar and the tagged-death path, so it runs with the 20-place slice, not
+before. Save identity beyond the file name and in-game tick timing are a separate card.
 
 One thing the modules have that SSaW does not: place-based protection of story places (`Place.story_lock`,
 `sim._story_shielded`), which the review found SSaW approximates by the player's own state.

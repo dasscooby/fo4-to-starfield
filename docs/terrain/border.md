@@ -144,7 +144,10 @@ in our builds, docs/testing/probe-stage.md: GetFormEditorID returned `MQ101`), b
 value of this setting is untested. The SFSE switch below was built first; SetINIBool is the fallback to try if it
 cannot be armed.
 
-## Per-world switch (SFSE plugin FO4SFBorder, built 2026-10-23, not yet run in game)
+## Per-world switch (SFSE plugin FO4SFBorder, built 2026-10-23; PC runs recorded)
+Status (checked 2026-11-06, Mountain): **Card A located the setting byte; Card B recorded the owner walking W / S
+and exiting Vault 95 without a popup** (PC, 2026-10-24); see the verified Card A / Card B entries below. The first-load
+flicker and subsequent fix remain recorded separately below.
 The owner chose this route on 2026-10-23: the popup comes after a correct landing, and the map stays open land with
 no walls ("L because the full vison"), so the border must be off in our world and on everywhere else.
 
