@@ -69,16 +69,15 @@ class CarryParityTests(unittest.TestCase):
         self.assertTrue('TryGetProperty("movable"' in exterior_cs, "TerrainOverlays never reads a base's movable")
         self.assertTrue("new MoveableStatic(" in exterior_cs, "TerrainOverlays never writes a MoveableStatic")
 
-    def test_static_body_rule_follows_the_book_decision(self):
-        """FAL-171 changed the rule (owner may overrule): convert_list marks a model static_body unless some reference
-        of it is MiscItem / Ingestible / Weapon / Book. A Book converts with a dynamic body outdoors as the interior batch
-        (which has no such rule) does; cars, cones and the like (MovableStatic, Static) stay static."""
-        kept = [{"model": CAN, "type": "MiscItem", "formkey": "000A01"}, {"model": BOOK, "type": "Book", "formkey": "000A02"}]
+    def test_static_body_rule_unchanged(self):
+        """The rule did not change (FAL-171): convert_list marks a model static_body unless some reference of it is
+        MiscItem / Ingestible / Weapon. Books are not translated at all today (exterior.CONVERT_TYPES and the interior
+        DEFAULT_CELL_TYPES have no Book), so no Book rule exists; cars and cones stay static."""
+        kept = [{"model": CAN, "type": "MiscItem", "formkey": "000A01"},
+                {"model": "Props\\Cone.nif", "type": "MovableStatic", "formkey": "000A03"}]
         entries = {e["model"]: e for e in mk.convert_list(kept)}
         self.assertNotIn("static_body", entries[CAN])
-        self.assertNotIn("static_body", entries[BOOK])
-        cone = mk.convert_list([{"model": "Props\\Cone.nif", "type": "MovableStatic", "formkey": "000A03"}])
-        self.assertTrue(cone[0].get("static_body"))
+        self.assertTrue(entries["Props\\Cone.nif"].get("static_body"))
 
 
 if __name__ == "__main__":

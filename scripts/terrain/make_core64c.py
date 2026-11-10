@@ -140,9 +140,6 @@ def select_bands(paths):
 
 
 ITEM_TYPES = ("MiscItem", "Ingestible", "Weapon")     # make_cluster.ITEM_TYPES: the references the core places as MISC
-# FAL-171: models that keep a dynamic body (and so a MoveableStatic outdoors). A FO4 Book is a loose item the interior
-# batch converts dynamic, so it does here too (owner may overrule: Book out of this tuple makes it static outdoors again).
-DYNAMIC_BODY_TYPES = ITEM_TYPES + ("Book",)
 
 
 def convert_list(kept):
@@ -160,7 +157,7 @@ def convert_list(kept):
         if r.get("teleports"):
             e.update(type="Door", teleport_destination=True)
         items.setdefault(exterior.source_key(r["model"]), False)
-        if r["type"] in DYNAMIC_BODY_TYPES:
+        if r["type"] in ITEM_TYPES:
             items[exterior.source_key(r["model"])] = True
     for k, e in by_model.items():
         if not items[k]:
