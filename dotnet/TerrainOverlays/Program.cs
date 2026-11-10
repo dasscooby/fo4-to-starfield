@@ -1185,20 +1185,21 @@ if (srcMapMarker == null)
 else foreach (var (w, o) in worlds)
 {
     var loc = mod.Locations.First(l => l.EditorID == o.GetProperty("location").GetString());
-    var entries = new List<(string Tag, string Name, float[] Pos, int[] Cell)>();
+    var entries = new List<(string Tag, string Name, float[] Pos, int[] Cell, int? Type)>();
     if (o.TryGetProperty("map_markers", out var mj) && mj.ValueKind == JsonValueKind.Array)
         foreach (var m in mj.EnumerateArray())
             entries.Add((m.GetProperty("tag").GetString()!, m.GetProperty("name").GetString()!,
                          m.GetProperty("pos").EnumerateArray().Select(e => e.GetSingle()).ToArray(),
-                         m.GetProperty("cell").EnumerateArray().Select(e => e.GetInt32()).ToArray()));
+                         m.GetProperty("cell").EnumerateArray().Select(e => e.GetInt32()).ToArray(),
+                         m.TryGetProperty("type", out var tj) && tj.ValueKind == JsonValueKind.Number ? tj.GetInt32() : null));
     else
         entries.Add(("", "Red Rocket",
                      o.GetProperty("spawn").EnumerateArray().Select(e => e.GetSingle()).ToArray(),
-                     o.GetProperty("spawn_cell").EnumerateArray().Select(e => e.GetInt32()).ToArray()));
+                     o.GetProperty("spawn_cell").EnumerateArray().Select(e => e.GetInt32()).ToArray(), null));
     var tags = new Dictionary<string, string>();
     for (int i = 0; i < entries.Count; i++)
     {
-        var (tag, name, pos, cell) = entries[i];
+        var (tag, name, pos, cell, type) = entries[i];
         var marker = (PlacedObject)srcMapMarker.Duplicate(NewKey());
         marker.EditorID = w.EditorID + "MapMarker" + (i == 0 ? "" : tag);       // the first keeps #296's EditorID
         marker.Position = new P3Float(pos[0], pos[1], pos[2]);
@@ -1209,7 +1210,11 @@ else foreach (var (w, o) in worlds)
         marker.MajorRecordFlagsRaw = (marker.MajorRecordFlagsRaw | 0x400) & ~0x800;
         marker.LinkedReferences?.Clear();                                    // drop LC172's XLKR into a vanilla ref
         if (marker.MapMarker != null)
+        {
             marker.MapMarker.Name = name;
+            // the icon: the entry's "type" (src/fo4sf/map_marker_types.json, 0-93); without one LC172's 0x17 stays
+            if (type.HasValue) marker.MapMarker.Type = checked((sbyte)type.Value);
+        }
         w.TopCell!.Persistent.Add(marker);
         loc.MasterSpecialReferences ??= new ExtendedList<LocationCellStaticReference>();
         loc.MasterSpecialReferences.Add(new LocationCellStaticReference

@@ -238,6 +238,7 @@ if (args[0] == "build")
             r.LinkedReferences?.Clear();
             Override(r, zLift);
             r.MapMarker!.Name = e.Name;
+            if (e.Type.HasValue) r.MapMarker.Type = e.Type.Value;            // the icon from the type table; else the template's
             OnStarMap(r, starMap);
             w.TopCell!.Persistent.Add(r);
             loc.MasterSpecialReferences.Add(Row(r.FormKey, w.FormKey, e));
@@ -439,6 +440,7 @@ if (args[0] == "check" && args.Length >= 3)
             if (flags.Value.HasFlag(PlacedObjectMapMarker.Flag.UseLocationName)) problems.Add($"{key} uses the location's name");
             if (!flags.Value.HasFlag(PlacedObjectMapMarker.Flag.Visible)) problems.Add($"{key} is not Visible");
             if (r.MapMarker.Name?.String != e.Name) problems.Add($"{key} name \"{r.MapMarker.Name}\" != \"{e.Name}\"");
+            if (e.Type.HasValue && r.MapMarker.Type != e.Type.Value) problems.Add($"{key} type {r.MapMarker.Type} != --extra's {e.Type.Value}");
             var starWant = StarMapWanted(want.Count > 0 ? want[0].MapMarker?.Flags ?? 0 : 0, e.Name, starMap);
             if (flags.Value.HasFlag(VisibleOnStarMap) != starWant)
                 problems.Add($"{key} \"{e.Name}\" is {(starWant ? "not " : "")}on the star map ({(starMap == null ? "the core" : "--star-map")} want{(starWant ? "s" : "s it off")})");
@@ -760,7 +762,14 @@ static List<Extra> LoadExtras(string path)
         if (name == "") throw new InvalidDataException($"{tag}: no name");
         if (pos.Length != 3 || !pos.All(float.IsFinite)) throw new InvalidDataException($"{tag}: pos needs 3 finite numbers");
         if (cell.Length != 2) throw new InvalidDataException($"{tag}: cell needs 2 numbers");
-        list.Add(new Extra(tag, name, new P3Float(pos[0], pos[1], pos[2]), cell[0], cell[1]));
+        sbyte? type = null;
+        if (m.TryGetProperty("type", out var tj) && tj.ValueKind != JsonValueKind.Null)
+        {
+            if (tj.ValueKind != JsonValueKind.Number || !tj.TryGetSByte(out var t) || t < 10 || t > 93)
+                throw new InvalidDataException($"{tag}: type wants a whole number 10-93 (0-9 are Starfield's own places)");
+            type = t;
+        }
+        list.Add(new Extra(tag, name, new P3Float(pos[0], pos[1], pos[2]), cell[0], cell[1], type));
     }
     var dup = list.GroupBy(e => e.Tag, StringComparer.OrdinalIgnoreCase).FirstOrDefault(g => g.Count() > 1);
     if (dup != null) throw new InvalidDataException($"tag {dup.Key} repeats");
@@ -823,7 +832,7 @@ static List<T[]> QuestChunks<T>(List<T> all, bool landing)
 // the script's own default (40) holds up to 20 markers; above that, twice the quest's markers
 static int? MaxMovesFor(int n) => 2 * n > DefaultMaxMoves ? 2 * n : null;
 
-record Extra(string Tag, string Name, P3Float Pos, short CellX, short CellY);
+record Extra(string Tag, string Name, P3Float Pos, short CellX, short CellY, sbyte? Type);
 record LandingPiece(P3Float Pos, P3Float Rot, short CellX, short CellY);
 record Landing(string Tag, string Name, LandingPiece Pad, LandingPiece Trigger, LandingPiece Marker, LandingPiece Heading);
 record StarMap(HashSet<string> Names, bool Strict);
