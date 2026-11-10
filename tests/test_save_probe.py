@@ -217,6 +217,61 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(rep["header"]["location"], "Sanctuary Hills")
 
 
+class ReviewFindingTests(unittest.TestCase):
+    """FAL-176 review of 4f7650ee."""
+
+    def test_false_member_record_does_not_win_a_tie(self):
+        plain = build_plain_save() + MISSION_IID + bytes([0x2B]) + struct.pack("<I", 6) + bytes(6)
+        rep = save_probe.build_report(plain, None, None, "x")
+        self.assertEqual(rep["script_stage"]["value"], 30)                  # the type-fitting record wins
+        self.assertEqual(rep["warnings"], [])
+
+    def test_conflicting_equal_records_are_ambiguous_and_say_so(self):
+        plain = build_plain_save()
+        i = plain.index(MISSION_IID + b"\x2b")
+        dup = bytearray(plain[i:i + 13 + 5 + 5 + 2 + 5 + 5 + 1])
+        dup[14:18] = struct.pack("<i", 40)                                  # same shape, applied=40
+        rep = save_probe.build_report(plain + bytes(dup), None, None, "x")
+        self.assertIsNone(rep["script_stage"])
+        text = "\n".join(rep["warnings"])
+        self.assertIn("equally plausible", text)
+        self.assertIn("script_stage could not be read", text)
+
+    def test_applied_must_be_a_decoded_integer(self):
+        plain = build_plain_save()
+        i = plain.index(MISSION_IID + b"\x2b") + 13
+        bad = plain[:i] + bytes([5, 1]) + plain[i + 5:]                     # applied as a bool
+        rep = save_probe.build_report(bad, None, None, "x")
+        self.assertIsNone(rep["script_stage"])
+
+    def test_compressed_chunk_cannot_expand_past_its_declared_size(self):
+        plain = build_plain_save()
+        bomb = zlib.compress(b"\x00" * 1_000_000)
+        head = bytearray(64)
+        head[:4] = b"BCPS"
+        struct.pack_into("<Q", head, 8, 64)
+        struct.pack_into("<Q", head, 24, 68)
+        struct.pack_into("<Q", head, 32, 12)
+        struct.pack_into("<Q", head, 48, 12)
+        raw = bytes(head) + struct.pack("<I", len(bomb)) + bomb
+        with self.assertRaises(save_probe.SaveError) as cm:
+            save_probe.decode_container(raw)
+        self.assertIn("expands past", str(cm.exception))
+        # a stream that stops early is a clear error too
+        short = zlib.compress(plain)[:-10]
+        head2 = bytearray(head)
+        struct.pack_into("<Q", head2, 32, len(plain))
+        struct.pack_into("<Q", head2, 48, len(plain))
+        with self.assertRaises(save_probe.SaveError):
+            save_probe.decode_container(bytes(head2) + struct.pack("<I", len(short)) + short)
+
+    def test_plain_save_with_only_the_magic_is_truncated(self):
+        for raw in (b"SFS_SAVEGAME", build_plain_save()[:30]):
+            with self.assertRaises(save_probe.SaveError) as cm:
+                save_probe.decode_container(raw)
+            self.assertIn("truncated", str(cm.exception))
+
+
 class FormArrayTests(unittest.TestCase):
     def roles(self, rep):
         return {i["instance_id"]: i["role"] for i in rep["instances"]}
@@ -351,6 +406,36 @@ class CommandLineTests(unittest.TestCase):
         code, _, err = self.run_main(os.path.join(self.tmp.name, "absent.sfs"))
         self.assertEqual(code, 1)
         self.assertNotIn(self.tmp.name, err)
+
+    def test_hard_link_output_cannot_overwrite_the_save(self):
+        link = os.path.join(self.tmp.name, "report.json")
+        os.link(self.save, link)
+        before = slurp(self.save)
+        code, _, err = self.run_main(self.save, "--json", link)
+        self.assertEqual(code, 2)
+        self.assertEqual(slurp(self.save), before)
+        self.assertEqual(slurp(link), before)
+
+    def test_json_replaces_an_existing_report_without_writing_into_its_inode(self):
+        old = os.path.join(self.tmp.name, "old.json")
+        with open(old, "w") as f:
+            f.write("old")
+        keep = os.path.join(self.tmp.name, "keep.json")
+        os.link(old, keep)                                  # a second name for the old report's inode
+        code, _, _ = self.run_main(self.save, "--json", old)
+        self.assertEqual(code, 0)
+        self.assertEqual(slurp(keep), b"old")               # the old inode was not truncated
+        self.assertIn("plugin_index", slurp(old).decode())
+        self.assertEqual([n for n in os.listdir(self.tmp.name) if n.endswith(".tmp")], [])
+
+    def test_truncated_plain_save_exits_nonzero(self):
+        cut = os.path.join(self.tmp.name, "plain.sfs")
+        with open(cut, "wb") as f:
+            f.write(b"SFS_SAVEGAME")
+        code, out, err = self.run_main(cut)
+        self.assertEqual(code, 1)
+        self.assertIn("truncated", err)
+        self.assertEqual(out, "")
 
     def test_bad_spot_is_a_usage_error(self):
         code, _, _ = self.run_main(self.save, "--spot", "Preston=1,2")

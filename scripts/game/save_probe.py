@@ -79,7 +79,7 @@ class SaveError(Exception):
 def decode_container(raw):
     """BCPS container (zlib or stored chunks) -> the plain save bytes. A plain SFS_SAVEGAME passes through."""
     if raw[:12] == b"SFS_SAVEGAME":
-        return bytes(raw)
+        return _check_plain(bytes(raw))
     if raw[:4] != b"BCPS":
         raise SaveError("not a Starfield save (neither a BCPS container nor SFS_SAVEGAME)")
     if len(raw) < 64:
@@ -105,10 +105,21 @@ def decode_container(raw):
         if s == want:                      # stored chunk (it did not compress)
             out += part
         else:
+            # bounded: never produce more than this chunk is declared to hold
             try:
-                out += zlib.decompress(part)
+                d = zlib.decompressobj()
+                piece = d.decompress(part, want)
+                if d.unconsumed_tail or d.unused_data or not d.eof:
+                    more = d.decompress(d.unconsumed_tail, 1) if d.unconsumed_tail else b""
+                    if more or d.unused_data:
+                        raise SaveError("damaged save: chunk %d expands past its declared %d bytes" % (i + 1, want))
+                    if not d.eof:
+                        raise SaveError("truncated save: chunk %d ends before its data does" % (i + 1))
             except zlib.error as e:
                 raise SaveError("damaged save: chunk %d does not decompress (%s)" % (i + 1, e))
+            if len(piece) != want:
+                raise SaveError("damaged save: chunk %d decompressed to %d bytes, declared %d" % (i + 1, len(piece), want))
+            out += piece
         pos += s
         if pad:
             pos = (pos + pad - 1) // pad * pad
@@ -116,7 +127,14 @@ def decode_container(raw):
         raise SaveError("damaged save: decompressed %d bytes, header says %d" % (len(out), total))
     if out[:12] != b"SFS_SAVEGAME":
         raise SaveError("not a Starfield save: container does not hold SFS_SAVEGAME")
-    return bytes(out)
+    return _check_plain(bytes(out))
+
+
+def _check_plain(data):
+    """The mandatory header strings must be there; a bare 'SFS_SAVEGAME' (a truncated file) is an error."""
+    if parse_header(data) is None:
+        raise SaveError("truncated or damaged save: the header after SFS_SAVEGAME is missing or unreadable")
+    return data
 
 
 def load_save(path):
@@ -273,22 +291,22 @@ def decode_members(data, p, members, strs):
         try:
             t = data[p]
             if t == 0:
-                entry.update(decoded=True, value=None, note="none")
+                entry.update(decoded=True, value=None, note="none", code=0)
                 p += 1
             elif t == 2:
                 idx, = struct.unpack_from("<I", data, p + 1)
                 if idx >= len(strs):
                     raise ValueError("string index out of range")
-                entry.update(decoded=True, value=strs[idx])
+                entry.update(decoded=True, value=strs[idx], code=2)
                 p += 5
             elif t == 3:
-                entry.update(decoded=True, value=struct.unpack_from("<i", data, p + 1)[0])
+                entry.update(decoded=True, value=struct.unpack_from("<i", data, p + 1)[0], code=3)
                 p += 5
             elif t == 4:
-                entry.update(decoded=True, value=round(struct.unpack_from("<f", data, p + 1)[0], 6))
+                entry.update(decoded=True, value=round(struct.unpack_from("<f", data, p + 1)[0], 6), code=4)
                 p += 5
             elif t == 5:
-                entry.update(decoded=True, value=bool(data[p + 1]))
+                entry.update(decoded=True, value=bool(data[p + 1]), code=5)
                 p += 2
             else:
                 stop = t
@@ -299,9 +317,25 @@ def decode_members(data, p, members, strs):
     return out
 
 
+_CODE_FOR_TYPE = {"int": 3, "float": 4, "bool": 5, "string": 2}
+
+
+def _type_matches(entry, declared):
+    """A decoded value fits its declared type: Int/Float/Bool/String need their own type code; any other
+    declared type (objects, arrays, structs) is not checked."""
+    want = _CODE_FOR_TYPE.get(declared.lower())
+    if want is None:
+        return True
+    return entry.get("code") == want
+
+
 def read_members(data, iid, members, strs):
-    """HEURISTIC. Best decoding among the places where 'iid 0x2B count' appears with the right count."""
-    best, best_n = None, -1
+    """HEURISTIC. -> (members or None, problem or None).
+
+    Candidates are the places where 'iid 0x2B count' appears with the right count. Each is ranked by (members
+    whose type code fits the declared type, members decoded). Equal best candidates that decode to different
+    values are ambiguous: nothing is chosen and `problem` says so (a false record must never win silently)."""
+    cands = []
     pos = 0
     key = iid + b"\x2b"
     while True:
@@ -315,10 +349,17 @@ def read_members(data, iid, members, strs):
         if n != len(members):
             continue
         got = decode_members(data, j + 13, members, strs)
+        fits = sum(1 for g, (_n, t) in zip(got, members) if g["decoded"] and _type_matches(g, t))
         ok = sum(1 for g in got if g["decoded"])
-        if ok >= best_n:
-            best, best_n = got, ok
-    return best
+        cands.append(((fits, ok), got))
+    if not cands:
+        return None, None
+    top = max(c[0] for c in cands)
+    best = [c[1] for c in cands if c[0] == top]
+    first = [(m["decoded"], m["value"]) for m in best[0]]
+    if any([(m["decoded"], m["value"]) for m in b] != first for b in best[1:]):
+        return None, "%d equally plausible member records with different values" % len(best)
+    return best[0], None
 
 
 def find_timers(data, iid):
@@ -524,10 +565,12 @@ def build_report(data, spots=None, plugin_index=None, file_name="", show_name=Fa
     for iid, ref in insts:
         fid = resolve_ref(data, arr_start, arr_count, ref) if fa else None
         role = roles.get(iid, "unknown")
-        vals = read_members(data, iid, members, strs) if members else None
+        vals, problem = read_members(data, iid, members, strs) if members else (None, None)
+        if problem:
+            w.append("instance %s: %s; members not reported" % (iid.hex(), problem))
         rep["instances"].append({"instance_id": iid.hex(), "quest_form": "%08X" % fid if fid is not None else None,
                                  "role": role, "members": vals, "timers": find_timers(data, iid)})
-        if vals is None and members:
+        if vals is None and members and not problem:
             w.append("instance %s: member values not found" % iid.hex())
         elif vals and not all(v["decoded"] for v in vals):
             w.append("instance %s: some member values not decoded" % iid.hex())
@@ -535,7 +578,7 @@ def build_report(data, spots=None, plugin_index=None, file_name="", show_name=Fa
     for inst in [i for i in rep["instances"] if i["role"] == "mission"][:1]:
         if inst["members"]:
             for m in inst["members"]:
-                if m["name"].lower() == "applied" and m["decoded"]:
+                if m["name"].lower() == "applied" and m["decoded"] and m.get("code") == 3:
                     rep["script_stage"] = {"value": m["value"], "source": "mission script member `applied`",
                                            "description": "the last stage the mission script applied"}
     missions = [i for i in rep["instances"] if i["role"] == "mission"]
@@ -648,6 +691,33 @@ def load_spots(spot_args, spots_file):
     return spots
 
 
+def _same_file(a, b):
+    """True if both names refer to one file (same path, symlink or hard link). A missing `a` is a new file."""
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return os.path.realpath(a) == os.path.realpath(b)
+
+
+def write_json_report(path, rep):
+    """Write to a new temporary file next to `path` and rename it over `path`, so an existing file's inode
+    (for instance a hard link to the save) is never opened for writing."""
+    import tempfile
+    d = os.path.dirname(os.path.abspath(path))
+    fd, tmp = tempfile.mkstemp(prefix=".save_probe_", suffix=".tmp", dir=d)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(rep, f, indent=2)
+            f.write("\n")
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Read-only probe of a Starfield save (mission state, actor positions).")
     ap.add_argument("save", help="path to the .sfs save (opened read-only)")
@@ -664,8 +734,8 @@ def main(argv=None):
             raise ValueError
     except ValueError:
         ap.error("--plugin-index must be a hex number between 01 and FD")
-    if args.json and os.path.realpath(args.json) == os.path.realpath(args.save):
-        ap.error("--json would overwrite the save")
+    if args.json and _same_file(args.json, args.save):
+        ap.error("--json would overwrite the save (same file, link or hard link)")
     try:
         spots = load_spots(args.spot, args.spots)
         data = load_save(args.save)
@@ -675,9 +745,12 @@ def main(argv=None):
     rep = build_report(data, spots, idx, os.path.basename(args.save), args.show_name)
     print(format_report(rep))
     if args.json:
-        with open(args.json, "w", encoding="utf-8") as f:
-            json.dump(rep, f, indent=2)
-            f.write("\n")
+        try:
+            write_json_report(args.json, rep)
+        except OSError as e:
+            print("save_probe: cannot write %s: %s" % (os.path.basename(args.json), e.strerror or type(e).__name__),
+                  file=sys.stderr)
+            return 1
     return 0
 
 
