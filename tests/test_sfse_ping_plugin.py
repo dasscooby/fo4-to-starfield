@@ -30,8 +30,11 @@ class PingPluginTests(unittest.TestCase):
         # a global native: std::monostate in the self slot, int in and out, answers v + 1
         self.assertIn("std::int32_t Ping(std::monostate, std::int32_t a_v)", self.main)
         self.assertIn("return a_v + 1;", self.main)
-        self.assertIn('vm->BindNativeMethod("FOCC"sv, "Ping"sv, &Ping, true, false);', self.main)
-        self.assertEqual(self.main.count("BindNativeMethod("), 1)
+        # no tasklet flag: libxse would call one of an overloaded virtual pair whose MSVC slot order is unproven
+        self.assertIn('vm->BindNativeMethod("FOCC"sv, "Ping"sv, &Ping, std::nullopt, false);', self.main)
+        self.assertNotIn("SetCallableFromTasklets(", self.main.replace("// tasklet flag libxse would also call SetCallableFromTasklets,", ""))
+        code = "\n".join(l for l in self.main.splitlines() if not l.lstrip().startswith("//"))
+        self.assertEqual(code.count("BindNativeMethod("), 1)
 
     def test_the_native_is_bound_on_post_data_load_through_the_singleton_without_a_hook(self):
         self.assertIn("SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)", self.main)
@@ -40,13 +43,13 @@ class PingPluginTests(unittest.TestCase):
         self.assertLess(load.index("SFSE::Init("), load.index("RegisterListener(&OnMessage)"))
         self.assertIn("if (a_msg && a_msg->type == SFSE::MessagingInterface::kPostDataLoad) {", self.main)
         self.assertIn("const auto game = RE::GameVM::GetSingleton();", self.main)
-        self.assertIn("const auto vm = game ? game->GetVM() : nullptr;", self.main)
+        self.assertIn("const auto vm = game->GetVM();", self.main)
         self.assertIn("if (!vm) {", self.main)                                           # no VM, no bind, no crash
-        self.assertEqual(load.count("return true;"), 2)                                   # loaded either way, the log tells
+        self.assertEqual(load.count("return true;"), 4)                                   # loaded either way, the log tells
         code = "\n".join(l for l in self.main.splitlines() if not l.lstrip().startswith("//"))   # the comments cite the old hook
-        for banned in ("static ", "new ", "malloc", "WriteProcessMemory", "REL::Relocation", "REL::ID(", "THook",
+        for banned in ("static ", "new ", "malloc", "WriteProcessMemory", "REL::Relocation", "THook",
                        "SetPapyrusCallback", "SFSEPluginVersion", "SFSE_PLUGIN_VERSION", "write_call"):
-            self.assertNotIn(banned, code, banned)                                       # no state, no address, no hook, no version data of its own
+            self.assertNotIn(banned, code, banned)                                       # no hook, no allocation, no version data of its own
         self.assertIn('#include "pch.h"', self.main)
         self.assertEqual(self.pch.count("#include"), 2)
         for inc in ('#include "RE/Starfield.h"', '#include "SFSE/SFSE.h"'):
@@ -57,6 +60,42 @@ class PingPluginTests(unittest.TestCase):
             self.assertIn(line, self.main, line)
         self.assertIn("FOCCPing.log", self.readme)
         self.assertIn("FOCCPing.log", self.runbook)
+
+    def test_nothing_is_called_before_it_is_checked(self):
+        """FAL-216: the version guard, the plugin's own Address Library read with the libxse cross-check, the game's
+        NativeFunctionBase vtable and five slots, and the GameVM and VM types, all before the bind (PR #704's checks)."""
+        load = self.main[self.main.index("SFSE_PLUGIN_LOAD("):]
+        self.assertIn("constexpr REL::Version kRuntime{ 1, 16, 244, 0 };", self.main)
+        guard = load.index('Refuse("version"')
+        checks = load.index('!CheckImage() || !ReadAddressLibrary(dir / "versionlib-1-16-244-0.bin") || !CheckNativeFunctionBase()')
+        self.assertLess(guard, checks)
+        self.assertLess(checks, load.index("RegisterListener(&OnMessage)"))
+        self.assertLess(checks, load.index("g_ready = true;"))
+        bind = self.main[self.main.index("void BindPing()"):self.main.index("void OnMessage(")]
+        self.assertTrue(bind.index("if (!g_ready) {") < bind.index('CheckObject("GameVM"') <
+                        bind.index('CheckObject("VirtualMachine"') < bind.index("InImage(slot[kBindSlot], 1)") <
+                        bind.index("vm->BindNativeMethod("))
+        ids = {"GameVM.Singleton": 937585, "GameVM.RTTI": 865426, "BSScript.Internal.VirtualMachine.RTTI": 870795,
+               "BSStringPool.GetEntry": 1186742, "BSStringPool.Entry.Release": 139340,
+               "NativeFunctionBase.vtable": 480710, "NativeFunctionBase.RTTI": 853245,
+               "NativeFunctionBase.GetParam": 138061, "NativeFunctionBase.Call": 138074,
+               "NativeFunctionBase.GetSourceFilename": 138065, "NativeFunctionBase.GetParamInfo": 138067,
+               "NativeFunctionBase.Unk_15": 138068, "BSScript.Stack.GetPageForFrame": 138020,
+               "BSScript.StackFrame.GetVariable": 84986}
+        for name, value in ids.items():
+            self.assertIn(f'{{ "{name}", {value}, ', self.main, name)
+            self.assertIn(str(value), self.readme, name)
+        self.assertEqual(self.main.count('{ "'), len(ids))
+        for slot, name in (("0x06", "kNativeGetParam"), ("0x0F", "kNativeCall"), ("0x10", "kNativeGetSourceFilename"),
+                           ("0x14", "kNativeGetParamInfo"), ("0x15", "kNativeUnk15")):
+            self.assertIn(f"{{ {slot}, {name} }}", self.main)
+        self.assertIn("constexpr std::size_t  kBindSlot = 0x1E;", self.main)
+        self.assertIn("const auto viaLibrary = REL::ID(kIds[i].id).offset();", self.main)
+        for step in ('Refuse("version"', 'Refuse("image"', 'Refuse("address_library"', 'Refuse("id"', 'Refuse("rtti"',
+                     'Refuse("slots"', 'Refuse("object"'):
+            self.assertIn(step, self.main, step)
+            self.assertIn("refuse step=" + step.split('"')[1], self.readme, step)
+        self.assertIn('REX::ERROR("refuse step={} {}", a_step, a_what);', self.main)
 
     def test_the_xmake_project_follows_the_libxse_template_and_installs_nothing(self):
         self.assertIn('includes("lib/commonlibsf")', self.xmake)
@@ -117,7 +156,8 @@ class PingPluginTests(unittest.TestCase):
             self.assertIn("05 00 00 00", text)                                         # format 5, the file on the PC
         self.assertIn("RUNTIME_LATEST` (1.16.244 at `9d090c4`", self.readme)                 # include/SFSE/Version.h at the pin
         self.assertNotIn("1.16.236", self.readme)
-        self.assertIn("`FOCCPing v0.2.0.0` (the library's own, from `SFSE::Init`)", self.readme)   # the log's first line
+        self.assertIn("`FOCCPing v0.3.0.0` (the library's own, from `SFSE::Init`)", self.readme)   # the log's first line
+        self.assertIn('set_version("0.3.0")', self.xmake)
         self.assertIn("the same `-Out` runs again", self.readme)
         # a wrong offset is a crash with no message box, not "cannot crash"
         self.assertIn('"Failed to find offset for Address Library ID"', self.runbook)
