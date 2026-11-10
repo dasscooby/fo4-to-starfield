@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -26,7 +27,7 @@ class ReleaseLoadTests(unittest.TestCase):
         names = ("Starfield.esm", "FO4Port.esm", "FO4SFBridge.esm")
         for name in names:
             (self.data / name).write_bytes(("opaque " + name).encode())
-        self.release = {"schema": 1, "release_id": "A", "masters": [
+        self.release = {"schema": 2, "implicit_loaders": {"game": None, "my_games": None}, "release_id": "A", "masters": [
             dict(sr.identity(self.data / name), name=name) for name in names], "state_layouts": {}}
 
     def check(self, release=None):
@@ -91,6 +92,7 @@ class ReleaseLoadTests(unittest.TestCase):
         for folder in (self.game, self.my_games):
             path = folder / "Starfield.ccc"
             path.write_text("Starfield.esm\nOther.esm\n")
+            self.release["implicit_loaders"] = rl.implicit_inputs(self.game, self.my_games)
             with self.assertRaisesRegex(ValueError, "loader configuration"):
                 self.check()
             path.unlink()
@@ -132,8 +134,79 @@ class ReleaseLoadTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.check()
 
+    def test_pinned_ccc_add_remove_change_and_reorder_refuse(self):
+        for folder in (self.game, self.my_games):
+            with self.subTest(folder=folder):
+                path = folder / "Starfield.ccc"
+                self.release["implicit_loaders"] = rl.implicit_inputs(self.game, self.my_games)
+                path.write_text("Starfield.esm\n")
+                with self.assertRaisesRegex(ValueError, "implicit loader configuration differs"):
+                    self.check()
+                self.release["implicit_loaders"] = rl.implicit_inputs(self.game, self.my_games)
+                self.check()
+                for raw in (b"# changed comment\nStarfield.esm\n", b"OldMars.esm\nStarfield.esm\n"):
+                    path.write_bytes(raw)
+                    with self.assertRaisesRegex(ValueError, "implicit loader configuration differs"):
+                        self.check()
+                path.unlink()
+                with self.assertRaisesRegex(ValueError, "implicit loader configuration differs"):
+                    self.check()
+
+    def test_implicit_pin_shape_is_required_and_strict(self):
+        for pins in (None, {}, {"game": None}, {"game": None, "my_games": None, "other": None},
+                     {"game": {"size": True, "sha256": "0" * 64}, "my_games": None},
+                     {"game": {"size": 1, "sha256": "bad"}, "my_games": None}):
+            with self.subTest(pins=pins), self.assertRaises(ValueError):
+                self.check(dict(self.release, implicit_loaders=pins))
+
+    def test_old_draft_schema_is_not_silently_upgraded(self):
+        with self.assertRaisesRegex(ValueError, "unknown release schema"):
+            self.check(dict(self.release, schema=1))
+        old = dict(self.release)
+        del old["implicit_loaders"]
+        with self.assertRaisesRegex(ValueError, "missing or unknown"):
+            self.check(old)
+
+    def test_pin_locations_cannot_be_swapped(self):
+        (self.game / "Starfield.ccc").write_text("Starfield.esm\n")
+        pins = rl.implicit_inputs(self.game, self.my_games)
+        self.release["implicit_loaders"] = dict(game=pins["my_games"], my_games=pins["game"])
+        with self.assertRaisesRegex(ValueError, "implicit loader configuration differs"):
+            self.check()
+
+    def test_capture_refuses_linked_or_oversized_ccc(self):
+        path = self.game / "Starfield.ccc"
+        path.write_bytes(b"#" * (sr.MAX_METADATA_BYTES + 1))
+        with self.assertRaisesRegex(ValueError, "limit"):
+            rl.implicit_inputs(self.game, self.my_games)
+        path.unlink()
+        target = self.root / "foreign.ccc"
+        target.write_text("Starfield.esm\n")
+        try:
+            path.symlink_to(target)
+        except OSError as error:
+            self.skipTest(str(error))
+        with self.assertRaisesRegex(ValueError, "link"):
+            rl.implicit_inputs(self.game, self.my_games)
+
+    def test_changed_ccc_during_read_refuses(self):
+        path = self.game / "Starfield.ccc"
+        path.write_text("Starfield.esm\n")
+        actual = rl.os.fstat
+        calls = []
+        def changing(fd):
+            result = actual(fd)
+            calls.append(result)
+            if len(calls) == 1:
+                path.write_text("# changed during read\nStarfield.esm\n")
+            return result
+        with mock.patch.object(rl.os, "fstat", side_effect=changing):
+            with self.assertRaisesRegex(ValueError, "changed while reading"):
+                rl.implicit_inputs(self.game, self.my_games)
+
     def test_builtin_only_ccc_uses_existing_loader_rules_without_claiming_indexes(self):
         (self.game / "Starfield.ccc").write_text("Starfield.esm\n")
+        self.release["implicit_loaders"] = rl.implicit_inputs(self.game, self.my_games)
         self.check()
 
 

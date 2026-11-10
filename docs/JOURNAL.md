@@ -2817,3 +2817,16 @@ or repair. Full implicit built-in ordering/indexes are not established by this
 part; accepted implicit loader configuration needs further identity/evidence.
 Managed installer workflow wiring and proven new-save binding publication remain
 in draft #716. Synthetic checks only; Windows/native/Tk/game NOT_RUN.
+
+
+### 2026-11-10 — Codex / Lone: implicit CCC identity (item 7 part 5)
+
+Following Scribe CLEAR6c139438 (FAL-267), declaration schema 2 pins both CCC
+locations, including absence. Changed inputs refuse publication and Play; changed
+pins refuse existing save bindings. Publication rechecks keep ownership pending
+on observed input changes. Synthetic controls cover both locations, bytes/order,
+malformed/missing pins, old schema refusal, interrupted publication recovery and
+post-tool refusal. No game formats parsed, assets, saves or state modified.
+Exact-head receipt/review on FAL-247 and draft #716. Native runtime/implicit-order
+acceptance, installer finalization and new-save provenance/publication remain.
+Windows/native/Tk/game NOT_RUN.

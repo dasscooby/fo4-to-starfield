@@ -33,7 +33,7 @@ class ReleaseInstallTests(unittest.TestCase):
         self.original = {"schema": 1, "complete": True, "source": "synthetic", "made": ["Starfield.exe"]}
         self.receipt.write_bytes(ri.encode(self.original))
         self.candidate = self.root / "candidate.json"
-        self.release = {"schema": 1, "release_id": "release-旅", "masters": [
+        self.release = {"schema": 2, "implicit_loaders": {"game": None, "my_games": None}, "release_id": "release-旅", "masters": [
             dict(sr.identity(self.data / "FO4Port.esm"), name="FO4Port.esm")], "state_layouts": {}}
         self.candidate.write_bytes(ri.encode(self.release))
         self.target = self.data / sr.RELEASE_FILE
@@ -219,6 +219,30 @@ class ReleaseInstallTests(unittest.TestCase):
         result = subprocess.run(argv + ["--apply"], env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(ri.installed(self.game), sr.declaration(self.release))
+
+    def test_changed_ccc_during_publication_keeps_pending_receipt(self):
+        calls = []
+        def running():
+            calls.append(True)
+            if len(calls) == 2:
+                (self.game / "Starfield.ccc").write_text("Starfield.esm\n")
+            return False
+        with self.assertRaisesRegex(ValueError, "implicit loader configuration differs"):
+            self.publish(apply=True, running=running)
+        self.assertFalse(json.loads(self.receipt.read_bytes())[ri.FIELD]["complete"])
+        self.assertFalse(self.target.exists())
+        self.assertIn("repeat install-release", sr.play_reason(self.values, self.game))
+        (self.game / "Starfield.ccc").unlink()
+        self.publish(apply=True)
+        self.assertEqual(ri.installed(self.game), sr.declaration(self.release))
+
+    def test_publication_refuses_changed_ccc_without_writes(self):
+        (self.game / "Starfield.ccc").write_text("Starfield.esm\n")
+        before = self.snapshot()
+        for apply in (False, True):
+            with self.assertRaisesRegex(ValueError, "implicit loader configuration differs"):
+                self.publish(apply=apply)
+        self.assertEqual(before, self.snapshot())
 
     def test_publication_refuses_other_active_configuration_without_writes(self):
         self.plugins.write_text("FO4Port.esm\n")

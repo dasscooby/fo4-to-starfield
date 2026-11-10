@@ -153,9 +153,11 @@ def publish(values, candidate_path, *, apply=False, running=restore.game_running
     _write(receipt_path, pending_raw, receipt_raw)
     if running() or read(receipt_path) != pending_raw:
         raise sr.BindingError("game or instance changed; release publication remains pending")
+    release_load.check(release, root, values.get("my_games"))
     _write(target, raw, old_raw)
     if running() or read(target) != raw:
         raise sr.BindingError("game or declaration changed; release publication remains pending")
+    release_load.check(release, root, values.get("my_games"))
     complete = dict(pending, **{FIELD: {"schema": 1, "complete": True,
                                      "declaration": pin(raw), "previous": None}})
     _write(receipt_path, encode(complete), pending_raw)

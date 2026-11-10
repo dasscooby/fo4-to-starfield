@@ -31,7 +31,7 @@ class SaveProfileTests(unittest.TestCase):
         self.saves = self.my_games / "Saves" / "FO4SF"
         self.saves.mkdir(parents=True)
         (self.data / "FO4Port.esm").write_bytes(b"synthetic master")
-        self.release = {"schema": 1, "release_id": "A", "masters": [
+        self.release = {"schema": 2, "implicit_loaders": {"game": None, "my_games": None}, "release_id": "A", "masters": [
             dict(sr.identity(self.data / "FO4Port.esm"), name="FO4Port.esm")], "state_layouts": {}}
         self.marker = self.data / sr.RELEASE_FILE
         self.marker.write_text(json.dumps(self.release))
@@ -65,6 +65,15 @@ class SaveProfileTests(unittest.TestCase):
         before = self.snapshot()
         self.assertEqual(self.reason(), "")
         self.assertEqual(before, self.snapshot())
+
+    def test_changed_ccc_blocks_empty_and_bound_profiles_without_writes(self):
+        for bound in (False, True):
+            if bound:
+                self.bound()
+            (self.my_games / "Starfield.ccc").write_text("Starfield.esm\n")
+            before = self.snapshot()
+            self.assertIn("implicit loader configuration differs", self.reason())
+            self.assertEqual(before, self.snapshot())
 
     def test_first_run_does_not_create_save_folder(self):
         self.saves.rmdir()
@@ -189,6 +198,16 @@ class SaveProfileTests(unittest.TestCase):
     def test_active_set_is_checked_even_with_no_saves(self):
         self.plugins.write_text("FO4Port.esm\n")
         self.assertIn("active master set/order", self.reason())
+
+    def test_load_order_tool_cannot_change_ccc_before_start(self):
+        (self.game / "Starfield.exe").write_bytes(b"")
+        system = FakeSystem([])
+        with mock.patch.dict(os.environ, {"LOCALAPPDATA": str(self.root / "local")}):
+            with mock.patch.object(crashwatch, "apply_load_order", side_effect=lambda *a:
+                                   (self.game / "Starfield.ccc").write_text("Starfield.esm\n")):
+                with self.assertRaisesRegex(ValueError, "implicit loader configuration differs"):
+                    crashwatch.play(self.values, str(self.game), system=system, folder=str(self.game))
+        self.assertEqual(system.calls, [])
 
     def test_load_order_tool_cannot_change_release_before_start(self):
         (self.game / "Starfield.exe").write_bytes(b"")

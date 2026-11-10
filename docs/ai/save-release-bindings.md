@@ -1,12 +1,12 @@
-# Per-save release binding: item 7, part 1
+# Per-save release binding: item 7, draft parts 1–5
 
-FAL-247, Codex / The Lone Wanderer. This first part provides a read-only verifier and
-CLI. It does **not yet enforce Play or automatically publish save bindings**. Those
-are the next part of this same item-7 PR. No existing save is automatically adopted.
+FAL-247, Codex / The Lone Wanderer. This draft provides a read-only verifier,
+CLI, Play enforcement and owned declaration publication. Automatic save-binding
+publication and managed installer finalization remain unfinished. No existing save is automatically adopted.
 No game-save header is read or modified; saves and native state are opaque files.
 
-Each release declaration has schema 1, a release_id, ordered masters (name, size,
-sha256), and state_layouts keyed by component. Each layout declares format,
+Each release declaration now has schema 2, a release_id, ordered masters (name,
+size, sha256), implicit_loaders, and state_layouts keyed by component. Each layout declares format,
 envelope_schema and payload_schema separately. This keeps a sidecar envelope version
 from being mistaken for the schema of the state inside it.
 
@@ -105,3 +105,34 @@ that implicit loader configuration remains necessary before claiming complete
 load compatibility. Windows/native acceptance is still NOT_RUN. Packaging
 finalization wiring, that implicit-loader evidence/pinning, and new-save provenance
 and binding publication remain in this same draft PR.
+
+
+Part 5 pins the implicit CCC configuration in declaration schema 2:
+
+```json
+"implicit_loaders": {"game": null, "my_games": null}
+```
+
+Each key addresses `Starfield.ccc` in that named folder. `null` means the file
+must be absent; a present file needs its measured `{"size": ..., "sha256": ...}`
+identity. `release_load.implicit_inputs(game, my_games)` captures these bounded,
+supported UTF-8 inputs without writes. A release producer supplies those pins;
+Play never captures fresh pins to make a changed install pass. Locations cannot
+be omitted or swapped. All exact bytes matter, including comments and line order.
+Adding, removing or editing either file refuses until the matching configuration
+is restored. The pins also enter compatibility and the original save declaration:
+a new release cannot silently rebind an old save to different CCC inputs.
+The read-only `check-save-release` command compares the declarations; actual CCC
+inputs are checked by publication and profile Play with its confirmed My Games.
+Publication rechecks before declaring complete; observed changes retain pending
+ownership and require restoration then the same repeat command. The final check
+after the load-order tool checks CCC pins as well as explicit Plugins.txt order.
+There is no global cross-process lock or claim to defeat every filesystem race.
+
+Earlier schema-1 draft declarations refuse; no automatic migration or adoption is
+provided. Binding and instance-ownership schemas remain 1, and a binding embeds
+the schema-2 declaration. No accepted item-7 release has been integrated yet.
+This pins configuration identity, not native built-in indexes or CCC interpretation.
+Native runtime/order acceptance, installer finalization, newly produced save
+provenance and atomic binding publication remain required. Keep PR #716 draft;
+Windows/native/Tk/game NOT_RUN. Saves and native state remain untouched.

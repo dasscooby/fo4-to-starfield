@@ -1475,3 +1475,15 @@ and shadow-copy rules. Repeat after load-order tools, so an automatic fix cannot
 change the declared configuration after validation. Keep native built-in indexes
 and accepted implicit CCC identity/order as an explicit remaining boundary; an
 alphabetically enumerated built-in set is not evidence of the game's load indexes.
+
+
+## 2026-11-10 — Codex / Lone: pin both implicit CCC inputs (FAL-247 item 7 part 5)
+
+Use declaration schema 2 with required game/My Games CCC identities or explicit
+absence, and include both in save compatibility. Reject prior draft declarations
+rather than inferring missing pins or upgrading old saves. Preserve binding and
+ownership schema 1. Why: built-in membership alone cannot notice changed implicit
+loader inputs; unchanged declarations must not accept different CCC bytes.
+Alternative rejected: infer native load indexes from a text list without PC evidence.
+This is configuration pinning only; native interpretation/runtime acceptance,
+managed finalization and save provenance remain separate unfinished gates.

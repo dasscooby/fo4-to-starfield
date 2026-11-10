@@ -29,7 +29,7 @@ class SaveReleaseTests(unittest.TestCase):
         (self.state / "sidecars/state.focc").write_bytes(b"opaque synthetic sidecar")
         for name in ("Starfield.esm", "FO4Port.esm"):
             (self.data / name).write_bytes(("synthetic master " + name).encode())
-        self.release = {"schema": 1, "release_id": "release-A",
+        self.release = {"schema": 2, "implicit_loaders": {"game": None, "my_games": None}, "release_id": "release-A",
                         "masters": [dict(sr.identity(self.data / n), name=n)
                                     for n in ("Starfield.esm", "FO4Port.esm")],
                         "state_layouts": {"focc": {"format": "focc-sidecar", "envelope_schema": 1,
@@ -73,6 +73,14 @@ class SaveReleaseTests(unittest.TestCase):
             release = copy.deepcopy(self.release)
             change(release)
             self.assertTrue(any("master identities/order" in p for p in self.check(release=release)))
+
+    def test_changed_implicit_configuration_refuses_old_binding(self):
+        release = copy.deepcopy(self.release)
+        release["implicit_loaders"]["game"] = {"size": 1, "sha256": "0" * 64}
+        before = self.snapshot()
+        self.assertIn("required implicit loader configuration changed", self.check(release=release))
+        self.assertNotEqual(sr.compatibility(release), sr.compatibility(self.release))
+        self.assertEqual(before, self.snapshot())
 
     def test_changed_actual_master_bytes_refuse_even_with_same_declaration(self):
         (self.data / "FO4Port.esm").write_bytes(b"changed actual master")
@@ -120,7 +128,7 @@ class SaveReleaseTests(unittest.TestCase):
             self.assertEqual(self.snapshot(), before)
 
     def test_unknown_or_malformed_declarations_fail_closed(self):
-        for change in (lambda r: r.update(schema=2), lambda r: r.update(schema=True),
+        for change in (lambda r: r.update(schema=999), lambda r: r.update(schema=True),
                        lambda r: r.update(extra="unknown"), lambda r: r.update(masters=[]),
                        lambda r: r["masters"].append(dict(r["masters"][0], name="STARFIELD.ESM")),
                        lambda r: r["masters"][0].update(size=True),

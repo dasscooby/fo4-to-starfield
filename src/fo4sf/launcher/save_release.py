@@ -13,6 +13,8 @@ from pathlib import Path
 import re
 
 SCHEMA = 1
+DECLARATION_SCHEMA = 2
+CCC_LOCATIONS = ("game", "my_games")
 MAX_METADATA_BYTES = 1 << 20
 SHA = re.compile(r"[0-9a-f]{64}")
 RELEASE_FILE = "FO4SF.release.json"
@@ -52,8 +54,8 @@ def _identity_fields(value):
 
 def declaration(value):
     """Validated, independent copy. Master order matters; Windows name casing does not."""
-    _keys(value, ("schema", "release_id", "masters", "state_layouts"), "release declaration")
-    if type(value["schema"]) is not int or value["schema"] != SCHEMA or not _text(value["release_id"]):
+    _keys(value, ("schema", "release_id", "masters", "state_layouts", "implicit_loaders"), "release declaration")
+    if type(value["schema"]) is not int or value["schema"] != DECLARATION_SCHEMA or not _text(value["release_id"]):
         raise BindingError("unknown release schema or missing release id")
     if not isinstance(value["masters"], list) or not value["masters"]:
         raise BindingError("release needs ordered master identities")
@@ -78,7 +80,11 @@ def declaration(value):
                 or not _number(layout["envelope_schema"])):
             raise BindingError("invalid envelope or payload schema identity")
         layouts[component.casefold()] = dict(layout)
-    return {"schema": SCHEMA, "release_id": value["release_id"], "masters": masters, "state_layouts": layouts}
+    _keys(value["implicit_loaders"], CCC_LOCATIONS, "implicit loader pins")
+    loaders = {key: None if value["implicit_loaders"][key] is None
+               else _identity_fields(value["implicit_loaders"][key]) for key in CCC_LOCATIONS}
+    return {"schema": DECLARATION_SCHEMA, "release_id": value["release_id"], "masters": masters,
+            "state_layouts": layouts, "implicit_loaders": loaders}
 
 
 def compatibility(value):
@@ -206,6 +212,8 @@ def _bound_save(release, binding, save, state_dir):
     problems = []
     if release["masters"] != old["masters"]:
         problems.append("required master identities/order changed")
+    if release["implicit_loaders"] != old["implicit_loaders"]:
+        problems.append("required implicit loader configuration changed")
     if release["state_layouts"] != old["state_layouts"]:
         problems.append("required state envelope/payload layout changed")
     if binding["save_name"].casefold() != Path(save).name.casefold() or identity(save) != saved_pin:

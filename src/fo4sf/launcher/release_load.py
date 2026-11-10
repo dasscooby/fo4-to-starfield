@@ -3,6 +3,8 @@
 Uses the existing launcher loader rules; does not infer native load indexes or
 parse opaque save files. Native implicit ordering still needs PC evidence.
 """
+import hashlib
+import os
 from pathlib import Path
 
 from ..core import loadset, preflight
@@ -14,7 +16,9 @@ def _loader_text(path):
         raise sr.BindingError(f"{path.name}: loader input is linked")
     try:
         with path.open("rb") as stream:
+            before = os.fstat(stream.fileno())
             raw = stream.read(sr.MAX_METADATA_BYTES + 1)
+            after = os.fstat(stream.fileno())
     except FileNotFoundError:
         return
     if len(raw) > sr.MAX_METADATA_BYTES:
@@ -24,6 +28,16 @@ def _loader_text(path):
     if b"\0" in raw:
         raise sr.BindingError(f"{path.name}: unsupported loader text encoding")
     raw.decode("utf-8-sig")
+    stamp = lambda s: (s.st_size, s.st_mtime_ns, s.st_ino)  # noqa: E731
+    if stamp(before) != stamp(after) or stamp(after) != stamp(path.stat()):
+        raise sr.BindingError(f"{path.name}: loader input changed while reading")
+    return {"size": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+
+
+def implicit_inputs(starfield, my_games):
+    """Capture supported CCC bytes or explicit absence; not native ordering proof."""
+    return {key: _loader_text(sr._inside(folder, "Starfield.ccc"))
+            for key, folder in (("game", starfield), ("my_games", my_games))}
 
 
 def check(release, starfield, my_games):
@@ -62,8 +76,10 @@ def check(release, starfield, my_games):
     if actual != wanted:
         raise sr.BindingError("active master set/order differs from release; restore its Plugins.txt")
     for folder in (root, Path(my_games)):
-        for name in detect.INI_NAMES + detect.LANGUAGE_INIS + ("Starfield.ccc",):
+        for name in detect.INI_NAMES + detect.LANGUAGE_INIS:
             _loader_text(folder / name)
+    if implicit_inputs(root, my_games) != release["implicit_loaders"]:
+        raise sr.BindingError("implicit loader configuration differs from release; restore its CCC inputs")
     probe = loadprobe.LoadProbe(str(root), [str(my_games)], str(plugins))
     loaders = preflight.check_loaders(probe)
     if loaders.status != preflight.PASS:
