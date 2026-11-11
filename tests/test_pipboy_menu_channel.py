@@ -1,6 +1,6 @@
 """FO4SFPipboyMenu's stage (c), the data channel (FAL-216), as text: the PR #704 plugin keeps every check and refusal
 line of stages (a) and (b) and their 16 ids, stage (c) checks its 16 more ids (13 for the channel, 3 for FAL-246's click
-to quest; only stages (c) and (d) do; stage (d)'s two more ids are tests/test_pipboy_stat_page.py's), the Scaleform
+to quest; only stages (c) to (e) do; stage (d)'s two more ids are tests/test_pipboy_stat_page.py's), the Scaleform
 Value functions against SFSE's own addresses, the RTTI ids by name, and every object before it is used; the
 instance names the plugin looks for are the ones make_probe_swf.py --channel writes; the ini, README and session
 card agree. No compiler here: the PC build is the compile check."""
@@ -54,7 +54,7 @@ class ChannelPluginTests(unittest.TestCase):
         self.assertIn("kIsMovieLoaded,\n\t\tkIdCountB,", enum)
         self.assertIn("kMainSingleton = kIdCountB,", enum)
         self.assertIn("kVmRtti,\n\t\tkIdCountC,", enum)
-        self.assertIn("std::size_t IdCount() { return g_stage == 4 ? kIdCount : g_stage == 3 ? kIdCountC : kIdCountB; }",
+        self.assertIn("std::size_t IdCount() { return g_stage >= 4 ? kIdCount : g_stage == 3 ? kIdCountC : kIdCountB; }",
                       self.main)
         library = function(self.main, "bool ReadAddressLibrary(")
         self.assertEqual(library.count("for (std::size_t i = 0; i < IdCount(); ++i) {"), 2)
