@@ -164,6 +164,51 @@ class GroupTests(Base):
         self.assertIn("persistent group without flag 0x400", text)
         self.assertIn("temporary group with flag 0x400", text)
 
+    def exterior_with_persistent(self, name, cell_id):
+        world = esm.Record(b"WRLD", 0x01000800, [(b"EDID", z("W"))])
+        pcell = pf.cell(0x01000801)
+        ref_p = pf.placed(b"REFR", 0x01000802, 0x00001234, (0, 0, 0), persistent=True)
+        ref_t = pf.placed(b"REFR", 0x01000804, 0x00001234, (0, 0, 0))
+        cell = pf.cell(cell_id, grid=(0, 0))
+        w = esm.PluginWriter(["Starfield.esm"], esm.ESM)
+        group = pf.world_group(world, pcell, [], [(cell, [ref_t], [ref_p])])
+        with open(self.p(name), "wb") as f:
+            f.write(w.to_bytes() + esm.group_bytes("WRLD", group))
+        return pv.verify(self.p(name)), world, pcell, ref_p, ref_t, cell, w
+
+    def test_a_persistent_group_under_an_override_of_a_masters_exterior_cell_is_refused(self):
+        """FAL-273 (#707): the layout that crashed the game; the world's persistent cell is where Starfield keeps them."""
+        bad, world, pcell, ref_p, ref_t, cell, w = self.exterior_with_persistent("E.esm", 0x00000803)
+        self.assertTrue(any("override of a master's cell" in t and "00000803" in t for t in bad.problems), bad.problems)
+        # the same reference in the world's persistent cell is fine
+        good = pf.world_group(world, pcell, [ref_p], [(cell, [ref_t])])
+        with open(self.p("E2.esm"), "wb") as f:
+            f.write(w.to_bytes() + esm.group_bytes("WRLD", good))
+        self.assertEqual(pv.verify(self.p("E2.esm")).problems, [])
+
+    def test_an_override_of_a_masters_exterior_cell_warns_even_without_a_reference(self):
+        """PC ladder 11 Nov (FAL-273): the cell override alone crashed; a warning (one world), the world's persistent cell does not warn."""
+        bad, world, pcell, ref_p, ref_t, cell, w = self.exterior_with_persistent("E4.esm", 0x00000803)
+        self.assertTrue(any("override of a master's exterior cell" in t and "00000803" in t for t in bad.warnings), bad.warnings)
+        good = pf.world_group(world, pcell, [ref_p], [(cell, [])])                                  # the cell override with no reference
+        with open(self.p("E5.esm"), "wb") as f:
+            f.write(w.to_bytes() + esm.group_bytes("WRLD", good))
+        rep = pv.verify(self.p("E5.esm"))
+        self.assertEqual(rep.problems, [])
+        self.assertTrue(any("override of a master's exterior cell" in t for t in rep.warnings), rep.warnings)
+        top_only = pf.world_group(world, pcell, [ref_p], [])                                         # toponly: no exterior cell at all
+        with open(self.p("E6.esm"), "wb") as f:
+            f.write(w.to_bytes() + esm.group_bytes("WRLD", top_only))
+        rep = pv.verify(self.p("E6.esm"))
+        self.assertEqual(rep.problems, [])
+        self.assertFalse(any("exterior cell" in t for t in rep.warnings), rep.warnings)
+
+    def test_a_persistent_group_under_the_plugins_own_exterior_cell_only_warns(self):
+        """The planet probe has this layout in a cell of its own and ran in game (its cell never loaded): a warning."""
+        rep = self.exterior_with_persistent("E3.esm", 0x01000803)[0]
+        self.assertEqual(rep.problems, [])
+        self.assertTrue(any("plugin's own exterior cell 01000803" in t for t in rep.warnings), rep.warnings)
+
     def test_a_children_group_without_its_record_is_a_warning(self):
         world = esm.Record(b"WRLD", 0x01000800, [(b"EDID", z("W"))])
         w = esm.PluginWriter(["Starfield.esm"], esm.ESM)
