@@ -179,21 +179,23 @@ Where each value comes from, and what is checked before it is used:
 
 | Value | Read | Checked first |
 | --- | --- | --- |
-| health, carry weight (`CarryWeight`), carried weight (`InventoryWeight`, if an actor value of that name exists), experience (`Experience`), `FO4SF_Rads` | the player's `ActorValueOwner::GetActorValue` with the `ActorValueInfo` form of that editor ID | the form: found by editor ID in the data handler's AVIF list, typed `ActorValueInfo` by RTTI. The call: next line |
+| health, carry weight (`CarryWeight`), carried weight (`InventoryWeight`, if an actor value of that name exists), experience (`Experience`), `FO4SF_Rads` | the player's `ActorValueOwner::GetActorValue` with the `ActorValueInfo` form of that editor ID | the form: looked up by form id (Starfield.esm's `0x001` to `0xFFF`; `FO4SF_Rads` at local id `0x800` of each full plugin `01`-`FD` and light plugin `FE000`-`FEFFF`), typed `ActorValueInfo` by RTTI and named by its editor ID. The call: next line |
 | the `GetActorValue` slot | the player's `ActorValueOwner` vtable, slot 0x01 | the base's offset from `PlayerCharacter`'s RTTI class hierarchy; that subobject's vtable locator names `PlayerCharacter` at that offset; slot 0x00 is the adjustor thunk to the player's own slot 0x00 (its destructor). libxse declares a virtual destructor before `GetActorValue`, SFSE 0.2.21 none: the thunk decides. Otherwise `refuse step=page what=get_actor_value ...` and every actor value is `?` |
 | level | the player's base object (`OBJ_REFR::objectReference`), its `TESActorBaseData`, `ACTOR_BASE_DATA::level` | the base is a `TESNPC` by RTTI; the base class offset from its hierarchy, its subobject checked as above. That the player's level lives there is a **supported hypothesis** (it does in Skyrim and Fallout 4) |
 | cell, worldspace | `TESObjectREFR::parentCell`, then `TESObjectCELL::cellWorldspace`; each name through its `TESFullName` (the pool string at +0x08) | `TESObjectCELL` and `TESWorldSpace` by RTTI; `TESFullName`'s offset from the hierarchy, subobject checked. An exterior cell usually has no name: `NO NAME` and its form id, which changes as the player crosses cells |
-| game time | the `GameHour` and `GameDaysPassed` globals (`TESGlobal::value`) | found by editor ID in the data handler's GLOB list, typed `TESGlobal` by RTTI. `Starfield.esm` has them as `00000038` and `00000039` (docs/ai/test-queue.md) |
+| game time | the `GameHour` and `GameDaysPassed` globals (`TESGlobal::value`) | looked up by form id, `Starfield.esm`'s `00000038` and `00000039` (docs/ai/test-queue.md; the PC confirmed them), typed `TESGlobal` by RTTI and named by their editor IDs |
 | editor IDs and names | the `BSStringPool` entry (libxse: an 0x18-byte header, then the characters; flag 0x02 at +0x14 points on at +0x08) | `step=page_strings self_test=ok`: our own menu name read back through the same reader first; if it does not read back, no name and no form list is read |
-| the data handler's lists | `TESDataHandler::formArrays` at +0x70, 0x18 each; AVIF is type 0x6D, GLOB 0x0A (libxse and SFSE 0.2.21 agree on all four) | the one new id, `TESDataHandler.Singleton` 937572, must equal SFSE 0.2.21's own address `0x5FD9B28` (`sfse/GameData.h`), else `refuse step=page_ids` and the plugin stays idle; the object is a `TESDataHandler` by RTTI; every entry is typed before its editor ID is read |
+| the form lookup | the engine's `TESForm::LookupByID` (libxse id 47401), the second call into the game | its address must equal SFSE 0.2.21's `GetFormByNumericID` `0x5DE3B0` (`sfse/GameForms.cpp`), else `refuse step=page_ids` and the plugin stays idle; libxse and SFSE both declare it `TESForm* (u32)`. Called on the main thread only, about 8,400 times once at the first open, never again |
+| the data handler's lists (diagnostic only) | `TESDataHandler::formArrays` at +0x70, 0x18 each (libxse and SFSE 0.2.21 agree), which read empty at `5a4e6016` (`refuse step=page_forms list=AVIF reason=array size=0`, PC run 11 Nov) | `TESDataHandler.Singleton` 937572 must equal SFSE's `0x5FD9B28`; the object is a `TESDataHandler` by RTTI. Only its memory is logged, once: `step=page_form_arrays avif=<3 qwords> glob=<3 qwords> nonzero_count=<n> <index>:<3 qwords>...`, so a later page can use the lists |
 
 The page's checks never stop the plugin: a value that fails prints `?` and its reason is logged once, as
-`step=page_unknown what=<value> reason=...`. `step=page_forms list=AVIF ... found=... missing=... weight_names=...`
+`step=page_unknown what=<value> reason=...`. `step=page_forms lookup=by_form_id ... found=... missing=... weight_names=...`
 also lists every actor value whose editor ID holds WEIGHT, ENCUMB or MASS, so the right carried-weight value can be
 named if `InventoryWeight` is missing. Credits are not on the page: no plain getter exists for an item count.
 
-**Not verified until the session:** that the AVIF and GLOB lists keep editor IDs at runtime; the slot thunk; that the
-level is the base's; which names the game uses for its menus.
+**Verified at `5a4e6016` (PC run, 11 Nov):** the page, both buttons, F10, the string self test, the slot thunk
+(`owner_offset=0x70`, slot 0x01), the level (`LEVEL 1` = `player.getlevel`), the cell line and `menus=`. **Not verified
+until the next session:** that the actor values and globals are found by form id and their editor IDs read.
 
 ## Build (PC)
 
@@ -278,15 +280,16 @@ Take a screenshot while the menu is open after the fifth press, and one after th
 
 1. Everything in (b), with `stage=4` and `step=ready stage=d`, after `step=load_d flag_sets=0x9 snapshot_key=0x7a`
    and, before `step=ready`, `step=channel_ids value_functions=sfse_equal rtti_names=ok` and `step=page_ids
-   data_handler=sfse_equal`; 30 `step=id` lines.
+   data_handler=sfse_equal lookup_by_id=sfse_equal`; 31 `step=id` lines.
 2. At the first open: `step=page_strings self_test=ok`, `step=page_actor_values ... get_actor_value_slot=0x01`,
-   `step=object name=TESDataHandler`, `step=page_forms list=AVIF ... found=Health,CarryWeight,...` and `step=page_forms
-   list=GLOB ... found=GameHour,GameDaysPassed`; then `step=listen name=fo4sfTabButton ... added=1` and `step=listen
-   name=fo4sfCloseButton ... added=1`.
+   `step=object name=TESDataHandler`, `step=page_form_arrays ...` and `step=page_forms lookup=by_form_id
+   globals_found=GameHour,GameDaysPassed ... found=Health,CarryWeight,...`; then `step=listen name=fo4sfTabButton ...
+   added=1` and `step=listen name=fo4sfCloseButton ... added=1`.
 3. **Lines follow the game:** `step=page ... fields=8/8 set=8 match=8` lines whose `text=` changes with the game:
    `TIME` minutes move while the page is open, `HEALTH` after damage, `CELL` after the player crosses a cell or a door,
    `POSITION` and `DAYS PASSED` on tab 2. The controls (console, PC helper only): `player.getav health`,
-   `player.getav carryweight`, `player.getlevel`, `getglobalvalue gamehour`, `player.getpos x`.
+   `player.getav carryweight`, `player.getlevel`, `player.getpos x` (`getglobalvalue gamehour` does not take that name in
+   this console; TIME is checked by its minutes moving).
 4. **NEXT TAB:** each click logs `step=click button=tab` and the next `step=page` shows the other tab (`tab=1` and
    `TAB 2 OF 2: DATA`, then back).
 5. **CLOSE:** `step=click button=close`, `step=close ... by=button was_open=1 sent=hide`, `step=state ... open=0
@@ -327,11 +330,11 @@ Take a screenshot while the menu is open after the fifth press, and one after th
 | `step=field ... set=1 read_back=1 match=yes` but no text on screen | (c): the field took the text and the embedded font did not draw | screenshot; the font is the next item |
 | `step=listen ... added=1` but no `step=click` on a click | (c): the click did not reach the movie (no cursor or no mouse input to our menu) | compare the flag sets' opens: the cursor bit is set 1 |
 | `step=field ... text="NO POSITION ..."` | (c): the player singleton was not readable as a PlayerCharacter | read the `step=object name=PlayerCharacter` line |
-| `refuse step=page_ids name=TESDataHandler.Singleton rva=<r> sfse_rva=0x5fd9b28` | (d): libxse's data handler id is not SFSE 0.2.21's address; the plugin stays idle | stop: one of the two is stale for this runtime |
+| `refuse step=page_ids name=<TESDataHandler.Singleton or TESForm.LookupByID> rva=<r> sfse_rva=<s>` | (d): a libxse id is not SFSE 0.2.21's address; the plugin stays idle | stop: one of the two is stale for this runtime |
 | `refuse step=page what=strings ...` | (d): our own menu name did not read back through the pool-string reader: no editor ID or name is read, every such line is `?` | report the line (it shows what was read) |
 | `refuse step=page what=actor_value_owner ...` or `what=get_actor_value ... slot0=... target0=... destructor=...` | (d): the player's ActorValueOwner was not found or its slot 0x00 is not the thunk to the destructor; every actor value is `?` | report the line: its slots and targets settle libxse's against SFSE's declaration |
-| `refuse step=object name=TESDataHandler ...` or `refuse step=page_forms list=<l> reason=...` | (d): the data handler or one of its lists is not what libxse and SFSE say; the values from it are `?` | report the line (`other_type=` names what the list holds) |
-| `step=page_forms ... missing=<names>` | (d): those editor IDs are not in the list. `FO4SF_Rads` missing is `RADS NOT INSTALLED`; another missing name prints `?` | read `weight_names=` and `sample=` |
+| `refuse step=object name=TESDataHandler ...` | (d): the data handler is not its type; only the form-list log is skipped | report the line |
+| `step=page_forms ... missing=<names>` or `avif_typed=0` | (d): those editor IDs were not found by form id. `rads=not_installed` is `RADS NOT INSTALLED`; another missing name prints `?` | read `sample=` (the first ids found) and `weight_names=` |
 | `step=page_unknown what=<value> reason=<r>` | (d): one value could not be read, once per kind; its line shows `?` | report the line |
 | `step=page ... fields=0/8` | (d): `getChildByName` found none of the page's fields: the movie is not the `--page` one | re-stage with `--page` |
 | `step=listen name=<button> ... added=1` but no `step=click` on a click | (d): the click did not reach the movie | read `step=flags`: the page needs `0x9` |
