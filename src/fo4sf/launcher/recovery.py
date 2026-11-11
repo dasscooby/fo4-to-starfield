@@ -37,6 +37,8 @@ def inspect(starfield):
             rec = json.loads(raw.decode("utf-8-sig"))
             if not isinstance(rec, dict) or not rec:
                 raise ValueError("receipt is not an object")
+            if "files" in rec and not isinstance(rec["files"], dict):
+                raise ValueError("receipt files are not an object")
         except (UnicodeError, ValueError):
             errors.append(f"cannot read {name}; preserve it for a failure report")
             continue
