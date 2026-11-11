@@ -45,6 +45,8 @@ bool Moved = false
 bool Announced = false
 bool Called = false
 string LastFurn = "none"
+string LastSitText = "0"
+string BeforeKey = ""       ; the player's state just before SwitchToPowerArmor, to say whether anything changed
 Race StartRace = None
 
 ; ---------------------------------------------------------------- init
@@ -143,6 +145,22 @@ string Function Na(string v, string what)
     return what + " " + v
 EndFunction
 
+string Function StateKey(Actor p)
+    {Race, furniture, sit state, power armor flag and camera as one string: equal before and after means nothing changed.}
+    return Id(p.GetRace()) + "|" + FurnId(p) + "|" + SitState(p) + "|" + InPowerArmor(p) + "|" + Camera() + "|" + WornCount(p)
+EndFunction
+
+Function Verdict()
+    {What the owner reads last. The PC run of the console probe (#708, 11 Nov) saw no change at all on a furniture that is the
+     chair plus the keyword; this says so, or says what changed.}
+    Actor p = Game.GetPlayer()
+    if StateKey(p) == BeforeKey
+        Say("Result: nothing changed. SwitchToPowerArmor does nothing on a chair with only the power armor keyword (as the PC run of the probe found). The climb-in needs more than the keyword.")
+    else
+        Say("Result: something CHANGED after SwitchToPowerArmor. Write down what you saw: the two Suit lines above give the numbers.")
+    endif
+EndFunction
+
 string Function Wording(string suffix)
     {The state after the call: IsInPowerArmor, furniture and sit state, camera, race, worn armor.}
     Actor p = Game.GetPlayer()
@@ -168,6 +186,7 @@ Event OnTimer(int aiTimerID)
         Say(Wording("1 s after the call"))
     elseif aiTimerID == TIMER_READ2
         Say(Wording("4 s after the call"))
+        Verdict()
         Say("Test over. Write down what you saw, then quit without saving.")
     endif
 EndEvent
@@ -195,6 +214,17 @@ Function Poll()
         Announced = true
         Say("Test room: the vanilla chair is on your left (the control), the suit furniture on your right. Sit on the left one first, stand up, then walk up to the right one.")
     endif
+    string sitText = SitState(p)
+    if sitText != LastSitText
+        LastSitText = sitText
+        if sitText == "3"
+            Say("You are seated (sit state 3). Next to the left chair this is the control: sitting works.")
+        elseif sitText == "0"
+            Say("You are standing (sit state 0).")
+        else
+            Say("Sit state " + sitText + " (3 is seated, 0 is standing).")
+        endif
+    endif
     string furn = FurnId(p)
     if furn != LastFurn
         string before = LastFurn
@@ -214,12 +244,14 @@ Function Poll()
         if p.GetDistance(suit) < NearSuit
             Called = true
             Say("You walked up to the suit: calling SwitchToPowerArmor on it now.")
+            BeforeKey = StateKey(p)
             p.SwitchToPowerArmor(suit)
             StartTimer(READ1_S, TIMER_READ1)
             StartTimer(READ2_S, TIMER_READ2)
         elseif InRoom >= RoomLimit
             Called = true
             Say("60 s in the room: calling SwitchToPowerArmor on the suit now.")
+            BeforeKey = StateKey(p)
             p.SwitchToPowerArmor(suit)
             StartTimer(READ1_S, TIMER_READ1)
             StartTimer(READ2_S, TIMER_READ2)

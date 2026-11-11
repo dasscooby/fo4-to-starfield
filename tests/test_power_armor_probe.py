@@ -88,6 +88,16 @@ class HandScriptTests(unittest.TestCase):
         self.assertIn("(149,11): variable race cannot have the same name", err)
         self.assertIn("(158,190): race is not a variable", err)
 
+    def test_the_owner_is_told_whether_anything_changed_and_when_he_sits(self):
+        """FAL-273 after the #708 PC run: the call did nothing on a keyword-only furniture and GetFurnitureReference is not in
+        Starfield's scripts (furn=NA), so the screen says the verdict itself and reads the sit state."""
+        self.assertEqual(HAND_PSC.count("BeforeKey = StateKey(p)"), 2)             # taken before either call
+        self.assertIn("if StateKey(p) == BeforeKey", HAND_PSC)
+        self.assertIn("nothing changed. SwitchToPowerArmor does nothing on a chair with only the power armor keyword", HAND_PSC)
+        self.assertLess(HAND_PSC.index('Say(Wording("4 s after the call"))'), HAND_PSC.index("        Verdict()"))
+        self.assertIn('if sitText == "3"', HAND_PSC)                                # seated on the control without the furniture call
+        self.assertNotIn("string race ", HAND_PSC)
+
     def test_the_hand_log_lines_end(self):
         self.assertIn('"FO4SFPAHAND rt="', HAND_PSC)
         self.assertIn('" end=true"', HAND_PSC)

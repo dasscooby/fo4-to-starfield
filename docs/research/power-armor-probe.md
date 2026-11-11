@@ -154,12 +154,12 @@ room), the call and its answer 1 s and 4 s later: in power armor, furniture, sit
 armor slots. A reading the game has no call for says `not in this game's scripts`. Every message is also a line of
 `FO4SFPAHand.0.log`. Offline only: the Papyrus compile and the game are the PC's.
 
-### Owner card (seven steps, no console)
+### Owner card (seven steps, no console; follows the #708 PC run: the call is expected to do nothing)
 
 1. Tick `FO4SFPowerArmorProbe.esm`. Load a save of a **throwaway** character already in the world (not the opening); do not save.
 2. Wait. Message: "Power armor test: in 30 s you are moved into a small test room." Then "Moving you into the test room." (If instead you read "type coc FO4SF_PAProbeCell", do that, nothing else.)
-3. In the room a message names the two furnitures: vanilla chair on your left (control), suit on your right. Walk to the left one and sit (activate it). Message "You are on the control chair ... Sitting works." If you cannot sit, say so and stop.
+3. In the room a message names the two furnitures: vanilla chair on your left (control), suit on your right. Walk to the left one and sit (activate it). Message "You are seated (sit state 3) ... sitting works." (`Actor.GetFurnitureReference` is not in Starfield's scripts, so the screen goes by the sit state.) If you cannot sit, say so and stop.
 4. Stand up. Walk up to the right-hand furniture and stand next to it (do not activate it yet). Message "You walked up to the suit: calling SwitchToPowerArmor on it now."
-5. Watch the screen and the character for 5 s: any climb-in animation, camera change, or HUD change. Two messages follow ("Suit 1 s after the call: ...", "Suit 4 s after the call: ..."). Screenshot each.
+5. Watch the screen and the character for 5 s: any climb-in animation, camera change, or HUD change. Three messages follow ("Suit 1 s after the call: ...", "Suit 4 s after the call: ...", then "Result: nothing changed ..." or "Result: something CHANGED ..."). The PC run of the probe (11 Nov, #708 at 9e252a4a) saw **nothing change** on this chair-plus-keyword furniture, so "nothing changed" is the expected result; a change is the news. Screenshot each.
 6. Now activate the suit furniture once. Does a message say "You are on the SUIT furniture ..."? Did anything animate?
 7. Quit without saving. Tell: step 3 worked or not; the two "Suit ..." messages as read; what you saw at steps 5 and 6.
