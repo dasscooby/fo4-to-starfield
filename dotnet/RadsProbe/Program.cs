@@ -3,12 +3,17 @@
 // FO4SFRadsProbe.esm (master Starfield.esm only; adds records, overrides none):
 //   AVIF  FO4SF_Rads         our own actor value, on the pattern of dotnet/NewGame's seven S.P.E.C.I.A.L. values
 //                            (name, abbreviation, type, default, min, max, flags). Default 0, 0 to 1000.
-//   MGEF  FO4SF_RadsEffect   one effect: archetype ValueModifier on FO4SF_Rads, self, instant. The ONE effect: the spell
-//                            below uses it at +100, RadAway at -200 (the magnitude lives in the effect entry, not here).
-//   SPEL  FO4SF_RadsSpell    "FO4SF Rads": FireAndForget, Self, one effect entry: FO4SF_RadsEffect, magnitude +100
-//   ALCH  FO4SF_RadAway      the consumable "RadAway" (Medicine): one effect entry: FO4SF_RadsEffect, magnitude -200
-//   QUST  FO4SF_RadsProbeQuest   start game enabled, stages 10 / 20 / 30 / 40, script FO4SF_RadsProbeQuest with four
-//                            properties: RadsAV (ours), HealthAV (Starfield's, found by EditorID), RadsSpell, RadAway
+//   MGEF  FO4SF_RadsEffect   the rads effect: archetype ValueModifier on FO4SF_Rads (the actor value in DATA word 14), a copy of
+//                            the vanilla DamageHealthContact (its flags kept, Detrimental included). The spell uses it at +100.
+//   SPEL  FO4SF_RadsSpell    "FO4SF Rads": a copy of the vanilla DamageHealthSpell, one entry: FO4SF_RadsEffect, magnitude +100
+//   ALCH  FO4SF_RadAway      the consumable "RadAway" (Medicine), a copy of a vanilla medicine's shell. Two shapes:
+//                            mirror: its own MGEF FO4SF_RadAwayEffect (a copy of a vanilla restore-Health effect, NOT Detrimental,
+//                            from an ingestible or, when no ingestible has one, from a spell) at +200: the plugin then holds two MGEF;
+//                            fallback (no restore effect found anywhere): the rads effect shared at -200: one MGEF.
+//   AVIF flags DefaultToZero | DamageIsPositive (bit 26): with the effect's Detrimental the engine's sign rule leaves +100 as
+//                            +100, and the non-Detrimental +200 of the mirror lowers the value.
+//   QUST  FO4SF_RadsProbeQuest   start game enabled, stages 10 / 20 / 30 / 40 / 50, script FO4SF_RadsProbeQuest with four
+//                            properties (RadsAV, HealthAV, RadsSpell, RadAway) and a fifth, ControlSpell, only with --control-spell
 // No hazard record (no writer exists for one). The route from rads to maximum health is the SCRIPT's (a permanent modifier
 // on Health, set from the rads each step): no native code, no perk entry point. The alternatives not taken are in
 // docs/research/rads-probe.md. The script reaches every form through its four properties;
@@ -22,8 +27,10 @@
 // No template found: the minimal record is written and the build says so (plan.json keeps it).
 //
 // usage: RadsProbe build <Starfield.esm> <out dir> [--health <AVIF editor id>] [--type <AVIF type>] [--template-spell <edid>] [--template-aid <edid>]
+//                                                    [--restore-spell <SPEL edid>] [--control-spell <SPEL edid>]
 //        RadsProbe check <plugin> <Starfield.esm> [same options]     exit 1 on a mismatch
-//        RadsProbe fixture <out dir>             a synthetic Starfield.esm holding the AVIF and the template records looked up
+//        RadsProbe fixture <out dir> [--restore aid|spell|none]   a synthetic Starfield.esm holding the AVIF and the template records
+//                                                    looked up (restore: where the Health restore effect lives; none: the fallback)
 using System.Globalization;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Plugins.Binary.Parameters;
@@ -53,10 +60,14 @@ try
     Opt("--template-aid", ref tAid);
     var cSpell = "";
     Opt("--control-spell", ref cSpell);
-    var tpl = new RadsProbe.Templates(tSpell, tAid, cSpell);
+    var rSpell = "";
+    Opt("--restore-spell", ref rSpell);
+    var restoreMode = "aid";
+    Opt("--restore", ref restoreMode);
+    var tpl = new RadsProbe.Templates(tSpell, tAid, cSpell, rSpell);
     if (rest.Count == 3 && rest[0] == "build") return RadsProbe.Build(rest[1], rest[2], health, type, tpl);
     if (rest.Count == 3 && rest[0] == "check") return RadsProbe.Check(rest[1], rest[2], health, type, tpl);
-    if (rest.Count == 2 && rest[0] == "fixture") return RadsProbe.Fixture(rest[1]);
+    if (rest.Count == 2 && rest[0] == "fixture") return RadsProbe.Fixture(rest[1], restoreMode);
 }
 catch (RadsProbe.Refusal r)
 {
@@ -84,10 +95,10 @@ static class RadsProbe
     // the script's property names, in the order the writer adds them
     static readonly string[] PropNames = { "RadsAV", "HealthAV", "RadsSpell", "RadAway", "ControlSpell" };   // the fifth only with --control-spell
 
-    public record Templates(string SpellEdid, string AidEdid, string ControlSpell = "");
+    public record Templates(string SpellEdid, string AidEdid, string ControlSpell = "", string RestoreSpell = "");
 
     /// <summary>The vanilla records the effect, the spell and RadAway are copied from (null: none found, minimal record).</summary>
-    public record Found(ISpellGetter? Spell, IMagicEffectGetter? Effect, IIngestibleGetter? Aid, string Level, IMagicEffectGetter? AidEffect = null)
+    public record Found(ISpellGetter? Spell, IMagicEffectGetter? Effect, IIngestibleGetter? Aid, string Level, IMagicEffectGetter? AidEffect = null, IEffectGetter? AidEntry = null)
     {
         /// <summary>RadAway gets an effect of its own, the copy of its template's (a restore pattern); else it shares the spell's.</summary>
         public bool Mirror => Aid != null && AidEffect != null;
@@ -128,10 +139,12 @@ static class RadsProbe
         }
         IIngestibleGetter? aid = null;
         IMagicEffectGetter? aidEffect = null;
+        IEffectGetter? aidEntry = null;
         if (t.AidEdid != "")
         {
             aid = One(sf.Ingestibles, t.AidEdid, "ALCH");
             aidEffect = aid.Effects.Count == 1 && aid.Effects[0].BaseEffect.FormKey is { } afk && mgefs.TryGetValue(afk, out var am) ? am : null;
+            aidEntry = aid.Effects[0];
         }
         else
         {
@@ -143,7 +156,7 @@ static class RadsProbe
             {
                 if (i.Effects[0].BaseEffect.FormKey is { } fk && mgefs.TryGetValue(fk, out var m) && m.Archetype.Type == MagicEffectArchetype.TypeEnum.ValueModifier &&
                     m.SecondActorValue.FormKey == healthKey && !m.Flags.HasFlag(MagicEffect.Flag.Detrimental) && i.Effects[0].Data?.Duration == 0)
-                { aid = i; aidEffect = m; break; }
+                { aid = i; aidEffect = m; aidEntry = i.Effects[0]; break; }
             }
             if (aid == null)
             {
@@ -151,7 +164,24 @@ static class RadsProbe
                 aid = meds.FirstOrDefault(i => i.Effects[0].Data?.Duration == 0) ?? meds.FirstOrDefault();
             }
         }
-        return new Found(spell, effect, aid, level, aidEffect);
+        // No restore ingestible (the real Starfield.esm has exactly one Health ingestible, ShipRepairKit, entry duration 10): the
+        // restore effect comes from a SPELL's entry instead (--restore-spell, else Dueling_RestoreHealth_Spell, else the first
+        // single-effect spell with a non-Detrimental Health value modifier and an entry of duration 0), and goes into the shell.
+        if (aid != null && aidEffect == null && t.AidEdid == "")
+        {
+            bool Restore(ISpellGetter sp) => sp.Effects.Count == 1 && sp.Effects[0].Data?.Duration == 0 && EffectOf(sp) is { } m &&
+                m.Archetype.Type == MagicEffectArchetype.TypeEnum.ValueModifier && m.SecondActorValue.FormKey == healthKey && !m.Flags.HasFlag(MagicEffect.Flag.Detrimental);
+            ISpellGetter? rs = null;
+            if (t.RestoreSpell != "") rs = One(sf.Spells, t.RestoreSpell, "SPEL");
+            else rs = sf.Spells.Where(sp => string.Equals(sp.EditorID, "Dueling_RestoreHealth_Spell", StringComparison.OrdinalIgnoreCase)).FirstOrDefault(Restore)
+                      ?? sf.Spells.Where(Restore).OrderBy(sp => sp.FormKey.ID).FirstOrDefault();
+            if (rs != null)
+            {
+                aidEffect = EffectOf(rs) ?? throw new Refusal($"{rs.EditorID} has not exactly one effect with a record in Starfield.esm");
+                aidEntry = rs.Effects[0];
+            }
+        }
+        return new Found(spell, effect, aid, level, aidEffect, aidEntry);
     }
 
     /// <summary>A copy of a vanilla value-modifier effect for one of our values: only the actor value changes (and the editor id and
@@ -295,7 +325,7 @@ static class RadsProbe
                 // damage-is-positive value its +200 should lower the number by 200 (the owner PC's reading of the sign rule)
                 var radEffect = CopyEffect(found.AidEffect!, RadAwayEffectId, RadAwayEffectEdid, "FO4SF RadAway", "Lowers FO4SF Rads.", avif.FormKey);
                 mod.MagicEffects.Add(radEffect);
-                radAway.Effects.Add(Entry(RadAwayMirrorMagnitude, found.Aid.Effects[0], radEffect.FormKey));
+                radAway.Effects.Add(Entry(RadAwayMirrorMagnitude, found.AidEntry ?? found.Aid.Effects[0], radEffect.FormKey));
             }
             else radAway.Effects.Add(Entry(RadAwayMagnitude, found.Aid.Effects[0]));
         }
@@ -334,7 +364,7 @@ static class RadsProbe
         };
         quest.VirtualMachineAdapter.Scripts.Add(script);
         mod.Quests.Add(quest);
-        mod.ModHeader.Stats.NextFormID = 0x806;
+        mod.ModHeader.Stats.NextFormID = found.Mirror ? 0x806u : 0x805u;      // 0x805 is RadAway's own effect, only built with the mirror
 
         Write(mod, outDir, SfEsm);
         var path = Path.Combine(outDir, Plugin.FileName);
@@ -497,7 +527,7 @@ static class RadsProbe
 
     // ---------------------------------------------------------------- fixture
 
-    public static int Fixture(string outDir)
+    public static int Fixture(string outDir, string restore = "aid")
     {
         var mod = new StarfieldMod(SfEsm, Release);
         mod.ModHeader.Flags |= StarfieldModHeader.HeaderFlag.Master;
@@ -511,20 +541,37 @@ static class RadsProbe
             Keywords = new ExtendedList<IFormLinkGetter<IKeywordGetter>> { new FormLink<IKeywordGetter>(new FormKey(SfEsm, 0x00A200)) },
         };
         synthMgef.SecondActorValue.SetTo(new FormKey(SfEsm, 0x00A02E));            // the template's own actor value (replaced by ours)
-        var restoreArch = new MagicEffectArchetype(MagicEffectArchetype.TypeEnum.ValueModifier);
-        var restoreMgef = new MagicEffect(new FormKey(SfEsm, 0x00A104), Release)
+        if (restore != "aid" && restore != "spell" && restore != "none") throw new Refusal("fixture --restore is aid, spell or none");
+        if (restore != "none")                 // a Health restore effect: carried by an ingestible (aid), or only by a spell (spell: the real file's case)
         {
-            EditorID = "SynthRestoreHealthEffect", Name = "Synth restore", CastType = CastType.FireAndForget, TargetType = TargetType.Self,
-            Flags = MagicEffect.Flag.NoDuration | MagicEffect.Flag.HideInUI, Archetype = restoreArch,
-        };
-        restoreMgef.SecondActorValue.SetTo(new FormKey(SfEsm, 0x00A02D));          // Health
-        mod.MagicEffects.Add(restoreMgef);
-        var restoreAid = new Ingestible(new FormKey(SfEsm, 0x00A105), Release)
-        {
-            EditorID = "SynthRestoreHealthAid", Name = "Synth stim", Flags = Ingestible.Flag.Medicine, MajorFlags = Ingestible.MajorFlag.Medicine,
-        };
-        restoreAid.Effects.Add(new Effect { BaseEffect = new FormLinkNullable<IMagicEffectGetter>(restoreMgef.FormKey), Data = new EffectData { Magnitude = 25f, Duration = 0 }, MAGF = 4, EFIF = 5, MUID = 6 });
-        mod.Ingestibles.Add(restoreAid);
+            var restoreArch = new MagicEffectArchetype(MagicEffectArchetype.TypeEnum.ValueModifier);
+            var restoreMgef = new MagicEffect(new FormKey(SfEsm, 0x00A104), Release)
+            {
+                EditorID = "SynthRestoreHealthEffect", Name = "Synth restore", CastType = CastType.FireAndForget, TargetType = TargetType.Self,
+                Flags = MagicEffect.Flag.NoDuration | MagicEffect.Flag.HideInUI, Archetype = restoreArch,
+            };
+            restoreMgef.SecondActorValue.SetTo(new FormKey(SfEsm, 0x00A02D));          // Health
+            mod.MagicEffects.Add(restoreMgef);
+            var restoreEntry = new Effect { BaseEffect = new FormLinkNullable<IMagicEffectGetter>(restoreMgef.FormKey), Data = new EffectData { Magnitude = 25f, Duration = 0 }, MAGF = 4, EFIF = 5, MUID = 6 };
+            if (restore == "aid")
+            {
+                var restoreAid = new Ingestible(new FormKey(SfEsm, 0x00A105), Release)
+                {
+                    EditorID = "SynthRestoreHealthAid", Name = "Synth stim", Flags = Ingestible.Flag.Medicine, MajorFlags = Ingestible.MajorFlag.Medicine,
+                };
+                restoreAid.Effects.Add(restoreEntry);
+                mod.Ingestibles.Add(restoreAid);
+            }
+            else
+            {
+                var restoreSpell = new Spell(new FormKey(SfEsm, 0x00A106), Release)
+                {
+                    EditorID = "SynthRestoreSpell", Name = "Synth restore spell", Type = Spell.SpellType.Spell, CastType = CastType.FireAndForget, TargetType = TargetType.Self,
+                };
+                restoreSpell.Effects.Add(restoreEntry);
+                mod.Spells.Add(restoreSpell);
+            }
+        }
         synthMgef.ResistValue.SetTo(new FormKey(SfEsm, 0x00A02E));
         mod.MagicEffects.Add(synthMgef);
         mod.Keywords.Add(new Keyword(new FormKey(SfEsm, 0x00A200), Release) { EditorID = "SynthKeyword" });

@@ -176,6 +176,9 @@ class StageTests(unittest.TestCase):
         cls.master = cls.root / "m" / "Starfield.esm"
         r = cls.run_tool("fixture", cls.root / "m")
         assert r.returncode == 0, r.stdout + r.stderr
+        for mode in ("spell", "none"):          # the real file's case (a restore effect only on a spell) and the fallback
+            r = cls.run_tool("fixture", cls.root / f"m_{mode}", "--restore", mode)
+            assert r.returncode == 0, r.stdout + r.stderr
 
     @classmethod
     def run_tool(cls, *argv):
@@ -331,6 +334,42 @@ class StageTests(unittest.TestCase):
         self.assertEqual(len(words), 2, words)
         for w in words:
             self.assertEqual(w[14], 0x01000800)
+
+    def test_with_no_restore_ingestible_the_mirror_effect_comes_from_a_spell(self):
+        """The real Starfield.esm has one Health ingestible (ShipRepairKit, entry duration 10): the restore effect then comes
+        from a spell's entry (Dueling_RestoreHealth_Spell on the real file), the shell stays a vanilla medicine's."""
+        m = self.root / "m_spell" / "Starfield.esm"
+        out = self.root / "b2s"
+        proc = self.run_tool("build", m, out)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("ALCH SynthAid", proc.stdout)                                   # the shell
+        self.assertIn("RadAway MGEF SynthRestoreHealthEffect", proc.stdout)           # the effect, from the spell
+        self.assertNotIn("shares the spell's effect", proc.stdout)
+        chk = self.run_tool("check", out / PLUGIN, m)
+        self.assertEqual(chk.returncode, 0, chk.stdout)
+        self.assertIn("MGEF FO4SF_RadAwayEffect", chk.stdout)
+        self.assertIn("1 effect(s) at 200", chk.stdout)
+        self.assertIn("records: MagicEffect 2,", chk.stdout)
+        self.assertIn("next 0x806", chk.stdout)
+        named = self.run_tool("build", m, self.root / "b2s2", "--restore-spell", "SynthRestoreSpell")
+        self.assertEqual(named.returncode, 0, named.stdout + named.stderr)
+        bad = self.run_tool("build", m, self.root / "b2s3", "--restore-spell", "NoSuchSpell")
+        self.assertEqual(bad.returncode, 1)
+        self.assertIn("0 SPEL named NoSuchSpell", bad.stderr)
+
+    def test_with_no_restore_effect_anywhere_radaway_shares_the_spells_effect(self):
+        """The fallback (no test before this one): one MGEF, RadAway at -200 on the shared effect, next form id 0x805."""
+        m = self.root / "m_none" / "Starfield.esm"
+        out = self.root / "b2n"
+        proc = self.run_tool("build", m, out)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("RadAway shares the spell's effect", proc.stdout)
+        chk = self.run_tool("check", out / PLUGIN, m)
+        self.assertEqual(chk.returncode, 0, chk.stdout)
+        self.assertIn("1 effect(s) at -200", chk.stdout)
+        self.assertIn("records: MagicEffect 1,", chk.stdout)
+        self.assertIn("next 0x805", chk.stdout)
+        self.assertNotIn("FO4SF_RadAwayEffect", chk.stdout)
 
     def test_a_restore_template_that_is_detrimental_is_not_picked_by_search(self):
         """The search wants a Health value modifier that is not Detrimental with duration 0: the synthetic SynthAid (whose

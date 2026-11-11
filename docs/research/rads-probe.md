@@ -5,7 +5,7 @@ question first: **can a value of our own hold rads, lower maximum health, and be
 needs hang from the same value pattern. Verified on the PC, untested in play: Starfield.esm has `ENV_*` hazards, hazard
 spells and effects, `AFFL_*` affliction values and addiction effects; nothing is named mutation. Research rows R1 to R4,
 C1 to C3, V1 to V5 (docs/research/framework/engine-mechanics-notes).
-Task: FAL-213. Status: **run in game five times; the crash is fixed; our spell has not yet moved the value; this head keeps Detrimental, flags the value damage-is-positive and mirrors RadAway (the fifth session's reading).**
+Task: FAL-213. Status: **run in game five times; the crash is fixed; our spell has not yet moved the value; this head keeps Detrimental, flags the value damage-is-positive and builds RadAway as a mirror when a restore effect is found (an ingestible's or, on the real file, a spell's), else as the old shared -200 fallback.**
 
 ## What the first game session found (head b9ad9081, owner PC, 10 Nov 20:49 and 20:58 UTC)
 
@@ -121,14 +121,18 @@ This head changes exactly what that reading says to change, and nothing else:
 3. **RadAway is the mirror**: its own effect, `FO4SF_RadAwayEffect`, a copy of a vanilla *restore Health* effect (value
    modifier on Health, **not Detrimental**, an entry of duration 0 in a vanilla ingestible; found by search, or named with
    `--template-aid`), pointed at our value, at **+200**. By the same rule a non-Detrimental +200 on a damage-is-positive value
-   becomes -200 on the number. The ingestible shell is that vanilla item's, not ShipRepairKit's. If the search finds no such
-   item the writer falls back to the old shell sharing the spell's effect at -200 (`RadAway shares the spell's effect` in the
-   build line); **that fallback is not covered by a test** (the synthetic Starfield.esm always has a restore item).
+   becomes -200 on the number. At head 9cba25ad the search looked at ingestibles only; the owner PC's build on the real
+   Starfield.esm then took the **fallback** (the real file has one Health ingestible, `ShipRepairKit`, entry duration 10): one
+   MGEF, RadAway at -200 in the ShipRepairKit shell, so stage 40 would not have tested the mirror (found in review FAL-318).
+   This head also takes the restore effect from a **spell** when no ingestible has one (`Dueling_RestoreHealth_Spell`
+   001E1171 first), copies it into RadAway's own effect, and tests the three paths (ingestible, spell, fallback) on three
+   synthetic masters. **Not confirmed on the real file**: that the spell path finds a match there.
 4. Stage 50 and the clamp stay.
 If stage 20 then reads 100 **without the script's force** (`fix ... forced=false`), the base is settled: rads is damage on a
 value that counts up, as in Fallout 4. If it still reads 0, the remaining suspect is that a value modifier from a spell does not
 act on a plugin's own AVIF at all, and the script-owned route is the base (a script effect that calls `ModValue`, or an item
-that calls the script). The plugin now holds two MGEFs (the spell's and RadAway's); the brief's "one effect" held until here.
+that calls the script). With the mirror the plugin holds two MGEFs (the spell's and RadAway's); the brief's "one effect" held until here. With the fallback
+it holds one.
 Still not shown: that the route lowers **maximum** Health (it lowers the current value), and that RadAway's `EquipItem` consumes the
 item.
 
@@ -161,14 +165,22 @@ planet probe is read or changed (a test pins both records byte for byte).
 `FO4SFRadsProbe.esm`, master Starfield.esm only, adds records and overrides none. No hazard record: no writer exists.
 
 * AVIF `FO4SF_Rads` "Rads": our own actor value on the pattern of the seven S.P.E.C.I.A.L. values in
-  `dotnet/NewGame/Program.cs` (name, abbreviation, type, default, min, max, flags). Default 0, 0 to 1000, flag
-  DefaultToZero. Type `Variable` (the one open choice: `stage --type DerivedAttribute` or `Resource` writes another, and
+  `dotnet/NewGame/Program.cs` (name, abbreviation, type, default, min, max, flags). Default 0, 0 to 1000, flags
+  `DefaultToZero | DamageIsPositive` (since the fifth session). Type `Variable` (the one open choice: `stage --type DerivedAttribute` or `Resource` writes another, and
   `check` follows the same option).
-* MGEF `FO4SF_RadsEffect`: archetype ValueModifier on `FO4SF_Rads`, FireAndForget, Self, instant (no duration). **One
-  effect for both directions**: the magnitude is in the effect entry, so the spell uses it at +100 and RadAway at -200.
-* SPEL `FO4SF_RadsSpell`: one entry, +100.
-* ALCH `FO4SF_RadAway` "RadAway" (Medicine): one entry, -200. No model, sound or keywords (not needed to test the value).
-* QUST `FO4SF_RadsProbeQuest`: start game enabled, stages 10 / 20 / 30 / 40, script with four properties: `RadsAV` (ours),
+* MGEF `FO4SF_RadsEffect`: a copy of the vanilla `DamageHealthContact`, the actor value (DATA word 14) changed to ours and its
+  own flags kept (`Detrimental` included), archetype ValueModifier, association empty. The spell uses it at +100.
+* SPEL `FO4SF_RadsSpell`: a copy of the vanilla `DamageHealthSpell`, one entry, +100.
+* ALCH `FO4SF_RadAway` "RadAway" (Medicine): the shell of a vanilla medicine (on the real Starfield.esm `ShipRepairKit`), one
+  entry. **Two shapes**, chosen at build time and printed in the build's `templates` line and in `plan.json`:
+  *mirror*: its own effect `FO4SF_RadAwayEffect`, a copy of a vanilla restore-Health effect (not Detrimental, entry duration 0) found on
+  an ingestible or, when no ingestible has one, on a spell (`Dueling_RestoreHealth_Spell` on the real file; `--restore-spell`
+  names another), pointed at our value, at **+200** (the plugin holds two MGEF); *fallback* (no restore effect anywhere): the
+  rads effect shared, at **-200** (one MGEF). The real Starfield.esm has one Health ingestible only (`ShipRepairKit`, entry
+  duration 10), so the ingestible search never matches there; whether the spell search does is **not confirmed offline** (the
+  owner PC's scan names `Dueling_RestoreHealth_Spell` 001E1171, which this build looks for by that editor id first). The
+  fallback is covered by a test since this head. No sound or keywords (not needed to test the value).
+* QUST `FO4SF_RadsProbeQuest`: start game enabled, stages 10 / 20 / 30 / 40 / 50, script with four properties: `RadsAV` (ours),
   `HealthAV` (Starfield.esm's `Health` AVIF, found by EditorID; `stage --health <edid>` names another), `RadsSpell`,
   `RadAway`. Properties are fine here: there are no cells and no references, so nothing is made persistent.
 
