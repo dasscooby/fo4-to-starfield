@@ -5,7 +5,7 @@ usage:
       read only, no game: every native the script needs, and each optional reading's name, looked up in Starfield's base
       sources (Scripts/Source of ContentResources.zip; inheritance followed). Exit 1 when a required one is missing.
   python make_rads_probe.py stage --out <dir> [--starfield <Starfield.esm>] [--compiler <exe>]
-                                         [--content-resources <zip>] [--health <AVIF editor id>] [--type <AVIF type>]
+                                         [--content-resources <zip>] [--health <AVIF editor id>] [--type <AVIF type>] [--control-spell <SPEL editor id>]
       1. dotnet/RadsProbe build + check against the Starfield.esm given (offline_check.txt);
       2. the Papyrus compile: each optional reading (";OPT <Base.Name> " lines of the .psc) whose name the base sources
          declare is compiled on its own, the ones that compile are kept, every other one is reported in plan.json
@@ -216,6 +216,8 @@ def stage(a):
         opts += ["--template-spell", a.template_spell]
     if a.template_aid:
         opts += ["--template-aid", a.template_aid]
+    if a.control_spell:
+        opts += ["--control-spell", a.control_spell]
     wrote = run(tool + ["build", a.starfield, out] + opts).stdout
     check = run(tool + ["check", os.path.join(out, PLUGIN), a.starfield] + opts).stdout
     with open(os.path.join(out, "offline_check.txt"), "w", encoding="utf-8") as f:
@@ -247,7 +249,7 @@ def stage(a):
     if sha256(a.starfield) != before:
         sys.exit(f"Starfield.esm changed during the build, nothing published; attempt kept in {out}")
     plan = {"kind": "rads-probe", "version": 1, "plugins": [PLUGIN], "outputs": stage_files(out),
-            "inputs": {"Starfield.esm": {"sha256": before}}, "health": a.health, "avif_type": a.type, "templates": template_line(wrote), "optional": fate,
+            "inputs": {"Starfield.esm": {"sha256": before}}, "health": a.health, "avif_type": a.type, "templates": template_line(wrote), "control_spell": a.control_spell, "optional": fate,
             "log": "<My Games>/Starfield/Logs/Script/User/FO4SFRadsProbe.0.log"}
     with open(os.path.join(out, "plan.json"), "w", encoding="utf-8") as f:
         json.dump(plan, f, indent=1)
@@ -315,6 +317,7 @@ def main(argv=None):
     s.add_argument("--health", default=DEFAULT_HEALTH)
     s.add_argument("--type", default=DEFAULT_TYPE)
     s.add_argument("--template-spell", default="", help="a vanilla self-cast value-modifier spell to copy (default: found)")
+    s.add_argument("--control-spell", default="", help="stage 50, the second control: a vanilla instant value effect on Health to cast (default: none, stage 50 does nothing)")
     s.add_argument("--template-aid", default="", help="a vanilla medicine ingestible to copy (default: found)")
     g = sub.add_parser("log")
     g.add_argument("--file", default=LOG)

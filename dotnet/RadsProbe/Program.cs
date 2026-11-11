@@ -51,7 +51,9 @@ try
     Opt("--type", ref type);
     Opt("--template-spell", ref tSpell);
     Opt("--template-aid", ref tAid);
-    var tpl = new RadsProbe.Templates(tSpell, tAid);
+    var cSpell = "";
+    Opt("--control-spell", ref cSpell);
+    var tpl = new RadsProbe.Templates(tSpell, tAid, cSpell);
     if (rest.Count == 3 && rest[0] == "build") return RadsProbe.Build(rest[1], rest[2], health, type, tpl);
     if (rest.Count == 3 && rest[0] == "check") return RadsProbe.Check(rest[1], rest[2], health, type, tpl);
     if (rest.Count == 2 && rest[0] == "fixture") return RadsProbe.Fixture(rest[1]);
@@ -61,7 +63,7 @@ catch (RadsProbe.Refusal r)
     Console.Error.WriteLine("refused: " + r.Message);
     return 1;
 }
-Console.Error.WriteLine("usage: RadsProbe build <Starfield.esm> <out dir> [--health <edid>] [--type <avif type>] [--template-spell <edid>] [--template-aid <edid>] | " +
+Console.Error.WriteLine("usage: RadsProbe build <Starfield.esm> <out dir> [--health <edid>] [--type <avif type>] [--template-spell <edid>] [--template-aid <edid>] [--control-spell <edid>] | " +
                         "check <plugin> <Starfield.esm> [same options] | fixture <out dir>");
 return 2;
 
@@ -77,11 +79,11 @@ static class RadsProbe
     const string AvifEdid = "FO4SF_Rads", EffectEdid = "FO4SF_RadsEffect", SpellEdid = "FO4SF_RadsSpell", RadAwayEdid = "FO4SF_RadAway",
         QuestEdid = "FO4SF_RadsProbeQuest", Script = "FO4SF_RadsProbeQuest";
     const float SpellMagnitude = 100f, RadAwayMagnitude = -200f, RadsMax = 1000f;
-    static readonly ushort[] Stages = { 10, 20, 30, 40 };
+    static readonly ushort[] Stages = { 10, 20, 30, 40, 50 };
     // the script's property names, in the order the writer adds them
-    static readonly string[] PropNames = { "RadsAV", "HealthAV", "RadsSpell", "RadAway" };
+    static readonly string[] PropNames = { "RadsAV", "HealthAV", "RadsSpell", "RadAway", "ControlSpell" };   // the fifth only with --control-spell
 
-    public record Templates(string SpellEdid, string AidEdid);
+    public record Templates(string SpellEdid, string AidEdid, string ControlSpell = "");
 
     /// <summary>The vanilla records the effect, the spell and RadAway are copied from (null: none found, minimal record).</summary>
     public record Found(ISpellGetter? Spell, IMagicEffectGetter? Effect, IIngestibleGetter? Aid, string Level);
@@ -273,6 +275,8 @@ static class RadsProbe
         script.Properties.Add(Prop(PropNames[1], health.FormKey));
         script.Properties.Add(Prop(PropNames[2], spell.FormKey));
         script.Properties.Add(Prop(PropNames[3], radAway.FormKey));
+        if (tpl.ControlSpell != "")          // stage 50: a vanilla instant value effect on Health, cast from the same script (second control)
+            script.Properties.Add(Prop(PropNames[4], One(sf.Spells, tpl.ControlSpell, "SPEL").FormKey));
         quest.VirtualMachineAdapter = new QuestAdapter
         {
             Version = 6, ObjectFormat = 2, ExtraBindDataVersion = 3,
@@ -405,17 +409,19 @@ static class RadsProbe
         Need(quest?.FormKey == Own(QuestId) && quest.EditorID == QuestEdid, "not exactly our QUST");
         if (quest != null)
         {
+            var wantProps = PropNames.Length - (tpl.ControlSpell != "" ? 0 : 1);
             var scripts = quest.VirtualMachineAdapter?.Scripts.ToList() ?? new();
             var props = scripts.Count == 1 ? scripts[0].Properties.OfType<ScriptObjectProperty>().ToDictionary(p => p.Name, p => p.Object.FormKey) : new();
             Console.WriteLine($"  QUST {quest.EditorID} flags {quest.Data?.Flags} stages [{string.Join(",", quest.Stages.Select(s => s.Index))}] scripts [{string.Join(", ", scripts.Select(s => $"{s.Name} ({s.Properties.Count} properties)"))}]");
             Need(quest.Data?.Flags.HasFlag(Quest.Flag.StartGameEnabled) == true, "QUST is not start game enabled");
-            Need(quest.Stages.Select(s => s.Index).SequenceEqual(Stages), "QUST stages are not 10, 20, 30, 40");
-            Need(scripts.Count == 1 && scripts[0].Name == Script && scripts[0].Properties.Count == PropNames.Length, $"QUST script is not {Script} with exactly {PropNames.Length} properties");
+            Need(quest.Stages.Select(s => s.Index).SequenceEqual(Stages), "QUST stages are not 10, 20, 30, 40, 50");
+            Need(scripts.Count == 1 && scripts[0].Name == Script && scripts[0].Properties.Count == wantProps, $"QUST script is not {Script} with exactly {wantProps} properties");
             void P(string name, FormKey want) => Need(props.TryGetValue(name, out var fk) && fk == want, $"property {name} is not {want}");
             P(PropNames[0], Own(AvifId));
             P(PropNames[1], health.FormKey);
             P(PropNames[2], Own(SpellId));
             P(PropNames[3], Own(RadAwayId));
+            if (tpl.ControlSpell != "") P(PropNames[4], One(sf.Spells, tpl.ControlSpell, "SPEL").FormKey);
             foreach (var kv in props) Console.WriteLine($"    property {kv.Key} = {kv.Value}");
         }
         var kinds = mod.EnumerateMajorRecords().GroupBy(r => r.GetType().Name.Replace("BinaryOverlay", "")).Select(g => $"{g.Key} {g.Count()}");

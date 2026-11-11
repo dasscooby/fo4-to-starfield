@@ -28,13 +28,14 @@ class ScriptTests(unittest.TestCase):
     def test_the_scripts_properties_are_the_tools(self):
         m = re.search(r"PropNames = \{([^}]*)\}", TOOL_SRC)
         tool = re.findall(r'"(\w+)"', m.group(1))
-        psc = re.findall(r"^(\w+) Property (\w+) Auto Const Mandatory", PSC, re.M)
-        self.assertEqual([n for _, n in psc], tool)
-        self.assertEqual([t for t, _ in psc], ["ActorValue", "ActorValue", "Spell", "Form"])
+        psc = re.findall(r"^(\w+) Property (\w+) Auto Const( Mandatory)?", PSC, re.M)
+        self.assertEqual([n for _, n, _ in psc], tool)
+        self.assertEqual([t for t, _, _ in psc], ["ActorValue", "ActorValue", "Spell", "Form", "Spell"])
+        self.assertEqual([bool(m) for _, _, m in psc], [True, True, True, True, False])     # ControlSpell is optional
         self.assertIn('string ProbePlugin = "FO4SFRadsProbe.esm"', PSC)
         self.assertIn('Script = "FO4SF_RadsProbeQuest"', TOOL_SRC)
         self.assertTrue(PSC.startswith("Scriptname FO4SF_RadsProbeQuest extends Quest"))
-        self.assertEqual(len(re.findall(r"^\w+(\[\])? Property ", PSC, re.M)), 4)
+        self.assertEqual(len(re.findall(r"^\w+(\[\])? Property ", PSC, re.M)), 5)       # the fifth, ControlSpell, is not Mandatory
 
     def test_the_log_name_prefix_and_events_are_the_readers(self):
         from fo4sf.rads import probe_log
@@ -46,10 +47,10 @@ class ScriptTests(unittest.TestCase):
 
     def test_the_stages_the_script_runs_are_the_quests_and_the_readers(self):
         from fo4sf.rads import probe_log
-        for s in (10, 20, 30, 40):
+        for s in (10, 20, 30, 40, 50):
             self.assertIn(f"GetStageDone({s})", PSC)
-        self.assertIn("{ 10, 20, 30, 40 }", TOOL_SRC)
-        self.assertEqual(probe_log.STAGES, (10, 20, 30, 40))
+        self.assertIn("{ 10, 20, 30, 40, 50 }", TOOL_SRC)
+        self.assertEqual(probe_log.STAGES, (10, 20, 30, 40, 50))
         for stage, want in probe_log.EXPECT.items():
             self.assertRegex(PSC, rf"stage == {stage}\n\s+return {want}") if stage != 10 else None
 
@@ -195,7 +196,7 @@ class StageTests(unittest.TestCase):
         self.assertIn("1 effect(s) at 100", check.stdout)
         self.assertIn('ALCH FO4SF_RadAway 000803:FO4SFRadsProbe.esm "RadAway"', check.stdout)
         self.assertIn("1 effect(s) at -200", check.stdout)
-        self.assertIn("QUST FO4SF_RadsProbeQuest flags StartGameEnabled stages [10,20,30,40]", check.stdout)
+        self.assertIn("QUST FO4SF_RadsProbeQuest flags StartGameEnabled stages [10,20,30,40,50]", check.stdout)
         self.assertIn("(4 properties)", check.stdout)
         self.assertIn("property HealthAV = 00A02D:Starfield.esm", check.stdout)
 
@@ -301,6 +302,24 @@ class StageTests(unittest.TestCase):
         self.assertRegex(check.stdout, r"MGEF FO4SF_RadsEffect .* flags NoDuration\n")
         self.assertNotIn("Recover", check.stdout)
         self.assertNotIn("Detrimental", check.stdout)
+
+    def test_the_second_control_spell_is_a_fifth_property_only_when_named(self):
+        out = self.root / "b2z"
+        ok = self.run_tool("build", self.master, out, "--control-spell", "SynthSelfSpell")
+        self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
+        chk = self.run_tool("check", out / PLUGIN, self.master, "--control-spell", "SynthSelfSpell")
+        self.assertEqual(chk.returncode, 0, chk.stdout)
+        self.assertIn("(5 properties)", chk.stdout)
+        self.assertIn("property ControlSpell = 00A101:Starfield.esm", chk.stdout)
+        plain = self.run_tool("check", out / PLUGIN, self.master)            # checked as built without it
+        self.assertEqual(plain.returncode, 1, plain.stdout)
+        self.assertIn("exactly 4 properties", plain.stdout)
+        none = self.root / "b2z0"
+        self.assertEqual(self.run_tool("build", self.master, none).returncode, 0)
+        self.assertIn("(4 properties)", self.run_tool("check", none / PLUGIN, self.master).stdout)
+        bad = self.run_tool("build", self.master, self.root / "b2z1", "--control-spell", "NoSuchSpell")
+        self.assertEqual(bad.returncode, 1)
+        self.assertIn("0 SPEL named NoSuchSpell", bad.stderr)
 
     def test_check_refuses_a_kit_whose_actor_value_is_not_ours(self):
         out = self.root / "b2x"

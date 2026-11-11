@@ -67,6 +67,17 @@ AVIF and whose spell entries have duration 0). The hand kit (#719) should not be
 Stage 10 now also writes a non-zero number (50) to our value, reads it, and writes 0 (`set` lines; the reader's
 "own value takes a number" line).
 
+## Second control: a vanilla instant effect (stage 50)
+
+Asked by the owner PC so one session separates "our effect is wrong" from "Cast on the player from a quest script applies no
+value modifier at all". `stage --control-spell <SPEL editor id>` binds a fifth, optional property, `ControlSpell`; stage 50
+reads Health, casts that vanilla spell on the player, reads Health 3 s later and logs one `vcontrol` line; the reader prints
+"stage 50 vanilla control": Health moved (Cast works, so our effect is at fault), Health did not move (Cast may apply no
+value modifier from a script at all), or not run. Not part of the verdict line and not run without the option. Candidate
+wanted: a self-cast SPEL whose one effect is a value modifier on Health (MGEF DATA word 14 = Health) with an EFIT duration of
+0 (instant), editor id named by the owner PC from Starfield.esm; nothing here reads Starfield.esm.
+Console: `setstage <Q> 50` (the `console` command prints it).
+
 ## What is built
 
 | Piece | Where |
