@@ -1,6 +1,6 @@
 """The Pip-Boy probe's empty plugin and its movie (FAL-187; sfse/FO4SFPipboyMenu/README.md).
 
-usage: python scripts/ui/make_pipboy_probe.py stage <dir> [--no-label] [--channel]
+usage: python scripts/ui/make_pipboy_probe.py stage <dir> [--no-label] [--channel | --page]
                                                                          FO4SFPipboyProbe.esm + Data/Interface/<movie>
        python scripts/ui/make_pipboy_probe.py check <FO4SFPipboyProbe.esm>
        python scripts/ui/make_pipboy_probe.py twin <dir> <Interface/file.swf>   the same movie again at that path
@@ -11,7 +11,10 @@ fo4sf.planet.esm.PluginWriter, the writer of our planet probe, with Starfield.es
 `check` refuses anything else: not TES4, no ESM flag, another master, or any record or group. Nothing is written into
 the repo. The staged folder is exp_install.py's shape (the plugin plus a Data tree): `exp_install.py install --pack`
 packs Data into "FO4SFPipboyProbe - Main.ba2" beside the plugin. `stage --channel` writes the movie with the data
-channel's text field and button (FAL-216, the plugin's Stage=3) under the same name.
+channel's text field and button (FAL-216, the plugin's Stage=3) under the same name; `stage --page` writes the STAT
+page (FAL-272, the plugin's Stage=4) under the same name, and the owner's card beside the plugin: owner-card.txt, the
+launcher's plain-text card (a title and eight numbered one-line steps; docs/spikes/pipboy-stat-page-owner-card.md is
+the full card). It is outside Data, so it is neither packed nor installed.
 """
 import argparse
 import os
@@ -30,20 +33,38 @@ MASTERS = ["Starfield.esm"]
 MOVIE = "Interface/FO4SF_PipboyMenu.swf"      # the path FO4SF_PipboyMenu loads at stage (b), relative to Data
 AUTHOR = "FO4SF"
 DESCRIPTION = "FAL-187 Pip-Boy probe: empty; loads its archive"
+OWNER_CARD = "owner-card.txt"
+PAGE_CARD = """Pip-Boy STAT page
+1. In a loaded game, standing somewhere safe, press F10: a green panel with seven lines and two buttons appears.
+2. Read the seven lines and write down HEALTH, LEVEL, CARRY WEIGHT MAX, TIME and any line that shows a question mark.
+3. Touch nothing for ten seconds and say whether the minutes of TIME went up.
+4. Move the mouse until the small pointer is on NEXT TAB and click once: TAB 2 OF 2 appears and UPDATES counts up.
+5. Click NEXT TAB again and say whether TAB 1 OF 2 came back.
+6. Click CLOSE and say whether the panel went away and you can walk again.
+7. Walk through a door or about thirty steps, then press F10 and say which lines changed.
+8. Press F10 and say whether the panel closed; if anything was odd, say what.
+"""
 
 
 def plugin_bytes():
     return PluginWriter(MASTERS, flags=ESM, author=AUTHOR, description=DESCRIPTION).to_bytes()
 
 
-def stage(out, label=True, channel=False):
-    """Writes <out>/FO4SFPipboyProbe.esm and <out>/Data/Interface/FO4SF_PipboyMenu.swf; returns the two paths."""
+def stage(out, label=True, channel=False, page=False):
+    """Writes <out>/FO4SFPipboyProbe.esm and <out>/Data/Interface/FO4SF_PipboyMenu.swf (with page, also
+    <out>/owner-card.txt); returns the plugin's and the movie's paths."""
     os.makedirs(out, exist_ok=True)
     esm = os.path.join(out, PLUGIN)
     with open(esm, "wb") as f:
         f.write(plugin_bytes())
     movie = os.path.join(out, "Data", *MOVIE.split("/"))
-    make_probe_swf.write_movie(movie, label=make_probe_swf.LABEL if label else None, channel=channel)
+    make_probe_swf.write_movie(movie, label=make_probe_swf.LABEL if label else None, channel=channel, page=page)
+    card = os.path.join(out, OWNER_CARD)
+    if page:
+        with open(card, "w", encoding="utf-8", newline="\n") as f:
+            f.write(PAGE_CARD)
+    elif os.path.exists(card):
+        os.remove(card)
     return esm, movie
 
 
@@ -104,7 +125,9 @@ def main(argv=None):
     s = sub.add_parser("stage")
     s.add_argument("out")
     s.add_argument("--no-label", action="store_true", help="the rectangle alone")
-    s.add_argument("--channel", action="store_true", help="the data channel's movie (FAL-216, Stage=3)")
+    kind = s.add_mutually_exclusive_group()
+    kind.add_argument("--channel", action="store_true", help="the data channel's movie (FAL-216, Stage=3)")
+    kind.add_argument("--page", action="store_true", help="the STAT page's movie (FAL-272, Stage=4)")
     c = sub.add_parser("check")
     c.add_argument("plugin")
     t = sub.add_parser("twin")
@@ -113,7 +136,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
     try:
         if a.cmd == "stage":
-            esm, movie = stage(a.out, label=not a.no_label, channel=a.channel)
+            esm, movie = stage(a.out, label=not a.no_label, channel=a.channel, page=a.page)
             check(esm)
             print(f"staged {esm} and {movie}; pack into {ARCHIVE}")
         elif a.cmd == "twin":
