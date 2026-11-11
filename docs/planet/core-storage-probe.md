@@ -138,8 +138,12 @@ core's persistent cell and was not taken.
 The earlier explanation here (the persistent group under the exterior cell) is **wrong**: the exterior CELL override alone is
 enough, with no reference at all. With it, `coc FO4Core_RedRocketSpawn` arrives in the world's origin cell 001340 (XCLC 12 27)
 instead of 000DAF (XCLC -10 11); the owner's reading, not proven, is that the override stops the console from finding the place
-in the cell. Open, and not answered by these runs: whether the crash comes from the override itself or from standing at the origin
-cell (a no-kit control that goes to cell 001340 would say).
+in the cell. Answered by the no-kit control (PC, 11 Nov 03:56 to 04:00 UTC, `probe-origin-ctl3-20261111T035554Z`): `cow 04000803 12 27` loads
+in under 40 s and survives 105 s with a normal exit, so standing at the origin does not crash by itself. The crash belongs to the
+load of the world with the exterior CELL override present, and the wrong arrival is a second symptom of the same override, not its
+cause (the position was not read: the console does not open during the load, so "cell 001340" rests on the command). `cow` takes
+the world by form id only (`cow FO4Core_Commonwealth ...` answers "not found for parameter WorldSpace"). Still unknown: what in the
+override breaks the load.
 
 Consequences in the kit: the default variant is now **`toponly`**: the world override plus an override of the world's persistent
 cell holding CS_P, **no exterior cell record**, no temporary reference (the layout the mission uses and the one that survives
