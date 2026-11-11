@@ -42,6 +42,7 @@ int LastAway = 0
 bool Settling = false
 float WantRads = 0.0
 string UsedWhat = ""
+float LastUseRT = 0.0       ; real time of the latest use: the settle waits SETTLE_S after it
 
 ; ---------------------------------------------------------------- init
 
@@ -142,22 +143,28 @@ Function Poll()
     Actor p = Game.GetPlayer()
     int dose = p.GetItemCount(RadDose)
     int away = p.GetItemCount(RadAway)
-    if !Settling
+    if dose < LastDose || away < LastAway
+        ; an item used while an earlier use is still settling adds to the target (it is never dropped)
         float want = LastRads
         string what = ""
+        if Settling
+            want = WantRads
+            what = UsedWhat + " + "
+        endif
         if dose < LastDose
             want += DoseMagnitude * (LastDose - dose)
-            what = "Rad Dose"
+            what = what + "Rad Dose"
         endif
         if away < LastAway
             want += RadAwayMagnitude * (LastAway - away)
             what = what + "RadAway"
         endif
-        if what != ""
-            WantRads = Clamp(want)
-            UsedWhat = what
+        WantRads = Clamp(want)
+        UsedWhat = what
+        LastUseRT = Utility.GetCurrentRealTime()
+        Trace("used what=" + what + " from=" + LastRads + " want=" + WantRads + " pending=" + Settling)
+        if !Settling
             Settling = true
-            Trace("used what=" + what + " from=" + LastRads + " want=" + WantRads)
             StartTimer(SETTLE_S, TIMER_SETTLE)
         endif
     endif
@@ -174,6 +181,11 @@ EndFunction
 Function Settle()
     {An item was used 3 s ago: did our value move as the effect says? When not, say so and set it, so the health route is still shown.}
     Actor p = Game.GetPlayer()
+    float wait = LastUseRT + SETTLE_S - Utility.GetCurrentRealTime()
+    if wait > 0.2
+        StartTimer(wait, TIMER_SETTLE)       ; another item was used meanwhile: give it its full time
+        return
+    endif
     float have = p.GetValue(RadsAV)
     Settling = false
     if have == WantRads

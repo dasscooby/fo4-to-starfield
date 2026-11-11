@@ -47,6 +47,18 @@ class HandScriptTests(unittest.TestCase):
         self.assertIn('" used, but rads stayed "', HAND_PSC)
         self.assertIn("p.SetValue(RadsAV, WantRads)", HAND_PSC)
 
+    def test_an_item_used_while_another_settles_is_added_not_dropped(self):
+        """FAL-278: the second Rad Dose of the card (step 5) came inside the first one's 3 s and was dropped, then the settle
+        reset the value and the screen said the effect did nothing."""
+        poll = HAND_PSC.split("Function Poll()")[1].split("Function Settle()")[0]
+        self.assertNotIn("if !Settling\n        float want", poll)
+        self.assertIn("if dose < LastDose || away < LastAway", poll)
+        self.assertIn("want = WantRads", poll)                                    # a use during a settle adds to the target
+        self.assertIn("if !Settling\n            Settling = true", poll)          # one timer only
+        settle = HAND_PSC.split("Function Settle()")[1]
+        self.assertIn("StartTimer(wait, TIMER_SETTLE)", settle)                   # the latest use gets its full time
+        self.assertLess(settle.index("StartTimer(wait"), settle.index("Settling = false"))
+
     def test_no_console_is_needed_the_items_come_with_the_quest(self):
         self.assertIn("p.AddItem(RadAway, GiveCount, true)", HAND_PSC)
         self.assertIn("p.AddItem(RadDose, GiveCount, true)", HAND_PSC)
