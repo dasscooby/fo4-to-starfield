@@ -22,6 +22,7 @@ import make_power_armor_probe as mpa  # noqa: E402
 PSC = (ROOT / "scripts" / "planet" / "FO4SF_PAProbeQuest.psc").read_text(encoding="utf-8")
 TOOL_SRC = (ROOT / "dotnet" / "PowerArmorProbe" / "Program.cs").read_text(encoding="utf-8")
 HAND_PSC = (ROOT / "scripts" / "planet" / "FO4SF_PAHandQuest.psc").read_text(encoding="utf-8")
+ENTRY_PSC = (ROOT / "scripts" / "planet" / "FO4SF_PAEntryQuest.psc").read_text(encoding="utf-8")
 PLUGIN = "FO4SFPowerArmorProbe.esm"
 
 
@@ -73,7 +74,7 @@ class HandScriptTests(unittest.TestCase):
         """The PC's compile (FAL-273): 'variable race cannot have the same name as a known type or script'. Papyrus names are
         case-blind, so a local called race, cell, form, actor... is refused. The fixture compile cannot see this."""
         types = {"race", "cell", "form", "actor", "quest", "furniture", "keyword", "spell", "game", "debug", "utility", "int", "float", "string", "bool"}
-        for text in (HAND_PSC, PSC):
+        for text in (HAND_PSC, PSC, ENTRY_PSC):
             decl = re.findall(r"^\s*(?:[A-Za-z:]+(?:\[\])?)\s+(\w+)\s*(?:=|$)", text, re.M)
             params = [p for m in re.findall(r"Function\s+\w+\(([^)]*)\)", text) for p in re.findall(r"\s(\w+)\s*(?:,|$)", " " + m)]
             self.assertEqual([n for n in decl + params if n.lower() in types], [])
@@ -113,6 +114,78 @@ class HandScriptTests(unittest.TestCase):
 
     def test_the_required_list_has_the_notification(self):
         self.assertIn("Notification", mpa.REQUIRED["Debug"])
+
+
+class EntryScriptTests(unittest.TestCase):
+    """The power armor entry by script (FAL-361, piece B of FAL-359): quest FO4SF_PAEntryQuest, its kit records."""
+
+    def test_the_entry_scripts_ids_are_the_tools(self):
+        ids = const_ids(TOOL_SRC)
+        for psc_name, tool_name in (("CellId", "CellId"), ("KitRaceId", "RaceId"), ("ControlRefId", "ControlRefId"),
+                                    ("ArrivalRefId", "ArrivalRefId"), ("EntryRefId", "EntryRefId"), ("InPaId", "InPaId"),
+                                    ("FrameId", "FrameId"), ("PieceHelmId", "PieceHelmId"), ("PieceTorsoId", "PieceTorsoId")):
+            m = re.search(rf"^int {psc_name} = (0x[0-9A-Fa-f]+)", ENTRY_PSC, re.M)
+            self.assertIsNotNone(m, psc_name)
+            self.assertEqual(int(m.group(1), 16), ids[tool_name], psc_name)
+        self.assertEqual(ids["EntryQuestId"], 0x809)
+        own = {k: v for k, v in ids.items() if 0x800 <= v < 0x1000}                    # ours; the others are Starfield.esm's
+        self.assertEqual(len(set(own.values())), len(own), "two records share an id")
+        self.assertLess(max(v for k, v in own.items() if k != "FirstTileId"), ids["FirstTileId"])
+        self.assertIn(f'string ProbePlugin = "{PLUGIN}"', ENTRY_PSC)
+        self.assertIn('EntryScript = "FO4SF_PAEntryQuest"', TOOL_SRC)
+        self.assertTrue(ENTRY_PSC.startswith("Scriptname FO4SF_PAEntryQuest extends Quest"))
+
+    def test_no_properties_no_stage_reads(self):
+        self.assertIsNone(re.search(r"^\s*\w+(\[\])?\s+\w+\s+Auto\b", ENTRY_PSC, re.M | re.I))
+        self.assertNotIn(" Property ", ENTRY_PSC)
+        self.assertNotIn("GetStageDone", ENTRY_PSC)
+
+    def test_the_entry_does_every_move_and_the_exit_undoes_each(self):
+        put_on = ENTRY_PSC.split("Function PutOn()")[1].split("EndFunction")[0]
+        take_off = ENTRY_PSC.split("Function TakeOff()")[1].split("EndFunction")[0]
+        self.assertIn("p.SetRace(kitRace)", put_on)                              # the kit race, proven both ways by the console probe
+        self.assertEqual(put_on.count("p.AddItem("), 3)
+        self.assertEqual(put_on.count("p.EquipItem("), 3)
+        self.assertIn("SetPaValue(p, 1.0)", put_on)
+        self.assertEqual(take_off.count("p.UnequipItem("), 3)
+        self.assertEqual(take_off.count("p.RemoveItem("), 3)
+        self.assertIn("SetPaValue(p, 0.0)", take_off)
+        self.assertIn("p.SetRace(StartRace)", take_off)                          # back to the race the player started with
+        self.assertIn("StartRace = p.GetRace()", ENTRY_PSC.split("Event OnInit()")[1])
+        for item in ("FrameId", "PieceHelmId", "PieceTorsoId"):                  # every item added is equipped, unequipped and removed
+            for call in ("AddItem", "EquipItem"):
+                self.assertIn(f"p.{call}(Thing({item})", put_on)
+            for call in ("UnequipItem", "RemoveItem"):
+                self.assertIn(f"p.{call}(Thing({item})", take_off)
+
+    def test_the_value_and_the_item_equip_reads_are_guesses_behind_opt(self):
+        self.assertEqual(mpa.optional_names(ENTRY_PSC), ["Actor.GetSitState", "Actor.GetValue", "Actor.SetValue", "Actor.IsEquipped",
+                                                         "ObjectReference.MoveTo"])
+        self.assertEqual(mpa.enable(ENTRY_PSC, []), ENTRY_PSC)
+        for name in ("EquipItem", "UnequipItem"):
+            self.assertIn(name, mpa.REQUIRED["Actor"])
+        for name in ("AddItem", "RemoveItem", "GetItemCount"):
+            self.assertIn(name, mpa.REQUIRED["ObjectReference"])
+
+    def test_the_screen_says_each_step_and_the_log_ends_each_line(self):
+        self.assertIn("Debug.Notification(msg)", ENTRY_PSC)
+        self.assertIn('string LogName = "FO4SFPAEntry"', ENTRY_PSC)
+        self.assertIn('"FO4SFPAENTRY rt="', ENTRY_PSC)
+        self.assertIn('" end=true"', ENTRY_PSC)
+        for words in ("Suit 1 s after the entry", "Suit 4 s after the entry", "1 s after the exit", "4 s after the exit",
+                      "the suit is ON", "the suit is OFF", "did NOT undo everything", "only partly on",
+                      "not in this game's scripts", "coc FO4SF_PAProbeCell"):
+            self.assertIn(words, ENTRY_PSC)
+
+    def test_a_game_without_a_sit_state_still_enters_once(self):
+        self.assertIn('elseif sitText == "na" && !FallbackEntryUsed', ENTRY_PSC)
+        self.assertIn("FallbackEntryUsed = true", ENTRY_PSC)
+        self.assertIn("if InSuitSeconds >= SuitLimit", ENTRY_PSC.replace("elseif ", "if "))   # the timed exit needs no sit state
+
+    def test_the_tool_is_one_kit_with_one_start_game_enabled_hand_or_entry(self):
+        self.assertIn("WithHand ? Quest.Flag.StartGameEnabled : default", TOOL_SRC)
+        self.assertIn('"--with-hand"', TOOL_SRC)
+        self.assertIn("EntryPos = new(3, 0, 0)", TOOL_SRC)
 
 
 class ScriptTests(unittest.TestCase):
@@ -168,8 +241,10 @@ class ScriptTests(unittest.TestCase):
 BASES = {
     "Form": "Scriptname Form\nint Function GetFormID() native\n",
     "ObjectReference": "Scriptname ObjectReference extends Form\nfloat Function GetPositionX() native\nfloat Function GetPositionY() native\nFunction MoveTo(ObjectReference a) native\n"
-                       "float Function GetPositionZ() native\nfloat Function GetDistance(ObjectReference a) native\nCell Function GetParentCell() native\n",
+                       "float Function GetPositionZ() native\nfloat Function GetDistance(ObjectReference a) native\nCell Function GetParentCell() native\n"
+                       "Function AddItem(Form f, int n, bool s) native\nFunction RemoveItem(Form f, int n, bool s) native\nint Function GetItemCount(Form f) native\n",
     "Actor": "Scriptname Actor extends ObjectReference\nFunction SwitchToPowerArmor(ObjectReference a) native\nFunction SetRace(Race r) native\n"
+             "Function EquipItem(Form f, bool a, bool b) native\nFunction UnequipItem(Form f, bool a, bool b) native\nbool Function IsEquipped(Form f) native\n"
              "Race Function GetRace() native\nObjectReference Function GetFurnitureReference() native\nint Function GetSitState() native\n"
              "Actor:WornItem Function GetWornItem(int i) native\n",
     "Game": "Scriptname Game\nActor Function GetPlayer() native global\nForm Function GetFormFromFile(int i, string p) native global\n"
@@ -197,12 +272,13 @@ class PrecheckTests(unittest.TestCase):
     def test_inherited_names_are_found_and_undeclared_optional_ones_are_reported(self):
         z = os.path.join(self.tmp.name, "cr.zip")
         fake_sources(z)
-        r = mpa.precheck_sources(mpa.read_sources(z), PSC, HAND_PSC)
+        r = mpa.precheck_sources(mpa.read_sources(z), PSC, HAND_PSC, ENTRY_PSC)
         self.assertEqual(r["missing"], [])
         self.assertTrue(r["required"]["Actor.GetDistance"])                  # declared on ObjectReference
         self.assertEqual(r["optional"], {"Actor.GetWornItem": True, "Actor.GetFurnitureReference": True,
                                          "Actor.GetSitState": True, "Actor.IsInPowerArmor": False, "Game.GetCameraState": False,
-                                         "ObjectReference.MoveTo": True})
+                                         "ObjectReference.MoveTo": True, "Actor.GetValue": False, "Actor.SetValue": False,
+                                         "Actor.IsEquipped": True})
 
     def test_a_missing_required_native_is_named(self):
         z = os.path.join(self.tmp.name, "cr.zip")
@@ -271,7 +347,8 @@ class StageTests(unittest.TestCase):
         self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
         self.assertIn("masters [Starfield.esm]", check.stdout)
         self.assertIn("QUST FO4SF_PAProbeQuest flags StartGameEnabled stages [10,20,30]", check.stdout)
-        self.assertIn("QUST FO4SF_PAHandQuest flags StartGameEnabled scripts [FO4SF_PAHandQuest (0 properties)]", check.stdout)
+        self.assertIn("QUST FO4SF_PAHandQuest flags 0 scripts [FO4SF_PAHandQuest (0 properties)]", check.stdout)   # off unless --with-hand
+        self.assertIn("QUST FO4SF_PAEntryQuest flags StartGameEnabled scripts [FO4SF_PAEntryQuest (0 properties)]", check.stdout)
         self.assertIn("(0 properties)", check.stdout)
 
     def test_the_plugin_adds_records_and_overrides_none(self):
@@ -298,9 +375,9 @@ class StageTests(unittest.TestCase):
                 i += 24 + size
         walk(data, 0, len(data))
         self.assertTrue(ids and all(f >> 24 == 1 for f in ids), [hex(f) for f in ids if f >> 24 != 1])
-        for sig, n in ((b"CELL", 1), (b"FURN", 1), (b"RACE", 1), (b"QUST", 2)):
+        for sig, n in ((b"CELL", 1), (b"FURN", 2), (b"RACE", 1), (b"QUST", 3), (b"ARMO", 3), (b"AVIF", 1)):
             self.assertEqual(kinds.get(sig), n, sig)
-        self.assertEqual(kinds.get(b"REFR"), 17)           # coc marker, arrival XMarker, suit, control, 9 floor tiles, 4 lights
+        self.assertEqual(kinds.get(b"REFR"), 18)           # coc marker, arrival XMarker, suit, control, entry chair, 9 floor tiles, 4 lights
 
     def test_the_arrival_is_a_persistent_xmarker_in_the_cells_persistent_group_and_check_refuses_otherwise(self):
         out = self.root / "b2p"
@@ -324,6 +401,35 @@ class StageTests(unittest.TestCase):
         self.assertEqual(self.run_tool("build", self.master, out).returncode, 0)
         check = self.run_tool("check", out / PLUGIN, self.master)
         self.assertRegex(check.stdout, r"FURN FO4SF_PAProbeSuit keywords \[000900:Starfield.esm, 0F4A21:Starfield.esm\] \(control .*: 1 keywords\)")
+
+    def test_the_entry_kit_records(self):
+        """FAL-361: the entry furniture is the control with NO keyword, one AVIF of ours, three ARMO without art by default."""
+        out = self.root / "e1"
+        self.assertEqual(self.run_tool("build", self.master, out).returncode, 0)
+        check = self.run_tool("check", out / PLUGIN, self.master)
+        self.assertEqual(check.returncode, 0, check.stdout)
+        self.assertRegex(check.stdout, r"FURN FO4SF_PAEntryFurn keywords \[000900:Starfield.esm\] \(the control's, no FurnitureTypePowerArmor\)")
+        self.assertRegex(check.stdout, r"AVIF FO4SF_PAInPowerArmor 00080C:FO4SFPowerArmorProbe.esm type Variable default 0 min 0 max 1")
+        for edid, slot in (("FO4SF_PAFrame", "BODY"), ("FO4SF_PAPieceHelm", "Hat"), ("FO4SF_PAPieceTorso", "UpperBody1VisOnly")):
+            self.assertIn(f"ARMO {edid} ", check.stdout)
+            self.assertRegex(check.stdout, rf"ARMO {edid} \S+ slot {slot} armatures 0 \(art: none\)")
+        self.assertIn("REFR 00080B:FO4SFPowerArmorProbe.esm FO4SF_PAEntryFurnRef base 00080A:FO4SFPowerArmorProbe.esm at (3, 0, 0)", check.stdout)
+
+    def test_art_options_copy_a_vanilla_armo_and_check_needs_the_same_options(self):
+        out = self.root / "e2"
+        art = ["--frame-art", "SynthArmorArt", "--piece-art", "SynthArmorArt", "--with-hand"]
+        self.assertEqual(self.run_tool("build", self.master, out, *art).returncode, 0)
+        ok = self.run_tool("check", out / PLUGIN, self.master, *art)
+        self.assertEqual(ok.returncode, 0, ok.stdout)
+        self.assertIn("armatures 1 (art: SynthArmorArt)", ok.stdout)
+        self.assertIn("QUST FO4SF_PAHandQuest flags StartGameEnabled", ok.stdout)
+        bad = self.run_tool("check", out / PLUGIN, self.master)                       # without the options the plugin is not what is asked
+        self.assertEqual(bad.returncode, 1, bad.stdout)
+        self.assertIn("armatures differ from none", bad.stdout)
+        self.assertIn("only --with-hand does that", bad.stdout)
+        miss = self.run_tool("build", self.master, self.root / "e3", "--frame-art", "NoSuchArmor")
+        self.assertEqual(miss.returncode, 1)
+        self.assertIn("0 ARMO named NoSuchArmor", miss.stderr)
 
     def test_a_control_that_is_already_power_armor_is_refused(self):
         proc = self.run_tool("build", self.master, self.root / "b4", "--control", "SynthAlreadyPowerArmor")
@@ -356,7 +462,12 @@ class StageTests(unittest.TestCase):
         plan = json.loads((final / "plan.json").read_text())
         self.assertEqual(plan["kind"], "power-armor-probe")
         self.assertEqual(plan["plugins"], [PLUGIN])
-        self.assertEqual(sorted(plan["outputs"]), sorted([PLUGIN, "Data/Scripts/FO4SF_PAProbeQuest.pex", "Data/Scripts/FO4SF_PAHandQuest.pex"]))
+        self.assertEqual(sorted(plan["outputs"]), sorted([PLUGIN, "Data/Scripts/FO4SF_PAProbeQuest.pex", "Data/Scripts/FO4SF_PAHandQuest.pex",
+                                                    "Data/Scripts/FO4SF_PAEntryQuest.pex"]))
+        self.assertEqual(plan["optional_entry"]["Actor.IsEquipped"], "kept")
+        self.assertEqual(plan["optional_entry"]["Actor.GetValue"], "not declared in the base scripts")
+        self.assertEqual(plan["optional_entry"]["Actor.GetSitState"][:8], "declared")
+        self.assertFalse(plan["hand_quest_on"])
         self.assertEqual(plan["inputs"]["Starfield.esm"]["sha256"], mpa.sha256(str(self.master)))
         self.assertEqual(plan["optional"]["Actor.GetWornItem"], "kept")
         self.assertEqual(plan["optional"]["Actor.GetFurnitureReference"], "kept")

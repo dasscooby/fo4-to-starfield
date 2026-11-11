@@ -163,3 +163,61 @@ armor slots. A reading the game has no call for says `not in this game's scripts
 5. Watch the screen and the character for 5 s: any climb-in animation, camera change, or HUD change. Three messages follow ("Suit 1 s after the call: ...", "Suit 4 s after the call: ...", then "Result: nothing changed ..." or "Result: something CHANGED ..."). The PC run of the probe (11 Nov, #708 at 9e252a4a) saw **nothing change** on this chair-plus-keyword furniture, so "nothing changed" is the expected result; a change is the news. Screenshot each.
 6. Now activate the suit furniture once. Does a message say "You are on the SUIT furniture ..."? Did anything animate?
 7. Quit without saving. Tell: step 3 worked or not; the two "Suit ..." messages as read; what you saw at steps 5 and 6.
+
+## Entry by script (FAL-361, piece B of FAL-359): kit, hand mode, card
+
+Status: **built offline, not run in game.** The #708 run showed that `SwitchToPowerArmor` on a keyword furniture does nothing,
+and the console probe showed `SetRace` to a copy of HumanRace works on the player both ways. So the entry here does not ask the
+engine to climb in: a script does the four things that make up "being in a suit" for our own design, and undoes them.
+
+Same plugin (`FO4SFPowerArmorProbe.esm`, still master Starfield.esm only, adds records, overrides none), new records:
+
+| Record | What |
+|---|---|
+| QUST `FO4SF_PAEntryQuest` (0x809), script `FO4SF_PAEntryQuest.psc` | start game enabled, one stage, no properties; hand mode (no console) with an on-screen line for every step and a line of `FO4SFPAEntry.0.log` for each |
+| FURN `FO4SF_PAEntryFurn` (0x80A), reference 0x80B 3 units ahead of the arrival | **the furniture of ours**: every field of the control chair (`NPCChairTech03_Free_270`), and **no** power armor keyword, so the engine has nothing power-armor-shaped to react to |
+| AVIF `FO4SF_PAInPowerArmor` (0x80C) | our value for "in power armor": variable, default 0, min 0, max 1 |
+| ARMO `FO4SF_PAFrame` (0x80D, slot BODY), `FO4SF_PAPieceHelm` (0x80E, Hat), `FO4SF_PAPieceTorso` (0x80F, UpperBody1VisOnly) | our frame and two pieces: a name, a slot, weight and value 0, no script |
+| RACE `FO4SF_PARace` (0x802, from the console probe) | the kit race: a copy of HumanRace |
+
+**The entry** (sit on the entry chair; the script waits 2 s): `SetRace` to the kit race, `AddItem` and `EquipItem` of the frame and
+both pieces, `SetValue` of our value to 1. It reads the state back after 1 s and 4 s and says on screen which of the four held.
+**The exit** (sit on the vanilla chair on the left, or 120 s in the suit): value to 0, `UnequipItem` and `RemoveItem` of the three,
+`SetRace` back to the race the player started with (taken at start), read back after 1 s and 4 s. Sit state 3 within 1.5 units of the
+chair is the trigger (the console probe's seated control was 0.12 units away); when the game has no `GetSitState` the first walk up to
+the entry chair is the trigger, once, and the exit is the 120 s timer.
+
+**Stage options.** `--with-hand` keeps the by-hand quest (`FO4SF_PAHandQuest`) start game enabled: it is **off by default** now,
+because it and the entry quest both move the player into the room at 30 s and both talk. `--frame-art <ARMO editor id>` and
+`--piece-art <ARMO editor id>` copy a vanilla ARMO (every field, so its armatures, which are the look) into the frame / the two
+pieces; `check` is given the same options as `build` and refuses a plugin that does not match.
+
+Names the script guesses are `;OPT` lines (the stager compiles each alone and keeps what compiles, in `plan.json` `optional_entry`):
+`Actor.GetValue`, `Actor.SetValue` (our value; **the value is the least certain native**), `Actor.IsEquipped`, `Actor.GetSitState`,
+`ObjectReference.MoveTo`. Required, in the stager's list: `Actor.EquipItem`, `Actor.UnequipItem`, `ObjectReference.AddItem`,
+`RemoveItem`, `GetItemCount`. **Not run offline:** the Papyrus compile (the PC's compiler), the real Starfield.esm, and the game.
+
+### What the player sees, and what is honestly missing
+
+* **Third person, as built (no art given):** the kit race is a copy of HumanRace with the same skeleton and graph, and the three ARMO
+  have **no armature**, so nothing changes on the body. The only visible results are the on-screen lines, three items appearing
+  in and leaving the inventory, and (if the game can read it) the value. **First person:** the same, no arms or camera change.
+* **With `--frame-art` / `--piece-art`:** the vanilla armor's armatures are worn: third person shows that armor over the character
+  (a copied suit's own slots and look decide whether it looks like a frame); whether Starfield accepts a vanilla ARMO's armatures
+  on a copied race is unknown until run.
+* **Missing, not attempted:** a climb-in animation (the engine's own did nothing); a power armor HUD or camera; a steel frame as art
+  (no frame model is made here); a fusion core, damage or carry-weight rules (the value is only ours: nothing reads it, so
+  nothing changes in play); the Starfield power armor state (`IsInPowerArmor` is not in Starfield's scripts); stopping the player
+  from taking the pieces off by hand (`EquipItem` is called with prevent-removal false); a save made while in the suit. The race swap
+  can break a save: **throwaway state only, no save.**
+
+### Card (eight steps; throwaway character, no console, game closed first for the install)
+
+1. Install the stage (`power_armor_probe_install.py install --dir <stage> --starfield <game dir>`; stage it without `--with-hand`) and tick `FO4SFPowerArmorProbe.esm`. Load a save of a **throwaway** character already in the world (not the opening). Do not save at any point.
+2. Wait 30 s. Messages: "Power armor entry test: in 30 s you are moved into a small test room", then "Moving you into the test room." (If you read "type coc FO4SF_PAProbeCell", do that and nothing else.) Screenshot third person and the inventory (armor tab) now: the **before**.
+3. The message "Test room: the ENTRY chair is 3 units ahead of you" appears. Walk to the chair ahead and sit (activate it). Message "You sat on the entry chair (sit state 3): the suit goes on in 2 s." If you cannot sit, say so and stop.
+4. Two seconds later "Suit ON requested ...", then "Suit 1 s after the entry: ..." and "Suit 4 s after the entry: ..." and "Result: the suit is ON" or "only partly on. Did not hold: ...". Copy every line.
+5. Stand up. Screenshot first person and third person, and the inventory (three FO4SF items, equipped or not). Note any visible change, T-pose, missing head or hands, stall, speed or jump change.
+6. Walk to the vanilla chair on your left and sit. Message "You sat on the exit chair ...", 2 s later "Suit OFF requested ...", "1 s after the exit ...", "4 s after the exit ..." and "Result: the suit is OFF" or "the exit did NOT undo everything. Still set: ...". Copy them.
+7. Stand up. Screenshots again, same three views, and the inventory: the **after**. Optionally enter and leave a second time (sit on the entry chair again).
+8. Quit to the desktop **without saving**. The entry's own log is `FO4SFPAEntry.0.log` in `My Games\Starfield\Logs\Script\User` (no reader for it yet: every line is plain text ending `end=true`); paste it with the screenshots and the eight copied lines. Tell: which of step 4's four held, whether step 6 undid them, what the screenshots show.
