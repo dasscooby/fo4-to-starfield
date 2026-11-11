@@ -87,6 +87,20 @@ other flag with the template). RadAway's item template prefers a vanilla medicin
 clamp. Untested in play. The `Detrimental` clearing is the sign rule (owner PC's disassembly reading): `DamageHealthContact`
 presumably carries it (Health lost 40 with magnitude +40), so without clearing it ours would be negative.
 
+### The one flag bit that differs from the template (9bc3ec25, owner PC's read-back)
+
+The staged effect's DATA words 24 to 26 read `00000003 00000101 09013F80`; the template `DamageHealthContact` has `09053F80`.
+The difference is the bit `0x00040000` of word 26, the bit `0x4` of the upper half (`0x0905` against `0x0901`). In Mutagen's
+`MagicEffect.Flag` that bit is **`Detrimental`** (`Hostile 0x1`, `Recover 0x2`, `Detrimental 0x4`, ...; read from the
+enum), and it is the only flag the writer clears. The check prints the copy's flags as `Hostile, DispelWithKeywords, NoArea`,
+which are exactly `0x901` (`0x1 + 0x100 + 0x800`); with `Detrimental` the template reads `0x905`. **That the upper half of
+word 26 is the flags field is an inference** from these numbers matching, not a layout read from Starfield's format.
+Why it is cleared: the owner PC's reading of the engine (disassembly, not tested in play) negates an effect's magnitude when
+exactly one of the effect's `Detrimental` and the actor value's "damage is positive" is set. The vanilla spell lowers Health
+by its +40 magnitude, which fits `Detrimental` set on a value without the other flag; our value (`AVFL 00000400`) lacks
+the second, so with `Detrimental` kept the spell would give -100 and the value would stay at 0; cleared it should give +100.
+If stage 20 shows a negative sign, set `Detrimental` again and flag the AVIF damage-is-positive instead.
+
 ## Second control: a vanilla instant effect (stage 50)
 
 Asked by the owner PC so one session separates "our effect is wrong" from "Cast on the player from a quest script applies no
