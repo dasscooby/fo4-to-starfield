@@ -444,6 +444,7 @@ def cmd_btd_summary(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="fo4sf", description="Fallout 4 → Starfield conversion tools")
     parser.add_argument("--config", help="path to config.toml (default: ./config.toml)")
+    parser.add_argument("--version", action="version", version="fo4sf (Fallout 4 → Starfield conversion tools)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_status = sub.add_parser("status", help="show configuration summary (with dir existence), and manifest coverage")
