@@ -51,13 +51,15 @@ def install(a):
     if sorted(plan["plugins"]) != names:
         sys.exit(f"rads probe not installed: the stage holds {names}, plan.json lists {plan['plugins']}")
     return installer(["install", "--exp-dir", d, "--starfield", a.starfield, "--pack",
-                      "--plugins", ",".join(plan["plugins"])])
+                      "--plugins", ",".join(plan["plugins"])] +
+                     (["--prepacked", a.prepacked] if getattr(a, "prepacked", "") else []))
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cmd", choices=("install", "uninstall", "status", "order", "active"))
     ap.add_argument("--dir", default="", help="the staged rads probe folder (install)")
+    ap.add_argument("--prepacked", default="", help="verify and install this existing archive; never build")
     ap.add_argument("--starfield", required=True, help="the game folder (Starfield.exe)")
     a = ap.parse_args(argv)
     if a.cmd == "install":
