@@ -39,7 +39,7 @@ class HandScriptTests(unittest.TestCase):
 
     def test_the_hand_scripts_ids_are_the_tools(self):
         ids = const_ids(TOOL_SRC)
-        for name in ("CellId", "SuitRefId", "ControlRefId", "CocRefId"):
+        for name in ("CellId", "SuitRefId", "ControlRefId", "ArrivalRefId"):
             m = re.search(rf"^int {name} = (0x[0-9A-Fa-f]+)", HAND_PSC, re.M)
             self.assertIsNotNone(m, name)
             self.assertEqual(int(m.group(1), 16), ids[name], name)
@@ -97,6 +97,14 @@ class HandScriptTests(unittest.TestCase):
         self.assertLess(HAND_PSC.index('Say(Wording("4 s after the call"))'), HAND_PSC.index("        Verdict()"))
         self.assertIn('if sitText == "3"', HAND_PSC)                                # seated on the control without the furniture call
         self.assertNotIn("string race ", HAND_PSC)
+
+    def test_the_arrival_the_script_moves_to_is_persistent_and_the_60_s_call_waits_for_standing(self):
+        """FAL-316 findings: MoveTo needs a reference that resolves while the room is not loaded; the timed call must not use the
+        one trial while the player sits on the control chair."""
+        self.assertIn("ObjectReference coc = Ref(ArrivalRefId)", HAND_PSC)
+        self.assertNotIn("Ref(CocRefId)", HAND_PSC)                                # the temporary COC marker is not the target
+        self.assertIn('elseif InRoom >= RoomLimit && (sitText == "0" || sitText == "na")', HAND_PSC)
+        self.assertEqual(const_ids(TOOL_SRC)["ArrivalRefId"], 0x808)
 
     def test_the_hand_log_lines_end(self):
         self.assertIn('"FO4SFPAHAND rt="', HAND_PSC)
@@ -292,7 +300,24 @@ class StageTests(unittest.TestCase):
         self.assertTrue(ids and all(f >> 24 == 1 for f in ids), [hex(f) for f in ids if f >> 24 != 1])
         for sig, n in ((b"CELL", 1), (b"FURN", 1), (b"RACE", 1), (b"QUST", 2)):
             self.assertEqual(kinds.get(sig), n, sig)
-        self.assertEqual(kinds.get(b"REFR"), 16)           # coc marker, suit, control, 9 floor tiles, 4 lights
+        self.assertEqual(kinds.get(b"REFR"), 17)           # coc marker, arrival XMarker, suit, control, 9 floor tiles, 4 lights
+
+    def test_the_arrival_is_a_persistent_xmarker_in_the_cells_persistent_group_and_check_refuses_otherwise(self):
+        out = self.root / "b2p"
+        self.assertEqual(self.run_tool("build", self.master, out).returncode, 0)
+        data = bytearray((out / PLUGIN).read_bytes())
+        i = data.index(b"FO4SF_PAProbeArrival")
+        rec = data.rfind(b"REFR", 0, i)
+        flags = struct.unpack_from("<I", data, rec + 8)[0]
+        self.assertEqual(flags & 0x400, 0x400)                                    # persistent
+        check = self.run_tool("check", out / PLUGIN, self.master)
+        self.assertEqual(check.returncode, 0, check.stdout)
+        self.assertIn("FO4SF_PAProbeArrival persistent, base 00003B:Starfield.esm", check.stdout)
+        struct.pack_into("<I", data, rec + 8, flags & ~0x400)                     # the same record without the flag
+        (out / "bad").mkdir()
+        (out / "bad" / PLUGIN).write_bytes(bytes(data))
+        bad = self.run_tool("check", out / "bad" / PLUGIN, self.master)
+        self.assertEqual(bad.returncode, 1, bad.stdout)
 
     def test_the_suit_differs_from_its_control_by_exactly_one_keyword(self):
         out = self.root / "b3"

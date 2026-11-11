@@ -26,7 +26,7 @@ string ProbePlugin = "FO4SFPowerArmorProbe.esm"
 int CellId = 0x800          ; CELL FO4SF_PAProbeCell
 int SuitRefId = 0x804       ; REFR the suit furniture
 int ControlRefId = 0x805    ; REFR the vanilla control furniture
-int CocRefId = 0x806        ; REFR the arrival marker
+int ArrivalRefId = 0x808    ; REFR the arrival XMarker: PERSISTENT, so it is found while the room is not loaded (the COC marker 0x806 is temporary)
 
 ; ---------------------------------------------------------------- state
 
@@ -55,7 +55,7 @@ Event OnInit()
     Debug.OpenUserLog(LogName)
     Actor p = Game.GetPlayer()
     StartRace = p.GetRace()
-    Trace("init quest=" + GetFormID() + " installed=" + Game.IsPluginInstalled(ProbePlugin) + " suitref=" + Id(Ref(SuitRefId)) + " controlref=" + Id(Ref(ControlRefId)) + " cocref=" + Id(Ref(CocRefId)))
+    Trace("init quest=" + GetFormID() + " installed=" + Game.IsPluginInstalled(ProbePlugin) + " suitref=" + Id(Ref(SuitRefId)) + " controlref=" + Id(Ref(ControlRefId)) + " arrivalref=" + Id(Ref(ArrivalRefId)))
     Say("Power armor test: in 30 s you are moved into a small test room. Throwaway game only: do not save.")
     StartTimer(POLL_S, TIMER_POLL)
 EndEvent
@@ -129,7 +129,7 @@ EndFunction
 bool Function MoveIn(Actor p)
     {The player moved onto the arrival marker; false when the game declares no such call.}
     bool ok = false
-;OPT ObjectReference.MoveTo     ObjectReference coc = Ref(CocRefId)
+;OPT ObjectReference.MoveTo     ObjectReference coc = Ref(ArrivalRefId)
 ;OPT ObjectReference.MoveTo     if coc
 ;OPT ObjectReference.MoveTo         p.MoveTo(coc)
 ;OPT ObjectReference.MoveTo         ok = true
@@ -248,7 +248,8 @@ Function Poll()
             p.SwitchToPowerArmor(suit)
             StartTimer(READ1_S, TIMER_READ1)
             StartTimer(READ2_S, TIMER_READ2)
-        elseif InRoom >= RoomLimit
+        elseif InRoom >= RoomLimit && (sitText == "0" || sitText == "na")
+            ; only while standing: a call made while the player sits on the control chair would use up the one trial there (FAL-316)
             Called = true
             Say("60 s in the room: calling SwitchToPowerArmor on the suit now.")
             BeforeKey = StateKey(p)

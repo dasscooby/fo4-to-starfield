@@ -62,12 +62,12 @@ static class PowerArmorProbe
 
     // the layout (scripts/planet/FO4SF_PAProbeQuest.psc carries the same ids)
     const uint CellId = 0x800, SuitId = 0x801, RaceId = 0x802, QuestId = 0x803, SuitRefId = 0x804, ControlRefId = 0x805,
-        CocRefId = 0x806, HandQuestId = 0x807, FirstTileId = 0x810;
+        CocRefId = 0x806, HandQuestId = 0x807, ArrivalRefId = 0x808, FirstTileId = 0x810;
     const string CellEdid = "FO4SF_PAProbeCell", SuitEdid = "FO4SF_PAProbeSuit", RaceEdid = "FO4SF_PARace",
         QuestEdid = "FO4SF_PAProbeQuest", Script = "FO4SF_PAProbeQuest", HandQuestEdid = "FO4SF_PAHandQuest", HandScript = "FO4SF_PAHandQuest";
     const string KeywordEdid = "FurnitureTypePowerArmor", HumanRaceEdid = "HumanRace";
     // dotnet/TestCell's vanilla forms
-    const uint Floor = 0x050776, Omni = 0x03D38C, CocMarker = 0x000032, LightingTemplate = 0x006658, ImageSpace = 0x122393;
+    const uint Floor = 0x050776, Omni = 0x03D38C, CocMarker = 0x000032, XMarker = 0x00003B, LightingTemplate = 0x006658, ImageSpace = 0x122393;
     const float Tile = 8f, LightZ = 4f;
     static readonly P3Float SuitPos = new(0, -2.5f, 0), ControlPos = new(0, 2.5f, 0), CocPos = new(-5, 0, 0.1f);
     static readonly ushort[] Stages = { 10, 20, 30 };
@@ -128,6 +128,11 @@ static class PowerArmorProbe
         var zero = new P3Float(0, 0, 0);
         PlacedObject Ref(uint id, FormKey b, P3Float pos, P3Float rot, string? edid = null) =>
             new(Own(id), Release) { EditorID = edid, Base = new FormLinkNullable<IPlaceableObjectGetter>(b), Position = pos, Rotation = rot };
+        // the hand quest moves the player here from another cell: a temporary reference of an unloaded cell cannot be found by
+        // Game.GetFormFromFile (FAL-316 finding), a persistent one can; XMarker 00003B as dotnet/CoreStorage
+        var arrival = Ref(ArrivalRefId, Sf(XMarker), CocPos, new P3Float(0, 0, (float)(Math.PI / 2)), "FO4SF_PAProbeArrival");
+        arrival.MajorRecordFlagsRaw |= 0x400;
+        cell.Persistent.Add(arrival);
         cell.Temporary.Add(Ref(CocRefId, Sf(CocMarker), CocPos, new P3Float(0, 0, (float)(Math.PI / 2))));       // facing +X
         cell.Temporary.Add(Ref(SuitRefId, suit.FormKey, SuitPos, zero, "FO4SF_PAProbeSuitRef"));
         cell.Temporary.Add(Ref(ControlRefId, control.FormKey, ControlPos, zero, "FO4SF_PAProbeControlRef"));
@@ -247,7 +252,11 @@ static class PowerArmorProbe
         if (cell != null)
         {
             Need(cell.Flags is { } fl && (fl & Cell.Flag.IsInteriorCell) != 0, "CELL is not an interior");
-            Need(cell.Persistent.Count == 0, "CELL has persistent references (the probe's are temporary)");
+            var persist = cell.Persistent.OfType<IPlacedObjectGetter>().ToList();
+            Need(cell.Persistent.Count == 1 && persist.Count == 1 && persist[0].FormKey == Own(ArrivalRefId) && (persist[0].MajorRecordFlagsRaw & 0x400) != 0
+                 && persist[0].Base.FormKey == Sf(XMarker) && persist[0].Position == CocPos,
+                 "the CELL's persistent group is not exactly the arrival XMarker (the probe's other references are temporary)");
+            if (persist.Count == 1) Console.WriteLine($"  REFR {persist[0].FormKey} {persist[0].EditorID} persistent, base {persist[0].Base.FormKey} at ({F(persist[0].Position.X)}, {F(persist[0].Position.Y)}, {F(persist[0].Position.Z)})");
             var objs = cell.Temporary.OfType<IPlacedObjectGetter>().ToDictionary(o => o.FormKey);
             void Ref(uint id, FormKey b, P3Float pos, string what)
             {

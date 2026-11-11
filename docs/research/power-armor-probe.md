@@ -144,13 +144,13 @@ The same plugin carries a second quest, `FO4SF_PAHandQuest` (0x807, script `FO4S
 the probe's stage 10 question, `SwitchToPowerArmor` on the suit furniture, and shows what the engine answered as messages on
 screen. **The furniture is not in the vanilla world**: it stands in the probe's own cell `FO4SF_PAProbeCell`, so the smallest
 thing the owner can use is that room. The script moves the player there itself 30 s after the quest starts
-(`ObjectReference.MoveTo` on the arrival marker, an optional name: when the game has no such call the screen says to type
+(`ObjectReference.MoveTo` on the arrival marker, an optional name; the target is `FO4SF_PAProbeArrival` (0x808), an XMarker in the cell's *persistent* group at the COC marker's place, because a temporary reference of a cell that is not loaded cannot be found by the script (FAL-316 finding): when the game has no such call the screen says to type
 `coc FO4SF_PAProbeCell`, the one console line left). The race swap (stages 20 and 30) is **not** in the hand version, because
 it can break a save; it stays with the console probe.
 
 In the room, on screen: what stands where; every change of the furniture the player is on (the control chair: "Sitting
 works"; the suit: sit state and `in power armor`); and, when the player walks within 2 units of the suit (or after 60 s in the
-room), the call and its answer 1 s and 4 s later: in power armor, furniture, sit state, camera, race unchanged or not, worn
+room), the call (the 60 s fallback only while standing, never while seated on the control chair) and its answer 1 s and 4 s later: in power armor, furniture, sit state, camera, race unchanged or not, worn
 armor slots. A reading the game has no call for says `not in this game's scripts`. Every message is also a line of
 `FO4SFPAHand.0.log`. Offline only: the Papyrus compile and the game are the PC's.
 
