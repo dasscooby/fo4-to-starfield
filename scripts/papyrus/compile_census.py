@@ -53,8 +53,10 @@ BUCKETS = ("unknown_function", "unknown_type", "unknown_property_or_variable",
            "wrong_argument_count", "signature_mismatch", "self_only_function", "type_mismatch", "follow_on",
            "syntax", "other")
 # Buckets whose errors name a missing thing; the top-names list draws from these.
-NAMED_BUCKETS = ("unknown_function", "unknown_type", "unknown_property_or_variable", "signature_mismatch",
-                 "self_only_function")
+NAMED_BUCKETS = ("unknown_function", "unknown_type", "unknown_property_or_variable")
+# Buckets whose errors name a thing that EXISTS (a changed signature, a self-only function): the name is kept on the
+# error record and counted in `top_named`, never in the missing-name list.
+EXISTING_BUCKETS = ("signature_mismatch", "self_only_function")
 DEFAULT_FLAGS = "Starfield_Papyrus_Flags.flg"
 MAX_MESSAGE = 200
 TOP_NAMES = 20
@@ -125,7 +127,7 @@ def parse_output(text):
             msg = located.group("msg")
             if re.match(r"warning\b", msg, re.I):
                 continue
-            msg = re.sub(r"^error:?\s*", "", msg, flags=re.I)
+            msg = re.sub(r"^error:\s+", "", msg, flags=re.I)   # only the compiler's own "error: " prefix; "Error is ..." names a function
             where = (int(located.group("line")), int(located.group("col")))
         elif UNLOCATED.search(line) and not re.search(r"\b0 error", line, re.I) \
                 and not SUMMARY.match(line):
@@ -237,6 +239,13 @@ def default_runner(cmd, timeout, cwd=None):
     return res.returncode, res.stdout, res.stderr
 
 
+def _text(value):
+    """Output a timeout carried: str, bytes or None."""
+    if value is None:
+        return ""
+    return value.decode("utf-8", "replace") if isinstance(value, bytes) else str(value)
+
+
 def run_census(fo4, starfield, shim, compiler, fragment, count, seed, out, flags=DEFAULT_FLAGS,
                timeout=120, runner=default_runner, scene_count=0):
     fo4, starfield, shim, out = (Path(p).resolve() for p in (fo4, starfield, shim, out))
@@ -275,8 +284,8 @@ def run_census(fo4, starfield, shim, compiler, fragment, count, seed, out, flags
         try:
             code, stdout, stderr = runner(cmd, timeout, str(work))
             note = None
-        except subprocess.TimeoutExpired:
-            code, stdout, stderr, note = None, "", "", f"timed out after {timeout}s"
+        except subprocess.TimeoutExpired as err:
+            code, stdout, stderr, note = None, _text(err.stdout), _text(err.stderr), f"timed out after {timeout}s"
         except OSError as err:
             code, stdout, stderr, note = None, "", "", f"could not run compiler: {err}"
         raw_name = rel.replace("/", "__") + ".txt"
@@ -315,22 +324,28 @@ def _summarize(results):
     compiled = sum(1 for r in results if r["compiled"])
     buckets = {b: {"errors": 0, "scripts": 0} for b in BUCKETS}
     names, shown = Counter(), {}
+    existing, existing_shown = Counter(), {}
     for r in results:
         seen = set()
         for e in r["errors"]:
             buckets[e["bucket"]]["errors"] += 1
             seen.add(e["bucket"])
+            if e["bucket"] in EXISTING_BUCKETS and e["name"]:
+                existing[(e["bucket"], e["name"].casefold())] += 1
+                existing_shown.setdefault((e["bucket"], e["name"].casefold()), e["name"])
             if e["bucket"] in NAMED_BUCKETS and e["name"]:
                 key = (e["bucket"], e["name"].casefold())          # SetAvailableToBeCompanion == SetAvailabletoBeCompanion
                 names[key] += 1
                 shown.setdefault(key, e["name"])
         for b in seen:
             buckets[b]["scripts"] += 1
+    top_existing = [{"bucket": b, "name": existing_shown[(b, n)], "count": c}
+                    for (b, n), c in sorted(existing.items(), key=lambda kv: (-kv[1], kv[0]))[:TOP_NAMES]]
     top = [{"bucket": b, "name": shown[(b, n)], "count": c}
            for (b, n), c in sorted(names.items(), key=lambda kv: (-kv[1], kv[0]))[:TOP_NAMES]]
     return {"total": total, "compiled": compiled,
             "compile_share": round(compiled / total, 4) if total else 0.0,
-            "buckets": buckets, "top_missing_names": top}
+            "buckets": buckets, "top_missing_names": top, "top_existing_names": top_existing}
 
 
 def format_table(census):
@@ -356,6 +371,9 @@ def format_table(census):
         lines += [f"  {t['count']:>4}  {t['name']}  ({t['bucket']})" for t in census["top_missing_names"]]
     else:
         lines.append("  (none)")
+    if census.get("top_existing_names"):
+        lines += ["", "Functions that exist but do not fit (changed signature, self-only): not missing names"]
+        lines += [f"  {t['count']:>4}  {t['name']}  ({t['bucket']})" for t in census["top_existing_names"]]
     return "\n".join(lines)
 
 

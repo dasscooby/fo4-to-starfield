@@ -91,6 +91,49 @@ class PcRunPatterns(unittest.TestCase):
         self.assertEqual(census["buckets"]["unknown_function"], {"errors": 3, "scripts": 3})
 
 
+class ReviewFixes(unittest.TestCase):
+    def test_error_prefix_needs_a_separator(self):
+        text = ("Demo.psc(1,1): ErrorCount is not a function or does not exist\n"
+                "Demo.psc(2,1): Error is not a function or does not exist\n"
+                "Demo.psc(3,1): error: ErrorCount is not a function or does not exist\n"
+                "Demo.psc(4,1): Error Foo is not a function or does not exist\n")
+        self.assertEqual([e["name"] for e in cc.parse_output(text)], ["ErrorCount", "Error", "ErrorCount", "Foo"])
+
+    def test_timeout_keeps_what_was_printed(self):
+        import subprocess
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            t = Path(tmp)
+            fo4, sf, shim = t / "fo4", t / "sf", t / "shim"
+            for d in (fo4, sf, shim):
+                d.mkdir()
+            (sf / cc.DEFAULT_FLAGS).write_text("")
+            (fo4 / "QF_A.psc").write_text("Scriptname QF_A Extends Quest\n")
+            (t / "c.exe").write_text("")
+            for out, so, se in (("o1", "X.psc(1,1): Foo is not a function or does not exist", "err-side"),
+                                ("o2", b"X.psc(1,1): Foo is not a function or does not exist", b"err-side")):
+                def slow(cmd, timeout, cwd=None, so=so, se=se):
+                    raise subprocess.TimeoutExpired(cmd, timeout, output=so, stderr=se)
+                c = cc.run_census(fo4, sf, shim, t / "c.exe", "QF_A", 0, 1, t / out, runner=slow)
+                raw = (t / out / "raw" / "QF_A.psc.txt").read_text(encoding="utf-8")
+                self.assertIn("Foo is not a function", raw)
+                self.assertIn("err-side", raw)
+                self.assertEqual(c["buckets"]["unknown_function"]["errors"], 1)
+                self.assertEqual(c["buckets"]["other"]["errors"], 1)          # the timeout marker is kept
+
+    def test_existing_functions_are_not_missing_names(self):
+        def res(bucket, name):
+            return {"script": name + ".psc", "compiled": False, "kind": "logic", "errors": [
+                {"bucket": bucket, "name": name, "line": 1, "col": 1, "message": "m"}]}
+        census = cc.summarize([res("signature_mismatch", "OnDeath"), res("signature_mismatch", "ondeath"),
+                               res("unknown_function", "OnDeath"), res("self_only_function", "GotoState")])
+        self.assertEqual(census["top_missing_names"], [{"bucket": "unknown_function", "name": "OnDeath", "count": 1}])
+        self.assertEqual(census["top_existing_names"][0], {"bucket": "signature_mismatch", "name": "OnDeath", "count": 2})
+        table = cc.format_table(census)
+        self.assertIn("not missing names", table)
+        self.assertEqual(census["buckets"]["signature_mismatch"]["errors"], 2)
+
+
 class Sampling(unittest.TestCase):
     NAMES = [f"S{i:02d}.psc" for i in range(30)] + ["Quests/QF_Fake_0001.psc"]
 

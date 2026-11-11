@@ -38,18 +38,23 @@ one as `other`. The tool names each script by its namespaced name (`Fragments:Qu
 
 ## Import order (so the result means what it says)
 
-Shim, then Starfield sources, then Fallout 4 sources. Starfield wins any name clash. A sampled Fallout 4 script that
-extends another Fallout 4 script still resolves it from the Fallout 4 folder.
+Shim, then `<out>\\overlay`, then Starfield sources, then Fallout 4 sources. A script name that exists in both games'
+sources at the same path is a clash: if Starfield's copy declares itself `Native` it is an engine base type and
+Starfield's wins; every other clash is Fallout 4's own script, so Fallout 4's copy is placed in the overlay and found
+first (`census.json` lists them under `clashes`). A sampled Fallout 4 script that extends another Fallout 4 script
+still resolves it from the Fallout 4 folder.
 
 ## What to send back
 
-1. The printed table (copy it from the console). It gives two rates, logic and scene/topic: quote those, not the mixed overall line (scene and topic scripts compile more often, so the mix reads as "quests work").
+1. The printed table (copy it from the console). It gives two rates, logic and scene/topic: quote those, not the mixed overall line (the mix reads as "quests work").
 2. `<out>\census.json`.
 
 Do **not** send the `.psc` files, the `.pex` files or the `raw` folder. `census.json` holds counts, script names,
 line numbers and short compiler messages. Read it once; if a message quotes something you would rather not share,
 trim it.
 
-Buckets: unknown function, unknown type or script, unknown property or variable, wrong argument count, syntax,
-other. A big `other` bucket means the tool's patterns missed a compiler phrasing; send two or three of its lines and
+Buckets: unknown function, unknown type or script, unknown property or variable, wrong argument count, signature
+mismatch (an event or function exists but its parameters changed), self-only function (GotoState and the like), type
+mismatch, follow-on (a member call rejected because its target never resolved), syntax, other. The "Top missing names"
+list holds only names that are missing; changed-signature and self-only names are listed below it. A big `other` bucket means the tool's patterns missed a compiler phrasing; send two or three of its lines and
 I will add them.
