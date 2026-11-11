@@ -33,9 +33,15 @@ memory; `tests/test_sfse_border.py` also pins the contract with the script's log
 `SignalLog` overrides the log path (default `Documents\My Games\Starfield\Logs\Script\User\fo4sf_map.0.log`). Lines
 written before the plugin loaded are skipped; a new log file (new session) is read from its start.
 
-Log: `<dll folder>\FO4SFBorder\fo4sf_border.log`, one JSON object per line.
+Log (FAL-246, out of the game's `Data` folder): `<Dir>\logs\fo4sf_border.log`, one JSON object per line, where `<Dir>` is
+the profile's run-time folder named by `FO4SF-Runtime.ini` next to the dll (`sfse/FOCCSidecar/README.md`, "Where the
+files land": the same file and rules for every dll of ours). With `Mode=1` or `2` and no usable `Dir` (no file, a
+malformed one, or a `Dir` whose parent folder does not exist) the plugin stays idle: no worker, no game memory
+written, no file. It says why once through `OutputDebugString` (`FO4SFBorder: refuse step=runtime_dir ...`, visible
+in a debugger or DebugView); it has no other log of its own. `Mode=0` needs no `FO4SF-Runtime.ini`.
 
 ## Install (PC card, the owner's line)
 
-Copy `FO4SFBorder.dll` and `FO4SFBorder.ini` to `Starfield\Data\SFSE\Plugins\`. Papyrus logging must be on for the
+Copy `FO4SFBorder.dll` and `FO4SFBorder.ini` to `Starfield\Data\SFSE\Plugins\`, with `FO4SF-Runtime.ini` there too
+(the launcher writes it; by hand, as the sidecar README shows). Papyrus logging must be on for the
 signal (`bEnableLogging` and `bEnableTrace` under `[Papyrus]`, as the bridge already needs). Remove both files to undo.
