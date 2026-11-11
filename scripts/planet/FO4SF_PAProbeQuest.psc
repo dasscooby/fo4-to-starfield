@@ -109,6 +109,17 @@ string Function InPowerArmor(Actor p)
     return s
 EndFunction
 
+string Function KwOnRef(ObjectReference r)
+    {Whether the game sees FurnitureTypePowerArmor (0003430B, the keyword of PowerArmorKeyword_DO) on the reference: the
+     native's validity test reads the reference's keywords. PC run of 11 Nov: the base FURN listed it and the game said 0.}
+    string s = "na"
+;OPT Form.HasKeyword     Keyword k = Game.GetFormFromFile(0x0003430B, "Starfield.esm") as Keyword
+;OPT Form.HasKeyword     if r && k
+;OPT Form.HasKeyword         s = "" + r.HasKeyword(k)
+;OPT Form.HasKeyword     endif
+    return s
+EndFunction
+
 string Function Camera()
     string s = "na"
 ;OPT Game.GetCameraState     s = "" + Game.GetCameraState()
@@ -163,7 +174,7 @@ EndFunction
 
 Function Step10(Actor p)
     ObjectReference suit = Ref(SuitRefId)
-    Trace("step stage=10 call=SwitchToPowerArmor suitref=" + Id(suit))
+    Trace("step stage=10 call=SwitchToPowerArmor suitref=" + Id(suit) + " haskw=" + KwOnRef(suit))
     Reading("before", 10)
     if suit
         p.SwitchToPowerArmor(suit)

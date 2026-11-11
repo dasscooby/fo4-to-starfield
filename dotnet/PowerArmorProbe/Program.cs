@@ -142,6 +142,14 @@ static class PowerArmorProbe
         suit.Keywords.Add(new FormLink<IKeywordGetter>(kw.FormKey));
         if (variants.Contains("furniture"))
             suit.Keywords.Add(new FormLink<IKeywordGetter>(One(sf.Keywords, FrameKeywordEdid, "KYWD").FormKey));
+        // PC run of 11 Nov: `haskeyword 0003430B` on the suit reference printed 0 although the base FURN lists the keyword in
+        // its KWDA, so the game does not read that list for this record. Starfield also keeps a record's keywords in a
+        // keyword form component (Components): the same keywords are written there too (supported hypothesis, untested:
+        // the PC compares a vanilla keyworded FURN; the script logs HasKeyword on the reference before the call)
+        var comp = suit.Components.OfType<KeywordFormComponent>().FirstOrDefault();
+        if (comp == null) { comp = new KeywordFormComponent(); suit.Components.Add(comp); }
+        comp.Keywords ??= new ExtendedList<IFormLinkGetter<IKeywordGetter>>();
+        foreach (var k in suit.Keywords) if (!comp.Keywords.Any(x => x.FormKey == k.FormKey)) comp.Keywords.Add(new FormLink<IKeywordGetter>(k.FormKey));
         mod.Furniture.Add(suit);
 
         var race = (Race)humanRace.Duplicate(Own(RaceId), new Race.TranslationMask(defaultOn: true) { Name = false });
@@ -273,6 +281,9 @@ static class PowerArmorProbe
             if (variants.Contains("furniture")) want.Add(One(sf.Keywords, FrameKeywordEdid, "KYWD").FormKey);
             Console.WriteLine($"  FURN {suit.EditorID} keywords [{string.Join(", ", keys)}] (control {control.EditorID} {control.FormKey}: {control.Keywords?.Count ?? 0} keywords) marker model {suit.MarkerModel}");
             Need(keys.SequenceEqual(want), $"FURN keywords are not the control's plus {kw.EditorID} {kw.FormKey}" + (variants.Contains("furniture") ? $" plus {FrameKeywordEdid}" : ""));
+            var ck = suit.Components.OfType<IKeywordFormComponentGetter>().SelectMany(c => c.Keywords ?? Enumerable.Empty<IFormLinkGetter<IKeywordGetter>>()).Select(k => k.FormKey).ToList();
+            Console.WriteLine($"  FURN keyword form component [{string.Join(", ", ck)}]");
+            Need(want.All(w => ck.Contains(w)), "the FURN's keyword form component does not hold every keyword of its KWDA list");
             Need(suit.MarkerModel == control.MarkerModel, "FURN marker model differs from the control's");
             Need((suit.MarkerParameters?.Count ?? 0) == (control.MarkerParameters?.Count ?? 0), "FURN marker parameters differ from the control's");
             Need((suit.MarkerEntryPoints?.Count ?? 0) == (control.MarkerEntryPoints?.Count ?? 0), "FURN entry points differ from the control's");

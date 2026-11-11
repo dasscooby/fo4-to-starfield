@@ -240,6 +240,24 @@ class PapyrusTests(unittest.TestCase):
         self.assertTrue(s["verdict"].startswith("INCONCLUSIVE"))
 
 
+class HasKeywordTests(unittest.TestCase):
+    def with_haskw(self, value):
+        return [l.replace("suitref=%d" % s32(SUITREF), "suitref=%d haskw=%s" % (s32(SUITREF), value), 1) if " step " in l and "stage=10" in l else l
+                for l in head() + sat() + steps()]
+
+    def test_the_keyword_check_on_the_reference_is_reported(self):
+        s = pl.summarize(self.with_haskw("false"))
+        self.assertIs(s["steps"][10]["haskw"], False)
+        self.assertTrue(any("HasKeyword(FurnitureTypePowerArmor) before the call: false" in l for l in pl.report(s)))
+        s = pl.summarize(self.with_haskw("true"))
+        self.assertTrue(any("before the call: true" in l and "throwaway" in l for l in pl.report(s)))
+
+    def test_an_unavailable_check_says_nothing(self):
+        for v in ("na", None):
+            s = pl.summarize(self.with_haskw(v) if v else head() + sat() + steps())
+            self.assertFalse(any("HasKeyword(FurnitureTypePowerArmor)" in l for l in pl.report(s)))
+
+
 class TableTests(unittest.TestCase):
     def test_the_quests_form_id_is_printed_for_setstage(self):
         out = pl.report(pl.summarize(head() + sat() + steps()))

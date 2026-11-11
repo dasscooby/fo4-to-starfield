@@ -70,7 +70,8 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(mpa.enable(PSC, []), PSC)
         names = mpa.optional_names(PSC)
         self.assertEqual(names, ["Actor.GetWornItem", "Actor.GetFurnitureReference", "Actor.GetSitState",
-                                 "Actor.IsInPowerArmor", "Game.GetCameraState"])
+                                 "Actor.IsInPowerArmor", "Form.HasKeyword", "Game.GetCameraState"])
+        self.assertIn('Trace("step stage=10 call=SwitchToPowerArmor suitref=" + Id(suit) + " haskw=" + KwOnRef(suit))', PSC)
 
     def test_enabling_an_optional_reading_uncomments_exactly_its_lines(self):
         on = mpa.enable(PSC, ["Actor.IsInPowerArmor"])
@@ -84,7 +85,7 @@ class ScriptTests(unittest.TestCase):
 
 
 BASES = {
-    "Form": "Scriptname Form\nint Function GetFormID() native\n",
+    "Form": "Scriptname Form\nint Function GetFormID() native\nbool Function HasKeyword(Keyword k) native\n",
     "ObjectReference": "Scriptname ObjectReference extends Form\nfloat Function GetPositionX() native\nfloat Function GetPositionY() native\n"
                        "float Function GetPositionZ() native\nfloat Function GetDistance(ObjectReference a) native\nCell Function GetParentCell() native\n",
     "Actor": "Scriptname Actor extends ObjectReference\nFunction SwitchToPowerArmor(ObjectReference a) native\nFunction SetRace(Race r) native\n"
@@ -119,7 +120,8 @@ class PrecheckTests(unittest.TestCase):
         self.assertEqual(r["missing"], [])
         self.assertTrue(r["required"]["Actor.GetDistance"])                  # declared on ObjectReference
         self.assertEqual(r["optional"], {"Actor.GetWornItem": True, "Actor.GetFurnitureReference": True,
-                                         "Actor.GetSitState": True, "Actor.IsInPowerArmor": False, "Game.GetCameraState": False})
+                                         "Actor.GetSitState": True, "Actor.IsInPowerArmor": False, "Form.HasKeyword": True,
+                                         "Game.GetCameraState": False})
 
     def test_a_missing_required_native_is_named(self):
         z = os.path.join(self.tmp.name, "cr.zip")
@@ -189,6 +191,7 @@ class StageTests(unittest.TestCase):
         self.assertIn("masters [Starfield.esm]", check.stdout)
         self.assertIn("QUST FO4SF_PAProbeQuest flags StartGameEnabled stages [10,20,30]", check.stdout)
         self.assertIn("(0 properties)", check.stdout)
+        self.assertIn("FURN keyword form component [000900:Starfield.esm, 0F4A21:Starfield.esm]", check.stdout)   # FAL-212, 11 Nov
 
     def test_the_plugin_adds_records_and_overrides_none(self):
         """Raw bytes: every record carries load index 1 (our own plugin; Starfield.esm is master 0)."""
@@ -282,6 +285,7 @@ class StageTests(unittest.TestCase):
         self.assertEqual(plan["variant"], [])
         self.assertEqual(plan["optional"]["Actor.GetWornItem"], "kept")
         self.assertEqual(plan["optional"]["Actor.GetFurnitureReference"], "kept")
+        self.assertEqual(plan["optional"]["Form.HasKeyword"], "kept")
         self.assertTrue(plan["optional"]["Actor.GetSitState"].startswith("declared but did not compile"))
         self.assertEqual(plan["optional"]["Actor.IsInPowerArmor"], "not declared in the base scripts")
         self.assertEqual(plan["optional"]["Game.GetCameraState"], "not declared in the base scripts")

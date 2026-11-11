@@ -145,6 +145,36 @@ therefore not the only gate (the success path reads the race slot, so they stay 
 furniture validity check. The game still gives `na` for camera state, worn
 count, `IsInPowerArmor` and the player's furniture. The fallback (race swap plus our own armor and camera, by script) stays available and `SetRace` works both ways.
 
+## The gate and the crash (owner PC, 11 Nov 04:07 to 04:12 UTC, `race` kit with console steps added)
+
+**Verified (owner PC):**
+
+* **Why the suit was refused.** In the console on the suit reference 09000804, `haskeyword 0003430B` printed
+  `HasKeyword: FurnitureTypePowerArmor >> 0.00` (and `isPowerArmorFrame` 0.00) although the base FURN `FO4SF_PAProbeSuit`
+  lists 0003430B in its KWDA: **the game did not see the base record's keyword list.** The native's validity test (read from
+  the exe): the base object is furniture, and the **reference** has the keyword held by `PowerArmorKeyword_DO`
+  (FurnitureTypePowerArmor in Starfield.esm). So the writer's FURN keywords were the bug, not the default objects.
+* **The gate passes with the keyword on the reference:** `addkeyword 0003430B` on the reference, `haskeyword` then prints 1.00;
+  stage 10 then logs `step` and one `before` state line, no "not valid power armor furniture" in Papyrus.0.log, and **the game
+  died one second later**: 0xC0000005 at `Starfield.exe+0xb6508b`, `cmp byte ptr [r15+2Eh],0CFh` with r15 = 0 (a null form
+  pointer; the byte compared is a form type). Evidence `probe-pa-20261111T040702Z` on the PC.
+* Reading: the entry call is alive in Starfield and does real work once the furniture is valid. It then needs something the
+  kit does not supply (only the race slot was filled; frame furniture, frame armor, armor keyword and battery default objects
+  were empty, and the suit is a copied chair). **Which piece is the null is unresolved** (the owner PC is reading the dump and the exe).
+
+**Writer change (supported hypothesis, untested in game):** Starfield also keeps a record's keywords in a keyword form
+component (`BGSKeywordForm_Component`, a BFCB block in the record's components). The writer now writes the suit's keywords in
+that component as well as in the KWDA list, so `HasKeyword` may be true on the reference without the console; whether the game
+reads the component for a FURN is not known (the owner PC compares a vanilla keyworded FURN with ours). The script logs
+`haskw=` (`Form.HasKeyword` of 0003430B on the suit reference, an optional reading) on the stage-10 step line before the call,
+and the reader prints it: **false** = the call will be refused; **true** = a real entry.
+
+> **WARNING: do not run stage 10 of this kit on a game anyone cares about, and do not stage it for a normal session.** If the
+> keyword is seen, `SwitchToPowerArmor` goes into the engine's power armor code and **crashes the game on a null** until the
+> missing default objects or pieces are supplied (the next kit follows the owner PC's dump note). Throwaway sessions only,
+> no save, uninstall afterwards. The script does **not** add the keyword by script (that would force the crash); the console
+> bypass above is the owner PC's own step.
+
 ## Session card
 
 **Throwaway state only. Do not save at any point.** The race swap (step 20) can break a save; do not autosave, quicksave

@@ -221,7 +221,8 @@ def summarize(lines, run=-1, papyrus=None):
         refusal = next((e for e in errs if REFUSAL.search(e)), None) if stage == 10 and step else None
         if refusal:                 # the call ran and the game refused it: not "no logged change"
             result = "refused by the game: " + refusal
-        out["steps"][stage] = {"call": step.get("call") if step else None, "result": result, "changed": ch, "states": by}
+        out["steps"][stage] = {"call": step.get("call") if step else None, "result": result, "changed": ch, "states": by,
+                               "haskw": step.get("haskw") if step else None}
         if step and "settled" not in by and by:
             out["problems"].append(f"stage {stage}: no settled reading (the 4 s timer never ran); judged on the reading right after the call")
     if cut:
@@ -280,6 +281,13 @@ def report(summary):
         lines.append(f"stage {stage} {s['call'] or '-'}: {shown}")
     if summary.get("unavailable"):
         lines.append("readings the game gave as na: " + ", ".join(summary["unavailable"]))
+    kw = (summary["steps"].get(10) or {}).get("haskw")
+    if kw is False:
+        lines.append("suit reference HasKeyword(FurnitureTypePowerArmor) before the call: false: the game does not see the keyword "
+                     "on the reference, the call will be refused (PC run of 11 Nov: the base FURN's KWDA list was not seen)")
+    elif kw is True:
+        lines.append("suit reference HasKeyword(FurnitureTypePowerArmor) before the call: true (a real entry: it can crash the game "
+                     "on a null the kit does not yet supply: throwaway sessions only)")
     if summary.get("papyrus"):
         lines += ["game Papyrus log: " + e for e in summary["papyrus"]]
     elif not summary.get("papyrus_read"):
