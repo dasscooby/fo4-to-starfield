@@ -113,6 +113,8 @@ Details:
   interpolates BTD samples, and FO4's triangle split does not matter at a vertex.
 - `shift sens.` is how much a half-sample (0.39 m) grid shift would move the reading on that slope.
 - `drop_z` = 150 m (the highest point is 121.71 m). `beyond` = (-1500, 1147.2), 100 m west of the BTD's west edge.
+  This holds for exp2 only: exp2b's `plan.json` has no `beyond`, so its runs used the runner's fallback
+  (-489.26, 1146.51), inside the BTD (cell -5, 11), which shows nothing past the edge.
 
 | Label | x (m) | y (m) | expect (m) | kind / note | slope | decoded error | shift sens. |
 |---|---|---|---|---|---|---|---|

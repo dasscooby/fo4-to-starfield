@@ -1028,10 +1028,11 @@ supported hypothesis / unresolved. Older research lives in docs/JOURNAL.md and d
   `dotnet/TerrainExp1` overlay mode, `dotnet/TerrainExp2` params, `make_exp2.py restage`, `tests/test_overlay.py`.
   Staged `C:\Modding\staging\terrain_exp1d` and `terrain_exp2b`. Not deployed, not run in game.
 - Evidence:
-  - **verified**: `FNAM` = `DNAM.x * DNAM.y` u16 in all 1,730 vanilla SFBK with an FNAM. Value = raw height of each
-    cell's south-west corner sample, cells from the south row: every cell exact in 1,464 of 1,711 records, 94.6 % of
-    all cells; min / max / mean / median / midrange / centre / north-first order: 0 records exact. lc172world 9/9,
-    akilacity 89 % of cells, NewAtlantis 91 %, lc001world 4/25.
+  - **verified**: `FNAM` = `DNAM.x * DNAM.y` u16 in all 1,730 vanilla SFBK with an FNAM. **Supported (strong)**: value
+    = raw height of each cell's south-west corner sample, cells from the south row: every cell exact in 1,464 of 1,711
+    records, 94.6 % of all cells; min / max / mean / median / midrange / centre / north-first order: 0 records exact.
+    lc172world 9/9, akilacity 89 % of cells, NewAtlantis 91 %, lc001world 4/25. Weaker for overlays (QA): 255 of
+    430 overlay blocks and 29 of 72 registered ones exact.
   - **verified**: all 430 overlay WRLDs have `XLCN`; `LocTypeOverlay` on the location in 11 of the 72 registered
     ones (LC172World among them), city / settlement keywords on the rest. LC172WorldLocation: parent
     `SSol_PMars_Surface` 01B736.
@@ -1044,6 +1045,17 @@ supported hypothesis / unresolved. Older research lives in docs/JOURNAL.md and d
 - Status: records **verified** offline. Whether any of the four differences matters in game, the meaning of `HNAM`,
   the stale FNAM of 247 vanilla blocks, mask row order and the run-time load-order byte (02 assumed) are
   **unresolved**.
+- Update (in game, 2026-10-11; `C:\Modding\testqueue\terrain_exp1d`, `terrain_exp2b`, `terrain_A2_lc172`):
+  - activation and the whole-cell merge offset plus Z offset are now **verified** (LC172World -500 / -2300 m,
+    Z -3.62 m; exp2b -1200 / -2700 m);
+  - "the overlay mask is read only by procedural generation" is **refuted**: on vanilla LC172World the ground matched
+    the BTD within 0.02 m where the mask is 0, 0.3-0.36 m next to it and 4-6 m off in mask-255 border cells, so the
+    mask (or the outer ring) governs height blending;
+  - our persistent anchors read back their unmerged local position (exp1d 50 50 10, exp2b -989.03 1147.20 105.14;
+    **verified**), unlike vanilla's COC marker; load-order byte 02 held;
+  - exp2b read -116.00 m (raw 0) at all 14 probes and exp1d -500.00 m (raw 0) at the arrival: flat, so the fixes are
+    not tested yet. Cause, a compressed BTD in our BA2 (vanilla stores all 2,112), is a **supported hypothesis**;
+    rerun with `-compression=None` pending.
 
 ## 2026-10-11 Claude: terrain experiment 2 staged
 - Question: can the real Commonwealth terrain around Red Rocket be one native Starfield BTD at absolute positions,

@@ -1,13 +1,19 @@
 # Overlay records: making our terrain worldspaces look like vanilla unique overlays
 
 Author: Claude, 2026-10-11. Branch `claude/terrain-overlay-records`, stacked on PR #60 (terrain experiment 2, which
-contains PR #56 and #57). Starfield 1.16.244. Nothing here ran in game or in the Creation Kit.
-Labels: **verified** (checked offline on files), **supported** (evidence, not proven in game), **unresolved**.
+contains PR #56 and #57). Starfield 1.16.244. Written before any run; exp1d and exp2b then ran in game on
+2026-10-11 (unattended runner), see [In-game result](#in-game-result-2026-10-11). Nothing here ran in the Creation Kit.
+Labels: **verified** (checked offline on files, or measured in game where it says so), **supported** (supported
+hypothesis: evidence, not proven in game), **unresolved**, **refuted** (contradicted by a measurement).
 
 ## Why
 A worldspace's own BTD is applied only when the worldspace is an activated overlay on a planet (a planet's PNDT
 `CNAM` entry registers it). Activation merges its cells into the planet worldspace at a whole-cell offset plus a Z
-offset (research notes 2026-10-11, `C:\Modding\research\terrain\binding\findings.md`, **supported**). The first
+offset (research notes 2026-10-11, `C:\Modding\research\terrain\binding\findings.md`). Both are now **verified** in
+game: unregistered World01 and World02 showed identical procedural planet ground (`C:\Modding\testqueue\terrain_exp1`,
+`terrain_exp1b`), and the vanilla LC172World overlay was measured at (-499.98, -2300.00, -3.62) m from its
+persistent COC marker `0010238E` (`terrain_A2_lc172`); World01 on Mars merged at +3000 / -3500 m, exp2b at
+-1200 / -2700 m. The first
 experiment plugins (exp1 / exp1b / exp1c, exp2) differ from vanilla unique overlays in four checkable places. This
 branch fixes all four, adds a Mars registration plugin for experiment 2 and gives both experiments a persistent
 anchor ref, so the runner can measure the merge offset directly.
@@ -19,7 +25,7 @@ anchor ref, so the runner can measure the merge offset directly.
 | 3 | overlay mask | `textures/terrain/overlaymasks/<edid>.dds` | none | ring mask, BC4 |
 | 4 | SFBK `INAM`/`HNAM` | 0 Relative (most), 1 Absolute (10 blocks) | 0 / 0 (template) | option; exp2b uses Absolute, HNAM 0 |
 
-## 1. SFBK FNAM: one raw height per BTD cell (verified)
+## 1. SFBK FNAM: one raw height per BTD cell (size verified; content rule supported, strong)
 - Size: all 1,730 vanilla SFBK with an `FNAM` store `DNAM.x * DNAM.y * 2` bytes (3 x 3 = 18 B, 5 x 5 = 50 B,
   14 x 14 = 392 B; raw walk of Starfield.esm). Ours stored 16 B. The research notes add the 56 SFBK of SFBGS00D.esm.
 - Content: compared with per-cell statistics of the raw u16 BTD heights. Survey: every vanilla SFBK with 1..30 cells
@@ -36,6 +42,10 @@ anchor ref, so the runner can measure the merge offset directly.
   `NewAtlantis` 91 %; `lc001world` only 4 of 25 (differences up to 1,759 raw = 40 m, FNAM above the cell's own
   maximum in places). The 247 records that are not exact are consistent with an FNAM written before a later terrain
   edit (**unresolved**; not needed for our files, which are written together).
+- The 85.6 % is dominated by procedural blocks. For the blocks that matter here the rule is weaker (QA review on
+  PR #64): overlay blocks behind a WRLD 255 of 430 exact, registered overlays only 29 of 72 (most of the rest differ
+  in a few cells, median difference 0 m; lc133world 0 of 25, lc001world 4 of 25). Hence "supported (strong)", not
+  verified, for the SW-corner content; the size rule has no exception.
 - The earlier observation "`FNAM[0]` = the BTD's SW corner" (experiment 2) is the first value of this rule.
 - `src/fo4sf/overlay.py` `fnam_values()` writes it; exp1d stores 25 values (50 B), exp2b 841 values (1,682 B). The raw
   walk of the written plugins shows the full length (Mutagen writes the longer array unchanged; **verified**).
@@ -52,7 +62,7 @@ anchor ref, so the runner can measure the merge offset directly.
   and fills `LCSR`/`LCID` after doors/lights (Grok 2026-10-17: [map-markers.md](map-markers.md)).
   EditorIDs `FO4TX_World01Location`, `FO4CW_CommonwealthLocation`; the WRLD's `XLCN` points at it.
 
-## 3. Overlay mask (verified file format, effect unresolved)
+## 3. Overlay mask (verified file format; it governs height blending, verified on vanilla LC172World)
 - Vanilla: `textures/terrain/overlaymasks/<edid lower case>.dds` in `Starfield - DensityMaps.ba2` (a General
   archive). Size = SFBK `DNAM` cells x 100 px (lc172world 300, lc001world 500, akilacity 900, newatlantis 1400),
   legacy header, FourCC `BC4U`, one mip. Values are 0 inside the authored footprint and 255 outside, with soft edges;
@@ -60,8 +70,17 @@ anchor ref, so the runner can measure the merge offset directly.
 - Ours: 0 inside, 255 on the outer ring of BTD cells (our BTDs hold real terrain everywhere), PNG -> texconv
   `-f BC4_UNORM -m 1` -> legacy `BC4U`, one mip; decodes back exactly (`overlay.bc4_decode`). Staged under
   `Data\textures\terrain\overlaymasks\`, so `exp_install.py --pack` puts it into `<plugin> - Main.ba2` with the BTD.
-- What reads it: procedural generation only (rocks, scatter; research notes, **supported**). Image row order is
-  **unresolved** (our ring is symmetric).
+- What reads it: ~~procedural generation only (rocks, scatter; research notes)~~, **refuted** in game
+  (`C:\Modding\testqueue\terrain_A2_lc172`). Probing vanilla LC172World relative to its overlay offset, the ground
+  matched its BTD within 0.02 m in the cell its mask marks authored (mask 0, probe `lc172_7`), was 0.30-0.36 m off
+  just outside it (`lc172_5` about 3 px inside the soft edge, `lc172_2`), and 4-6 m off in the mask-255 border cells
+  (5 of 6 probes there). So the mask, or the outer cell ring, also controls how the overlay's heights blend with the
+  planet; procedural clutter may follow it too. In LC172World the mask edge and the outer ring coincide, so this run
+  cannot tell the two apart (**unresolved**).
+- Design consequence: the outer ring of a Commonwealth overlay will not keep FO4 heights, so the BTD must extend at
+  least one cell beyond the authored area. Our ring mask already marks the outer cell ring 255; every exp1d and exp2b
+  plan point lies in an inner cell (exp2b: cells x -13..-8, y 8..13).
+- Image row order is **unresolved** (our ring is symmetric).
 
 ## 4. Alignment (verified records, meaning supported)
 - `INAM` 0 = Relative: 1,743 of 1,753 vanilla SFBK, including the LC landing overlays (`LC172World`, `lc001world`: `HNAM` 0).
@@ -72,6 +91,8 @@ anchor ref, so the runner can measure the merge offset directly.
 - Hypothesis (**supported**, from the CK's Relative/Absolute names): Relative places the overlay relative to the planet
   ground at the site (a placement-dependent Z offset), Absolute uses the BTD heights (+ `HNAM`) as world z. For exact
   Commonwealth heights exp2b uses Absolute with `HNAM` 0; exp1d stays Relative (as `LC172World`, its template).
+  In game: Relative gives a Z offset (LC172World, `HNAM` 0: -3.62 m, **verified**); what Absolute does is still
+  **unresolved**, because exp2b came out flat at the BTD's raw-0 height (see the in-game result).
   `make_exp2.py --alignment relative|absolute --hnam N`, `overlay_records.py exp1d --alignment ... --hnam ...`.
 
 ## 5. Mars registration and anchor
@@ -90,8 +111,13 @@ anchor ref, so the runner can measure the merge offset directly.
   `"02000800"`: `02` is the **assumed** load-order byte for Plugins.txt [`FO4TerrainExpN.esm`,
   `FO4TerrainExpN_Mars.esm`, `FO4Port.esm`] and depends on which official masters load first. If `prid` fails, the
   runner falls back to `spawn_local` (COC marker x, y and the ground under it).
+- In game (2026-10-11): `prid` worked (byte 02 held), but **our anchors read back their unmerged local position**
+  (exp1d `50.00 50.00 10.00`, exp2b `-989.03 1147.20 105.14`; **verified**, `C:\Modding\testqueue\terrain_exp1d`,
+  `terrain_exp2b`), unlike vanilla LC172World's persistent COC marker, which reads its merged position. The anchor
+  therefore cannot give the merge offset; the runner (branch `claude/test-queue`) now detects this
+  (`anchor_unmerged`) and falls back to the arrival point. Why vanilla's marker differs is **unresolved**.
 
-## Staged (outside the repo, not deployed)
+## Staged (outside the repo; installed by the runner for the 2026-10-11 runs)
 
 | Folder | Contents |
 |---|---|
@@ -107,10 +133,15 @@ plan.json (runner format, points and `expect` in the worldspace's own frame, the
 
 Install: `scripts/game/exp_install.py install --exp-dir <folder> --plugins FO4TerrainExpN.esm,FO4TerrainExpN_Mars.esm
 --pack` (branch `claude/test-queue`): every folder under the staged `Data\` goes into `FO4TerrainExpN - Main.ba2`.
+Loose files are not an alternative: they are disabled on this install (`Starfield.ini` `sResourceDataDirsFinal=STRINGS\`,
+**verified**). The 2026-10-11 runs packed with Archive2's default zlib compression, so the BTD was stored compressed
+(`fo4tx_world01.btd`: 43,257 of 298,371 B), while 0 of the 2,112 vanilla BTD entries are compressed;
+`exp_install.py` now packs with `-compression=None`.
 
 ## Offline verification (verified)
 `overlay_records.py check` / `make_exp2.py check` (raw record walk, independent of Mutagen) passed every item for
-both folders:
+both folders. Note: `check` is not read-only, it rewrites `offline_check.json` in the staged folder (same content
+on a rerun, new mtime); avoid running it on a folder the runner is using.
 - BTD decoded at every plan point under bilinear and both triangle splits: exp1d worst 10.3 mm (pit C; step
   22.9 mm), exp2b worst 3.2 mm (step 3.9 mm). `spawn_local` z and the anchor z equal the decoded ground.
 - WRLD `XLCN` -> LCTN in the plugin with `KWDA` `002CA99D` and `PNAM` `0001B736`.
@@ -122,10 +153,27 @@ both folders:
   exactly one for the experiment WRLD.
 - Mask: BC4, n x 100 px, one mip, decodes to the ring with 0 differing pixels.
 
-## How to read the in-game result
+## In-game result (2026-10-11)
+Unattended runner, evidence in `C:\Modding\testqueue\<queue>\tests\...\obs.json`:
+
+| Queue | Read | Status |
+|---|---|---|
+| `terrain_exp1d` | arrival at (3050, -3450, **-500.00**): the BTD's raw-0 height (`ENAM` minimum of -500 / 1000), merge offset +3000 / -3500 m. The anchor read its unmerged local (50, 50, 10), so the runner used offset 0 and the six probes landed outside the overlay, on Mars ground | flat, verified |
+| `terrain_exp2b`, `terrain_exp2b2` | merge offset -1200.0014 / -2700 m (from the arrival; the anchor read its unmerged local position); **-116.00 m at all 14 probes**, the BTD minimum (raw 0) | flat, verified |
+
+- Neither run shows our BTD heights, so neither says whether the four record fixes matter. Flat at exactly raw 0
+  means the BTD's blocks were not decoded.
+- Cause (**supported hypothesis**, rerun pending): the BTD was zlib-compressed inside our BA2, and every vanilla BTD
+  is stored. The LOD block tables suggest the terrain streamer reads blocks by offset straight from the archive.
+  Reruns with stored BTDs are queued (exp2b3, then exp1f).
+- Earlier, with the old records and the same compressed archive, World01 registered on Mars (`terrain_B_w01`,
+  `terrain_exp1c_mars`) was also flat (-13.94 m at every probe), so the flat result is not caused by the fixes.
+
+## How to read the in-game result (plan, written before the runs)
 - exp1d vs exp1c (same BTD, same registration): heights now match (pad A 35, ...) after the runner's offset -> one of
   the three fixes was missing; still planet ground -> the fixes do not matter, look at activation (H2 / H8 in the
-  research notes).
+  research notes). Caveat (QA): a BTD the engine cannot read (for example a compressed archive entry) gives the same
+  picture, so first rule that out with a stored BTD.
 - exp2b: Z offset (anchor read - local) near 0 -> Absolute + HNAM 0 gives exact Commonwealth heights; a constant
   non-zero Z offset -> Absolute is still placed relative to something (try `--hnam`); XY offset is a whole number of
   cells -> the merge offset, as on Mars before.
@@ -133,10 +181,13 @@ both folders:
   the player stands (falls from the COC marker 2 m above ground in exp2b).
 
 ## Unknowns
-1. Whether any of the four differences matters to the engine (everything here is offline).
-2. The meaning of `HNAM` in Absolute blocks, `XNAM`/`YNAM` on the location, and the stale FNAM in 247 vanilla blocks.
-3. Mask row order and what else reads the mask.
-4. The real load-order byte of the experiment plugin at run time.
+1. Whether any of the four differences matters to the engine (the runs so far were flat at raw 0, see the in-game
+   result); first whether a stored (uncompressed) BTD in the BA2 is read at all.
+2. The meaning of `HNAM` in Absolute blocks, what Absolute alignment does in game, `XNAM`/`YNAM` on the location, and
+   the stale FNAM in 247 vanilla blocks.
+3. Mask row order; whether the mask itself or the outer cell ring drives the height blend (section 3).
+4. ~~The real load-order byte of the experiment plugin at run time~~: 02 held in the 2026-10-11 runs (`prid` found
+   the anchor). Why our persistent anchors read their unmerged position while vanilla's COC marker does not.
 
 ## Reproduce
 
