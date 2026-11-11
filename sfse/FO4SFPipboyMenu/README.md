@@ -27,7 +27,7 @@ and logs every step. The stage is picked by `Stage` in `FO4SFPipboyMenu.ini`:
 | --- | --- |
 | `src/main.cpp` | the plugin: version guard, checks before use, the menu object, the key thread |
 | `src/pch.h` | precompiled header (libxse's game headers and SFSE layer) |
-| `FO4SFPipboyMenu.ini` | `Stage`, `Key` (default `0x79`, F10), `Flags` (0), `KeepAlive` (1); stage (c): `FlagSets` (`0x0,0x8,0x9`), `SnapshotKey` (`0x7A`, F11), `ClickCall` (empty: off); stages (d) and (e): `PageFlagSets` (`0x9`); stage (e): `KitUp` to `KitNextTab`, and the pages (`[Kit]`, `[Page <TAB>/<SUB>]`) |
+| `FO4SFPipboyMenu.ini` | `Stage`, `Key` (default `0x79`, F10), `Flags` (0), `KeepAlive` (1); stage (c): `FlagSets` (`0x0,0x8,0x9`), `SnapshotKey` (`0x7A`, F11), `ClickCall` (empty: off); stages (d) and (e): `PageFlagSets` (`0x9`), `CloseKeys` (`0x09,0x1B`), `HoldMenuKeys` (1); stage (e): `KitUp` to `KitNextTab`, and the pages (`[Kit]`, `[Page <TAB>/<SUB>]`) |
 | `xmake.lua`, `build.ps1` | the PC build: FOCCPing's build path (`docs/spikes/combined-core-probes.md`, B0-2) |
 | `scripts/ui/make_probe_swf.py` | writes the stage (b) movie, with `--channel` the stage (c) one and with `--page` the stage (d) one (pure Python; tests `tests/test_make_probe_swf.py`, `tests/test_pipboy_stat_page.py`) |
 | `scripts/ui/make_pipboy_kit.py` | the page kit (stage (e)): reads and checks the pages of the ini (`--check`) and writes the kit's movie for them (pure Python, on `make_probe_swf.py`; tests `tests/test_pipboy_kit.py`) |
@@ -328,13 +328,14 @@ when held (after 420 ms, every 90 ms). No move wraps around.
 | selection up, down | Up arrow or W (`0x26,0x57`), Down arrow or S (`0x28,0x53`) |
 | sub-tab left, right | Left arrow or A (`0x25,0x41`), Right arrow or D (`0x27,0x44`) |
 | main tab left, right | Q (`0x51`), E (`0x45`) |
-| close | F10 (`Key`), as at every stage; the CLOSE button |
+| close | F10 (`Key`), as at every stage; Tab and Esc (`CloseKeys`, FAL-404); the CLOSE button |
 
 *Which keys the game lets through at `0x9`:* the plugin reads the keyboard itself (`GetAsyncKeyState`), so it sees
 every key whatever the game does with it. The PC runs at `0x9` (FAL-216, FAL-272) showed that W does not move the
-player, that the game draws its own pointer, and that F10 and F11 reach the key thread. What the game *also* does with
-A, S, D, Q, E, the arrows, Tab and Esc while the page is open has not been seen. The owner's card records it (step 7
-and the report). Tab is not bound by default for that reason; `KitNextTab=0x45,0x09` adds it.
+player, that the game draws its own pointer, and that F10 and F11 reach the key thread. The kit session of 11 Nov
+answered for Tab and Esc: both opened the game's pause menu over the page. They now close it ("Tab and Esc close the
+page", below). What the game also does with A, S, D, Q, E and the arrows while the page is open is in the owner's
+report.
 
 **Clicks:**
 
@@ -360,6 +361,60 @@ one setting. The planned route for the font and the Vault Boy pictures:
 - **Vault Boy pictures:** they are Fallout 4's art and cannot be drawn by us. They come only by converting the
   player's own Fallout 4 interface files on their PC, as the port does for everything else, after the PC survey names
   those files.
+
+## Tab and Esc close the page (FAL-404)
+
+**What the PC saw (11 Nov, the kit at `0x9`):** with the page open, Tab and Esc each opened the game's pause menu over
+it, with QUICKSAVE and SAVE greyed, and the plugin's state stayed open; only F10 and CLOSE closed the page. In Fallout 4
+Tab puts the Pip-Boy away. The input contexts of the FAL-216 snapshots say why (libxse `UserEvents.h` names them).
+Plain play is `0,1` (MainGameplay, ConsoleOpening). The pause menu adds `78,2,11,3,13`: StopContextProcessing first,
+which keeps every context under it from the keys, then BasicMenuNav and three more. Our menu at `0x8` and `0x9` adds
+only `13` (Cursor). So Tab and Esc still reach the gameplay context, and MenuControls' MenuOpenHandler opens the pause
+menu.
+
+**What the plugin does now, at stages (d) and (e):**
+
+- **The close keys** (`CloseKeys`, default `0x09,0x1B`: Tab and Esc; up to three, never `Key`, `SnapshotKey` or a kit
+  key). The key thread reads them as it reads F10, only while the page is open and the game is in front. A press
+  closes the page by CLOSE's route: `step=close n=<k> by=key vk=<vk> was_open=1 sent=hide`, then `step=state`.
+- **The hold** (`HoldMenuKeys=1`). While the page is open, the game's MenuOpenHandler hears no input. Its
+  `BSInputEventUser` flag `inputEventHandlingEnabled` (libxse `+0x38`, the flag libxse's
+  `MenuControls::RegisterHandler` sets) is 0 from just before the show. It gets its own value back once the page is
+  hidden and no close key has been held for three ticks (90 ms), so the key that closed the page cannot open a menu
+  after it. Any hide counts: ours, the engine's, our menu's destructor, or a main-thread read that finds the page
+  closed. This is the plugin's only write into an object the engine owns. It is one byte, guarded like every read.
+  Log: `step=hold n=<k> on=1 was=1`, then `step=hold on=0 by=hide restored=1 ok=1`.
+
+The hold's ids are read from the Address Library file and checked like the others, but they are their own set: a
+failure turns off the hold alone (`refuse step=hold ...`), and Tab and Esc still close the page.
+
+| Name | Id | Source | Checked by |
+| --- | --- | --- | --- |
+| MenuControls.Singleton | 938076 | libxse | file + libxse lookup, `step=hold_id`; the object's RTTI is MenuControls's at offset 0 |
+| MenuControls.RTTI | 864851 | libxse `RTTI_MenuControls` | names `.?AVMenuControls@@` |
+| MenuOpenHandler.RTTI | 864856 | libxse `RTTI_MenuOpenHandler` | names `.?AVMenuOpenHandler@@` |
+
+Checked once, at the first open, before the first write (`step=hold_target menu_controls=<a> handler=<a>
+type=.?AVMenuOpenHandler@@ offset=<o> handlers=<n> index=<i> enabled=1`):
+
+- the handler at MenuControls `+0x48` is a MenuOpenHandler by RTTI;
+- it is one of the entries of MenuControls' handler list at `+0x20` (so both offsets are the game's);
+- its flag reads 0 or 1.
+
+**What it does not do:**
+
+- It reads the keys, not the game's own cancel event: a player who rebinds Esc in the game's settings sets
+  `CloseKeys` too.
+- While the page is open, the hold keeps every menu key the MenuOpenHandler serves from opening its menu, as Fallout
+  4's Pip-Boy does. The pause menu is one; which others it serves is the session's to see.
+
+**Not verified until the session:**
+
+- that the flag at `+0x38` is what the game's input dispatch reads for this handler on 1.16.244 (libxse sets it on
+  registration; the dispatch that reads it has not been read);
+- that the pause menu then stays shut on Tab and Esc;
+- that the hold is given back (the control: the Esc after, with the page closed, opens the pause menu);
+- what the console key does while the page is open.
 
 ## Build (PC)
 
@@ -606,7 +661,11 @@ Take a screenshot while the menu is open after the fifth press, and one after th
    moved=1`, and `name=fo4sfTab3` or `fo4sfTabHit3` `action=tab` for MAP.
 6. **CLOSE:** `step=click button=close`, `step=close ... sent=hide` and `step=state ... match=yes`. F10 then opens the
    page where it was left.
-7. The owner's report of what Tab and Esc did is a finding, not a pass or a fail.
+7. **Tab and Esc** (FAL-404, "Tab and Esc close the page"): at load `step=close_keys keys=0x9,0x1b hold_menu_keys=1`,
+   three `step=hold_id` lines and `step=hold_ids rtti_names=ok`; at the first open `step=hold_target ... enabled=1`,
+   and at each open `step=hold n=<k> on=1 was=1`. Tab gives `step=close n=<k> by=key vk=0x9 was_open=1 sent=hide`,
+   then `step=state ... match=yes` and `step=hold on=0 by=hide restored=1 ok=1`; Esc the same with `vk=0x1b`. The
+   owner saw no game menu on either. *Control:* the Esc after, with the page closed, opens the game's pause menu.
 
 ### What each failure line means
 
@@ -625,6 +684,12 @@ Take a screenshot while the menu is open after the fifth press, and one after th
 | `refuse step=listen` | SFSE gave no messaging or task interface | report the SFSE version |
 | `refuse step=register reason=name_taken` / `not_taken` / `no_ui` | the menu name is in use, the engine did not take our registration, or no UI singleton | report the log |
 | `refuse step=key_thread` | the key thread could not start | report |
+| `refuse step=ini close_keys` | (d), (e): `CloseKeys` holds 0, a code above 0xFE, `Key`, `SnapshotKey` or a kit key | fix the ini |
+| `refuse step=hold name=<x> id=<n> reason=<r>` | (d), (e): a hold id is beyond the file, zero, outside the image or differs in libxse; no hold this session, the close keys still close the page | `NEEDS-PC lookup <id>` |
+| `refuse step=hold name=<x>.RTTI type=<t>` | (d), (e): a hold RTTI id does not name its type; no hold | the id is stale: look it up again |
+| `refuse step=hold what=menu_controls`, `what=menu_open_handler`, `what=layout` or `what=write` | (d), (e): MenuControls is not its type, its handler at +0x48 is not a MenuOpenHandler or not in its handler list, the flag is not 0 or 1, or the write faulted; no hold | report the line: libxse's layout is not the game's |
+| `step=hold_target result=no_menu_controls` | (d), (e): MenuControls did not exist yet at that open; asked again at the next | nothing, if a later open logs `step=hold_target` |
+| `step=hold ... on=1` with no `step=hold on=0` after a close | (d), (e): the hold was not given back; the game's menu keys stay off | press F10 twice (open and close) and report the log |
 | `refuse step=toggle n=<n> reason=no_ui_or_queue` | the key was pressed before the UI or its message queue existed; nothing was sent | press again once in play; report if it repeats |
 | `refuse step=create reason=out_of_memory` | allocation failed on open | report |
 | `step=create ... vtables=UNEXPECTED` | the constructor set other vtables than the checked ones | stop: the layout differs |
