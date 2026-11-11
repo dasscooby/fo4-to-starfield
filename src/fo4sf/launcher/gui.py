@@ -9,7 +9,7 @@ import subprocess
 import sys
 import threading
 
-from . import paths, settings
+from . import paths, recovery, settings
 
 
 def controls():
@@ -66,6 +66,15 @@ class SettingsModel:
             return argv + ["update", "--check"]                 # fetches; changes nothing
         if action == "update":
             return argv + ["update"]                            # a fast-forward of a clean main only (selfupdate.py)
+        if action == "recover-install":
+            if pids is None or pids:
+                raise ValueError("Close Starfield and wait for the process check before recovery")
+            if self.values(raw) != self.saved or settings.load(self.path) != self.saved:
+                raise ValueError("Save or reload the settings and locations before recovery")
+            folder = self.saved["instance"] or starfield or self.saved["starfield"]
+            if not folder:
+                raise ValueError("Confirm the Starfield folder before recovery")
+            return argv + ["recover-install", "--settings", self.path, "--starfield", folder, "--apply"]
         if action == "play":
             starfield = starfield or (raw or self.saved).get("starfield", "")
             reason = self.play_reason(raw, starfield, pids, windows=windows)
@@ -109,7 +118,7 @@ class SettingsModel:
             problem = paths.check(key, starfield or values[key] if key == "starfield" else values[key])
             if problem:
                 return f"{settings.LABELS[key]}: {problem} (Locations tab)"
-        return ""
+        return recovery.play_reason(values["instance"] or starfield or values["starfield"])
 
     def part(self, raw, part="all"):
         """raw with the other half put back to the saved values: "settings" keeps the saved locations, so Save
@@ -129,7 +138,7 @@ class SettingsModel:
         return [r for r in paths.rows(self.saved, found, prefer) if r["key"] not in dirty]
 
 
-REPORT_ACTIONS = ("status", "detect", "update-check", "update")    # their output shows on the Status tab
+REPORT_ACTIONS = ("status", "detect", "update-check", "update", "recover-install")
 
 
 def run_command(argv, on_line, *, popen=subprocess.Popen):
@@ -278,6 +287,9 @@ def launch(launcher, path, *, recipe="", overrides=(), fo4_data=(), starfield=""
             self.play = ttk.Button(footer, text="▶  Play", style="Accent.TButton", command=lambda: self.start("play"))
             self.play.grid(row=0, column=3, rowspan=2, padx=(8, 0))
             self.widgets += [(reload_button, "normal"), (save, "normal")]
+            recover = ttk.Button(footer, text="Recover install", command=lambda: self.start("recover-install"))
+            recover.grid(row=0, column=4, rowspan=2, padx=(8, 0))
+            self.widgets.append((recover, "normal"))
             for var in self.vars.values():
                 var.trace_add("write", lambda *_args: self.refresh_play())
             root.protocol("WM_DELETE_WINDOW", self.close)

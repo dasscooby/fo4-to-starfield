@@ -1,3 +1,5 @@
+> **Historical brief (8 October 2026):** an onboarding note for an outside AI research helper (ChatGPT), written when the project covered only interiors. Not a task list; the current scope is in [ROADMAP.md](ROADMAP.md).
+
 # Brief for ChatGPT (paste this into a new chat)
 
 You are joining an open-source project, https://github.com/dasscooby/fo4-to-starfield. It ports Fallout 4 interiors into
