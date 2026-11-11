@@ -151,6 +151,14 @@ Function Control(Actor p)
     Trace("control av=" + Id(HealthAV) + " delta=" + ControlDelta + " called=" + called + " before=" + before + " after=" + after + " restored=" + restored + " undone=" + back)
 EndFunction
 
+bool Function ModRads(Actor p, float delta)
+    {Our value moved by delta with Actor.ModValue; false when the game declares no such call (then the caller falls back to SetValue).}
+    bool ok = false
+;OPT Actor.ModValue     p.ModValue(RadsAV, delta)
+;OPT Actor.ModValue     ok = true
+    return ok
+EndFunction
+
 Function ApplyRoute(Actor p)
     float rads = p.GetValue(RadsAV)
     bool clamped = false
@@ -269,8 +277,14 @@ Function Settle(int stage)
     float want = Expected(stage)
     float have = p.GetValue(RadsAV)
     if have != want
-        p.SetValue(RadsAV, want)
-        Trace("fix stage=" + stage + " forced=true want=" + want + " had=" + have + " now=" + p.GetValue(RadsAV))
+        ; Sixth session: SetValue wrote the base while the cast's change sat apart from it (300 stored, SetValue 100 read 400). A
+        ; correction by the difference reaches want whichever of the two the call moves; SetValue only when there is no ModValue.
+        string how = "ModValue"
+        if !ModRads(p, want - have)
+            how = "SetValue"
+            p.SetValue(RadsAV, want)
+        endif
+        Trace("fix stage=" + stage + " forced=true want=" + want + " had=" + have + " now=" + p.GetValue(RadsAV) + " how=" + how)
     else
         Trace("fix stage=" + stage + " forced=false want=" + want + " had=" + have + " now=" + have)
     endif

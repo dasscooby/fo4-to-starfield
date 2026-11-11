@@ -63,6 +63,8 @@ class ScriptTests(unittest.TestCase):
     def test_the_calls_under_test_are_made(self):
         self.assertEqual(PSC.count("RadsSpell.Cast(p, p)"), 3)            # once at stage 20, twice at stage 30
         self.assertIn("p.EquipItem(RadAway, false, true)", PSC)
+        self.assertIn("ModRads(p, want - have)", PSC)                  # the force is a difference, not SetValue(want)
+        self.assertRegex(PSC, r"(?m)^;OPT Actor\.ModValue +p\.ModValue\(RadsAV, delta\)")
         self.assertIn("p.SetValue(RadsAV, 0.0)", PSC)
         self.assertIn("p.SetValue(RadsAV, WriteTest)", PSC)            # stage 10 writes a number that is not zero
         self.assertIn(f"float WriteTest = {int(__import__('fo4sf.rads.probe_log', fromlist=['x']).WRITE_TEST)}.0", PSC)

@@ -136,6 +136,27 @@ it holds one.
 Still not shown: that the route lowers **maximum** Health (it lowers the current value), and that RadAway's `EquipItem` consumes the
 item.
 
+## The sixth session (head 9cba25ad): the spell moves the value
+
+Owner PC run on the real Starfield.esm with `--control-spell DamageHealthSpell`. **Verified in the game log:** stage 20 read
+**rads 100** and stage 30 **rads 300** three seconds after the casts, **with no force** (`forced=false`); the route then lowered
+current Health 205 to 195 and 175 (`applied` -10, -30); stage 50's vanilla spell took Health 165 to 125. So a value of our own
+**takes a spell's change and holds it**; this is the base's first answer. **Which of the two changes did it is not separated**:
+the effect's `Detrimental` bit was kept and the value flagged `DamageIsPositive` in the same head.
+RadAway (stage 40) did **nothing** on that head: the real file took the fallback (old shell, shared Detrimental effect, -200), and
+a negative magnitude on a Detrimental effect moved nothing. The head after it (6925a548) builds the mirror from a spell's restore
+effect instead; **not yet run in the game**.
+Two faults of the script and the reader, found in the same table and fixed in this head:
+* **The force was wrong:** `fix stage=40 forced=true want=100 had=300 now=400`. **Arithmetic reading, untested:** `SetValue`
+  writes the base while the cast's change is kept apart from it, so the value read 100 + the 300 already stored. At stage 10 the
+  stored part was 0, which is why `SetValue 50` read back 50. The force is now a **difference** (`ModValue(want - have)`),
+  which reaches the number whichever of the two the call moves; `SetValue` only when `ModValue` is not declared. The `fix`
+  line says `how=ModValue` or `how=SetValue`.
+* **The reader's "base unchanged at 200" was misleading:** the route lowers **current** Health (195, 175, 165) and the base never
+  moves. With no maximum reading (`GetValueMax` is not declared) the reader now judges the route on current Health, names that
+  in a note ("not the maximum") and lists the base readings.
+Still not shown: that the route lowers **maximum** Health, that RadAway lowers the value, and an active-effect list (`fx` is `NA`).
+
 ## Second control: a vanilla instant effect (stage 50)
 
 Asked by the owner PC so one session separates "our effect is wrong" from "Cast on the player from a quest script applies no

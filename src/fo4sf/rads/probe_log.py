@@ -136,8 +136,9 @@ def control_check(ctl):
 
 
 def max_health(s):
-    """(value, source) of one state line: max, else base, else health (the current value), else (None, None)."""
-    for k in ("max", "base", "health"):
+    """(value, source) of one state line: max, else health (the current value), else (None, None). The base is not used:
+    the route moves the current value (sixth session: base stayed 200 while health read 195, 175, 165) and the report says so."""
+    for k in ("max", "health"):
         if num(s.get(k)):
             return s[k], k
     return None, None
@@ -291,7 +292,9 @@ def summarize(lines, run=-1):
     if all(isinstance(s.get("fx"), str) and s.get("fx") == "na" for s in states if "fx" in s) and states:
         out["problems"].append("the game gave no list of active effects (fx na): Starfield's own radiation cannot be seen")
     if src == "health":
-        out["problems"].append("no maximum or base reading for Health (both na): the route is judged on the current health")
+        bases = sorted({s["base"] for s in states if num(s.get("base"))})
+        out["problems"].append("no maximum reading for Health (GetValueMax is not declared): the route is judged on current Health, not the maximum"
+                               + (f"; base read {', '.join(fmt(b) for b in bases)} throughout" if bases else ""))
     if any(num(x.get("rads")) and x["rads"] < 0 for x in states):
         out["problems"].append("our value read below zero (the AVIF minimum is not enforced for an effect's change): an effect applied more than once per cast")
     if any(e.get("clamped") is True for e in r if e["event"] == "route"):
