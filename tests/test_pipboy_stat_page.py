@@ -231,10 +231,23 @@ class PagePluginTests(unittest.TestCase):
         edid = function(self.main, "std::string EditorIdOf(")
         self.assertLess(edid.index("!IsType(a_form, a_type, type)"), edid.index("Peek(a_form + a_editorIdAt, entry)"))
         find = function(self.main, "void FindForms()")
-        for line in ('EditorIdOf(form, "TESGlobal@@", kGlobalEditorIdAt)', 'EditorIdOf(form, "ActorValueInfo@@", kAvifEditorIdAt)',
+        for line in ('AcceptById(kGameHourId, "GameHour", "TESGlobal@@", kGlobalEditorIdAt, g_forms.gameHour)',
+                     'AcceptById(kGameDaysPassedId, "GameDaysPassed", "TESGlobal@@", kGlobalEditorIdAt',
+                     'AcceptById(kHealthId, "Health", "ActorValueInfo@@", kAvifEditorIdAt, g_forms.health)',
+                     'AcceptById(kCarryWeightId, "CarryWeight", "ActorValueInfo@@", kAvifEditorIdAt, g_forms.carryWeight)',
+                     'AcceptById(kExperienceId, "Experience", "ActorValueInfo@@", kAvifEditorIdAt, g_forms.experience)',
+                     'if (!form || !IsType(form, "ActorValueInfo@@", type)) {',
+                     'EditorIdOf(form, "ActorValueInfo@@", kAvifEditorIdAt)',
                      "for (std::uint32_t id = 1; id < kCoreFormIds; ++id) {", "((i + 1) << 24) | kRadsLocalId",
                      "0xFE000000u | ((i - 0xFD) << 12) | kRadsLocalId"):
             self.assertIn(line, find, line)
+        accept = function(self.main, "std::string AcceptById(")
+        self.assertLess(accept.index("if (IsType(form, a_type, type)) {"), accept.index("a_out = form;"))
+        self.assertLess(accept.index("a_out = form;"), accept.index("Peek(form + a_editorIdAt, entry)"))
+        for constant, value in (("kHealthId", "0x2D4"), ("kCarryWeightId", "0x2DC"), ("kExperienceId", "0x2C9"),
+                                ("kGameHourId", "0x38"), ("kGameDaysPassedId", "0x39")):
+            self.assertRegex(self.main, rf"constexpr std::uint32_t {constant} = {value};")
+        self.assertNotIn("inventoryWeight", self.main)
         self.assertNotIn("ScanForms", self.main)
         page_scan = function(self.main, "void PageScan()")
         self.assertLess(page_scan.index("g_forms.strings = CheckStrings();"), page_scan.index("FindForms();"))
@@ -261,7 +274,7 @@ class PagePluginTests(unittest.TestCase):
     def test_the_only_calls_into_the_game_are_the_checked_ones(self):
         self.assertEqual(self.page.count("reinterpret_cast<GetActorValue_t>"), 1)
         self.assertEqual(self.page.count("reinterpret_cast<LookupById_t>(Address(kLookupById))"), 1)
-        self.assertEqual(self.main.count("FormById("), 4)                       # the definition and FindForms' three
+        self.assertEqual(self.main.count("FormById("), 4)                    # the definition, AcceptById, FindForms' two
         self.assertNotIn("REL::Relocation", self.page)
         self.assertNotIn("REL::ID", self.page)
         value = function(self.main, "std::string ActorValueText(")
