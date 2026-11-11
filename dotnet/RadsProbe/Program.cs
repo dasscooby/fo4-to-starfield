@@ -182,6 +182,11 @@ static class RadsProbe
             effect.MagicSkill.SetToNull();
             effect.ResistValue.SetToNull();
             effect.SecondActorValue.SetTo(avif.FormKey);
+            // Third game session (FAL-213): the spell cast without a crash but the value did not move. The loose template was a timed
+            // effect that recovers (undoes its change when it ends) and our entry has duration 0, so the change would be applied and
+            // taken back at once (the owner PC's reading of the records, untested). An instant effect that keeps its change: NoDuration
+            // set, Recover cleared.
+            effect.Flags = (effect.Flags | MagicEffect.Flag.NoDuration) & ~MagicEffect.Flag.Recover;
             effect.Flags &= ~MagicEffect.Flag.Detrimental;     // the engine negates the magnitude when exactly one of the effect's Detrimental flag and the actor value's damage-is-positive flag is set; neither is set here, so +100 stays +100
             effect.ThirdActorValue.SetToNull();
             effect.CounterEffects.Clear();
@@ -348,12 +353,13 @@ static class RadsProbe
             Need(effect.SecondActorValue.FormKey == Own(AvifId), "the MGEF's actor value (SecondActorValue, DATA word 14) is not FO4SF_Rads: the engine would read a null actor value at Spell.Cast");
             Need(arch?.Association.IsNull != false, "the MGEF's archetype association (DATA word 0) is set: vanilla value modifiers leave it empty");
             Need(!effect.Flags.HasFlag(MagicEffect.Flag.Detrimental), "the MGEF is Detrimental: with the actor value's flags the engine would negate +100");
+            Need(effect.Flags.HasFlag(MagicEffect.Flag.NoDuration) && !effect.Flags.HasFlag(MagicEffect.Flag.Recover), "the MGEF is not instant and non-recovering (NoDuration set, Recover clear): with duration 0 a recovering effect undoes its change at once");
             Need(effect.ResistValue.IsNull && effect.MagicSkill.IsNull && effect.ThirdActorValue.IsNull, "the MGEF still names a resist, skill or third actor value");
             var tm = found.Effect;
             if (tm == null) Need(effect.CastType == CastType.FireAndForget && effect.TargetType == TargetType.Self, "the MGEF is not FireAndForget / Self");
             else
             {
-                Need(effect.CastType == tm.CastType && effect.TargetType == tm.TargetType && effect.Flags == (tm.Flags & ~MagicEffect.Flag.Detrimental), $"the MGEF's cast type, target or flags (other than Detrimental, cleared on purpose) differ from its template {tm.EditorID}");
+                Need(effect.CastType == tm.CastType && effect.TargetType == tm.TargetType && effect.Flags == ((tm.Flags | MagicEffect.Flag.NoDuration) & ~(MagicEffect.Flag.Detrimental | MagicEffect.Flag.Recover)), $"the MGEF's cast type, target or flags (other than NoDuration, Recover and Detrimental, changed on purpose) differ from its template {tm.EditorID}");
                 Need(effect.Sounds.Count == tm.Sounds.Count && effect.Components.Count == tm.Components.Count, $"the MGEF's sounds or components differ from its template {tm.EditorID}");
                 Need(effect.Conditions.Count == 0 && effect.VirtualMachineAdapter == null && (effect.Keywords?.Count ?? 0) == 0, "the MGEF still carries conditions, a script or keywords of its template");
             }
@@ -431,7 +437,7 @@ static class RadsProbe
         var synthMgef = new MagicEffect(new FormKey(SfEsm, 0x00A100), Release)
         {
             EditorID = "SynthValueEffect", Name = "Synth", CastType = CastType.FireAndForget, TargetType = TargetType.Self,
-            Flags = MagicEffect.Flag.NoDuration | MagicEffect.Flag.Detrimental, Archetype = synthArch,       // a template with the flag that would negate
+            Flags = MagicEffect.Flag.Detrimental | MagicEffect.Flag.Recover, Archetype = synthArch,       // a template with the flag that would negate
             Keywords = new ExtendedList<IFormLinkGetter<IKeywordGetter>> { new FormLink<IKeywordGetter>(new FormKey(SfEsm, 0x00A200)) },
         };
         synthMgef.SecondActorValue.SetTo(new FormKey(SfEsm, 0x00A02E));            // the template's own actor value (replaced by ours)

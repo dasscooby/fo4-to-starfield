@@ -5,7 +5,7 @@ question first: **can a value of our own hold rads, lower maximum health, and be
 needs hang from the same value pattern. Verified on the PC, untested in play: Starfield.esm has `ENV_*` hazards, hazard
 spells and effects, `AFFL_*` affliction values and addiction effects; nothing is named mutation. Research rows R1 to R4,
 C1 to C3, V1 to V5 (docs/research/framework/engine-mechanics-notes).
-Task: FAL-213. Status: **run in game once (head b9ad9081); this head fixes what that session found.**
+Task: FAL-213. Status: **run in game three times (b9ad9081, 41d3f968, 5e6ae1bc); the crash is fixed, the effect did not move the value; this head tries an instant, non-recovering effect.**
 
 ## What the first game session found (head b9ad9081, owner PC, 10 Nov 20:49 and 20:58 UTC)
 
@@ -45,6 +45,25 @@ Since the first session the writer **copies a vanilla self-cast value-modifier s
 ingestible, from Starfield.esm** (found by what they are, or named with `--template-spell` / `--template-aid`; the build
 prints and `plan.json` records which) and changes the editor id, name, the effect's actor value and the magnitude;
 conditions, scripts, keywords, resist/skill values and an addiction are cleared. That alone did not stop the crash (above).
+## The third session (head 5e6ae1bc): the crash is gone, the effect does nothing
+
+Owner PC run, all four stages, no crash. **Verified in the game log:** control OK; our value takes 50 and 0; `Cast` ran
+(`rads=0` three seconds after, so the spell did not move the value; the script forced 100); the two casts and RadAway by
+`EquipItem` likewise left the value where it was (forced to 300 and 100); the script's own route works (rads 100 / 300 / 100:
+Health 195 / 175 / 195, `applied` -10 / -30 / -10). `fx na`: no list of active effects exists to read.
+Two honest limits: the route **lowers current Health, not the maximum** (`GetValueMax` is not declared in Starfield's
+scripts and `base` stayed 200), so "lower maximum health" is **not shown**; and whether RadAway's `EquipItem` consumed the
+item at all is not shown either (the value did not move, and the log has no inventory reading).
+Why the effect does nothing (**the owner PC's reading of the records, untested**): the loose template was a timed effect
+that recovers, our entry has duration 0, so the change is applied and taken back at once. The strict template search
+(fire and forget, self, no duration) found none.
+This head makes the effect **instant and non-recovering** (`NoDuration` set, `Recover` cleared, `Detrimental` still clear);
+`check` refuses a kit that is not, and compares every other flag with the template. One cheap experiment, one game session.
+**If the value still does not move**, the next step is not another flag: it is the owner PC's proposal, the script owns the
+value and a consumable reaches it through a script effect (an effect whose script calls `ModValue` on start) or through an
+item that calls the script directly, or an instant vanilla template found by search (every MGEF whose DATA word 14 is an
+AVIF and whose spell entries have duration 0). The hand kit (#719) should not be handed over until this is settled.
+
 Stage 10 now also writes a non-zero number (50) to our value, reads it, and writes 0 (`set` lines; the reader's
 "own value takes a number" line).
 

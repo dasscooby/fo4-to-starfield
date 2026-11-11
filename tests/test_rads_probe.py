@@ -236,7 +236,7 @@ class StageTests(unittest.TestCase):
         template's own subrecords (equip type, effect ids, description) and none of its keywords or conditions."""
         out = self.root / "b2t"
         proc = self.run_tool("build", self.master, out)
-        self.assertIn("templates (strict): SPEL SynthSelfSpell", proc.stdout)
+        self.assertIn("templates (relaxed): SPEL SynthSelfSpell", proc.stdout)
         self.assertIn("MGEF SynthValueEffect", proc.stdout)
         self.assertIn("ALCH SynthAid", proc.stdout)
         data = (out / PLUGIN).read_bytes()
@@ -266,7 +266,7 @@ class StageTests(unittest.TestCase):
         self.assertNotIn(b"CTDA", subs[b"SPEL"] + subs[b"MGEF"] + subs[b"ALCH"])
         check = self.run_tool("check", out / PLUGIN, self.master)
         self.assertEqual(check.returncode, 0, check.stdout)
-        self.assertIn("templates (strict)", check.stdout)
+        self.assertIn("templates (relaxed)", check.stdout)
 
     def test_the_mgef_data_word_14_is_our_actor_value_and_the_flags_do_not_negate(self):
         """Both game crashes (FAL-213): the engine reads the effect's actor value (DATA word 14, Mutagen's
@@ -290,6 +290,17 @@ class StageTests(unittest.TestCase):
         self.assertEqual(words[17], 0)
         self.assertIn("actor value (DATA word 14) 000800:FO4SFRadsProbe.esm",
                       self.run_tool("check", out / PLUGIN, self.master).stdout)
+
+    def test_the_effect_is_instant_and_does_not_recover(self):
+        """Third session: a timed, recovering template effect with duration 0 applies and undoes its change at once.
+        The synthetic template is Detrimental + Recover (no NoDuration); the kit's effect must be NoDuration only."""
+        out = self.root / "b2y"
+        self.assertEqual(self.run_tool("build", self.master, out).returncode, 0)
+        check = self.run_tool("check", out / PLUGIN, self.master)
+        self.assertEqual(check.returncode, 0, check.stdout)
+        self.assertRegex(check.stdout, r"MGEF FO4SF_RadsEffect .* flags NoDuration\n")
+        self.assertNotIn("Recover", check.stdout)
+        self.assertNotIn("Detrimental", check.stdout)
 
     def test_check_refuses_a_kit_whose_actor_value_is_not_ours(self):
         out = self.root / "b2x"
@@ -360,7 +371,7 @@ class StageTests(unittest.TestCase):
         self.assertEqual((plan["health"], plan["avif_type"]), ("Health", "Variable"))
         self.assertEqual(sorted(plan["outputs"]), sorted([PLUGIN, "Data/Scripts/FO4SF_RadsProbeQuest.pex"]))
         self.assertEqual(plan["inputs"]["Starfield.esm"]["sha256"], mrp.sha256(str(self.master)))
-        self.assertTrue(plan["templates"].startswith("strict: SPEL SynthSelfSpell"))
+        self.assertTrue(plan["templates"].startswith("relaxed: SPEL SynthSelfSpell"))
         self.assertEqual(plan["optional"]["Actor.ModValue"], "kept")
         self.assertEqual(plan["optional"]["Actor.GetActiveEffects"], "kept")
         self.assertTrue(plan["optional"]["Actor.GetBaseValue"].startswith("declared but did not compile"))
