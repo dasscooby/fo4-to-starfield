@@ -12,8 +12,9 @@ Scriptname FO4SF_RadsProbeQuest extends Quest
    stage 50  the SECOND CONTROL: a vanilla spell (property ControlSpell, named when the plugin is built) is cast on the player
              and Health read before and 3 s after. Tells "our effect is wrong" from "Cast from a quest script applies no value
              modifier at all". Not run when the property is None.
- After the effect has had 3 s the script reads the value, FORCES the step's number with SetValue when the effect did not
- give it (logged fix forced=true, so the route is still tested), then applies the ROUTE: a permanent modifier on Health
+ After the effect has had 3 s the script reads the value, FORCES the step's number when the effect did not give it, by the
+ difference (Actor.ModValue of want minus have; SetValue only when ModValue is not declared; logged fix forced=true how=<call>,
+ so the route is still tested), then applies the ROUTE: a permanent modifier on Health
  of minus one tenth of the rads (ModValue on the difference to what it applied before), and reads again 3 s later.
  Each reading logs our value, the player's health (GetValue), its base value and maximum when the game declares those,
  and the ids of the active magic effects on the player (to see whether Starfield's own radiation acts in our world).

@@ -246,8 +246,8 @@ is optional too: if it does not exist, the control fails and the session is **IN
 `Actor.SetValue/GetValue` with an own AVIF and `AddItem/EquipItem` were compiled on the PC by the new game script.
 
 Per step: *before*, *now* (right after the call), *settled* (3 s later, the effect has had its time), a `fix` line (was the
-step's number there, or did the script **force** it with `SetValue`, `forced=true`, so that the route is still tested when the
-effect does nothing), a `route` line, *routed*, and *final* 3 s later. Each line ends `end=true`; a line without it was cut.
+step's number there, or did the script **force** it, `forced=true`, by the difference with `ModValue` (`how=ModValue`; `SetValue` only
+when `ModValue` is not declared), so that the route is still tested when the effect does nothing), a `route` line, *routed*, and *final* 3 s later. Each line ends `end=true`; a line without it was cut.
 The log is `My Games\Starfield\Logs\Script\User\FO4SFRadsProbe.0.log`, under `OneDrive\Documents` on the owner's PC (the reader tries that first, then `Documents`; `--file` names it).
 
 **Offline tests** use a synthetic Starfield.esm (with synthetic template records), a fake compiler and fake base sources. The Mutagen shapes of the MGEF archetype (the actor value sits in
@@ -266,8 +266,8 @@ Otherwise `CONTROL OK` and:
 
 * effect: each of stage 20 and 30 "gave N without help", "did not move the value (...); the script forced it" or "moved it
   to X, not N; the script forced it"; RadAway likewise.
-* route: the maximum health (the `max` reading, else `base`, else `health`; the source is named and `health` is only the
-  current value) at the end of stage 10 against the ends of stages 20, 30 and 40: moved by the expected tenth of the rads,
+* route: the maximum health (the `max` reading, else `health`; the source is named, `health` is only the current value and the
+  report says so; the base is not used, only listed in a note) at the end of stage 10 against the ends of stages 20, 30 and 40: moved by the expected tenth of the rads,
   unchanged, or by another amount.
 * active effect ids at a stage that were not there at stage 10 are listed. The log cannot say which id is radiation:
   the owner looks the ids up. Exit 0 when the control held, 1 when inconclusive, 2 with no log.

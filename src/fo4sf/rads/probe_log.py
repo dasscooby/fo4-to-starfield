@@ -16,8 +16,9 @@ control line. With the control read, three things are judged on the log alone:
   effect  stage 20 and 30: did the spell's effect raise our value to the step's number without help (fix forced=false)
   route   the maximum health of stage 10 (final) against stages 20, 30 and 40 (final): did it fall by a tenth of the rads
   RadAway stage 40: did the consumable lower our value to the step's number without help, and did the route give back
-Maximum health is the "max" reading when the game declares one, else "base", else "health" (the current value, so a hit
-taken during the session reads as a change: the report names the source). The log cannot say what the screen shows.
+Maximum health is the "max" reading when the game declares one, else "health" (the current value, so a hit taken during
+the session reads as a change: the report names the source and says it is not the maximum). The base is never used: the
+route moves the current value and the base stays put (sixth session); the base readings are only listed in a note. The log cannot say what the screen shows.
 Active effect ids are listed per stage; ids that were not there at stage 10 are named, as the way to see whether
 Starfield's own radiation acts in our world (the log cannot say which id is radiation: the owner looks them up).
 """
