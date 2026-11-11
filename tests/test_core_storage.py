@@ -183,6 +183,24 @@ class CoreStorageTests(unittest.TestCase):
         self.assertEqual(bad.returncode, 1)
         self.assertIn("is not one of toponly, topcell, full, persist-only, temp-only, cell-only, world-only", bad.stderr)
 
+    def test_the_run_instructions_follow_the_variant(self):
+        """FAL-330 finding: the README of a toponly stage must not ask for CS_T found or 75 s, and must name the arrival cell."""
+        top = make_core_storage.run_instructions("toponly")
+        self.assertIn("80 s", top)
+        self.assertIn("..000DAF", top)
+        self.assertIn("..001340", top)
+        self.assertIn("CS_T reads not found in this variant, by design", top)
+        self.assertNotIn("75 s", top)
+        self.assertNotIn("CS_T found and CS_P", top)
+        for v in make_core_storage.VARIANTS:
+            self.assertNotIn("75 s", make_core_storage.run_instructions(v), v)
+            self.assertIn("80 s", make_core_storage.run_instructions(v), v)
+        for v in ("topcell", "full", "persist-only", "temp-only", "cell-only"):     # the ones with the exterior cell override
+            self.assertIn("CONTROL variant " + v, make_core_storage.run_instructions(v))
+        self.assertNotIn("CONTROL", top)
+        self.assertIn("CONTROL variant world-only", make_core_storage.run_instructions("world-only"))
+        self.assertNotIn("spawn cell override", make_core_storage.run_instructions("world-only"))
+
     def test_the_stage_names_the_variant(self):
         self.assertIn("--variant", (ROOT / "scripts" / "core_storage" / "make_core_storage.py").read_text(encoding="utf-8"))
         self.assertEqual(make_core_storage.VARIANTS, ("toponly", "topcell", "full", "persist-only", "temp-only", "cell-only", "world-only"))

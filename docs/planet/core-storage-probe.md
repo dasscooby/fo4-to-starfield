@@ -147,3 +147,6 @@ here). CS_T therefore reads "not found" by design, and the probe's result line w
 cell (it must be 000DAF), 80 s alive, and CS_P `with player`. `topcell` (which still overrides the spawn cell for CS_T) is kept
 and is expected to crash the same way; run it only as a control. The installer's conflict with the mission and the combined probe
 applies to both, because both override the world's persistent cell.
+The staged README.txt follows the variant (`run_instructions`, FAL-330 finding): for `toponly` it asks for 80 s, the arrival line in
+cell ..000DAF (not ..001340) and CS_P with the player, and says CS_T not found is by design; the other variants say they are controls.
+The header comment of `FO4SF_CoreStorageQuest.psc` still carries the old verdict text; it was left alone so the staged `.pex` does not change.

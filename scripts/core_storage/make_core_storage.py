@@ -49,6 +49,24 @@ def tool_cmd(*argv):
     return ["dotnet", "run", "-c", "Release", "--project", TOOL, "--", *argv]
 
 
+def run_instructions(variant):
+    """The README's \"in game\" and reading text for a variant (FAL-330 finding: it must follow the PC ladder of 11 Nov, FAL-273).
+    toponly (the default) has no exterior cell record and no CS_T; the others carry the spawn cell override, which crashed."""
+    if variant == "world-only":
+        return (f"CONTROL variant world-only: the world override alone, no cell, no reference (it survived 80 s on the PC, 11 Nov). In game: coc {SPAWN_CELL};\n"
+                f"stay 80 s; the user log {LOG} holds FO4SFCS lines 2, 10, 30 and 60 s after the arrival. Expected: arrival in cell ..000DAF, still running\n"
+                f"after 80 s, CS_P and CS_T both not found (nothing is written for them).\n")
+    if variant == "toponly":
+        return (f"In game: coc {SPAWN_CELL}; stay 80 s; the user log {LOG} holds FO4SFCS lines 2, 10, 30 and 60 s after the arrival.\n"
+                f"PASS = the arrival line (arrive n=2) names cell ..000DAF at about x=-2189 y=-1553 (NOT cell ..001340 at 50, 50), the game\n"
+                f"is still running after 80 s, and CS_P reads found=True, with the player. CS_T reads not found in this variant, by design\n"
+                f"(no spawn cell override, no temporary reference): that is not a failure. Arrival in ..001340, or a crash (0xC0000005 at\n"
+                f"SF+0x41efd6), is a FAIL; keep the crash folder.\n")
+    return (f"CONTROL variant {variant}: it carries the spawn cell override ({SPAWN_CELL}), which crashed the game 28 s after arrival on the PC\n"
+            f"(FAL-273, 11 Nov) and moves the arrival to cell ..001340; run it only to repeat that. In game: coc {SPAWN_CELL}; stay 80 s;\n"
+            f"the user log {LOG} holds FO4SFCS lines 2, 10, 30 and 60 s after the arrival. A crash at SF+0x41efd6 is the expected result.\n")
+
+
 def stage(a):
     import make_bridge  # noqa: E402  (run, the default tool paths)
     import zipfile
@@ -98,10 +116,7 @@ def stage(a):
         f.write(f"""Core storage probe (FAL-208), variant {a.variant}. {PLUGIN} (build {plugin_sha[:8]}), masters Starfield.esm + FO4TerrainCore.esm.
 FO4SF_CS_P (0x800, persistent; variant {a.variant}: world persistent cell for toponly / topcell) and FO4SF_CS_T (0x801, temporary, in {SPAWN_CELL}): XMarkers at its COC marker + 4 / 8 m east.
 Install (game closed), after the core: python scripts\\core_storage\\core_storage_install.py install --dir "{out}" --starfield <game>
-In game: coc {SPAWN_CELL} with the roofs on screen; stay 75 s; the user log {LOG} holds FO4SFCS lines 2, 10, 30 and 60 s
-after the arrival. CS_T not found: cell not loaded (not a failure). CS_T found and CS_P with the player: PASS.
-CS_T found and CS_P left behind or not found: FAIL.
-Uninstall (game closed): python scripts\\core_storage\\core_storage_install.py uninstall --starfield <game>
+{run_instructions(a.variant)}Uninstall (game closed): python scripts\\core_storage\\core_storage_install.py uninstall --starfield <game>
 """)
     print(f"staged {out}: {PLUGIN} ({plugin_sha[:8]}), Data/Scripts/{SCRIPT}.pex, offline_check.txt, plan.json, README.txt")
 
