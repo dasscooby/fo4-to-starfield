@@ -1,6 +1,7 @@
 """The Pip-Boy probe's empty plugin and its movie (FAL-187; sfse/FO4SFPipboyMenu/README.md).
 
-usage: python scripts/ui/make_pipboy_probe.py stage <dir> [--no-label] [--channel | --page]
+usage: python scripts/ui/make_pipboy_probe.py stage <dir> [--no-label] [--channel | --page | --kit [--ini <ini>]
+                                                                         [--color RRGGBB]]
                                                                          FO4SFPipboyProbe.esm + Data/Interface/<movie>
        python scripts/ui/make_pipboy_probe.py check <FO4SFPipboyProbe.esm>
        python scripts/ui/make_pipboy_probe.py twin <dir> <Interface/file.swf>   the same movie again at that path
@@ -12,12 +13,16 @@ fo4sf.planet.esm.PluginWriter, the writer of our planet probe, with Starfield.es
 the repo. The staged folder is exp_install.py's shape (the plugin plus a Data tree): `exp_install.py install --pack`
 packs Data into "FO4SFPipboyProbe - Main.ba2" beside the plugin. `stage --channel` writes the movie with the data
 channel's text field and button (FAL-216, the plugin's Stage=3) under the same name; `stage --page` writes the STAT
-page (FAL-272, the plugin's Stage=4) under the same name, and the owner's card beside the plugin: owner-card.txt, the
-launcher's plain-text card (a title and eight numbered one-line steps; docs/spikes/pipboy-stat-page-owner-card.md is
-the full card). It is outside Data, so it is neither packed nor installed.
+page (FAL-272, the plugin's Stage=4) under the same name; `stage --kit` writes the page kit's movie (FAL-301, the
+plugin's Stage=5) under the same name, its main tabs drawn from the pages of --ini (the plugin's own ini by default:
+install that same file beside the dll) in the colour --color. Both page movies come with the owner's card beside the
+plugin: owner-card.txt, the launcher's plain-text card (a title and eight numbered one-line steps;
+docs/spikes/pipboy-stat-page-owner-card.md and docs/spikes/pipboy-page-kit-owner-card.md are the full cards). It is
+outside Data, so it is neither packed nor installed.
 """
 import argparse
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -25,6 +30,7 @@ REPO = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(REPO, "src"))
 sys.path.insert(0, HERE)
 from fo4sf.planet.esm import ESM, EsmError, Plugin, PluginWriter  # noqa: E402
+import make_pipboy_kit  # noqa: E402
 import make_probe_swf  # noqa: E402
 
 PLUGIN = "FO4SFPipboyProbe.esm"
@@ -45,24 +51,46 @@ PAGE_CARD = """Pip-Boy STAT page
 8. Press F10 and say whether the panel closed; if anything was odd, say what.
 """
 
+KIT_CARD = """Pip-Boy page kit
+1. In a loaded game, standing somewhere safe, press F10: a green screen with STAT INV DATA MAP RADIO at the top.
+2. Write down every row that shows a question mark, then press S three times and W once: the bright bar follows.
+3. Press D: SPECIAL shows seven rows, STRENGTH to LUCK; write down the seven numbers.
+4. Press E twice, then D, then hold S for three seconds: KIT TEST scrolls and stops at TEST ROW 30.
+5. Click one TEST ROW line, then click MAP at the top, and say whether both clicks worked.
+6. Press Q until the bracket is back on STAT, then click SPECIAL, and say whether Q and the click worked.
+7. Press Tab once, then Esc once: say what the game did on each; if Esc opened the game's menu, close it with Esc.
+8. Click CLOSE, then press F10 twice, two seconds apart: say whether it reopened on SPECIAL, then closed.
+"""
+
 
 def plugin_bytes():
     return PluginWriter(MASTERS, flags=ESM, author=AUTHOR, description=DESCRIPTION).to_bytes()
 
 
-def stage(out, label=True, channel=False, page=False):
-    """Writes <out>/FO4SFPipboyProbe.esm and <out>/Data/Interface/FO4SF_PipboyMenu.swf (with page, also
-    <out>/owner-card.txt); returns the plugin's and the movie's paths."""
+def stage(out, label=True, channel=False, page=False, kit=False, ini=make_pipboy_kit.INI,
+          color=make_pipboy_kit.PIPBOY_GREEN):
+    """Writes <out>/FO4SFPipboyProbe.esm and <out>/Data/Interface/FO4SF_PipboyMenu.swf (with page or kit, also
+    <out>/owner-card.txt, that movie's card); returns the plugin's and the movie's paths. kit: the page kit's movie for
+    the pages of `ini`, in `color` (the pages are checked first; a wrong one writes nothing)."""
+    if kit and (channel or page):
+        raise make_probe_swf.SwfError("--kit, --channel and --page are different movies")
+    kit_pages = make_pipboy_kit.read_kit(ini) if kit else None
     os.makedirs(out, exist_ok=True)
     esm = os.path.join(out, PLUGIN)
     with open(esm, "wb") as f:
         f.write(plugin_bytes())
     movie = os.path.join(out, "Data", *MOVIE.split("/"))
-    make_probe_swf.write_movie(movie, label=make_probe_swf.LABEL if label else None, channel=channel, page=page)
+    if kit:
+        os.makedirs(os.path.dirname(movie), exist_ok=True)
+        with open(movie, "wb") as f:
+            f.write(make_pipboy_kit.kit_movie_bytes(kit_pages, color=color))
+    else:
+        make_probe_swf.write_movie(movie, label=make_probe_swf.LABEL if label else None, channel=channel, page=page)
     card = os.path.join(out, OWNER_CARD)
-    if page:
+    text = KIT_CARD if kit else PAGE_CARD if page else None
+    if text:
         with open(card, "w", encoding="utf-8", newline="\n") as f:
-            f.write(PAGE_CARD)
+            f.write(text)
     elif os.path.exists(card):
         os.remove(card)
     return esm, movie
@@ -128,6 +156,9 @@ def main(argv=None):
     kind = s.add_mutually_exclusive_group()
     kind.add_argument("--channel", action="store_true", help="the data channel's movie (FAL-216, Stage=3)")
     kind.add_argument("--page", action="store_true", help="the STAT page's movie (FAL-272, Stage=4)")
+    kind.add_argument("--kit", action="store_true", help="the page kit's movie (FAL-301, Stage=5)")
+    s.add_argument("--ini", default=make_pipboy_kit.INI, help="--kit: the ini with the pages (the plugin's own)")
+    s.add_argument("--color", default=f"{make_pipboy_kit.PIPBOY_GREEN:06X}", help="--kit: the phosphor colour, RRGGBB")
     c = sub.add_parser("check")
     c.add_argument("plugin")
     t = sub.add_parser("twin")
@@ -136,14 +167,17 @@ def main(argv=None):
     a = ap.parse_args(argv)
     try:
         if a.cmd == "stage":
-            esm, movie = stage(a.out, label=not a.no_label, channel=a.channel, page=a.page)
+            if not re.fullmatch(r"[0-9A-Fa-f]{6}", a.color):
+                raise make_probe_swf.SwfError(f"--color {a.color!r} is not RRGGBB")
+            esm, movie = stage(a.out, label=not a.no_label, channel=a.channel, page=a.page, kit=a.kit, ini=a.ini,
+                               color=int(a.color, 16))
             check(esm)
             print(f"staged {esm} and {movie}; pack into {ARCHIVE}")
         elif a.cmd == "twin":
             print(f"staged twin {twin(a.out, a.path)}; set WorldMovie={a.path} in the ini")
         else:
             print(f"ok: {check(a.plugin)}")
-    except (EsmError, make_probe_swf.SwfError, TwinError, OSError) as e:
+    except (EsmError, make_probe_swf.SwfError, make_pipboy_kit.KitError, TwinError, OSError, UnicodeDecodeError) as e:
         print(f"make_pipboy_probe: {e}", file=sys.stderr)
         return 1
     return 0

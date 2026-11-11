@@ -16,6 +16,10 @@ and logs every step. The stage is picked by `Stage` in `FO4SFPipboyMenu.ini`:
   health, level and experience, carry weight, `FO4SF_Rads`, cell, worldspace and game time (tab 1, STATUS) or with
   live data (tab 2, DATA). NEXT TAB switches the tab, CLOSE closes the menu. Section "Stage (d): the STAT page"; the
   owner's card is `docs/spikes/pipboy-stat-page-owner-card.md`.
+- **(e)** `Stage=5` (FAL-301): the page kit. One movie for every page (staged with `--kit`): main tabs, sub-tabs, a
+  scrolling list with a selection bar, value rows, a footer and key hints. The pages are data: sections of this
+  plugin's ini. Keys and clicks move between them. Section "Stage (e): the page kit"; the owner's card is
+  `docs/spikes/pipboy-page-kit-owner-card.md`.
 
 `Stage=0` (as shipped) logs one line and does nothing else.
 
@@ -23,10 +27,11 @@ and logs every step. The stage is picked by `Stage` in `FO4SFPipboyMenu.ini`:
 | --- | --- |
 | `src/main.cpp` | the plugin: version guard, checks before use, the menu object, the key thread |
 | `src/pch.h` | precompiled header (libxse's game headers and SFSE layer) |
-| `FO4SFPipboyMenu.ini` | `Stage`, `Key` (default `0x79`, F10), `Flags` (0), `KeepAlive` (1); stage (c): `FlagSets` (`0x0,0x8,0x9`), `SnapshotKey` (`0x7A`, F11), `ClickCall` (empty: off); stage (d): `PageFlagSets` (`0x9`) |
+| `FO4SFPipboyMenu.ini` | `Stage`, `Key` (default `0x79`, F10), `Flags` (0), `KeepAlive` (1); stage (c): `FlagSets` (`0x0,0x8,0x9`), `SnapshotKey` (`0x7A`, F11), `ClickCall` (empty: off); stages (d) and (e): `PageFlagSets` (`0x9`); stage (e): `KitUp` to `KitNextTab`, and the pages (`[Kit]`, `[Page <TAB>/<SUB>]`) |
 | `xmake.lua`, `build.ps1` | the PC build: FOCCPing's build path (`docs/spikes/combined-core-probes.md`, B0-2) |
 | `scripts/ui/make_probe_swf.py` | writes the stage (b) movie, with `--channel` the stage (c) one and with `--page` the stage (d) one (pure Python; tests `tests/test_make_probe_swf.py`, `tests/test_pipboy_stat_page.py`) |
-| `scripts/ui/make_pipboy_probe.py` | stages the empty `FO4SFPipboyProbe.esm` and the movie; `check` checks the plugin |
+| `scripts/ui/make_pipboy_kit.py` | the page kit (stage (e)): reads and checks the pages of the ini (`--check`) and writes the kit's movie for them (pure Python, on `make_probe_swf.py`; tests `tests/test_pipboy_kit.py`) |
+| `scripts/ui/make_pipboy_probe.py` | stages the empty `FO4SFPipboyProbe.esm` and the movie (`--channel`, `--page` or `--kit`); `check` checks the plugin |
 | `scripts/ui/pipboy_probe_install.py` | stage (b) install with its own record (test `tests/test_pipboy_probe_install.py`) |
 
 ## Design: the engine's menu object, not libxse's IMenu class
@@ -57,7 +62,7 @@ and the game runs behind it (the same run). Stage (c) records what other flags d
 | 0x03, 0x04 | `GetName` (`FO4SF_PipboyMenu`), `GetRootPath` (`""`: our movie has no code to bind) |
 | 0x05 | `GetViewScaleMode`: ShowAll |
 | 0x06 | `LoadMovie`: (a) returns true with no movie; (b) the engine's, logged, with the event dispatcher off |
-| 0x08 | `ProcessMessage`: the engine's, logged; at (a) our own answer to show; at (c) the data channel and at (d) the page, after the engine's handling |
+| 0x08 | `ProcessMessage`: the engine's, logged; at (a) our own answer to show; at (c) the data channel, at (d) the page and at (e) the kit, after the engine's handling |
 | 0x0A | (a) only: `IsMovieLoaded` true |
 
 ## Game version and where every id comes from
@@ -123,7 +128,7 @@ the engine's thread for this menu:
   (libxse's `ShowCursor`, bit 3) and `0x9` (bit 3 and bit 0; bit 0 is Fallout 4's "pauses game", unverified in
   Starfield). The snapshot's `paused=` and `menus=` show what each set does.
 
-**Checked first, at stages (c) and (d) only** (stages (a) and (b) check exactly their 16 ids, as before). Sixteen
+**Checked first, at stages (c) to (e) only** (stages (a) and (b) check exactly their 16 ids, as before). Sixteen
 more ids, each in the file, non-zero, inside the image and equal through libxse; then `step=channel_ids`. These
 thirteen, and the three of the click's section below:
 
@@ -218,7 +223,7 @@ Where each value comes from, and what is checked before it is used:
 | the `GetActorValue` slot | the player's `ActorValueOwner` vtable, slot 0x01 | the base's offset from `PlayerCharacter`'s RTTI class hierarchy; that subobject's vtable locator names `PlayerCharacter` at that offset; slot 0x00 is the adjustor thunk to the player's own slot 0x00 (its destructor). libxse declares a virtual destructor before `GetActorValue`, SFSE 0.2.21 none: the thunk decides. Otherwise `refuse step=page what=get_actor_value ...` and every actor value is `?` |
 | level | the player's base object (`OBJ_REFR::objectReference`), its `TESActorBaseData`, `ACTOR_BASE_DATA::level` | the base is a `TESNPC` by RTTI; the base class offset from its hierarchy, its subobject checked as above. That the player's level lives there is a **supported hypothesis** (it does in Skyrim and Fallout 4) |
 | cell, worldspace | `TESObjectREFR::parentCell`, then `TESObjectCELL::cellWorldspace`; each name through its `TESFullName` (the pool string at +0x08) | `TESObjectCELL` and `TESWorldSpace` by RTTI; `TESFullName`'s offset from the hierarchy, subobject checked. An exterior cell usually has no name: `NO NAME` and its form id, which changes as the player crosses cells |
-| game time | the `GameHour` and `GameDaysPassed` globals, each a float at one offset found in the game | looked up by form id, `Starfield.esm`'s `00000038` and `00000039` (docs/ai/test-queue.md; the PC confirmed them), accepted by their RTTI type `TESGlobal` (at `3eb30d71` an editor-ID check refused both). libxse's value offset +0x40 read `DAYS PASSED -3.5924` at `a156037c`, so the offset is found: the first 4-byte slot of +0x28 to +0x44 where the hour is in [0, 24), the days above 0 and below a million, and the hour within three game minutes of the days' fraction. Until one is, `TIME ?` and `DAYS PASSED ?`; the 32 bytes of both are logged once (`step=page_globals from=0x28 game_hour hex=... floats=... game_days_passed ...`), then `step=page_globals value_at=<offset>` |
+| game time | the `GameHour` and `GameDaysPassed` globals, each a float at one offset found in the game | looked up by form id, `Starfield.esm`'s `00000038` and `00000039` (docs/ai/test-queue.md; the PC confirmed them), accepted by their RTTI type `TESGlobal` (at `3eb30d71` an editor-ID check refused both). libxse's value offset +0x40 read `DAYS PASSED -3.5924` at `a156037c`, and the 4-byte slot at +0x28 (`TESForm::formID`, `38000000` and `39000000`) read as an hour and a day of about zero and passed at `6de5559a` (`TIME 00:00 DAY 1`). The game's own GetValue reads a float at **+0x48** (bytes `C4 C1 7A 10 40 48 C3`, `vmovss xmm0, [r8+0x48]`; the object is 0x50 bytes, form type 0x0A at +0x2E; FAL-384), so: +0x48 when the hour is in [0, 24), the days above 0 and below a million, and the hour within three game minutes of the days' fraction; else the first other 4-byte slot of +0x30 to +0x4C that passes; never +0x28. Until one is, `TIME ?` and `DAYS PASSED ?`; the 40 bytes (+0x28 to +0x4F) of both are logged once (`step=page_globals from=0x28 game_hour hex=... floats=... game_days_passed ...`), then `step=page_globals value_at=<offset>` |
 | editor IDs and names | the `BSStringPool` entry (libxse: an 0x18-byte header, then the characters; flag 0x02 at +0x14 points on at +0x08) | `step=page_strings self_test=ok`: our own menu name read back through the same reader first; if it does not read back, no name and no form list is read |
 | the form lookup | the engine's `TESForm::LookupByID` (libxse id 47401), the second call into the game | its address must equal SFSE 0.2.21's `GetFormByNumericID` `0x5DE3B0` (`sfse/GameForms.cpp`), else `refuse step=page_ids` and the plugin stays idle; libxse and SFSE both declare it `TESForm* (u32)`. Called on the main thread only, about 8,400 times once at the first open, never again |
 | the data handler's lists (diagnostic only) | `TESDataHandler::formArrays` at +0x70, 0x18 each (libxse and SFSE 0.2.21 agree), which read empty at `5a4e6016` (`refuse step=page_forms list=AVIF reason=array size=0`, PC run 11 Nov) | `TESDataHandler.Singleton` 937572 must equal SFSE's `0x5FD9B28`; the object is a `TESDataHandler` by RTTI. Only its memory is logged, once: `step=page_form_arrays avif=<3 qwords> glob=<3 qwords> nonzero_count=<n> <index>:<3 qwords>...`, so a later page can use the lists |
@@ -236,6 +241,126 @@ form lookup and `HEALTH 205` (= `player.getav health`). **Verified at `a156037c`
 through their fixed form ids. **Not verified until the next session:** the time (`TIME ?` and `DAYS PASSED -3.5924` at
 +0x40 there; the offset is now found and checked as above).
 
+## Stage (e): the page kit (FAL-301)
+
+The owner's order of 11 Nov: several pages and a baseline for making them, with the Fallout 4 look, then the raise
+animation. This stage is the baseline. A page is a few lines of data; adding one needs no C++ and no new movie by hand.
+
+**The movie** (`scripts/ui/make_pipboy_kit.py`, staged with `make_pipboy_probe.py stage <exp> --kit` under the same name
+`Interface/FO4SF_PipboyMenu.swf`) has no code. It draws one dark screen in one phosphor colour (`--color RRGGBB`,
+default `1AFF80`); the screen, the dim text and the footer boxes are derived from that one colour. Its font is stage
+(d)'s 5 x 7 table plus `[ ] < > * ;`. The plugin finds each part by name and changes only `text` and `visible`:
+
+| Part | Names | What the plugin does |
+| --- | --- | --- |
+| title bar | `fo4sfTitle`, `fo4sfHeaderInfo` | the kit's title; on the right, the `[Kit]` `Header=` value (the game time) |
+| main tabs | `fo4sfTab<i>`, `fo4sfTabMark<i>`, `fo4sfTabHit<i>` | the label; the bracket around the shown tab (`visible`); the click area |
+| sub-tabs | `fo4sfSub<i>`, `fo4sfSubDim<i>`, `fo4sfSubHit<i>` (5 slots) | the shown tab's sub-tabs, the current one bright and the others dim |
+| list | `fo4sfRowName<i>`, `fo4sfRowValue<i>`, `fo4sfRowNameSel<i>`, `fo4sfRowValueSel<i>`, `fo4sfBar<i>`, `fo4sfRowHit<i>` (16 rows) | each row's label and right-aligned value; on the selected row the bar and the dark copy of the text are shown and the bright copy is hidden |
+| scrolling | `fo4sfMoreUp`, `fo4sfMoreDown` | shown while rows lie above or below the 16 on screen |
+| value rows | `fo4sfInfoLabel<i>`, `fo4sfInfoValue<i>` (16 rows) | the selected row's details in two columns |
+| footer | `fo4sfFoot<i>` (3 cells), `fo4sfHints`, `fo4sfClose` | the page's footer cells, the key hints, the CLOSE button |
+| check | `fo4sfKitId` | the kit's signature, drawn in the screen's colour so it stays invisible; read at each new movie |
+
+The hit areas are sprites filled in the screen's own colour, under the text, so they cannot be seen. A click on a
+tab, a sub-tab or a row is reported under one of that row's names, whether it lands on the text or beside it.
+
+**The pages** are sections of `FO4SFPipboyMenu.ini`. The plugin reads them at load (`ReadKit`) and
+`make_pipboy_kit.py` reads them to draw the main tabs (`--check` prints them). Both apply the same grammar and checks:
+
+- `[Kit]`: `Title=`, `Header=<value>`, `Hints=`.
+- `[Page <TAB>/<SUB>]`: a page. Main tabs come in the order of their first page (up to 5); sub-tabs come in page
+  order (up to 5 per tab). A page has exactly one of:
+  - `Row=<label>|<value>` lines (up to 64, 16 on screen, scrolled);
+  - `List=<list>`;
+  - `Notice=<text>` lines (up to 16).
+  It may also have up to three `Footer=<label>|<value>` cells and a `Hint=`.
+- Labels are upper case, in the kit's font, and fit their field: 33 characters for a row or a notice, 9 for a tab, 13
+  for a sub-tab, 10 for a footer cell.
+
+A wrong line stops the kit at load: `refuse step=pages line=<n> reason=<r>`, and the plugin stays idle. A page whose
+row value is longer than 8 characters shows that value after its label, in the label's column.
+
+| Page | Content |
+| --- | --- |
+| STAT / STATUS | rows: health, level, experience, carry weight max, rads, cell, world, time; footer HP, LEVEL, XP |
+| STAT / SPECIAL | rows: Strength to Luck, `av:2C2` to `av:2C8` (Starfield.esm keeps Fallout 4's ids); the same footer |
+| INV / ITEMS, DATA / QUESTS | notices: the inventory list and the quest list (our mission first) come in the next pull request |
+| DATA / KIT TEST | `List=kit_test`: thirty rows to scroll, select and click |
+| MAP / WORLD, RADIO / STATIONS | notices: each waits for its own track (the map track, the radio) |
+
+**Value providers.** Every value is read on the main thread, with stage (d)'s reads and two calls only. When one
+cannot be read it prints `?`, and its reason is logged once as `step=page_unknown what=<value> reason=<r>`.
+
+| Value | Reads | When it cannot |
+| --- | --- | --- |
+| `health`, `xp`, `carry_max` | the player's `GetActorValue` with Starfield.esm's `Health` `0x2D4`, `Experience` `0x2C9`, `CarryWeight` `0x2DC` (stage (d)) | `what=health`, `experience`, `carry_weight`: `reason=no_such_actor_value`, `no_get_actor_value` or `not_finite` |
+| `rads` | `FO4SF_Rads` the same way; `NOT INSTALLED` without the rads probe | `what=rads reason=actor_values_unread` |
+| `level` | the base `TESNPC`'s `ACTOR_BASE_DATA::level` (stage (d)) | `what=level reason=base ...` or `actor_base_data ...` |
+| `cell`, `world` | the parent cell and its worldspace, each name with its form id (stage (d)) | `what=cell reason=cell ...`, `what=cell_name`, `what=world reason=...` |
+| `time` | `GameHour` `0x38` and `GameDaysPassed` `0x39` at the value offset found and checked as at (d): `hh:mm   DAY n` | `what=time reason=globals_unread`, `no_value_offset` or `out_of_range` |
+| `days` | `GameDaysPassed`, two decimals, checked as the time is | `what=days reason=globals_unread`, `no_value_offset` or `out_of_range` |
+| `position` | the player's position, whole units | `what=position reason=no_player` |
+| `av:<hex>` | the player's `GetActorValue` with the `ActorValueInfo` form of that form id. The form is looked up once by its id and accepted by its RTTI type, with stage (d)'s `AcceptById`, logged as `step=kit_av av:<id>:form=<0 or 1>:type=<rtti>:...:<used or refused>` | `what=av:<hex> reason=no_such_actor_value` |
+
+Lists: `kit_test` (thirty rows, no read of the game). The inventory and the quests come next, as `inventory` and
+`quests`.
+
+**How it runs.** The pattern is stage (d)'s:
+
+- On the main thread, `KitCollect` builds the shown page's screen (in `Toggle` before each kShow, and in `SendUpdate`
+  before each kUpdate).
+- On the menu's thread, `KitWrite` sets only what changed since the last read-back, and reads each change back.
+  `step=kit n=<k> update=<u> show=<0 or 1> page=<TAB>/<SUB> root=1 collected=1 changed=<c> set=<s> match=<m> missing=0
+  bar=<row> footer="..." rows="..."` is logged for n = 1 to 20, then every 20th, and on the first 20 problems.
+- At each new movie, `step=kit_movie id="<read>" expected="<ours>" match=yes` checks that the movie was staged from the
+  same pages. Then come `step=listen name=root ... added=1` and `step=listen name=fo4sfClose ... button=1 ... added=1`.
+- The state is kept while the page is closed, so the page opens where it was left. It is the main tab, each tab's
+  sub-tab, and each page's selection and first row on screen.
+
+**Keys** (`KitUp` to `KitNextTab` in the ini, up to three each, never `Key` or `SnapshotKey`). They are read by the key
+thread every 30 ms, only while the page is open and the game is in front. Each press is logged as `step=kit_key vk=<vk>
+action=<a> index=0 moved=<0 or 1> page=<TAB>/<SUB> selected=<n>`, and an update follows at once. Up and Down repeat
+when held (after 420 ms, every 90 ms). No move wraps around.
+
+| Action | Default keys |
+| --- | --- |
+| selection up, down | Up arrow or W (`0x26,0x57`), Down arrow or S (`0x28,0x53`) |
+| sub-tab left, right | Left arrow or A (`0x25,0x41`), Right arrow or D (`0x27,0x44`) |
+| main tab left, right | Q (`0x51`), E (`0x45`) |
+| close | F10 (`Key`), as at every stage; the CLOSE button |
+
+*Which keys the game lets through at `0x9`:* the plugin reads the keyboard itself (`GetAsyncKeyState`), so it sees
+every key whatever the game does with it. The PC runs at `0x9` (FAL-216, FAL-272) showed that W does not move the
+player, that the game draws its own pointer, and that F10 and F11 reach the key thread. What the game *also* does with
+A, S, D, Q, E, the arrows, Tab and Esc while the page is open has not been seen. The owner's card records it (step 7
+and the report). Tab is not bound by default for that reason; `KitNextTab=0x45,0x09` adds it.
+
+**Clicks:**
+
+- One listener on the movie's root hears every click. It reads the event's `target`, then that object's `name`
+  (`step=kit_click n=<k> args=1 target=1 name=<name> action=<a> ...`).
+- A name ending in a number moves the kit: `fo4sfTab*`, `fo4sfTabMark*` and `fo4sfTabHit*` pick a main tab; the
+  `fo4sfSub*` names pick a sub-tab; the row names select that row.
+- CLOSE keeps stage (d)'s own listener and handler, the proven path.
+
+**Not verified until the session:**
+
+- that `visible` sets and reads back on our sprites and fields;
+- that a click event's `target` carries the instance name, for a text field and for a hit sprite;
+- that the root's listener hears clicks that land on its children;
+- what the keys do in the game at `0x9`;
+- how the layout looks at the PC's resolution (ShowAll keeps the 16:9 stage).
+
+**The look (part 3, next):** scan lines, a slight glow, the list highlight, and a better font. The colour is already
+one setting. The planned route for the font and the Vault Boy pictures:
+
+- **Font:** ours, generated like this one. Nothing from either game goes into Git, the kit runs with or without
+  Fallout 4 installed, and the tests stay byte-exact.
+- **Vault Boy pictures:** they are Fallout 4's art and cannot be drawn by us. They come only by converting the
+  player's own Fallout 4 interface files on their PC, as the port does for everything else, after the PC survey names
+  those files.
+
 ## Build (PC)
 
 From a checkout at the PR head, in the PC's x64 environment:
@@ -248,7 +373,8 @@ Exit 0 leaves `FO4SFPipboyMenu.dll`, `FO4SFPipboyMenu.ini` and `build.json` (eve
 `-Out`. Nothing is installed. Exit 1 after `build.cmd exit 90` (configure) or `91` (build): see `xmake_output.txt`.
 
 Stage the plugin and movie, and check the plugin (stage (c): `stage <exp folder> --channel`; stage (d): `stage <exp
-folder> --page`; the movie keeps its name):
+folder> --page`; stage (e): `stage <exp folder> --kit`, from the same ini that is installed beside the dll; the movie
+keeps its name):
 
 ```
 python scripts/ui/make_pipboy_probe.py stage <exp folder>
@@ -260,8 +386,9 @@ python scripts/ui/make_pipboy_probe.py check <exp folder>\FO4SFPipboyProbe.esm
 Install:
 
 1. Copy `FO4SFPipboyMenu.dll`, `FO4SFPipboyMenu.ini` and `versionlib-1-16-244-0.bin` into
-   `<Starfield>\Data\SFSE\Plugins\`. Set `Stage=1`, `2`, `3` or `4` in that copy of the ini.
-2. Stages (b), (c) and (d): `python scripts/ui/pipboy_probe_install.py install --dir <exp folder> --starfield <game>`.
+   `<Starfield>\Data\SFSE\Plugins\`. Set `Stage=1`, `2`, `3`, `4` or `5` in that copy of the ini (at (e) its pages
+   must be those the movie was staged from: `step=kit_movie ... match=yes`).
+2. Stages (b) to (e): `python scripts/ui/pipboy_probe_install.py install --dir <exp folder> --starfield <game>`.
    This checks the stage, activates `FO4SFPipboyProbe.esm` and packs its `Data` tree into
    `FO4SFPipboyProbe - Main.ba2`, under its own record `Data\FO4SFPipboyProbe.install.json`; the installed
    experiment's `FO4SFExp.install.json` is not read or changed. A `plugin_toggle.py` hold makes it refuse, so run it
@@ -269,7 +396,7 @@ Install:
 
 Uninstall:
 
-1. Stages (b), (c) and (d): `python scripts/ui/pipboy_probe_install.py uninstall --starfield <game>`. This removes
+1. Stages (b) to (e): `python scripts/ui/pipboy_probe_install.py uninstall --starfield <game>`. This removes
    exactly what its record lists and the Plugins.txt line it added.
 2. Delete `FO4SFPipboyMenu.dll` and `FO4SFPipboyMenu.ini` from `Data\SFSE\Plugins\`. Delete
    `versionlib-1-16-244-0.bin` too, unless it was there before the session.
@@ -449,19 +576,43 @@ Take a screenshot while the menu is open after the fifth press, and one after th
 3. **Lines follow the game:** `step=page ... fields=8/8 set=8 match=8` lines whose `text=` changes with the game:
    `TIME` minutes move while the page is open, `HEALTH` after damage, `CELL` after the player crosses a cell or a door,
    `POSITION` and `DAYS PASSED` on tab 2. The controls (console, PC helper only): `player.getav health`,
-   `player.getav carryweight`, `player.getlevel`, `player.getpos x` (`getglobalvalue gamehour` does not take that name in
-   this console; TIME is checked by its minutes moving).
+   `player.getav carryweight`, `player.getlevel`, `player.getpos x` (`getglobalvalue gamehour` answers "not found for parameter Global" in
+   this console; use `getglobalvalue 00000039` for days passed and `00000038` for the hour, PC run 11 Nov; TIME's minutes also move).
 4. **NEXT TAB:** each click logs `step=click button=tab` and the next `step=page` shows the other tab (`tab=1` and
    `TAB 2 OF 2: DATA`, then back).
 5. **CLOSE:** `step=click button=close`, `step=close ... by=button was_open=1 sent=hide`, `step=state ... open=0
    expected=0 match=yes`; F10 then opens the page again.
 6. `RADS NOT INSTALLED` without the rads probe; with it (FAL-213), `RADS <n>` equal to `player.getav FO4SF_Rads`.
 
+### PASS at (e), `Stage=5` (the owner's card: `docs/spikes/pipboy-page-kit-owner-card.md`)
+
+1. Everything in (b), with `stage=5` and `step=ready stage=e`. Before it come:
+   - `step=load_e flag_sets=0x9 snapshot_key=0x7a`;
+   - six `step=kit_keys` lines and seven `step=page_def` lines;
+   - `step=pages pages=7 tabs=5 signature="FO4SF KIT 1 16 STAT,INV,DATA,MAP,RADIO"`;
+   - `step=channel_ids` and `step=page_ids` as at (d), with 34 `step=id` lines.
+2. At the first open:
+   - stage (d)'s `step=page_strings self_test=ok`, `step=page_actor_values ... get_actor_value_slot=0x01`,
+     `step=page_forms`, `step=page_globals from=0x28 ...` and `step=page_globals value_at=<offset>`;
+   - `step=kit_movie ... match=yes`;
+   - `step=listen name=root ... added=1` and `step=listen name=fo4sfClose ... button=1 ... added=1`;
+   - `step=kit n=1 update=0 show=1 ... missing=0`, with `match` equal to `changed`.
+3. **Keys:** `step=kit_key vk=0x53 action=down ... moved=1` and the like. The next `step=kit` line shows the bar on
+   the next row (`bar=<n>`, the `>` in `rows=`). D shows `page=STAT/SPECIAL`, with seven `step=kit_av av:2c2` ...
+   `av:2c8` lines, each `:used`, and seven numbers equal to `player.getav strength` ... `player.getav luck`.
+4. **Scrolling:** on DATA / KIT TEST, holding S takes `rows=` past `TEST ROW 16` with the bar still on screen, and
+   it stops at `TEST ROW 30`.
+5. **Clicks:** `step=kit_click ... target=1 name=fo4sfRowHit<i>` (or another of that row's names) `action=row ...
+   moved=1`, and `name=fo4sfTab3` or `fo4sfTabHit3` `action=tab` for MAP.
+6. **CLOSE:** `step=click button=close`, `step=close ... sent=hide` and `step=state ... match=yes`. F10 then opens the
+   page where it was left.
+7. The owner's report of what Tab and Esc did is a finding, not a pass or a fail.
+
 ### What each failure line means
 
 | Line | Meaning | Next |
 | --- | --- | --- |
-| `step=off` | `Stage` is not 1, 2, 3 or 4 in the ini next to the dll | set it |
+| `step=off` | `Stage` is not 1 to 5 in the ini next to the dll | set it |
 | `refuse step=version` | the runtime is not 1.16.244.0 | nothing to do on that runtime |
 | `refuse step=ini key=` | `Key` is 0 or above 0xFE | fix the ini |
 | `refuse step=image` | the game image does not look like a PE32+ executable | report |
@@ -502,9 +653,17 @@ Take a screenshot while the menu is open after the fifth press, and one after th
 | `refuse step=page what=actor_value_owner ...` or `what=get_actor_value ... slot0=... target0=... destructor=...` | (d): the player's ActorValueOwner was not found or its slot 0x00 is not the thunk to the destructor; every actor value is `?` | report the line: its slots and targets settle libxse's against SFSE's declaration |
 | `refuse step=object name=TESDataHandler ...` | (d): the data handler is not its type; only the form-list log is skipped | report the line |
 | `step=page_forms ... known=...:refused` or `avif_typed=0` | (d): that fixed form id gave no form (`form=0`) or another type (`type=`); its line prints `?`. `rads=not_installed` is `RADS NOT INSTALLED` | report the line; `avif_ids=` lists what the ids hold |
-| `step=page_globals from=0x28 ...` but no `value_at=` | (d): no slot of the logged bytes holds both globals in range and in step: `TIME ?`, `DAYS PASSED ?` | post the line whole: its hex and floats show where the value is |
+| `step=page_globals from=0x28 ...` but no `value_at=` | (d): no slot from +0x30 holds both globals in range and in step: `TIME ?`, `DAYS PASSED ?` | post the line whole: its hex and floats show where the value is |
 | `step=page_unknown what=<value> reason=<r>` | (d): one value could not be read, once per kind; its line shows `?` | report the line |
 | `step=page ... fields=0/8` | (d): `getChildByName` found none of the page's fields: the movie is not the `--page` one | re-stage with `--page` |
 | `step=listen name=<button> ... added=1` but no `step=click` on a click | (d): the click did not reach the movie | read `step=flags`: the page needs `0x9` |
+| `refuse step=pages line=<n> reason=<r> (the kit stays off)` | (e): line n of the ini is not a page line the kit reads | `python scripts/ui/make_pipboy_kit.py --check --ini <that ini>` names the problem |
+| `refuse step=ini kit_key=<action> ...` | (e): one of that action's keys is 0, above 0xFE, `Key` or `SnapshotKey` | fix the ini |
+| `step=kit_movie ... match=no` | (e): the movie was staged from other pages than those beside the dll | re-stage with `--kit` from the installed ini |
+| `step=kit ... missing=<n>` | (e): n names were not found: the movie is not the kit's | re-stage with `--kit` |
+| `step=kit ... changed=<c> match=<m>`, m below c | (e): a `text` or a `visible` did not read back; it is set again on the next update | report the line (`visible` is new at this stage) |
+| `step=listen name=root ... added=0` | (e): no listener on the root, so clicks do nothing; the keys still work | report the line |
+| `step=kit_click ... target=0` or `name=-` | (e): the click's event had no target or no name | report: one listener per object is the fallback |
+| `step=kit_av av:<id>:...:refused` | (e): that form id gave no `ActorValueInfo`; its row prints `?` | report the line |
 
 The probe changes no Starfield interface file, and nothing it makes goes into Git: no dll, no movie, no archive.
