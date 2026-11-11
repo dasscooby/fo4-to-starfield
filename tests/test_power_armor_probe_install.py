@@ -164,6 +164,19 @@ class PowerArmorProbeInstallTests(unittest.TestCase):
         self.assertIn("refusing to overwrite", str(code))
         self.assertEqual(self.read(PLUGIN), b"someone else's")
 
+    def test_prepacked_is_forwarded_unchanged_and_only_when_given(self):
+        """FAL-274: the launcher passes an existing archive; the wrapper hands it to exp_install.py and never builds."""
+        from unittest import mock
+        with mock.patch.object(pai, "installer", return_value=0) as inst:
+            self.run_main("install", "--dir", self.staged)
+            plain = inst.call_args[0][0]
+            self.run_main("install", "--dir", self.staged, "--prepacked", "C:/cache/kit.ba2")
+            packed = inst.call_args[0][0]
+        self.assertNotIn("--prepacked", plain)
+        self.assertEqual(packed[-2:], ["--prepacked", "C:/cache/kit.ba2"])
+        self.assertEqual(packed[:-2], plain)                                      # nothing else changes
+        self.assertIn("--pack", packed)
+
     def test_the_stage_needs_its_dir(self):
         code, _ = self.run_main("install")
         self.assertIn("needs --dir", str(code))
