@@ -239,7 +239,7 @@ class ToolTests(unittest.TestCase):
         check = self.run_tool("check", out / PLUGIN, self.sf, self.core, "--set", "fo4", "--shell", "plain")
         self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
         self.assertIn("records: Activator 5, Quest 1, ConstructibleObject 5", check.stdout)
-        self.assertIn("COBJ 00082E:FO4SFBuildPieces.esm makes 000806", check.stdout)       # recipe 5 = RecipeBase + 4, shell 5 = ShellBase + 4
+        self.assertIn('COBJ 00082E:FO4SFBuildPieces.esm "FO4 WoodCrate" makes 000806', check.stdout)       # recipe 5 = RecipeBase + 4, shell 5 = ShellBase + 4
         self.assertIn("cost 000B11 x1, sort 15", check.stdout)                             # piece 5: the cost cycle starts again
 
     def test_tab_files_the_recipes_under_a_vanilla_category_keyword(self):
@@ -262,6 +262,69 @@ class ToolTests(unittest.TestCase):
         wrong = self.run_tool("check", rep_ / PLUGIN, self.sf, self.core, "--category", "replace", "--tab", "furniture")
         self.assertEqual(wrong.returncode, 1)
 
+    def test_menu_reads_a_vanilla_variants_entry_whose_created_object_is_a_form_list(self):
+        r = self.run_tool("menu", self.sf, "--cobj", "co_Outpost_Furniture_BedList02_Beds")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("created object 000C10 OutpostFurnitureBedList02_Beds type FormList", r.stdout)
+        self.assertIn("FLST 2 item(s)", r.stdout)
+        self.assertIn("000C02 OutpostFurnitureBed01 [Furniture]", r.stdout)
+        self.assertIn("000C03 OutpostFurnitureBed02 [Furniture]", r.stdout)
+
+    def test_the_tabs_table_prints_a_sample_once(self):
+        r = self.run_tool("menu", self.sf)
+        crafting = r.stdout.split("000E01 OutpostCategoryCrafting: 2 / 0")[1].split("\n  0")[0]
+        self.assertEqual(crafting.count("sample 2E2F2C"), 1)
+
+    def test_workbench_and_filter_are_chosen_apart(self):
+        # workbench only: the template's filters stay; filter only: the template's workbench stays; both by editor id or by form id
+        for name, opts, want in (
+                ("wb", ["--workbench", "000E20"], "workbench 000E20, filters [000E02, 000E03]"),
+                ("fl", ["--filter", "OutpostCategoryFurniture"], "workbench 000E01, filters [000E21]"),
+                ("both", ["--workbench", "000E01", "--filter", "000E22"], "workbench 000E01, filters [000E22]"),
+                ("short", ["--workbench", "structures", "--filter", "000E21"], "workbench 000E20, filters [000E21]")):
+            out = self.build(f"b-sep-{name}", *opts)
+            c = self.run_tool("check", out / PLUGIN, self.sf, self.core, *opts)
+            self.assertEqual(c.returncode, 0, c.stdout + c.stderr)
+            self.assertIn(want, c.stdout)
+            self.assertIn("records: Furniture 4, Quest 1, ConstructibleObject 4", c.stdout)    # no keyword of our own
+            other = self.run_tool("check", out / PLUGIN, self.sf, self.core)                    # the plain variant must not pass for it
+            self.assertEqual(other.returncode, 1)
+        for bad in (["--workbench", "0E6A3E"], ["--filter", "Nothing"], ["--workbench", "000E20", "--tab", "structures"], ["--filter", "000E20", "--category", "add"]):
+            r = self.run_tool("build", self.sf, self.core, str(self.root / "b-sep-bad"), *bad)
+            self.assertEqual(r.returncode, 1, bad)
+            self.assertRegex(r.stderr, "KYWD named|their own choice")
+
+    def test_filter_own_is_a_keyword_of_our_own_with_a_full_name_under_the_chosen_workbench(self):
+        opts = ["--workbench", "000E20", "--filter", "own"]
+        out = self.build("b-own", *opts)
+        c = self.run_tool("check", out / PLUGIN, self.sf, self.core, *opts)
+        self.assertEqual(c.returncode, 0, c.stdout + c.stderr)
+        self.assertIn("workbench 000E20, filters [000801]", c.stdout)
+        self.assertIn("records: Keyword 1, Furniture 4, Quest 1, ConstructibleObject 4", c.stdout)
+        opts = ["--filter", "own"]
+        out2 = self.build("b-own2", *opts)
+        c2 = self.run_tool("check", out2 / PLUGIN, self.sf, self.core, *opts)
+        self.assertIn("workbench 000E01, filters [000801]", c2.stdout)
+        data = (out / PLUGIN).read_bytes()
+        self.assertIn(b"FO4 pieces", data)                                                      # the keyword's full name
+
+    def test_variants_are_one_recipe_whose_created_object_is_a_form_list_of_shells(self):
+        opts = ["--set", "fo4", "--variants"]
+        out = self.build("b-var", *opts)
+        c = self.run_tool("check", out / PLUGIN, self.sf, self.core, *opts)
+        self.assertEqual(c.returncode, 0, c.stdout + c.stderr)
+        self.assertIn("records: Furniture 5, Quest 1, FormList 2, ConstructibleObject 3", c.stdout)   # 5 shells, 3 recipes (2 walls, 1 crate)
+        self.assertIn('COBJ 00082A:FO4SFBuildPieces.esm "FO4 junk wall" makes 000852', c.stdout)       # recipe 1 makes form list 1
+        self.assertIn('COBJ 00082B:FO4SFBuildPieces.esm "FO4 pier shack wall" makes 000853', c.stdout)
+        self.assertIn('COBJ 00082C:FO4SFBuildPieces.esm "FO4 WoodCrate" makes 000806', c.stdout)       # a single piece: its shell, no list
+        self.assertIn('"FO4 junk wall" model', c.stdout)                                               # the shells take the group's name
+        self.assertNotIn('"FO4 JunkWall01"', c.stdout)
+        built = self.run_tool("build", self.sf, self.core, self.root / "b-var2", *opts).stdout
+        self.assertIn("5 pieces in 3 recipe(s)", built)
+        self.assertIn('recipe 1 00082A makes form list 000852 "FO4 junk wall" of 2 shells', built)
+        wrong = self.run_tool("check", out / PLUGIN, self.sf, self.core, "--set", "fo4")           # without --variants the same plugin fails
+        self.assertEqual(wrong.returncode, 1)
+
     def test_menu_prints_the_art_fields_and_the_tabs(self):
         r = self.run_tool("menu", self.sf)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -270,7 +333,7 @@ class ToolTests(unittest.TestCase):
         self.assertIn("fields of COBJ (ConstructibleObject):", r.stdout)
         self.assertIn("tabs (OutpostCategory keywords)", r.stdout)
         self.assertRegex(r.stdout, r"000E20 OutpostCategoryStructures: 0 / 0")
-        self.assertRegex(r.stdout, r"000E01 OutpostCategoryCrafting: 1 / 0")
+        self.assertRegex(r.stdout, r"000E01 OutpostCategoryCrafting: 2 / 0")
 
     def test_every_variant_builds_and_checks(self):
         for shell in ("clone", "plain"):
@@ -287,8 +350,8 @@ class ToolTests(unittest.TestCase):
     def test_the_recipes_are_the_templates_with_a_small_cost_and_the_shells_carry_the_cores_models(self):
         out = self.build("b-detail")
         check = self.run_tool("check", out / PLUGIN, self.sf, self.core).stdout.replace("\\", "/")       # Windows prints the model path with backslashes
-        self.assertIn("COBJ 00082A:FO4SFBuildPieces.esm makes 000802, workbench 000E01, filters [000E02, 000E03], cost 000B11 x1, sort 11", check)
-        self.assertIn("COBJ 00082D:FO4SFBuildPieces.esm makes 000805, workbench 000E01, filters [000E02, 000E03], cost 000B11 x2, sort 14", check)
+        self.assertIn('COBJ 00082A:FO4SFBuildPieces.esm "FO4 Crate01" makes 000802, workbench 000E01, filters [000E02, 000E03], cost 000B11 x1, sort 11', check)
+        self.assertIn('COBJ 00082D:FO4SFBuildPieces.esm "FO4 Locker03" makes 000805, workbench 000E01, filters [000E02, 000E03], cost 000B11 x2, sort 14', check)
         self.assertIn('"FO4 Crate01" model Meshes/Props/Crate01.nif (core 0A2002 FO4Core_stat_000a02_fallout4)', check)
         self.assertIn('"FO4 Locker03" model Meshes/Props/Locker03.nif (core 0A2006', check)
 
@@ -382,7 +445,8 @@ class StageTests(unittest.TestCase):
         self.assertEqual(plan["kind"], "build-pieces")
         self.assertEqual(plan["plugins"], [PLUGIN])
         self.assertEqual(sorted(plan["outputs"]), sorted([PLUGIN, "Data/Scripts/FO4SF_BPQuest.pex"]))
-        self.assertEqual(plan["variant"], {"shell": "clone", "category": "add", "tab": None, "set": None, "cobj": "co_Outpost_Crafting_WorkbenchIndustrialStation"})
+        self.assertEqual(plan["variant"], {"shell": "clone", "category": "add", "tab": None, "set": None, "cobj": "co_Outpost_Crafting_WorkbenchIndustrialStation",
+                                       "workbench": None, "filter": None, "variants": False})
         self.assertEqual([p["core_id"] for p in plan["pieces"]], [0x0A2002, 0x0A2003, 0x0A2005, 0x0A2006])
         self.assertEqual(plan["inputs"]["Starfield.esm"]["sha256"], mbp.wp.sha256(str(self.sf)))
         self.assertEqual(plan["inputs"]["core"]["sha256"], mbp.wp.sha256(str(self.core)))

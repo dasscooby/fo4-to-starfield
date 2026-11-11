@@ -11,6 +11,7 @@ usage:
       read only: every native the script needs, looked up in Starfield's base sources. Exit 1 when one is missing.
   python make_build_pieces.py stage --out <dir> [--starfield ..] [--core ..] [--compiler ..] [--content-resources ..]
                                      [--pieces a,b,c] [--shell clone|plain] [--category vanilla|add|replace] [--cobj ..]
+                                     [--tab ..] [--workbench <kywd>] [--filter <kywd|own>] [--variants] [--set fo4]
       1. dotnet/BuildPieces build + check against the Starfield.esm and core given (offline_check.txt);
       2. the Papyrus compile of FO4SF_BPQuest with the core ids put in (the ;COREIDS line);
       3. plan.json (SHA-256 of every file and of both inputs, the variant, the pieces) and README.txt. Built in a new
@@ -80,6 +81,12 @@ def variant_opts(a):
         o += ["--set", a.set]
     if a.tab:
         o += ["--tab", a.tab]
+    if a.workbench:
+        o += ["--workbench", a.workbench]
+    if a.filter:
+        o += ["--filter", a.filter]
+    if a.variants:
+        o += ["--variants"]
     return o
 
 
@@ -184,7 +191,8 @@ def stage(a):
         sys.exit(f"Starfield.esm or the core changed during the build, nothing published; attempt kept in {out}")
     plan = {"kind": "build-pieces", "version": 1, "plugins": [PLUGIN], "outputs": stage_files(out),
             "inputs": {"Starfield.esm": {"sha256": sf_before}, "core": {"name": os.path.basename(a.core), "sha256": core_before}},
-            "variant": {"shell": a.shell, "category": a.category, "tab": a.tab or None, "set": a.set or None, "cobj": a.cobj}, "pieces": pieces,
+            "variant": {"shell": a.shell, "category": a.category, "tab": a.tab or None, "set": a.set or None, "cobj": a.cobj,
+                         "workbench": a.workbench or None, "filter": a.filter or None, "variants": bool(a.variants)}, "pieces": pieces,
             "log": "<My Games>/Starfield/Logs/Script/User/FO4SFBP.0.log"}
     with open(os.path.join(out, "plan.json"), "w", encoding="utf-8") as f:
         json.dump(plan, f, indent=1)
@@ -192,7 +200,7 @@ def stage(a):
     with open(os.path.join(out, "README.txt"), "w", encoding="utf-8") as f:
         f.write(f"""Build pieces ({datetime.date.today().isoformat()}). docs/research/build-pieces.md
 {PLUGIN} (sha256 {plan['outputs'][PLUGIN]}): {len(pieces)} buildables for the outpost build menu, one recipe each (a copy of {a.cobj}),
-variant shell={a.shell} category={a.category} tab={a.tab or 'none'} set={a.set or 'none'}. Pieces: {names}.
+variant shell={a.shell} category={a.category} tab={a.tab or 'none'} workbench={a.workbench or 'template'} filter={a.filter or 'template'} variants={'yes' if a.variants else 'no'} set={a.set or 'none'}. Pieces: {names}.
 Master Starfield.esm only; adds records, overrides none; the installed core is not a master (its model paths were read at stage time).
 Checked against Starfield.esm {sf_before} and {os.path.basename(a.core)} {core_before}. Re-stage after a game or core update.
 Install (the owner's word, game closed; loose scripts are not read, the installer packs them into a ba2):
@@ -227,6 +235,9 @@ def main(argv=None):
         sp.add_argument("--pieces", default="", help="comma separated editor ids (* allowed) of core statics, 3 to 40 (default: the tool's four)")
         sp.add_argument("--set", default="", choices=("", "fo4"), help="a named set of core statics (fo4: junk walls, pier shack walls and roofs, sandbags, bed, table, crates, barrel)")
         sp.add_argument("--tab", default="", help="file the recipes under a vanilla outpost category keyword (structures, furniture, decorations, miscellaneous, storage, defenses or an editor id); needs --category add|replace")
+        sp.add_argument("--workbench", default="", help="the recipes' workbench keyword (a keyword editor id or 6 hex digits of its form id), chosen apart from the filter; not with --tab or --category add|replace")
+        sp.add_argument("--filter", default="", help="the recipes' only filter keyword (editor id, 6 hex digits, or 'own' = a keyword of our own with a full name); the template's workbench stays unless --workbench")
+        sp.add_argument("--variants", action="store_true", help="one recipe per group (junk walls 01..07, pier shack walls, roofs) whose created object is a form list of the group's shells")
         sp.add_argument("--shell", choices=("clone", "plain"), default="clone")
         sp.add_argument("--category", choices=("vanilla", "add", "replace"), default="vanilla")
         sp.add_argument("--cobj", default=DEFAULT_COBJ)

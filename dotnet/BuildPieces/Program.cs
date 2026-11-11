@@ -17,6 +17,10 @@
 //        BuildPieces core <core.esm> [--pieces a,b,c]               read only: the statics a build would use
 //        BuildPieces pieces <core.esm> [--pieces a,b,c]             the same choice as JSON (the stager reads it)
 //        BuildPieces build <Starfield.esm> <core.esm> <out dir> [--pieces ..] [--shell clone|plain] [--category vanilla|add|replace] [--cobj ..]
+//                [--workbench <kywd>] [--filter <kywd|own>]   the workbench keyword and the filter chosen separately (a keyword editor id or its
+//                         6 hex digits; own = a KYWD of our own with a full name, FO4SF_BPCategory); the template's stays for the one not named
+//                [--variants]   with --set fo4: the junk walls 01..07, the pier shack walls and the roofs are ONE recipe each whose created
+//                         object is a form list of their shells (FO4SF_BPList1.., ids 852..), as the vanilla bed entries
 //        BuildPieces check <plugin> <Starfield.esm> <core.esm> [same options]     exit 1 on a mismatch
 //        BuildPieces fixture <out dir>              a synthetic Starfield.esm and core (out/Starfield.esm, out/FO4TerrainCore.esm)
 using System.Text;
@@ -40,8 +44,10 @@ try
         rest.RemoveRange(i, 2);
         return v;
     }
-    var o = new BuildPieces.Options(Opt("--cobj") ?? BuildPieces.DefaultCobj, Opt("--shell") ?? "clone", Opt("--category") ?? "vanilla", Opt("--pieces"), Opt("--tab"), Opt("--set"));
+    bool Flag(string name) => rest.Remove(name);
+    var o = new BuildPieces.Options(Opt("--cobj") ?? BuildPieces.DefaultCobj, Opt("--shell") ?? "clone", Opt("--category") ?? "vanilla", Opt("--pieces"), Opt("--tab"), Opt("--set"), Opt("--workbench"), Opt("--filter"), Flag("--variants"));
     if (o.Set != null && !BuildPieces.Sets.ContainsKey(o.Set)) throw new BuildPieces.Refusal("--set is one of: " + string.Join(", ", BuildPieces.Sets.Keys));
+    if ((o.Workbench != null || o.Filter != null) && (o.Tab != null || o.Category != "vanilla")) throw new BuildPieces.Refusal("--workbench and --filter are their own choice: not together with --tab or --category add|replace");
     if (o.Shell != "clone" && o.Shell != "plain") throw new BuildPieces.Refusal("--shell is clone or plain");
     if (o.Category != "vanilla" && o.Category != "add" && o.Category != "replace") throw new BuildPieces.Refusal("--category is vanilla, add or replace");
     if (rest.Count == 2 && rest[0] == "menu") return BuildPieces.Menu(rest[1], o);
@@ -57,14 +63,20 @@ catch (BuildPieces.Refusal r)
     return 1;
 }
 Console.Error.WriteLine("usage: BuildPieces menu <Starfield.esm> | core <core.esm> | pieces <core.esm> | build <Starfield.esm> <core.esm> <out dir> | " +
-                        "check <plugin> <Starfield.esm> <core.esm> | fixture <out dir>   [--pieces a,b,c] [--shell clone|plain] [--category vanilla|add|replace] [--tab <structures|furniture|decorations|miscellaneous|storage|defenses|keyword editor id>] [--set fo4] [--cobj <editor id>]");
+                        "check <plugin> <Starfield.esm> <core.esm> | fixture <out dir>   [--pieces a,b,c] [--shell clone|plain] [--category vanilla|add|replace] [--workbench <keyword>] [--filter <keyword|own>] [--variants] [--tab <structures|furniture|decorations|miscellaneous|storage|defenses|keyword editor id>] [--set fo4] [--cobj <editor id>]");
 return 2;
 
 static class BuildPieces
 {
     public class Refusal(string m) : Exception(m);
-    public record Options(string Cobj, string Shell, string Category, string? Pieces, string? Tab = null, string? Set = null);
+    public record Options(string Cobj, string Shell, string Category, string? Pieces, string? Tab = null, string? Set = null, string? Workbench = null, string? Filter = null, bool Variants = false);
     public record Piece(int N, uint CoreId, string Edid, string Model, string Name);
+    // one recipe of the menu: a single piece, or (--variants) several shells in one form list (the menu's "VARIANTS" entry); ListIdx -1 = no list
+    public record Entry(int K, string Name, List<Piece> Members, int ListIdx)
+    {
+        public bool IsList => ListIdx >= 0;
+        public FormKey Key => IsList ? Own(ListBase + (uint)ListIdx) : Own(ShellBase + (uint)(Members[0].N - 1));
+    }
 
     public const string DefaultCobj = "co_Outpost_Crafting_WorkbenchIndustrialStation";
     const StarfieldRelease Release = StarfieldRelease.Starfield;
@@ -73,7 +85,7 @@ static class BuildPieces
 
     // the layout (scripts/planet/FO4SF_BPQuest.psc carries the quest id; the shells and recipes are found by the game's menu)
     public const int MaxPieces = 40;                                                   // room for 40 shells and 40 recipes
-    const uint QuestId = 0x800, CategoryId = 0x801, ShellBase = 0x802, RecipeBase = 0x82A;   // RecipeBase = ShellBase + MaxPieces
+    const uint QuestId = 0x800, CategoryId = 0x801, ShellBase = 0x802, RecipeBase = 0x82A, ListBase = 0x852;   // RecipeBase = ShellBase + MaxPieces
     const string QuestEdid = "FO4SF_BPQuest", Script = "FO4SF_BPQuest", CategoryEdid = "FO4SF_BPCategory", CategoryName = "FO4 pieces";
     static readonly uint[] Counts = { 1, 1, 2, 2 };                       // the small cost of piece 1..4, repeating
     static uint Cost(int n) => Counts[(n - 1) % Counts.Length];
@@ -83,6 +95,42 @@ static class BuildPieces
         ["fo4"] = new[] { "junkwall01", "junkwall02", "junkwall03", "junkwall04", "junkwall05", "junkwall06", "junkwall07", "junkwallcorner01", "junkwalldoor01", "junkwallgate01",
                           "piershackwall*", "piershackroof*", "sandbagsingle01", "bedmetal01", "cafetable01", "woodcrate", "cratelarge01", "metalbarrel01" },
     };
+    public const int MaxLists = 14;
+    // --variants: pieces that share one recipe, by core editor id (first match wins); the shells all take the group's name
+    static readonly (string Name, Regex Match)[] VariantGroups =
+    {
+        ("FO4 junk wall", new Regex("^(FO4Core_)?junkwall0[1-7]$", RegexOptions.IgnoreCase)),
+        ("FO4 pier shack wall", new Regex("^(FO4Core_)?piershackwall", RegexOptions.IgnoreCase)),
+        ("FO4 pier shack roof", new Regex("^(FO4Core_)?piershackroof", RegexOptions.IgnoreCase)),
+    };
+    static List<Entry> Entries(List<Piece> pieces, Options o)
+    {
+        var res = new List<Entry>();
+        if (!o.Variants)
+            return pieces.Select((p, i) => new Entry(i + 1, p.Name, new List<Piece> { p }, -1)).ToList();
+        var groups = new Dictionary<string, List<Piece>>();
+        var order = new List<object>();
+        foreach (var p in pieces)
+        {
+            var g = VariantGroups.FirstOrDefault(x => x.Match.IsMatch(p.Edid));
+            if (g.Name == null) { order.Add(p); continue; }
+            if (!groups.TryGetValue(g.Name, out var l)) { groups[g.Name] = l = new List<Piece>(); order.Add(g.Name); }
+            l.Add(p with { Name = g.Name });
+        }
+        int k = 0, li = 0;
+        foreach (var x in order)
+        {
+            k++;
+            if (x is Piece sp) res.Add(new Entry(k, sp.Name, new List<Piece> { sp }, -1));
+            else
+            {
+                var m = groups[(string)x];
+                res.Add(m.Count > 1 ? new Entry(k, (string)x, m, li++) : new Entry(k, m[0].Name, m, -1));
+            }
+        }
+        if (li > MaxLists) throw new Refusal($"{li} form lists: at most {MaxLists}");
+        return res;
+    }
     static readonly Dictionary<string, string> Tabs = new(StringComparer.OrdinalIgnoreCase)
     {
         ["structures"] = "OutpostCategoryStructures", ["furniture"] = "OutpostCategoryFurniture", ["decorations"] = "OutpostCategoryDecorations",
@@ -222,6 +270,11 @@ static class BuildPieces
         var rec = sf.EnumerateMajorRecords().FirstOrDefault(r => r.FormKey == made);
         Console.WriteLine($"  created object {Hex(made)} {N(made)} type {rec?.GetType().Name.Replace("BinaryOverlay", "") ?? "not in this file"}");
         if (rec is IFurnitureGetter fu) Console.WriteLine($"    FURN bench {fu.BenchType}, keywords [{string.Join(", ", fu.Keywords?.Select(k => N(k.FormKey)) ?? Enumerable.Empty<string>())}], model {fu.Model?.File}, scripts [{string.Join(", ", fu.VirtualMachineAdapter?.Scripts.Select(s => s.Name) ?? Array.Empty<string>())}], components {fu.Components?.Count ?? 0}");
+        if (rec is IFormListGetter fli)
+        {
+            Console.WriteLine($"    FLST {fli.Items.Count} item(s) (a VARIANTS entry's created object):");
+            foreach (var it in fli.Items) Console.WriteLine($"      {Hex(it.FormKey)} {N(it.FormKey)} [{(sf.EnumerateMajorRecords().FirstOrDefault(r => r.FormKey == it.FormKey)?.GetType().Name.Replace("BinaryOverlay", "") ?? "not in this file")}]");
+        }
         if (rec is IActivatorGetter ac) Console.WriteLine($"    ACTI keywords [{string.Join(", ", ac.Keywords?.Select(k => N(k.FormKey)) ?? Enumerable.Empty<string>())}], model {ac.Model?.File}, scripts [{string.Join(", ", ac.VirtualMachineAdapter?.Scripts.Select(s => s.Name) ?? Array.Empty<string>())}], components {ac.Components?.Count ?? 0}");
         // where a station's picture comes from is not known offline: print every set field of the created object and of the COBJ,
         // and the records that the art-like ones (icon, image, art, material, texture, menu, preview) point to
@@ -250,7 +303,7 @@ static class BuildPieces
             var wbs = sf.ConstructibleObjects.Where(x => x.WorkbenchKeyword.FormKey == k.FormKey).ToList();
             var fil = sf.ConstructibleObjects.Where(x => L(x.RecipeFilters).Any(f => f.FormKey == k.FormKey)).ToList();
             Console.WriteLine($"  {Hex(k.FormKey)} {k.EditorID}: {wbs.Count} / {fil.Count}");
-            foreach (var x in wbs.Concat(fil).Distinct().OrderBy(x => x.MenuArtObject.IsNull ? 1 : 0).ThenBy(x => x.FormKey.ID).Take(3))
+            foreach (var x in wbs.Concat(fil).DistinctBy(x => x.FormKey).OrderBy(x => x.MenuArtObject.IsNull ? 1 : 0).ThenBy(x => x.FormKey.ID).Take(3))
                 Console.WriteLine($"    sample {Hex(x.FormKey)} {x.EditorID}: makes {N(x.CreatedObject.FormKey)}, filters [{string.Join(", ", L(x.RecipeFilters).Select(f => N(f.FormKey)))}], menu art {(x.MenuArtObject.IsNull ? "none" : N(x.MenuArtObject.FormKey))}, limit {(x.MaxBuildCountGlobal.IsNull ? "none" : N(x.MaxBuildCountGlobal.FormKey))}");
         }
         return 0;
@@ -303,22 +356,40 @@ static class BuildPieces
     }
     record CostComponent(FormKey Component);
 
-    // --tab: a vanilla outpost category keyword (a short name or an editor id) that the recipes are filed under instead of our own keyword
-    static FormKey? TabKey(IStarfieldModGetter sf, Options o)
+    // a keyword of Starfield.esm by short tab name, editor id or its 6 hex digits (a form id, load index ignored)
+    static FormKey Kw(IStarfieldModGetter sf, string tok, string flag)
     {
-        if (o.Tab == null) return null;
-        var edid = Tabs.GetValueOrDefault(o.Tab, o.Tab);
-        var hits = sf.Keywords.Where(k => string.Equals(k.EditorID, edid, StringComparison.OrdinalIgnoreCase)).ToList();
-        if (hits.Count != 1) throw new Refusal($"{hits.Count} KYWD named {edid} in Starfield.esm (one needed): --tab is {string.Join(", ", Tabs.Keys)} or a keyword editor id");
-        if (o.Category == "vanilla") throw new Refusal("--tab needs --category add or replace (vanilla keeps the template's filters)");
+        var edid = Tabs.GetValueOrDefault(tok, tok);
+        var hits = Regex.IsMatch(tok, "^[0-9A-Fa-f]{6,8}$")
+            ? sf.Keywords.Where(k => k.FormKey.ID == (Convert.ToUInt32(tok, 16) & 0xFFFFFF)).ToList()
+            : sf.Keywords.Where(k => string.Equals(k.EditorID, edid, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (hits.Count != 1) throw new Refusal($"{hits.Count} KYWD named {edid} in Starfield.esm (one needed): {flag} is {string.Join(", ", Tabs.Keys)}, a keyword editor id or its form id (6 hex digits)");
         return hits[0].FormKey;
     }
 
-    // the keyword a recipe is filed under, as (workbench keyword, filters): replace = the tab replaces the template's workbench keyword AND
-    // its filters; add = the template's workbench keyword and filters stay and the tab is appended to the filters
-    static (FormKey Workbench, List<FormKey> Filters) Filing(IConstructibleObjectGetter t, Options o, FormKey? cat)
+    // --tab, or --filter <keyword>: the keyword the recipes are filed under instead of the template's filters (--filter own = our own keyword, made by Build)
+    static FormKey? TabKey(IStarfieldModGetter sf, Options o)
+    {
+        if (o.Tab != null)
+        {
+            var k = Kw(sf, o.Tab, "--tab");
+            if (o.Category == "vanilla") throw new Refusal("--tab needs --category add or replace (vanilla keeps the template's filters)");
+            return k;
+        }
+        return o.Filter != null && o.Filter != "own" ? Kw(sf, o.Filter, "--filter") : null;
+    }
+    static FormKey? WorkbenchKey(IStarfieldModGetter sf, Options o) => o.Workbench == null ? null : Kw(sf, o.Workbench, "--workbench");
+    // a keyword of our own: --category add|replace without a tab, or --filter own
+    static bool OwnKeyword(Options o, FormKey? tab) => o.Filter == "own" || (o.Category != "vanilla" && tab == null);
+
+    // the keyword a recipe is filed under, as (workbench keyword, filters): --workbench / --filter choose each separately (the template's
+    // stays for the one not named); --tab: replace = the tab replaces the template's workbench keyword AND its filters, add = the template's
+    // workbench keyword and filters stay and the tab is appended to the filters
+    static (FormKey Workbench, List<FormKey> Filters) Filing(IConstructibleObjectGetter t, Options o, FormKey? cat, FormKey? wb = null)
     {
         var tf = t.RecipeFilters.Select(f => f.FormKey).ToList();
+        if (o.Workbench != null || o.Filter != null)
+            return (wb ?? t.WorkbenchKeyword.FormKey, o.Filter != null ? new List<FormKey> { cat!.Value } : tf);
         if (cat == null) return (t.WorkbenchKeyword.FormKey, tf);
         if (o.Tab != null) return o.Category == "add" ? (t.WorkbenchKeyword.FormKey, tf.Append(cat.Value).ToList()) : (cat.Value, new List<FormKey> { cat.Value });
         return (t.WorkbenchKeyword.FormKey, o.Category == "add" ? tf.Append(cat.Value).ToList() : tf.Skip(1).Append(cat.Value).ToList());
@@ -331,6 +402,7 @@ static class BuildPieces
         var names = EditorIds(sf);
         var t = Template(sf, o.Cobj);
         var pieces = ChoosePieces(core, o);
+        var entries = Entries(pieces, o);
         var comp = PickComponent(t, names);
         var made = sf.EnumerateMajorRecords().FirstOrDefault(r => r.FormKey == t.CreatedObject.FormKey);
         if (o.Shell == "clone" && made is not (IFurnitureGetter or IActivatorGetter or IStaticGetter))
@@ -341,7 +413,8 @@ static class BuildPieces
         mod.ModHeader.Author = "fo4-to-starfield";
 
         FormKey? cat = TabKey(sf, o);
-        if (o.Category != "vanilla" && cat == null)
+        var wbKey = WorkbenchKey(sf, o);
+        if (OwnKeyword(o, cat))
         {
             var first = t.RecipeFilters.FirstOrDefault() ?? throw new Refusal($"{t.EditorID} has no recipe filter keyword to copy a category from");
             var kw = sf.Keywords.FirstOrDefault(k => k.FormKey == first.FormKey) ?? throw new Refusal($"the first filter {first.FormKey} is not a KYWD of Starfield.esm");
@@ -351,7 +424,7 @@ static class BuildPieces
             cat = own.FormKey;
         }
 
-        foreach (var p in pieces)
+        foreach (var p in entries.SelectMany(e => e.Members))
         {
             var shellKey = Own(ShellBase + (uint)(p.N - 1));
             switch (o.Shell == "clone" ? made : null)
@@ -375,19 +448,29 @@ static class BuildPieces
                     mod.Activators.Add(new Mutagen.Bethesda.Starfield.Activator(shellKey, Release) { EditorID = $"FO4SF_BPShell{p.N}", Name = p.Name, Model = new Model { File = p.Model } });
                     break;
             }
-            var rc = t.Duplicate(Own(RecipeBase + (uint)(p.N - 1)));
-            rc.EditorID = $"FO4SF_BPRecipe{p.N}";
-            rc.CreatedObject.SetTo(shellKey);
-            rc.Description = p.Name;
-            rc.MenuSortOrder = t.MenuSortOrder + p.N;
+        }
+
+        foreach (var e in entries)
+        {
+            if (e.IsList)
+            {
+                var fl = new FormList(e.Key, Release) { EditorID = $"FO4SF_BPList{e.ListIdx + 1}" };
+                foreach (var m in e.Members) fl.Items.Add(new FormLink<IStarfieldMajorRecordGetter>(Own(ShellBase + (uint)(m.N - 1))));
+                mod.FormLists.Add(fl);
+            }
+            var rc = t.Duplicate(Own(RecipeBase + (uint)(e.K - 1)));
+            rc.EditorID = $"FO4SF_BPRecipe{e.K}";
+            rc.CreatedObject.SetTo(e.Key);
+            rc.Description = e.Name;
+            rc.MenuSortOrder = t.MenuSortOrder + e.K;
             rc.ConstructableComponents = new ExtendedList<ConstructibleObjectComponent>
             {
-                new ConstructibleObjectComponent { Component = new FormLink<IItemGetter>(comp.Component), RequiredCount = Cost(p.N) },
+                new ConstructibleObjectComponent { Component = new FormLink<IItemGetter>(comp.Component), RequiredCount = Cost(e.K) },
             };
             rc.VirtualMachineAdapter = null;
-            if (cat != null)
+            if (cat != null || wbKey != null)
             {
-                var (wb, fl) = Filing(t, o, cat);
+                var (wb, fl) = Filing(t, o, cat, wbKey);
                 rc.WorkbenchKeyword.SetTo(wb);
                 var filters = new ExtendedList<IFormLinkGetter<IKeywordGetter>>();
                 foreach (var f in fl) filters.Add(new FormLink<IKeywordGetter>(f));
@@ -405,7 +488,7 @@ static class BuildPieces
         q.VirtualMachineAdapter = new QuestAdapter { Version = 6, ObjectFormat = 2, ExtraBindDataVersion = 3, Script = new ScriptEntry { Name = "", Flags = ScriptEntry.Flag.Local } };
         q.VirtualMachineAdapter.Scripts.Add(new ScriptEntry { Name = Script, Flags = ScriptEntry.Flag.Local });
         mod.Quests.Add(q);
-        mod.ModHeader.Stats.NextFormID = 0x860;
+        mod.ModHeader.Stats.NextFormID = 0x860;   // 0x852..0x85F: the form lists (MaxLists)
         if (!mod.ModHeader.MasterReferences.Any(m => m.Master == SfEsm)) mod.ModHeader.MasterReferences.Add(new MasterReference { Master = SfEsm });
 
         Directory.CreateDirectory(outDir);
@@ -420,8 +503,12 @@ static class BuildPieces
             File.Move(tmp, path, overwrite: true);
         }
         finally { if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, true); }
-        Console.WriteLine($"wrote {path} ({new FileInfo(path).Length:N0} bytes): {pieces.Count} pieces, shell {o.Shell}, category {o.Category}{(o.Tab != null ? " tab " + o.Tab : "")}, template COBJ {t.EditorID} {Hex(t.FormKey)}, cost {names.GetValueOrDefault(comp.Component, "?")} x{string.Join(",", Enumerable.Range(1, pieces.Count).Select(i => Cost(i)))}");
-        foreach (var p in pieces) Console.WriteLine($"  piece {p.N}: shell {ShellBase + p.N - 1:X6} recipe {RecipeBase + p.N - 1:X6} <- core {p.CoreId:X6} {p.Edid} model {p.Model}");
+        Console.WriteLine($"wrote {path} ({new FileInfo(path).Length:N0} bytes): {pieces.Count} pieces in {entries.Count} recipe(s), shell {o.Shell}, category {o.Category}{(o.Tab != null ? " tab " + o.Tab : "")}{(o.Workbench != null ? " workbench " + o.Workbench : "")}{(o.Filter != null ? " filter " + o.Filter : "")}{(o.Variants ? " variants" : "")}, template COBJ {t.EditorID} {Hex(t.FormKey)}, cost {names.GetValueOrDefault(comp.Component, "?")} x{string.Join(",", entries.Select(e => Cost(e.K)))}");
+        foreach (var e in entries)
+        {
+            if (e.IsList) Console.WriteLine($"  recipe {e.K} {RecipeBase + e.K - 1:X6} makes form list {e.Key.ID:X6} \"{e.Name}\" of {e.Members.Count} shells");
+            foreach (var p in e.Members) Console.WriteLine($"  piece {p.N}: shell {ShellBase + p.N - 1:X6} recipe {RecipeBase + e.K - 1:X6} <- core {p.CoreId:X6} {p.Edid} model {p.Model}");
+        }
         return 0;
     }
 
@@ -434,6 +521,7 @@ static class BuildPieces
         var t = Template(sf, o.Cobj);
         var names = EditorIds(sf);
         var pieces = ChoosePieces(core, o);
+        var entries = Entries(pieces, o);
         var comp = PickComponent(t, names);
         var styles = new Cache<IModMasterStyledGetter, ModKey>(x => x.ModKey);
         styles.Set(new KeyedMasterStyle(SfEsm, MasterStyle.Full));
@@ -449,9 +537,11 @@ static class BuildPieces
         var foreign = mod.EnumerateMajorRecords().Where(r => r.FormKey.ModKey != Plugin).Select(r => r.FormKey.ToString()).ToList();
         Need(foreign.Count == 0, $"records of another plugin (overrides): {string.Join(", ", foreign)}");
         var tabKey = TabKey(sf, o);
-        int own = o.Category == "vanilla" || tabKey != null ? 0 : 1;
-        int want = 1 + pieces.Count * 2 + own;
-        Need(mod.EnumerateMajorRecords().Count() == want, $"not exactly {want} records ({pieces.Count} shells, {pieces.Count} COBJ, 1 QUST{(own == 0 ? "" : ", 1 KYWD")})");
+        var wbWant0 = WorkbenchKey(sf, o);
+        int own = OwnKeyword(o, tabKey) ? 1 : 0;
+        int lists = entries.Count(e => e.IsList);
+        int want = 1 + pieces.Count + entries.Count + lists + own;
+        Need(mod.EnumerateMajorRecords().Count() == want, $"not exactly {want} records ({pieces.Count} shells, {entries.Count} COBJ, {lists} form list(s), 1 QUST{(own == 0 ? "" : ", 1 KYWD")})");
 
         FormKey? catKey = tabKey;
         if (own == 1)
@@ -460,7 +550,7 @@ static class BuildPieces
             Need(k?.EditorID == CategoryEdid, $"no KYWD {CategoryEdid} at {Own(CategoryId)}");
             if (k != null) catKey = k.FormKey;
         }
-        foreach (var p in pieces)
+        foreach (var p in entries.SelectMany(e => e.Members))
         {
             var shellKey = Own(ShellBase + (uint)(p.N - 1));
             var shell = mod.EnumerateMajorRecords().FirstOrDefault(r => r.FormKey == shellKey);
@@ -479,18 +569,28 @@ static class BuildPieces
             Need(name == p.Name, $"shell {p.N} name {name} is not {p.Name}");
             Need(scripts == 0, $"shell {p.N} carries a script");
             if (o.Shell == "plain") Need(shell is IActivatorGetter, $"shell {p.N} is not an Activator");
-            var rc = mod.ConstructibleObjects.FirstOrDefault(c => c.FormKey == Own(RecipeBase + (uint)(p.N - 1)));
-            Need(rc?.EditorID == $"FO4SF_BPRecipe{p.N}", $"no COBJ FO4SF_BPRecipe{p.N}");
+        }
+        foreach (var e in entries)
+        {
+            if (e.IsList)
+            {
+                var fl = mod.FormLists.FirstOrDefault(x => x.FormKey == e.Key);
+                Need(fl?.EditorID == $"FO4SF_BPList{e.ListIdx + 1}", $"no FLST FO4SF_BPList{e.ListIdx + 1} at {e.Key}");
+                Need(fl != null && fl.Items.Select(i => i.FormKey).SequenceEqual(e.Members.Select(m => Own(ShellBase + (uint)(m.N - 1)))), $"form list {e.ListIdx + 1} is not the shells [{string.Join(", ", e.Members.Select(m => m.N))}]");
+            }
+            var p = e.Members[0];
+            var rc = mod.ConstructibleObjects.FirstOrDefault(c => c.FormKey == Own(RecipeBase + (uint)(e.K - 1)));
+            Need(rc?.EditorID == $"FO4SF_BPRecipe{e.K}", $"no COBJ FO4SF_BPRecipe{e.K}");
             if (rc == null) continue;
-            Need(rc.CreatedObject.FormKey == shellKey, $"recipe {p.N} does not make shell {p.N}");
-            var (wbWant, filtWant) = Filing(t, o, catKey);
-            Need(rc.WorkbenchKeyword.FormKey == wbWant, $"recipe {p.N} workbench keyword is not {Hex(wbWant)} (the template's {Hex(t.WorkbenchKeyword.FormKey)}{(o.Tab != null && o.Category == "replace" ? ", replaced by the tab" : "")})");
-            Need(rc.MaxBuildCountGlobal.FormKey == t.MaxBuildCountGlobal.FormKey, $"recipe {p.N} build limit is not the template's");
-            Need(rc.ConstructableComponents.Count == 1 && rc.ConstructableComponents[0].Component.FormKey == comp.Component && rc.ConstructableComponents[0].RequiredCount == Cost(p.N),
-                 $"recipe {p.N} cost is not {names.GetValueOrDefault(comp.Component, "?")} x{Cost(p.N)}");
+            Need(rc.CreatedObject.FormKey == e.Key, $"recipe {e.K} does not make {(e.IsList ? "form list " + (e.ListIdx + 1) : "shell " + p.N)}");
+            var (wbWant, filtWant) = Filing(t, o, catKey, wbWant0);
+            Need(rc.WorkbenchKeyword.FormKey == wbWant, $"recipe {e.K} workbench keyword is not {Hex(wbWant)} (the template's {Hex(t.WorkbenchKeyword.FormKey)}{(o.Tab != null && o.Category == "replace" ? ", replaced by the tab" : "")})");
+            Need(rc.MaxBuildCountGlobal.FormKey == t.MaxBuildCountGlobal.FormKey, $"recipe {e.K} build limit is not the template's");
+            Need(rc.ConstructableComponents.Count == 1 && rc.ConstructableComponents[0].Component.FormKey == comp.Component && rc.ConstructableComponents[0].RequiredCount == Cost(e.K),
+                 $"recipe {e.K} cost is not {names.GetValueOrDefault(comp.Component, "?")} x{Cost(e.K)}");
             var filters = rc.RecipeFilters.Select(f => f.FormKey).ToList();
-            Need(filters.SequenceEqual(filtWant), $"recipe {p.N} filters are not [{string.Join(", ", filtWant.Select(Hex))}]");
-            Console.WriteLine($"    COBJ {rc.FormKey} makes {Hex(rc.CreatedObject.FormKey)}, workbench {Hex(rc.WorkbenchKeyword.FormKey)}, filters [{string.Join(", ", filters.Select(Hex))}], cost {Hex(comp.Component)} x{rc.ConstructableComponents.FirstOrDefault()?.RequiredCount}, sort {rc.MenuSortOrder}");
+            Need(filters.SequenceEqual(filtWant), $"recipe {e.K} filters are not [{string.Join(", ", filtWant.Select(Hex))}]");
+            Console.WriteLine($"    COBJ {rc.FormKey} \"{e.Name}\" makes {Hex(rc.CreatedObject.FormKey)}, workbench {Hex(rc.WorkbenchKeyword.FormKey)}, filters [{string.Join(", ", filters.Select(Hex))}], cost {Hex(comp.Component)} x{rc.ConstructableComponents.FirstOrDefault()?.RequiredCount}, sort {rc.MenuSortOrder}");
         }
         var qq = mod.Quests.FirstOrDefault(x => x.FormKey == Own(QuestId));
         Need(qq?.EditorID == QuestEdid, $"no QUST {QuestEdid}");
@@ -539,6 +639,18 @@ static class BuildPieces
             new ConstructibleObjectComponent { Component = new FormLink<IItemGetter>(ironRes.FormKey), RequiredCount = 3 },
         };
         sf.ConstructibleObjects.Add(c);
+        // a vanilla VARIANTS entry: a recipe whose created object is a form list (read with `menu --cobj co_Outpost_Furniture_BedList02_Beds`)
+        var bed1 = new Furniture(S(0x000C02), Release) { EditorID = "OutpostFurnitureBed01", Name = "Bed", Model = new Model { File = "Props\\Bed01.nif" } };
+        var bed2 = new Furniture(S(0x000C03), Release) { EditorID = "OutpostFurnitureBed02", Name = "Bunk", Model = new Model { File = "Props\\Bed02.nif" } };
+        sf.Furniture.Add(bed1); sf.Furniture.Add(bed2);
+        var bedList = new FormList(S(0x000C10), Release) { EditorID = "OutpostFurnitureBedList02_Beds" };
+        bedList.Items.Add(new FormLink<IStarfieldMajorRecordGetter>(bed1.FormKey)); bedList.Items.Add(new FormLink<IStarfieldMajorRecordGetter>(bed2.FormKey));
+        sf.FormLists.Add(bedList);
+        var cb = new ConstructibleObject(S(0x2E3000), Release) { EditorID = "co_Outpost_Furniture_BedList02_Beds", MenuSortOrder = 20 };
+        cb.CreatedObject.SetTo(bedList.FormKey);
+        cb.WorkbenchKeyword.SetTo(wb.FormKey);
+        cb.RecipeFilters = new ExtendedList<IFormLinkGetter<IKeywordGetter>> { new FormLink<IKeywordGetter>(f1.FormKey) };
+        sf.ConstructibleObjects.Add(cb);
         var path = Path.Combine(outDir, "Starfield.esm");
         sf.BeginWrite.ToPath(path).WithNoLoadOrder().Write();
 
