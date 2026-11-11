@@ -13,7 +13,8 @@ usage:
          ("optional") and logs "na"; then the script itself;
          The entry kit (FAL-361, FO4SF_PAEntryQuest) is built the same way. --with-hand keeps the by-hand quest
          FO4SF_PAHandQuest start game enabled (off by default: it and the entry quest would both move the player and talk);
-         --frame-art / --piece-art copy a vanilla ARMO into the entry kit's frame / pieces (the look; none by default).
+         --frame-art / --piece-art copy a vanilla ARMO into the entry kit's frame / pieces (defaults Spacesuit_Mark1_Body /
+         Spacesuit_Mark1_Helmet: an ARMO with no armature cannot be equipped, PC run of #733); `none` only for offline tests.
       3. plan.json (SHA-256 of every file, of Starfield.esm, the optional readings' fate) and README.txt. Built in a new
          <out>.partial-<time>-<pid> and renamed to <out> only when every step passed; an existing <out> is refused.
   python make_power_armor_probe.py log [--file <FO4SFPAProbe.0.log>]
@@ -49,6 +50,8 @@ HAND_PSC = os.path.join(HERE, HAND_SCRIPT + ".psc")
 ENTRY_SCRIPT = "FO4SF_PAEntryQuest"      # the entry by script (FAL-361): same plugin, its own quest and script
 ENTRY_PSC = os.path.join(HERE, ENTRY_SCRIPT + ".psc")
 DEFAULT_CONTROL = "NPCChairTech03_Free_270"
+DEFAULT_FRAME_ART = "Spacesuit_Mark1_Body"      # PC run of #733: pieces with an armature equip, pieces without one are refused
+DEFAULT_PIECE_ART = "Spacesuit_Mark1_Helmet"
 STARFIELD = r"D:\SteamLibrary\steamapps\common\Starfield"
 LOG = os.path.join(os.path.expanduser("~"), "Documents", "My Games", "Starfield", "Logs", "Script", "User", "FO4SFPAProbe.0.log")
 # what the script cannot run without (the optional readings are the .psc's ";OPT" lines)
@@ -202,8 +205,7 @@ def stage(a):
     os.makedirs(work)
     tool = ["dotnet", "run", "-c", "Release", "--project", PROJECT, "--"]
     opts = ["--control", a.control] + (["--with-hand"] if a.with_hand else [])
-    opts += ["--frame-art", a.frame_art] if a.frame_art else []
-    opts += ["--piece-art", a.piece_art] if a.piece_art else []
+    opts += ["--frame-art", a.frame_art, "--piece-art", a.piece_art]
     wrote = run(tool + ["build", a.starfield, out] + opts).stdout
     check = run(tool + ["check", os.path.join(out, PLUGIN), a.starfield] + opts).stdout
     with open(os.path.join(out, "offline_check.txt"), "w", encoding="utf-8") as f:
@@ -298,8 +300,8 @@ def main(argv=None):
     s.add_argument("--content-resources", default=cr)
     s.add_argument("--control", default=DEFAULT_CONTROL)
     s.add_argument("--with-hand", action="store_true")
-    s.add_argument("--frame-art", default=None)
-    s.add_argument("--piece-art", default=None)
+    s.add_argument("--frame-art", default=DEFAULT_FRAME_ART)
+    s.add_argument("--piece-art", default=DEFAULT_PIECE_ART)
     g = sub.add_parser("log")
     g.add_argument("--file", default=LOG)
     a = p.parse_args(argv)

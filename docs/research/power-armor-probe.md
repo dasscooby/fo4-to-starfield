@@ -187,7 +187,7 @@ read back after 1 s and 4 s. Sit state 3 within 1.5 units of the
 chair is the trigger (the console probe's seated control was 0.12 units away); when the game has no `GetSitState` the first walk up to
 the entry chair is the trigger, once, and the exit is the 120 s timer.
 
-**Stage options.** `--with-hand` keeps the by-hand quest (`FO4SF_PAHandQuest`) start game enabled: it is **off by default** now,
+**Stage options (art now defaults, see "PC runs at 1a6096e1").** `--with-hand` keeps the by-hand quest (`FO4SF_PAHandQuest`) start game enabled: it is **off by default** now,
 because it and the entry quest both move the player into the room at 30 s and both talk. `--frame-art <ARMO editor id>` and
 `--piece-art <ARMO editor id>` copy a vanilla ARMO (every field, so its armatures, which are the look) into the frame / the two
 pieces; `check` is given the same options as `build` and refuses a plugin that does not match.
@@ -199,7 +199,7 @@ Names the script guesses are `;OPT` lines (the stager compiles each alone and ke
 
 ### What the player sees, and what is honestly missing
 
-* **Third person, as built (no art given):** the player stays HumanRace, and the three ARMO have **no armature**, so nothing
+* **Third person with `--frame-art none --piece-art none` (the offline opt-out; no longer the default):** the player stays HumanRace, and the three ARMO have **no armature**, so nothing
   changes on the body. The only visible results are the on-screen lines, three items appearing
   in and leaving the inventory, and (if the game can read it) the value. **First person:** the same, no arms or camera change.
 * **With `--frame-art` / `--piece-art`:** the vanilla armor's armatures are worn: third person shows that armor over the character
@@ -213,13 +213,13 @@ Names the script guesses are `;OPT` lines (the stager compiles each alone and ke
 
 ### Card (eight steps; throwaway character, no console, game closed first for the install)
 
-1. Install the stage (`power_armor_probe_install.py install --dir <stage> --starfield <game dir>`; stage it without `--with-hand`) and tick `FO4SFPowerArmorProbe.esm`. Load a save of a **throwaway** character already in the world (not the opening). Do not save at any point.
+1. Stage with the defaults (the suit art is built in; no `--with-hand`) and install (`power_armor_probe_install.py install --dir <stage> --starfield <game dir>`) and tick `FO4SFPowerArmorProbe.esm`. Load a save of a **throwaway** character already in the world (not the opening). Do not save at any point.
 2. Wait 30 s. Messages: "Power armor entry test: in 30 s you are moved into a small test room", then "Moving you into the test room." (If you read "type coc FO4SF_PAProbeCell", do that and nothing else.) Screenshot third person and the inventory (armor tab) now: the **before**.
 3. The message "Test room: the ENTRY chair is 3 units ahead of you" appears. Walk to the chair ahead and sit (activate it). Message "You sat on the entry chair (sit state 3): the suit goes on in 2 s." If you cannot sit, say so and stop.
 4. Two seconds later "Suit ON requested ...", then "Suit 1 s after the entry: ..." and "Suit 4 s after the entry: ..." and "Result: the suit is ON" or "only partly on. Did not hold: ...". Copy every line.
 5. Stand up. Screenshot first person and third person, and the inventory (three FO4SF items, equipped or not). Note any visible change, T-pose, missing head or hands, stall, speed or jump change.
 6. Walk to the vanilla chair on your left and sit. Message "You sat on the exit chair ...", 2 s later "Suit OFF requested ...", "1 s after the exit ...", "4 s after the exit ..." and "Result: the suit is OFF" or "the exit did NOT undo everything. Still set: ...". Copy them.
-7. Stand up. Screenshots again, same three views, and the inventory: the **after**. Optionally enter and leave a second time (sit on the entry chair again).
+7. Stand up. Screenshots again, same three views, and the inventory: the **after** (the character should wear what it wore before; the log has `saved worn=` and `restored worn=`). Optionally enter and leave a second time (sit on the entry chair again).
 8. Quit to the desktop **without saving**. The entry's own log is `FO4SFPAEntry.0.log` in `My Games\Starfield\Logs\Script\User` (no reader for it yet: every line is plain text ending `end=true`); paste it with the screenshots and the eight copied lines. Tell: which of step 4's four held, whether step 6 undid them, what the screenshots show.
 
 ### PC run of #733 at e9acb003 and the fixes (FAL-361)
@@ -249,3 +249,26 @@ it. `FO4SF_PARace` stays in the plugin for the console probe (its stage 20/30 sw
 logged at init. **Not done:** (a) the own-skin kit race (copies of Skin_Naked and its two ARMA naming the copy, plus armatures per
 piece); worth it only if the suit needs its own skeleton or size. **Equip may still be refused** with no art: an ARMO with no armature
 may not equip even for HumanRace; the rerun decides, and `--frame-art` is the fallback (give it any vanilla ARMO).
+
+### PC runs of #733 at 1a6096e1: PASS with art, FAIL without (FAL-361)
+
+Verified by the PC (10:51 and 11:01 UTC, test save, no save): **without art** the equip is refused again (`armor cannot be equipped by the
+passed in actor's race`) although the race is untouched and the ARMO read HumanRace: an ARMO with no armature cannot be worn, whatever
+race it names; the character stays whole in third person. **With `--frame-art Spacesuit_Mark1_Body --piece-art Spacesuit_Mark1_Helmet`
+the whole entry passes**: equipped 3 of 3, value 1.0, race unchanged, "the suit is ON"; the exit gives bag 0 of 3, equipped 0 of 3, value
+0, "the suit is OFF"; no Papyrus error. Third person: a suit body and pack with a **bare head** (the helmet copy was forced into the Hat
+slot and drew nothing); after the exit the character looked as before.
+
+Changed offline (awaiting a fourth PC run), the PC's four findings:
+
+1. **Art is not optional.** The tool and the stager default to `Spacesuit_Mark1_Body` (frame) and `Spacesuit_Mark1_Helmet` (both pieces);
+   a missing name refuses the stage by name; `none` is the offline tests' explicit opt-out and `check` then refuses nothing else.
+2. **A copied piece keeps its own slot** (the helmet's), not the slot we named; only an armature-less piece (`none`) gets our slot.
+   Both pieces carry the helmet art by default, so the "torso" piece is a second helmet: if a body plate is wanted, give a real one.
+3. **What the player wore is recorded and put back.** At entry the script records every distinct worn item (`Actor.GetWornItem`, `;OPT`,
+   up to 64) before the suit goes on and logs `saved worn=N`; at exit, after our pieces are removed, it equips them again and logs
+   `restored worn=N` and says so on screen. When the game cannot list the worn items it says so at entry and nothing is put back.
+4. **`init` refs none** is unchanged: unresolved temporary references of an unloaded cell (FAL-316); not a fault of the entry.
+
+Card changes: step 1 stages with the defaults (no art options needed); step 7 adds "the character wears what it wore before".
+Not yet seen: first-person arms, the inventory screen, a second enter and leave, the 120 s exit, the restore of a changed outfit.

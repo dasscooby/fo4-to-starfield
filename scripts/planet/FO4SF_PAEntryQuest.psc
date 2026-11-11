@@ -57,6 +57,8 @@ bool Announced = false
 bool FallbackEntryUsed = false
 string LastSitText = "0"
 Race StartRace = None
+Form[] SavedWorn = None     ; what the player wore at entry (up to 64 distinct items), re-equipped at the exit
+int SavedCount = 0          ; -1 when the game has no Actor.GetWornItem: nothing is restored then and the screen says so
 
 ; ---------------------------------------------------------------- init
 
@@ -64,6 +66,7 @@ Event OnInit()
     Debug.OpenUserLog(LogName)
     Actor p = Game.GetPlayer()
     StartRace = p.GetRace()
+    SavedWorn = new Form[64]
     Trace("init quest=" + GetFormID() + " installed=" + Game.IsPluginInstalled(ProbePlugin) + " startrace=" + Id(StartRace) + " kitrace=" + Id(Game.GetFormFromFile(KitRaceId, ProbePlugin)) + " entryref=" + Id(Ref(EntryRefId)) + " controlref=" + Id(Ref(ControlRefId)) + " arrivalref=" + Id(Ref(ArrivalRefId)) + " frame=" + Id(Game.GetFormFromFile(FrameId, ProbePlugin)) + " inpa=" + Id(Game.GetFormFromFile(InPaId, ProbePlugin)))
     Say("Power armor entry test: in 30 s you are moved into a small test room. Throwaway game only: do not save.")
     StartTimer(POLL_S, TIMER_POLL)
@@ -155,6 +158,45 @@ int Function HeldCount(Actor p)
     return n
 EndFunction
 
+bool Function IsSaved(Form aForm, int aCount)
+    int i = 0
+    while i < aCount
+        if SavedWorn[i] == aForm
+            return true
+        endif
+        i += 1
+    endwhile
+    return false
+EndFunction
+
+int Function SaveWorn(Actor p)
+    {Records every distinct item the player wears (SavedWorn) and how many; -1 when the game has no Actor.GetWornItem. The entry
+     takes the place of what is worn in the slots of the suit; the exit puts it back (PC run of #733: nothing put it back itself).}
+    int n = -1
+;OPT Actor.GetWornItem     n = 0
+;OPT Actor.GetWornItem     int slot = 0
+;OPT Actor.GetWornItem     while slot < 64
+;OPT Actor.GetWornItem         Actor:WornItem w = p.GetWornItem(slot)
+;OPT Actor.GetWornItem         if w && w.item && n < 64 && !IsSaved(w.item, n)
+;OPT Actor.GetWornItem             SavedWorn[n] = w.item
+;OPT Actor.GetWornItem             n += 1
+;OPT Actor.GetWornItem         endif
+;OPT Actor.GetWornItem         slot += 1
+;OPT Actor.GetWornItem     endwhile
+    return n
+EndFunction
+
+Function RestoreWorn(Actor p)
+    {Equips again what SaveWorn recorded (an item already worn stays as it is).}
+    int i = 0
+    while i < SavedCount
+        if SavedWorn[i]
+            p.EquipItem(SavedWorn[i], false, true)
+        endif
+        i += 1
+    endwhile
+EndFunction
+
 bool Function MoveIn(Actor p)
     {The player moved onto the arrival marker; false when the game declares no such call.}
     bool ok = false
@@ -202,6 +244,14 @@ EndFunction
 Function PutOn()
     Actor p = Game.GetPlayer()
     Trace("enter cycle=" + Cycle + " " + StateText("before"))
+    SavedCount = SaveWorn(p)
+    if SavedCount < 0
+        Trace("saved worn=na (not in this game's scripts): nothing will be put back at the exit")
+        SavedCount = 0
+        Say("The game cannot list what you wear: your own clothes will not be put back at the exit.")
+    else
+        Trace("saved worn=" + SavedCount)
+    endif
     p.AddItem(Thing(FrameId), 1, true)
     p.AddItem(Thing(PieceHelmId), 1, true)
     p.AddItem(Thing(PieceTorsoId), 1, true)
@@ -226,8 +276,10 @@ Function TakeOff()
     p.RemoveItem(Thing(FrameId), 1, true)
     p.RemoveItem(Thing(PieceHelmId), 1, true)
     p.RemoveItem(Thing(PieceTorsoId), 1, true)
+    RestoreWorn(p)
+    Trace("restored worn=" + SavedCount)
     Phase = 0
-    Say("Suit OFF requested: value cleared, pieces unequipped and removed. Reading it back...")
+    Say("Suit OFF requested: value cleared, pieces unequipped and removed, your " + SavedCount + " worn items put back. Reading it back...")
     StartTimer(READ1_S, TIMER_XREAD1)
     StartTimer(READ2_S, TIMER_XREAD2)
 EndFunction

@@ -161,7 +161,7 @@ class EntryScriptTests(unittest.TestCase):
 
     def test_the_value_and_the_item_equip_reads_are_guesses_behind_opt(self):
         self.assertEqual(mpa.optional_names(ENTRY_PSC), ["Actor.GetSitState", "Actor.GetValue", "Actor.SetValue", "Actor.IsEquipped",
-                                                         "ObjectReference.MoveTo"])
+                                                         "Actor.GetWornItem", "ObjectReference.MoveTo"])
         self.assertEqual(mpa.enable(ENTRY_PSC, []), ENTRY_PSC)
         for name in ("EquipItem", "UnequipItem"):
             self.assertIn(name, mpa.REQUIRED["Actor"])
@@ -177,6 +177,20 @@ class EntryScriptTests(unittest.TestCase):
                       "the suit is ON", "the suit is OFF", "did NOT undo everything", "only partly on",
                       "not in this game's scripts", "coc FO4SF_PAProbeCell"):
             self.assertIn(words, ENTRY_PSC)
+
+    def test_what_was_worn_is_recorded_at_entry_and_put_back_at_the_exit(self):
+        """PC run of #733: the entry takes the place of what is worn in the suit's slots and nothing put it back."""
+        put_on = ENTRY_PSC.split("Function PutOn()")[1].split("EndFunction")[0]
+        take_off = ENTRY_PSC.split("Function TakeOff()")[1].split("EndFunction")[0]
+        self.assertLess(put_on.index("SavedCount = SaveWorn(p)"), put_on.index("p.AddItem("))      # recorded BEFORE the suit goes on
+        self.assertLess(take_off.index("p.RemoveItem(Thing(PieceTorsoId)"), take_off.index("RestoreWorn(p)"))
+        self.assertIn("p.EquipItem(SavedWorn[i], false, true)", ENTRY_PSC.split("Function RestoreWorn")[1])
+        self.assertIn("SavedWorn = new Form[64]", ENTRY_PSC.split("Event OnInit()")[1])
+        self.assertIn('Trace("saved worn="', ENTRY_PSC)
+        self.assertIn('Trace("restored worn="', ENTRY_PSC)
+        self.assertIn("will not be put back", ENTRY_PSC)                                  # said when the game cannot list the worn items
+        self.assertIn("worn items put back", ENTRY_PSC)
+        self.assertIn("p.GetWornItem(slot)", mpa.enable(ENTRY_PSC, ["Actor.GetWornItem"]))
 
     def test_a_game_without_a_sit_state_still_enters_once(self):
         self.assertIn('elseif sitText == "na" && !FallbackEntryUsed', ENTRY_PSC)
@@ -404,16 +418,16 @@ class StageTests(unittest.TestCase):
         self.assertRegex(check.stdout, r"FURN FO4SF_PAProbeSuit keywords \[000900:Starfield.esm, 0F4A21:Starfield.esm\] \(control .*: 1 keywords\)")
 
     def test_the_entry_kit_records(self):
-        """FAL-361: the entry furniture is the control with NO keyword, one AVIF of ours, three ARMO without art by default."""
+        """FAL-361: the entry furniture is the control with NO keyword, one AVIF of ours, three ARMO that carry the default vanilla art (PC run of #733: no armature, no equip)."""
         out = self.root / "e1"
         self.assertEqual(self.run_tool("build", self.master, out).returncode, 0)
         check = self.run_tool("check", out / PLUGIN, self.master)
         self.assertEqual(check.returncode, 0, check.stdout)
         self.assertRegex(check.stdout, r"FURN FO4SF_PAEntryFurn keywords \[000900:Starfield.esm\] \(the control's, no FurnitureTypePowerArmor\)")
         self.assertRegex(check.stdout, r"AVIF FO4SF_PAInPowerArmor 00080C:FO4SFPowerArmorProbe.esm type Variable default 0 min 0 max 1")
-        for edid, slot in (("FO4SF_PAFrame", "BODY"), ("FO4SF_PAPieceHelm", "Hat"), ("FO4SF_PAPieceTorso", "UpperBody1VisOnly")):
-            self.assertIn(f"ARMO {edid} ", check.stdout)
-            self.assertRegex(check.stdout, rf"ARMO {edid} \S+ slot {slot} armatures 0 \(art: none\)")
+        for edid, slot, art in (("FO4SF_PAFrame", "BODY", "Spacesuit_Mark1_Body"), ("FO4SF_PAPieceHelm", "Backpack", "Spacesuit_Mark1_Helmet"),
+                                ("FO4SF_PAPieceTorso", "Backpack", "Spacesuit_Mark1_Helmet")):      # the copied art's OWN slot (fixture helmet: Backpack)
+            self.assertRegex(check.stdout, rf"ARMO {edid} \S+ slot {slot} armatures 1 \(art: {art}\)")
         self.assertIn("REFR 00080B:FO4SFPowerArmorProbe.esm FO4SF_PAEntryFurnRef base 00080A:FO4SFPowerArmorProbe.esm at (3, 0, 0)", check.stdout)
 
     def test_the_three_armor_name_humanrace_not_the_copy_and_the_hand_script_is_off_the_record_without_with_hand(self):
@@ -435,16 +449,31 @@ class StageTests(unittest.TestCase):
         self.assertEqual(self.run_tool("build", self.master, out, *art).returncode, 0)
         ok = self.run_tool("check", out / PLUGIN, self.master, *art)
         self.assertEqual(ok.returncode, 0, ok.stdout)
-        self.assertIn("armatures 1 (art: SynthArmorArt)", ok.stdout)
+        self.assertIn("armatures 2 (art: SynthArmorArt)", ok.stdout)
         self.assertIn("QUST FO4SF_PAHandQuest flags StartGameEnabled scripts [FO4SF_PAHandQuest (0 properties)]", ok.stdout)
         bad = self.run_tool("check", out / PLUGIN, self.master)                       # without the options the plugin is not what is asked
         self.assertEqual(bad.returncode, 1, bad.stdout)
-        self.assertIn("armatures differ from none", bad.stdout)
+        self.assertIn("armatures differ from Spacesuit_Mark1_Body", bad.stdout)
         self.assertIn("only --with-hand does that", bad.stdout)
         self.assertIn("only --with-hand attaches it", bad.stdout)
         miss = self.run_tool("build", self.master, self.root / "e3", "--frame-art", "NoSuchArmor")
         self.assertEqual(miss.returncode, 1)
         self.assertIn("0 ARMO named NoSuchArmor", miss.stderr)
+
+    def test_art_is_not_optional_by_default_and_none_is_the_explicit_opt_out(self):
+        """PC run of #733: an ARMO with no armature cannot be equipped, so a stage always carries art unless `none` is said."""
+        self.assertIn('FrameArt = "Spacesuit_Mark1_Body", PieceArt = "Spacesuit_Mark1_Helmet"', TOOL_SRC)
+        self.assertEqual((mpa.DEFAULT_FRAME_ART, mpa.DEFAULT_PIECE_ART), ("Spacesuit_Mark1_Body", "Spacesuit_Mark1_Helmet"))
+        out = self.root / "e4"
+        none = ["--frame-art", "none", "--piece-art", "none"]
+        self.assertEqual(self.run_tool("build", self.master, out, *none).returncode, 0)
+        ok = self.run_tool("check", out / PLUGIN, self.master, *none)
+        self.assertEqual(ok.returncode, 0, ok.stdout)
+        self.assertIn("armatures 0 (art: none)", ok.stdout)
+        self.assertEqual(self.run_tool("check", out / PLUGIN, self.master).returncode, 1)     # the default check refuses an armature-less kit
+        gone = self.run_tool("build", self.master, self.root / "e5", "--piece-art", "Spacesuit_Mark1_Nothing")
+        self.assertEqual(gone.returncode, 1)
+        self.assertIn("0 ARMO named Spacesuit_Mark1_Nothing", gone.stderr)
 
     def test_a_control_that_is_already_power_armor_is_refused(self):
         proc = self.run_tool("build", self.master, self.root / "b4", "--control", "SynthAlreadyPowerArmor")
