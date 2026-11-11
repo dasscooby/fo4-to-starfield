@@ -233,7 +233,7 @@ class ToolTests(unittest.TestCase):
 
     def test_the_recipes_are_the_templates_with_a_small_cost_and_the_shells_carry_the_cores_models(self):
         out = self.build("b-detail")
-        check = self.run_tool("check", out / PLUGIN, self.sf, self.core).stdout
+        check = self.run_tool("check", out / PLUGIN, self.sf, self.core).stdout.replace("\\", "/")       # Windows prints the model path with backslashes
         self.assertIn("COBJ 000806:FO4SFBuildPieces.esm makes 000802, workbench 000E01, filters [000E02, 000E03], cost 000B11 x1, sort 11", check)
         self.assertIn("COBJ 000809:FO4SFBuildPieces.esm makes 000805, workbench 000E01, filters [000E02, 000E03], cost 000B11 x2, sort 14", check)
         self.assertIn('"FO4 Crate01" model Meshes/Props/Crate01.nif (core 0A2002 FO4Core_stat_000a02_fallout4)', check)

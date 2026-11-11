@@ -24,7 +24,15 @@ get into that menu, and can Fallout 4 pieces made from statics the installed cor
   `RecipeFilters` keyword list**, the **bench the recipe belongs to is `WorkbenchKeyword`**.
 * **Supported hypothesis, not read:** the menu lists every COBJ whose `WorkbenchKeyword` is the workshop's (`OutpostCategoryCrafting`
   for the six stations, as the task text says) and sorts it into a tab by its `RecipeFilters`. This is what the kit tries.
-* **Unresolved, not readable offline:** the values in the real `co_Outpost_Crafting_WorkbenchIndustrialStation` (2E2F2C): its created
+* **Verified (PC offline run of #737 at 3a561478, owner PC, real Starfield.esm; written by Claude, not re-run here):** the real recipe 2E2F2C
+  has workbench keyword and its only recipe filter both `2CFDE6 OutpostCategoryCrafting`, **no build limit global**, created object the
+  Furniture `WorkbenchIndustrial`, components Aluminum x4 and Iron x3. 18 category keywords exist (Structures 2A7578, Furniture 2BE3B5,
+  Decorations 293ADF, Miscellaneous 06D72D, ...): so a **category of its own may be a recipe filter that is one of those**, and the
+  `FO4SF_BPCategory` copy of the first filter (which is the workbench keyword itself) is a weaker guess than a vanilla category keyword. The
+  stage passed against the real files, and the quest script compiled with the real compiler. The core has 11,700 statics with a model: the default
+  choice (first four by form id) took an airship hull section and a cliff, so **stage with `--pieces`**, e.g.
+  `--pieces FO4Core_woodcrate,FO4Core_metalbarrel01,FO4Core_junkwall01,FO4Core_cafetable01` (all accepted).
+* **Unresolved, still not read (earlier list, narrowed by the above):** the values in the real `co_Outpost_Crafting_WorkbenchIndustrialStation` (2E2F2C): its created
   object and that record's type, its real filter keywords, whether a filter keyword is a tab, what its build limit GLOB is and whether
   other recipes share it, its menu art, sound and flags, and whether a created object needs components or a snap template to be
   placeable. Nothing in this repository has the file. **`make_build_pieces.py menu` reads exactly these from the real file on the PC**
