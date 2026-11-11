@@ -819,9 +819,12 @@ the main menu, delete it at once (rule 7).
 
 **Job focc-P1-2n (where the files land, no save made). Game: CLOSED between launches, launched through
 `sfse_loader.exe`.** For a session that may not make a save (FAL-246, 11 Nov). It checks item 2 alone: the refusals
-with no usable `Dir`, and the folders a load creates with one. It needs FOCCSidecar (P1-1, P1-2 without the ini lines)
-and FO4SFBorder built with `sfse\FO4SFBorder\build.ps1` (after `sfse\FOCCSidecar\fetch_pluginapi.ps1 -Dest
-sfse\FO4SFBorder`). FO4SFBorder is in the owner's installed set: hold the installed dll and ini aside, install the
+with no usable `Dir`, and the folders a load creates with one. It needs FOCCSidecar built (P1-1) and FO4SFBorder built
+with `sfse\FO4SFBorder\build.ps1` (after `sfse\FOCCSidecar\fetch_pluginapi.ps1 -Dest sfse\FO4SFBorder`). The block
+below installs them: FOCCSidecar with `bEnabled=1` (with 0 it loads idle and N-3 shows nothing) and no
+`FO4SF-Runtime.ini` yet, and `versionlib-1-16-244-0.bin`, which a libxse plugin needs beside it (without it SFSE shows
+"DLL plugins you have installed require a new version of the Address Library" and the game never reaches the main
+menu: owner PC, 11 Nov). FO4SFBorder is in the owner's installed set: hold the installed dll and ini aside, install the
 built ones with `Mode=1` (probe: reads, never writes game memory), and put the installed pair back at the end. No
 FOCCPing or FO4SFPipboyMenu is needed.
 
@@ -830,11 +833,19 @@ $p = "$sf\Data\SFSE\Plugins"; $sl = "$(Split-Path $saves)\SFSE\Logs"; $rt = "$sa
 New-Item -ItemType Directory "$p\held_$date" | Out-Null
 Move-Item "$p\FO4SFBorder.dll","$p\FO4SFBorder.ini" "$p\held_$date\"
 if ($had_rt) { Move-Item "$p\FO4SF-Runtime.ini" "$p\held_$date\" }
+$had_bin = Test-Path "$p\versionlib-1-16-244-0.bin"
+if (-not $had_bin) { Copy-Item D:\Modding\staging\addresslib_v22\versionlib-1-16-244-0.bin $p }
+Copy-Item "D:\Modding\staging\focc_sidecar_$date\FOCCSidecar.dll","D:\Modding\staging\focc_sidecar_$date\FOCCSidecar.ini" $p
+(Get-Content "$p\FOCCSidecar.ini") -replace '^bEnabled=0','bEnabled=1' | Set-Content -Encoding ASCII "$p\FOCCSidecar.ini"
 Copy-Item "D:\Modding\staging\fo4sf_border_$date\FO4SFBorder.dll","D:\Modding\staging\fo4sf_border_$date\FO4SFBorder.ini" $p
 (Get-Content "$p\FO4SFBorder.ini") -replace 'Mode=0','Mode=1' | Set-Content -Encoding ASCII "$p\FO4SFBorder.ini"
+Select-String -Path "$p\FOCCSidecar.ini","$p\FO4SFBorder.ini" -Pattern '^(bEnabled|Mode)='
 Get-ChildItem $p -Recurse | Select FullName,LastWriteTime | ConvertTo-Json > "D:\Modding\testqueue\focc_P1n_$date.before.json"
 Test-Path $rt
 ```
+
+Expect `bEnabled=1` and `Mode=1`. `Test-Path $rt` is `True` if an earlier session made the folder (it is player data
+and stays); then N-1's "same as before" only shows that nothing removed it. Write down which.
 
 1. **N-1, no ini.** Launch, wait for the main menu, quit. `Get-Content "$sl\FOCCSidecar.log"` must contain
    `refuse step=runtime_dir file=FO4SF-Runtime.ini reason=not found` and no `step=event` line (an `[E]` prefix is
@@ -844,20 +855,22 @@ Test-Path $rt
    then launch, reach the main menu and quit. Expect `refuse step=runtime_dir dir=<that path> reason=parent_missing`,
    and `Test-Path "$saves\FO4SF-NoParent"` is `False`.
 3. **N-3, with the ini, a load and no save.** Write `Set-Content -Encoding UTF8 "$p\FO4SF-Runtime.ini" "[Runtime]`r`nDir=$rt"`.
-   Launch, load any existing save from the menu, wait 30 s, and quit to desktop without saving. Expect:
-   - in `FOCCSidecar.log`, `step=runtime_dir dir=<$rt>`;
-   - `$rt\logs\focc_sidecar.log` with the `"event": "load"` line, then `pre_load` and `post_load` for that save
-     (`"found": false` unless a sidecar for it already exists);
+   Launch, load any existing save (from the menu or with the console's `load`), wait 30 s, and quit to desktop
+   without saving. Expect:
+   - in `FOCCSidecar.log`, `step=runtime_dir dir=<$rt>`, then one `step=event` line per line below;
+   - `$rt\logs\focc_sidecar.log` with two lines, both written at startup: `"event": "load"` (the plugin) and
+     `"event": "sfse_post_load"` (all plugins loaded). No `pre_load` or `post_load` line for the save, and an
+     autosave adds no `pre_save` line and no `.focc` file: SFSE 0.2.21 sends none of its save and load messages (4 to
+     7; its `Hooks_Serialization_Apply` is inside `#if 0`, FAL-216). A `pre_load` line would be news: write it down;
    - `$rt\sidecars` present and empty;
    - `$rt\logs\fo4sf_border.log` whose `load` line says `"mode": 1`.
-   - If the game made an autosave, there is also a `pre_save` line and a `.focc` file. Write that down; it is not a
-     failure.
    - `reason=create error=<n>` instead is the Controlled Folder Access answer (Starfield.exe kept out of the save folder).
 4. **After every launch,** `Get-ChildItem $p -Recurse | Select FullName,LastWriteTime` compared with the before list:
    nothing new or changed under `Data\SFSE\Plugins` except what this card wrote (the ini).
 
 Back out (game closed):
-- Delete `FOCCSidecar.dll`, `FOCCSidecar.ini`, the built `FO4SFBorder.dll`/`.ini` and `FO4SF-Runtime.ini` from `$p`.
+- Delete `FOCCSidecar.dll`, `FOCCSidecar.ini`, the built `FO4SFBorder.dll`/`.ini` and `FO4SF-Runtime.ini` from `$p`,
+  and `versionlib-1-16-244-0.bin` only if `$had_bin` was false.
 - Move everything in `$p\held_$date` back to `$p`, then remove the empty `held_$date` folder.
 - `$rt` stays (player data). It holds only this card's logs.
 
@@ -867,6 +880,15 @@ Send back:
 - `Get-ChildItem $rt -Recurse`;
 - both directory listings;
 - `build.json` of each dll.
+
+*Result at `69ed3bc0` (owner PC, 11 Nov 2026, 04:47 to 04:59 UTC; FOCCSidecar from #727's `0366f4d4`, the same
+source): N-1, N-2 and N-3 PASS for where the files land.* Three launches, no save made, the owner's border pair held
+aside and back, the before and after listings equal except the ini. N-1 `reason=not found`, no `step=event`; N-2
+`reason=parent_missing`, `FO4SF-NoParent` not created; N-3 `step=runtime_dir`, `$rt\logs\focc_sidecar.log` with its
+two startup lines, `fo4sf_border.log` with `"mode": 1`, `$rt\sidecars` empty. The save was loaded with the console's
+`load`; no `pre_load` or `post_load` line, as SFSE 0.2.21 sends none (the expectation above was corrected after this
+run). `$rt` existed before N-1 from an earlier try. FO4SFBorder's first MSVC build: exit 0, one warning, C4701 on
+`size` in `read_new` (a false alarm: it is read only after `GetFileSizeEx` succeeded).
 
 **Job focc-P1-3 (run). Game: launched through `sfse_loader.exe`, not Steam** (cycle.ps1 is not the path here).
 Load the throwaway save, then in the console:

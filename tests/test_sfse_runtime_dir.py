@@ -227,9 +227,17 @@ class PluginTests(unittest.TestCase):
         self.assertIn("reason=parent_missing", job)
         self.assertIn('REX::INFO("step=runtime_dir dir={}", parsed.dir);', self.sidecar)
         self.assertIn('REX::INFO("step=event {}{}"', self.sidecar)
+        # the two lines a load can show are both written at startup; pre_load comes only from SFSE's message 6, which
+        # SFSE 0.2.21 never sends (owner PC, 11 Nov: N-3 logged load and sfse_post_load, nothing for the save)
+        self.assertIn('LogLine("\\"event\\": \\"sfse_post_load\\"");', self.sidecar)
+        self.assertIn('LogLine(std::format("\\"event\\": \\"load\\", \\"plugin\\": \\"FOCCSidecar\\"', self.sidecar)
         self.assertIn('"event\\": \\"pre_load\\"', self.sidecar)
+        self.assertIn('`"event": "load"`', job)
+        self.assertIn('`"event": "sfse_post_load"`', job)
+        self.assertIn("No `pre_load` or `post_load` line for the save", job)
         self.assertIn('", \\"mode\\": " + std::to_string(g_mode)', self.border)
-        for words in ("Mode=0','Mode=1'", "held_$date", "without saving", "sfse\\FO4SFBorder\\build.ps1", "player data"):
+        for words in ("Mode=0','Mode=1'", "held_$date", "without saving", "sfse\\FO4SFBorder\\build.ps1", "player data",
+                      "-replace '^bEnabled=0','bEnabled=1'", "versionlib-1-16-244-0.bin", "$had_bin"):
             self.assertIn(words, job)
         self.assertNotIn("save focc", job)                                   # this job makes no save
 
