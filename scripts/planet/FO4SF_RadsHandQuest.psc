@@ -171,6 +171,18 @@ Function Poll()
     LastDose = dose
     LastAway = away
     float rads = p.GetValue(RadsAV)
+    if rads < 0.0 || rads > RadsMaxValue
+        ; the PC run of the probe (FAL-213) saw an ingestible's effect applied once per frame: rads at -59,700. The AVIF's min and
+        ; max are not enforced for a value changed that way, so the script keeps it in range itself (never routed, never shown).
+        Trace("range rads=" + rads + " clamped=" + Clamp(rads))
+        p.SetValue(RadsAV, Clamp(rads))
+        rads = Clamp(rads)
+    endif
+    if Settling
+        ; an item was just used: its effect is still working (it may run every frame for a moment). Nothing is shown or routed
+        ; until the settle has read the value, so the owner sees one message with the final number, not a run of huge ones.
+        return
+    endif
     if rads != LastRads
         ApplyRoute(p)
         Say(Describe(p))
@@ -191,7 +203,7 @@ Function Settle()
     if have == WantRads
         Trace("settle used=" + UsedWhat + " ok=true want=" + WantRads + " had=" + have)
     else
-        Say(UsedWhat + " used, but rads stayed " + (have as int) + " (expected " + (WantRads as int) + "). Setting " + (WantRads as int))
+        Say(UsedWhat + " used: the effect left rads at " + (have as int) + ", expected " + (WantRads as int) + ". Setting " + (WantRads as int))
         Trace("settle used=" + UsedWhat + " ok=false want=" + WantRads + " had=" + have)
         p.SetValue(RadsAV, WantRads)
     endif

@@ -44,7 +44,7 @@ class HandScriptTests(unittest.TestCase):
         # the change path: a different value than the last one shown is applied to the route and said
         self.assertRegex(HAND_PSC, r"if rads != LastRads\n\s+ApplyRoute\(p\)\n\s+Say\(Describe\(p\)\)")
         # the failure path says so on screen and sets the value
-        self.assertIn('" used, but rads stayed "', HAND_PSC)
+        self.assertIn('" used: the effect left rads at "', HAND_PSC)
         self.assertIn("p.SetValue(RadsAV, WantRads)", HAND_PSC)
 
     def test_an_item_used_while_another_settles_is_added_not_dropped(self):
@@ -58,6 +58,15 @@ class HandScriptTests(unittest.TestCase):
         settle = HAND_PSC.split("Function Settle()")[1]
         self.assertIn("StartTimer(wait, TIMER_SETTLE)", settle)                   # the latest use gets its full time
         self.assertLess(settle.index("StartTimer(wait"), settle.index("Settling = false"))
+
+    def test_a_runaway_effect_is_clamped_and_hidden_until_the_settle(self):
+        """FAL-213 PC run: an ingestible's effect was applied once per frame (rads -59,700). The hand quest must not show or
+        route that, and must keep the value in range itself."""
+        poll = HAND_PSC.split("Function Poll()")[1].split("Function Settle()")[0]
+        self.assertIn("if rads < 0.0 || rads > RadsMaxValue", poll)
+        self.assertIn("p.SetValue(RadsAV, Clamp(rads))", poll)
+        self.assertLess(poll.index("if Settling\n        ; an item was just used"), poll.index("ApplyRoute(p)"))   # no route while it settles
+        self.assertLess(poll.index("p.SetValue(RadsAV, Clamp(rads))"), poll.index("if Settling\n        ; an item was just used"))
 
     def test_no_console_is_needed_the_items_come_with_the_quest(self):
         self.assertIn("p.AddItem(RadAway, GiveCount, true)", HAND_PSC)
@@ -90,13 +99,14 @@ class ScriptTests(unittest.TestCase):
     def test_the_scripts_properties_are_the_tools(self):
         m = re.search(r"PropNames = \{([^}]*)\}", TOOL_SRC)
         tool = re.findall(r'"(\w+)"', m.group(1))
-        psc = re.findall(r"^(\w+) Property (\w+) Auto Const Mandatory", PSC, re.M)
-        self.assertEqual([n for _, n in psc], tool)
-        self.assertEqual([t for t, _ in psc], ["ActorValue", "ActorValue", "Spell", "Form"])
+        psc = re.findall(r"^(\w+) Property (\w+) Auto Const( Mandatory)?", PSC, re.M)
+        self.assertEqual([n for _, n, _ in psc], tool)
+        self.assertEqual([t for t, _, _ in psc], ["ActorValue", "ActorValue", "Spell", "Form", "Spell"])
+        self.assertEqual([bool(m) for _, _, m in psc], [True, True, True, True, False])     # ControlSpell is optional
         self.assertIn('string ProbePlugin = "FO4SFRadsProbe.esm"', PSC)
         self.assertIn('Script = "FO4SF_RadsProbeQuest"', TOOL_SRC)
         self.assertTrue(PSC.startswith("Scriptname FO4SF_RadsProbeQuest extends Quest"))
-        self.assertEqual(len(re.findall(r"^\w+(\[\])? Property ", PSC, re.M)), 4)
+        self.assertEqual(len(re.findall(r"^\w+(\[\])? Property ", PSC, re.M)), 5)       # the fifth, ControlSpell, is not Mandatory
 
     def test_the_log_name_prefix_and_events_are_the_readers(self):
         from fo4sf.rads import probe_log
@@ -108,10 +118,10 @@ class ScriptTests(unittest.TestCase):
 
     def test_the_stages_the_script_runs_are_the_quests_and_the_readers(self):
         from fo4sf.rads import probe_log
-        for s in (10, 20, 30, 40):
+        for s in (10, 20, 30, 40, 50):
             self.assertIn(f"GetStageDone({s})", PSC)
-        self.assertIn("{ 10, 20, 30, 40 }", TOOL_SRC)
-        self.assertEqual(probe_log.STAGES, (10, 20, 30, 40))
+        self.assertIn("{ 10, 20, 30, 40, 50 }", TOOL_SRC)
+        self.assertEqual(probe_log.STAGES, (10, 20, 30, 40, 50))
         for stage, want in probe_log.EXPECT.items():
             self.assertRegex(PSC, rf"stage == {stage}\n\s+return {want}") if stage != 10 else None
 
@@ -260,7 +270,7 @@ class StageTests(unittest.TestCase):
         self.assertIn('ALCH FO4SF_RadDose 000805:FO4SFRadsProbe.esm "Rad Dose"', check.stdout)
         self.assertIn("1 effect(s) at 100", check.stdout)
         self.assertIn("QUST FO4SF_RadsHandQuest flags StartGameEnabled scripts [FO4SF_RadsHandQuest (4 properties)]", check.stdout)
-        self.assertIn("QUST FO4SF_RadsProbeQuest flags StartGameEnabled stages [10,20,30,40]", check.stdout)
+        self.assertIn("QUST FO4SF_RadsProbeQuest flags StartGameEnabled stages [10,20,30,40,50]", check.stdout)
         self.assertIn("(4 properties)", check.stdout)
         self.assertIn("property HealthAV = 00A02D:Starfield.esm", check.stdout)
 
@@ -301,7 +311,7 @@ class StageTests(unittest.TestCase):
         template's own subrecords (equip type, effect ids, description) and none of its keywords or conditions."""
         out = self.root / "b2t"
         proc = self.run_tool("build", self.master, out)
-        self.assertIn("templates (strict): SPEL SynthSelfSpell", proc.stdout)
+        self.assertIn("templates (preferred): SPEL DamageHealthSpell", proc.stdout)
         self.assertIn("MGEF SynthValueEffect", proc.stdout)
         self.assertIn("ALCH SynthAid", proc.stdout)
         data = (out / PLUGIN).read_bytes()
@@ -331,7 +341,7 @@ class StageTests(unittest.TestCase):
         self.assertNotIn(b"CTDA", subs[b"SPEL"] + subs[b"MGEF"] + subs[b"ALCH"])
         check = self.run_tool("check", out / PLUGIN, self.master)
         self.assertEqual(check.returncode, 0, check.stdout)
-        self.assertIn("templates (strict)", check.stdout)
+        self.assertIn("templates (preferred)", check.stdout)
 
     def test_the_mgef_data_word_14_is_our_actor_value_and_the_flags_do_not_negate(self):
         """Both game crashes (FAL-213): the engine reads the effect's actor value (DATA word 14, Mutagen's
@@ -355,6 +365,46 @@ class StageTests(unittest.TestCase):
         self.assertEqual(words[17], 0)
         self.assertIn("actor value (DATA word 14) 000800:FO4SFRadsProbe.esm",
                       self.run_tool("check", out / PLUGIN, self.master).stdout)
+
+    def test_the_preferred_template_is_the_vanilla_damage_spell_and_its_flags_are_kept(self):
+        """Fourth session: DamageHealthSpell works from Cast; the copy keeps its effect's own flags (only Detrimental off)."""
+        out = self.root / "b2p"
+        proc = self.run_tool("build", self.master, out)
+        self.assertIn("templates (preferred): SPEL DamageHealthSpell", proc.stdout)
+        self.assertEqual(self.run_tool("check", out / PLUGIN, self.master).returncode, 0)
+
+    def test_the_script_clamps_our_value_at_zero_before_the_route(self):
+        self.assertRegex(PSC, r"if rads < 0\.0\n(?:.*\n)*?\s+p\.SetValue\(RadsAV, 0\.0\)\n\s+rads = 0\.0\n\s+clamped = true")
+        self.assertIn('" clamped=" + clamped', PSC)
+
+    def test_the_effect_is_instant_and_does_not_recover(self):
+        """Third session: a timed, recovering template effect with duration 0 applies and undoes its change at once.
+        The synthetic template is Detrimental + Recover (no NoDuration); the kit's effect must be NoDuration only."""
+        out = self.root / "b2y"
+        self.assertEqual(self.run_tool("build", self.master, out).returncode, 0)
+        check = self.run_tool("check", out / PLUGIN, self.master)
+        self.assertEqual(check.returncode, 0, check.stdout)
+        self.assertRegex(check.stdout, r"MGEF FO4SF_RadsEffect .* flags NoDuration\n")
+        self.assertNotIn("Recover", check.stdout)
+        self.assertNotIn("Detrimental", check.stdout)
+
+    def test_the_second_control_spell_is_a_fifth_property_only_when_named(self):
+        out = self.root / "b2z"
+        ok = self.run_tool("build", self.master, out, "--control-spell", "SynthSelfSpell")
+        self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
+        chk = self.run_tool("check", out / PLUGIN, self.master, "--control-spell", "SynthSelfSpell")
+        self.assertEqual(chk.returncode, 0, chk.stdout)
+        self.assertIn("(5 properties)", chk.stdout)
+        self.assertIn("property ControlSpell = 00A101:Starfield.esm", chk.stdout)
+        plain = self.run_tool("check", out / PLUGIN, self.master)            # checked as built without it
+        self.assertEqual(plain.returncode, 1, plain.stdout)
+        self.assertIn("exactly 4 properties", plain.stdout)
+        none = self.root / "b2z0"
+        self.assertEqual(self.run_tool("build", self.master, none).returncode, 0)
+        self.assertIn("(4 properties)", self.run_tool("check", none / PLUGIN, self.master).stdout)
+        bad = self.run_tool("build", self.master, self.root / "b2z1", "--control-spell", "NoSuchSpell")
+        self.assertEqual(bad.returncode, 1)
+        self.assertIn("0 SPEL named NoSuchSpell", bad.stderr)
 
     def test_check_refuses_a_kit_whose_actor_value_is_not_ours(self):
         out = self.root / "b2x"
@@ -425,7 +475,7 @@ class StageTests(unittest.TestCase):
         self.assertEqual((plan["health"], plan["avif_type"]), ("Health", "Variable"))
         self.assertEqual(sorted(plan["outputs"]), sorted([PLUGIN, "Data/Scripts/FO4SF_RadsProbeQuest.pex", "Data/Scripts/FO4SF_RadsHandQuest.pex"]))
         self.assertEqual(plan["inputs"]["Starfield.esm"]["sha256"], mrp.sha256(str(self.master)))
-        self.assertTrue(plan["templates"].startswith("strict: SPEL SynthSelfSpell"))
+        self.assertTrue(plan["templates"].startswith("preferred: SPEL DamageHealthSpell"))
         self.assertEqual(plan["optional"]["Actor.ModValue"], "kept")
         self.assertEqual(plan["optional"]["Actor.GetActiveEffects"], "kept")
         self.assertTrue(plan["optional"]["Actor.GetBaseValue"].startswith("declared but did not compile"))

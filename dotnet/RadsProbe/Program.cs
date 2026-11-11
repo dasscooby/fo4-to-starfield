@@ -55,7 +55,9 @@ try
     Opt("--type", ref type);
     Opt("--template-spell", ref tSpell);
     Opt("--template-aid", ref tAid);
-    var tpl = new RadsProbe.Templates(tSpell, tAid);
+    var cSpell = "";
+    Opt("--control-spell", ref cSpell);
+    var tpl = new RadsProbe.Templates(tSpell, tAid, cSpell);
     if (rest.Count == 3 && rest[0] == "build") return RadsProbe.Build(rest[1], rest[2], health, type, tpl);
     if (rest.Count == 3 && rest[0] == "check") return RadsProbe.Check(rest[1], rest[2], health, type, tpl);
     if (rest.Count == 2 && rest[0] == "fixture") return RadsProbe.Fixture(rest[1]);
@@ -65,7 +67,7 @@ catch (RadsProbe.Refusal r)
     Console.Error.WriteLine("refused: " + r.Message);
     return 1;
 }
-Console.Error.WriteLine("usage: RadsProbe build <Starfield.esm> <out dir> [--health <edid>] [--type <avif type>] [--template-spell <edid>] [--template-aid <edid>] | " +
+Console.Error.WriteLine("usage: RadsProbe build <Starfield.esm> <out dir> [--health <edid>] [--type <avif type>] [--template-spell <edid>] [--template-aid <edid>] [--control-spell <edid>] | " +
                         "check <plugin> <Starfield.esm> [same options] | fixture <out dir>");
 return 2;
 
@@ -81,13 +83,14 @@ static class RadsProbe
     const string AvifEdid = "FO4SF_Rads", EffectEdid = "FO4SF_RadsEffect", SpellEdid = "FO4SF_RadsSpell", RadAwayEdid = "FO4SF_RadAway",
         QuestEdid = "FO4SF_RadsProbeQuest", Script = "FO4SF_RadsProbeQuest",
         DoseEdid = "FO4SF_RadDose", HandQuestEdid = "FO4SF_RadsHandQuest", HandScript = "FO4SF_RadsHandQuest";
+    const string PreferredSpell = "DamageHealthSpell";
     const float SpellMagnitude = 100f, RadAwayMagnitude = -200f, DoseMagnitude = 100f, RadsMax = 1000f;
-    static readonly ushort[] Stages = { 10, 20, 30, 40 };
+    static readonly ushort[] Stages = { 10, 20, 30, 40, 50 };
     // the script's property names, in the order the writer adds them
-    static readonly string[] PropNames = { "RadsAV", "HealthAV", "RadsSpell", "RadAway" };
+    static readonly string[] PropNames = { "RadsAV", "HealthAV", "RadsSpell", "RadAway", "ControlSpell" };   // the fifth only with --control-spell
     static readonly string[] HandPropNames = { "RadsAV", "HealthAV", "RadAway", "RadDose" };
 
-    public record Templates(string SpellEdid, string AidEdid);
+    public record Templates(string SpellEdid, string AidEdid, string ControlSpell = "");
 
     /// <summary>The vanilla records the effect, the spell and RadAway are copied from (null: none found, minimal record).</summary>
     public record Found(ISpellGetter? Spell, IMagicEffectGetter? Effect, IIngestibleGetter? Aid, string Level);
@@ -109,6 +112,13 @@ static class RadsProbe
             effect = EffectOf(spell) ?? throw new Refusal($"{t.SpellEdid} has not exactly one effect with a record in Starfield.esm");
             level = "named";
         }
+        else if (sf.Spells.Where(sp => string.Equals(sp.EditorID, PreferredSpell, StringComparison.OrdinalIgnoreCase)).ToList() is { Count: 1 } pref && EffectOf(pref[0]) is { } prefEffect)
+        {
+            // Fourth game session (FAL-213): the vanilla DamageHealthSpell moved Health from a quest script's Cast and the copies of
+            // an artifact power (a Starborn power with a cost, another equip type) did not. Its one effect, DamageHealthContact, is
+            // all zero but the actor value and a few trailing words, so only the actor value changes for ours.
+            spell = pref[0]; effect = prefEffect; level = "preferred";
+        }
         else
         {
             foreach (var strict in new[] { true, false })
@@ -120,7 +130,12 @@ static class RadsProbe
         }
         IIngestibleGetter? aid = null;
         if (t.AidEdid != "") aid = One(sf.Ingestibles, t.AidEdid, "ALCH");
-        else aid = sf.Ingestibles.OrderBy(i => i.FormKey.ID).FirstOrDefault(i => i.Flags.HasFlag(Ingestible.Flag.Medicine) && i.MajorFlags.HasFlag(Ingestible.MajorFlag.Medicine) && i.Effects.Count == 1 && i.Addiction.IsNull);
+        else
+        {
+            // an instant one first (an entry with duration 0 in a vanilla item), else any single-effect medicine
+            var meds = sf.Ingestibles.Where(i => i.Flags.HasFlag(Ingestible.Flag.Medicine) && i.MajorFlags.HasFlag(Ingestible.MajorFlag.Medicine) && i.Effects.Count == 1 && i.Addiction.IsNull).OrderBy(i => i.FormKey.ID).ToList();
+            aid = meds.FirstOrDefault(i => i.Effects[0].Data?.Duration == 0) ?? meds.FirstOrDefault();
+        }
         return new Found(spell, effect, aid, level);
     }
 
@@ -188,6 +203,8 @@ static class RadsProbe
             effect.MagicSkill.SetToNull();
             effect.ResistValue.SetToNull();
             effect.SecondActorValue.SetTo(avif.FormKey);
+            // The template's own duration flags are kept: forcing NoDuration and clearing Recover on a timed template (third session)
+            // made the ingestible's effect run for a while and subtract about once per frame (-59,700 from a -200 entry).
             effect.Flags &= ~MagicEffect.Flag.Detrimental;     // the engine negates the magnitude when exactly one of the effect's Detrimental flag and the actor value's damage-is-positive flag is set; neither is set here, so +100 stays +100
             effect.ThirdActorValue.SetToNull();
             effect.CounterEffects.Clear();
@@ -301,6 +318,8 @@ static class RadsProbe
         script.Properties.Add(Prop(PropNames[1], health.FormKey));
         script.Properties.Add(Prop(PropNames[2], spell.FormKey));
         script.Properties.Add(Prop(PropNames[3], radAway.FormKey));
+        if (tpl.ControlSpell != "")          // stage 50: a vanilla instant value effect on Health, cast from the same script (second control)
+            script.Properties.Add(Prop(PropNames[4], One(sf.Spells, tpl.ControlSpell, "SPEL").FormKey));
         quest.VirtualMachineAdapter = new QuestAdapter
         {
             Version = 6, ObjectFormat = 2, ExtraBindDataVersion = 3,
@@ -482,17 +501,19 @@ static class RadsProbe
         Need(quest?.FormKey == Own(QuestId) && quest.EditorID == QuestEdid, "not exactly our QUST");
         if (quest != null)
         {
+            var wantProps = PropNames.Length - (tpl.ControlSpell != "" ? 0 : 1);
             var scripts = quest.VirtualMachineAdapter?.Scripts.ToList() ?? new();
             var props = scripts.Count == 1 ? scripts[0].Properties.OfType<ScriptObjectProperty>().ToDictionary(p => p.Name, p => p.Object.FormKey) : new();
             Console.WriteLine($"  QUST {quest.EditorID} flags {quest.Data?.Flags} stages [{string.Join(",", quest.Stages.Select(s => s.Index))}] scripts [{string.Join(", ", scripts.Select(s => $"{s.Name} ({s.Properties.Count} properties)"))}]");
             Need(quest.Data?.Flags.HasFlag(Quest.Flag.StartGameEnabled) == true, "QUST is not start game enabled");
-            Need(quest.Stages.Select(s => s.Index).SequenceEqual(Stages), "QUST stages are not 10, 20, 30, 40");
-            Need(scripts.Count == 1 && scripts[0].Name == Script && scripts[0].Properties.Count == PropNames.Length, $"QUST script is not {Script} with exactly {PropNames.Length} properties");
+            Need(quest.Stages.Select(s => s.Index).SequenceEqual(Stages), "QUST stages are not 10, 20, 30, 40, 50");
+            Need(scripts.Count == 1 && scripts[0].Name == Script && scripts[0].Properties.Count == wantProps, $"QUST script is not {Script} with exactly {wantProps} properties");
             void P(string name, FormKey want) => Need(props.TryGetValue(name, out var fk) && fk == want, $"property {name} is not {want}");
             P(PropNames[0], Own(AvifId));
             P(PropNames[1], health.FormKey);
             P(PropNames[2], Own(SpellId));
             P(PropNames[3], Own(RadAwayId));
+            if (tpl.ControlSpell != "") P(PropNames[4], One(sf.Spells, tpl.ControlSpell, "SPEL").FormKey);
             foreach (var kv in props) Console.WriteLine($"    property {kv.Key} = {kv.Value}");
         }
         var kinds = mod.EnumerateMajorRecords().GroupBy(r => r.GetType().Name.Replace("BinaryOverlay", "")).Select(g => $"{g.Key} {g.Count()}");
@@ -514,7 +535,7 @@ static class RadsProbe
         var synthMgef = new MagicEffect(new FormKey(SfEsm, 0x00A100), Release)
         {
             EditorID = "SynthValueEffect", Name = "Synth", CastType = CastType.FireAndForget, TargetType = TargetType.Self,
-            Flags = MagicEffect.Flag.NoDuration | MagicEffect.Flag.Detrimental, Archetype = synthArch,       // a template with the flag that would negate
+            Flags = MagicEffect.Flag.Detrimental | MagicEffect.Flag.NoDuration, Archetype = synthArch,       // a template with the flag that would negate
             Keywords = new ExtendedList<IFormLinkGetter<IKeywordGetter>> { new FormLink<IKeywordGetter>(new FormKey(SfEsm, 0x00A200)) },
         };
         synthMgef.SecondActorValue.SetTo(new FormKey(SfEsm, 0x00A02E));            // the template's own actor value (replaced by ours)
@@ -529,6 +550,14 @@ static class RadsProbe
         synthSpell.EquipmentType.SetTo(new FormKey(SfEsm, 0x00A300));
         synthSpell.Effects.Add(new Effect { BaseEffect = new FormLinkNullable<IMagicEffectGetter>(synthMgef.FormKey), Data = new EffectData { Magnitude = 5f }, MAGF = 7, EFIF = 8, MUID = 9 });
         mod.Spells.Add(synthSpell);
+        var dmgSpell = new Spell(new FormKey(SfEsm, 0x00A103), Release)
+        {
+            EditorID = PreferredSpell, Name = "Synth damage", Type = Spell.SpellType.Spell, CastType = CastType.FireAndForget, TargetType = TargetType.Self,
+            Flags = Spell.Flag.ManualCostCalc,
+        };
+        dmgSpell.EquipmentType.SetTo(new FormKey(SfEsm, 0x00A301));
+        dmgSpell.Effects.Add(new Effect { BaseEffect = new FormLinkNullable<IMagicEffectGetter>(synthMgef.FormKey), Data = new EffectData { Magnitude = 40f }, MAGF = 70, EFIF = 80, MUID = 90 });
+        mod.Spells.Add(dmgSpell);
         var synthAid = new Ingestible(new FormKey(SfEsm, 0x00A102), Release)
         {
             EditorID = "SynthAid", Name = "Synth aid", Flags = Ingestible.Flag.Medicine, MajorFlags = Ingestible.MajorFlag.Medicine,

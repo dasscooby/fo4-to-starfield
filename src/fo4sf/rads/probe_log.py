@@ -25,12 +25,12 @@ import re
 
 LINE = re.compile(r"FO4SFRADS rt=(?P<rt>[-+\d.eE]+) (?P<event>\w+)(?P<rest>.*)$", re.IGNORECASE)
 TOKEN = re.compile(r"(\w+)=(\S*)")
-EVENTS = ("init", "start", "step", "state", "control", "set", "fix", "route")
+EVENTS = ("init", "start", "step", "state", "control", "set", "fix", "route", "vcontrol")
 WRITE_TEST = 50.0         # the script's WriteTest: stage 10 writes this to our value and reads it
 ID_KEYS = {"quest", "rads_av", "health_av", "spell", "radaway", "av"}
 WHENS = ("start", "before", "now", "settled", "routed", "final")
 ORDER = {w: i for i, w in enumerate(WHENS)}
-STAGES = (10, 20, 30, 40)
+STAGES = (10, 20, 30, 40, 50)
 EXPECT = {10: 0.0, 20: 100.0, 30: 300.0, 40: 100.0}
 PENALTY = 0.1            # the script's PenaltyPerRad
 CONTROL_DELTA = 10.0
@@ -235,12 +235,32 @@ def setvalue_check(events):
     return f"NO (wrote {fmt(e['wrote'])}, read {fmt(e['read'])})"
 
 
+def vcontrol_check(events):
+    """The second control (stage 50, only when the kit was built with --control-spell): did a vanilla spell move Health
+    when cast from the quest script? A sentence; "not run" when stage 50 was not set."""
+    v = next((e for e in events if e["event"] == "vcontrol"), None)
+    if v is None:
+        return "not run (stage 50 not set)"
+    if v.get("cast") is not True:
+        return "not run (the kit was built without --control-spell)"
+    b, a = v.get("before"), v.get("after")
+    if not (num(b) and num(a)):
+        return f"no reading (before {fmt(b)}, after {fmt(a)})"
+    if abs(a - b) <= EPS:
+        return f"Health did not move (cast of {hexid(v.get('spell'))}: {fmt(b)} to {fmt(a)}): Cast from a quest script may apply no value modifier at all"
+    return f"Health moved {fmt(b)} to {fmt(a)} ({a - b:+g}) with the vanilla spell {hexid(v.get('spell'))}: Cast works, so a value that stays put is our effect's fault"
+
+
+def hexid(v):
+    return "none" if v is None else f"{v:08X}" if isinstance(v, int) else str(v)
+
+
 def summarize(lines, run=-1):
     """{"runs", "run", "cut", "init", "start", "control": (ok, why), "effect": {stage: text}, "route": {stage: text},
     "radaway": text, "maxsource", "states", "extra_effects", "problems", "verdict"} of one run (the latest)."""
     rs, cut = runs(lines)
     out = {"runs": len(rs), "cut": cut, "init": None, "start": None, "control": (False, "no log"), "effect": {}, "route": {},
-           "radaway": "not run", "setvalue": "not run", "maxsource": None, "states": [], "extra_effects": {}, "problems": [],
+           "radaway": "not run", "setvalue": "not run", "vanilla_control": "not run", "maxsource": None, "states": [], "extra_effects": {}, "problems": [],
            "verdict": "INCONCLUSIVE: no log lines"}
     if not rs:
         return out
@@ -265,13 +285,17 @@ def summarize(lines, run=-1):
         out["verdict"] = f"INCONCLUSIVE: control failed: {why}"
         return out
     eff, route, rad, src, bad = judge(r)
-    out.update(effect=eff, route=route, radaway=rad, maxsource=src, setvalue=setvalue_check(r))
+    out.update(effect=eff, route=route, radaway=rad, maxsource=src, setvalue=setvalue_check(r), vanilla_control=vcontrol_check(r))
     by = by_stage(states)
     out["extra_effects"] = extra_effects(by)
     if all(isinstance(s.get("fx"), str) and s.get("fx") == "na" for s in states if "fx" in s) and states:
         out["problems"].append("the game gave no list of active effects (fx na): Starfield's own radiation cannot be seen")
     if src == "health":
         out["problems"].append("no maximum or base reading for Health (both na): the route is judged on the current health")
+    if any(num(x.get("rads")) and x["rads"] < 0 for x in states):
+        out["problems"].append("our value read below zero (the AVIF minimum is not enforced for an effect's change): an effect applied more than once per cast")
+    if any(e.get("clamped") is True for e in r if e["event"] == "route"):
+        out["problems"].append("the script clamped our value at 0 before routing it (a route line has clamped=true)")
     for e in bad:
         out["problems"].append(f"the route's ModValue was not called at rads {fmt(e.get('rads'))} (delta {fmt(e.get('delta'))})")
     out["verdict"] = (f"CONTROL OK ({why}). Own value takes a number: {out['setvalue']}; effect +100: {eff.get(20)}; effect +200: {eff.get(30)}; "
@@ -307,6 +331,7 @@ def report(summary):
                 lines.append(f"stage {stage} route (maximum health, source {summary['maxsource']}): {summary['route'][stage]}")
         lines.append(f"stage 10 own value takes a number: {summary['setvalue']}")
         lines.append(f"stage 40 RadAway: {summary['radaway']}")
+        lines.append(f"stage 50 vanilla control: {summary['vanilla_control']}")
         for stage, ids in summary["extra_effects"].items():
             lines.append(f"stage {stage} active effects not there at stage 10: " + ", ".join(f"{i:08X}" if isinstance(i, int) else str(i) for i in ids))
     lines += ["note: " + p for p in summary.get("problems", [])]

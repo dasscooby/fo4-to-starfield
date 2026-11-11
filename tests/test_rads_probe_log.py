@@ -127,6 +127,47 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(s["route"], {})
 
 
+class NegativeValueTests(unittest.TestCase):
+    def test_a_value_below_zero_is_a_note_and_a_clamp_is_a_note(self):
+        lines = [x.replace("rads=100.0 health=200.0 base=na max=190.0 applied=-10 fx=none", "rads=-59700.0 health=200.0 base=na max=190.0 applied=-10 fx=none") for x in good_log()]
+        s = pl.summarize(lines)
+        self.assertTrue(any("below zero" in p for p in s["problems"]))
+        lines = [x.replace("ok=true", "ok=true clamped=true") if " route " in x else x for x in good_log()]
+        self.assertTrue(any("clamped our value at 0" in p for p in pl.summarize(lines)["problems"]))
+        self.assertEqual(pl.summarize(good_log())["problems"], [])
+
+
+class VanillaControlTests(unittest.TestCase):
+    def vc(self, **kw):
+        return good_log() + [line(60.0, "vcontrol", **kw)]
+
+    def test_not_set_when_there_is_no_vcontrol_line(self):
+        self.assertEqual(pl.summarize(good_log())["vanilla_control"], "not run (stage 50 not set)")
+
+    def test_built_without_the_spell(self):
+        s = pl.summarize(self.vc(spell="none", before=200.0, after=200.0, cast="false"))
+        self.assertEqual(s["vanilla_control"], "not run (the kit was built without --control-spell)")
+
+    def test_a_vanilla_cast_that_moves_health_tells_the_fault_is_ours(self):
+        s = pl.summarize(self.vc(spell=-1234, before=200.0, after=230.0, cast="true"))
+        self.assertIn("Health moved 200 to 230 (+30) with the vanilla spell FFFFFB2E: Cast works", s["vanilla_control"])
+        self.assertIn("our effect's fault", s["vanilla_control"])
+
+    def test_a_vanilla_cast_that_does_not_move_health_points_at_cast(self):
+        s = pl.summarize(self.vc(spell=5, before=200.0, after=200.0, cast="true"))
+        self.assertIn("Health did not move", s["vanilla_control"])
+        self.assertIn("Cast from a quest script may apply no value modifier", s["vanilla_control"])
+        self.assertIn("stage 50 vanilla control: Health did not move", "\n".join(pl.report(s)))
+
+    def test_unreadable_numbers(self):
+        s = pl.summarize(self.vc(spell=5, before="na", after=200.0, cast="true"))
+        self.assertTrue(s["vanilla_control"].startswith("no reading"))
+
+    def test_a_failed_first_control_judges_nothing_here_either(self):
+        lines = head() + control(after=200.0) + [line(60.0, "vcontrol", spell=5, before=200.0, after=230.0, cast="true")]
+        self.assertEqual(pl.summarize(lines)["vanilla_control"], "not run")
+
+
 class SetValueTests(unittest.TestCase):
     def test_a_number_that_is_read_back_is_yes(self):
         s = pl.summarize(good_log())

@@ -9,6 +9,9 @@ Scriptname FO4SF_RadsProbeQuest extends Quest
    stage 20  rads to 100     (the spell, once: effect +100)
    stage 30  rads to 300     (the spell, twice: +200)
    stage 40  RadAway         (AddItem + EquipItem: effect -200, so 100 left)
+   stage 50  the SECOND CONTROL: a vanilla spell (property ControlSpell, named when the plugin is built) is cast on the player
+             and Health read before and 3 s after. Tells "our effect is wrong" from "Cast from a quest script applies no value
+             modifier at all". Not run when the property is None.
  After the effect has had 3 s the script reads the value, FORCES the step's number with SetValue when the effect did not
  give it (logged fix forced=true, so the route is still tested), then applies the ROUTE: a permanent modifier on Health
  of minus one tenth of the rads (ModValue on the difference to what it applied before), and reads again 3 s later.
@@ -26,6 +29,7 @@ ActorValue Property RadsAV Auto Const Mandatory
 ActorValue Property HealthAV Auto Const Mandatory
 Spell Property RadsSpell Auto Const Mandatory
 Form Property RadAway Auto Const Mandatory
+Spell Property ControlSpell Auto Const    ; stage 50 only: a vanilla instant value effect on Health (second control); None when not given
 
 ; ---------------------------------------------------------------- the numbers
 
@@ -46,6 +50,7 @@ bool Done10 = false
 bool Done20 = false
 bool Done30 = false
 bool Done40 = false
+bool Done50 = false
 
 ; ---------------------------------------------------------------- init
 
@@ -148,6 +153,14 @@ EndFunction
 
 Function ApplyRoute(Actor p)
     float rads = p.GetValue(RadsAV)
+    bool clamped = false
+    if rads < 0.0
+        ; the engine does not enforce the value's minimum for a change made by an effect (fourth session: -59,900): clamp at 0
+        ; before the route, or a negative number would raise Health
+        p.SetValue(RadsAV, 0.0)
+        rads = 0.0
+        clamped = true
+    endif
     int pen = (rads * PenaltyPerRad) as int
     float want = -1.0 * pen
     float delta = want - Applied
@@ -158,7 +171,7 @@ Function ApplyRoute(Actor p)
             Applied = want
         endif
     endif
-    Trace("route rads=" + rads + " want=" + want + " delta=" + delta + " applied=" + Applied + " ok=" + ok)
+    Trace("route rads=" + rads + " want=" + want + " delta=" + delta + " applied=" + Applied + " ok=" + ok + " clamped=" + clamped)
 EndFunction
 
 ; ---------------------------------------------------------------- poll and steps
@@ -169,6 +182,8 @@ Event OnTimer(int aiTimerID)
         StartTimer(POLL_S, TIMER_POLL)
     elseif aiTimerID >= TIMER_FINAL
         Reading("final", aiTimerID - TIMER_FINAL)
+    elseif aiTimerID == TIMER_SETTLE + 50
+        VSettle(Game.GetPlayer())
     elseif aiTimerID >= TIMER_SETTLE
         Settle(aiTimerID - TIMER_SETTLE)
     endif
@@ -191,6 +206,10 @@ Function Poll()
     if !Done40 && GetStageDone(40)
         Done40 = true
         Step40(p)
+    endif
+    if !Done50 && GetStageDone(50)
+        Done50 = true
+        Step50(p)
     endif
 EndFunction
 
@@ -258,4 +277,26 @@ Function Settle(int stage)
     ApplyRoute(p)
     Reading("routed", stage)
     StartTimer(SETTLE_S, TIMER_FINAL + stage)
+EndFunction
+
+float VBefore = 0.0
+
+Function Step50(Actor p)
+    Trace("step stage=50 call=CastVanilla spell=" + Id(ControlSpell))
+    VBefore = p.GetValue(HealthAV)
+    Reading("before", 50)
+    if ControlSpell == None
+        Trace("vcontrol spell=none before=" + VBefore + " after=" + VBefore + " cast=false")
+        return
+    endif
+    ControlSpell.Cast(p, p)
+    Reading("now", 50)
+    StartTimer(SETTLE_S, TIMER_SETTLE + 50)
+EndFunction
+
+Function VSettle(Actor p)
+    {Three seconds after the vanilla cast: Health read again; one vcontrol line.}
+    float after = p.GetValue(HealthAV)
+    Reading("settled", 50)
+    Trace("vcontrol spell=" + Id(ControlSpell) + " before=" + VBefore + " after=" + after + " cast=true")
 EndFunction

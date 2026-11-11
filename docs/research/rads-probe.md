@@ -5,7 +5,7 @@ question first: **can a value of our own hold rads, lower maximum health, and be
 needs hang from the same value pattern. Verified on the PC, untested in play: Starfield.esm has `ENV_*` hazards, hazard
 spells and effects, `AFFL_*` affliction values and addiction effects; nothing is named mutation. Research rows R1 to R4,
 C1 to C3, V1 to V5 (docs/research/framework/engine-mechanics-notes).
-Task: FAL-213. Status: **run in game once (head b9ad9081); this head fixes what that session found.**
+Task: FAL-213. Status: **run in game three times (b9ad9081, 41d3f968, 5e6ae1bc); the crash is fixed, the effect did not move the value; this head tries an instant, non-recovering effect.**
 
 ## What the first game session found (head b9ad9081, owner PC, 10 Nov 20:49 and 20:58 UTC)
 
@@ -45,8 +45,72 @@ Since the first session the writer **copies a vanilla self-cast value-modifier s
 ingestible, from Starfield.esm** (found by what they are, or named with `--template-spell` / `--template-aid`; the build
 prints and `plan.json` records which) and changes the editor id, name, the effect's actor value and the magnitude;
 conditions, scripts, keywords, resist/skill values and an addiction are cleared. That alone did not stop the crash (above).
+## The third session (head 5e6ae1bc): the crash is gone, the effect does nothing
+
+Owner PC run, all four stages, no crash. **Verified in the game log:** control OK; our value takes 50 and 0; `Cast` ran
+(`rads=0` three seconds after, so the spell did not move the value; the script forced 100); the two casts and RadAway by
+`EquipItem` likewise left the value where it was (forced to 300 and 100); the script's own route works (rads 100 / 300 / 100:
+Health 195 / 175 / 195, `applied` -10 / -30 / -10). `fx na`: no list of active effects exists to read.
+Two honest limits: the route **lowers current Health, not the maximum** (`GetValueMax` is not declared in Starfield's
+scripts and `base` stayed 200), so "lower maximum health" is **not shown**; and whether RadAway's `EquipItem` consumed the
+item at all is not shown either (the value did not move, and the log has no inventory reading).
+Why the effect does nothing (**the owner PC's reading of the records, untested**): the loose template was a timed effect
+that recovers, our entry has duration 0, so the change is applied and taken back at once. The strict template search
+(fire and forget, self, no duration) found none.
+This head makes the effect **instant and non-recovering** (`NoDuration` set, `Recover` cleared, `Detrimental` still clear);
+`check` refuses a kit that is not, and compares every other flag with the template. One cheap experiment, one game session.
+**If the value still does not move**, the next step is not another flag: it is the owner PC's proposal, the script owns the
+value and a consumable reaches it through a script effect (an effect whose script calls `ModValue` on start) or through an
+item that calls the script directly, or an instant vanilla template found by search (every MGEF whose DATA word 14 is an
+AVIF and whose spell entries have duration 0). The hand kit (#719) should not be handed over until this is settled.
+
 Stage 10 now also writes a non-zero number (50) to our value, reads it, and writes 0 (`set` lines; the reader's
 "own value takes a number" line).
+
+## The fourth session (head 88e99c4d): the vanilla spell works, ours does not
+
+Owner PC run with `--control-spell DamageHealthSpell` (0029AAE9: one effect, `DamageHealthContact` on Health, magnitude 40,
+duration 0). **Verified in the game log:** no crash; the vanilla spell, cast by the same script, moved Health 6195 to 6155
+(-40): **`Cast` from a quest script applies value modifiers**. Our spell (stages 20, 30) still moved nothing, so the fault
+is in our records. The two spells differ in `ETYP` (`00013F43` ours, copied from the artifact power; `00013F44` the working
+one) and in `SPIT` (ours 15 and 1 in the first two words, byte 14 zero; the working one 0, 0 and byte 14 one). Why ours is
+refused is **unresolved**: the owner PC's guess is a cost the player cannot pay, or the delivery byte; neither tested.
+RadAway (stage 40) **did** apply, about once per frame: 300 x -200 = -59,700 read after the settle, then -59,900 after the
+script's force. The AVIF minimum (0) is not enforced for a change made by an effect. **Verified** (the readings); "once per
+frame" is a reading of the size, frames not counted. Cause: with `NoDuration` set and `Recover` cleared on a timed template the
+effect stayed live and subtracted every update.
+This head: the effect and the spell are copied from **`DamageHealthSpell` and its effect** (preferred; the build prints
+`templates (preferred)`; `--template-spell` still overrides) with only the actor value changed and `Detrimental` cleared; the
+effect's own duration flags are **kept** (the forced `NoDuration` / no `Recover` of 222e2a45 is gone, `check` compares every
+other flag with the template). RadAway's item template prefers a vanilla medicine whose one effect has duration 0. The script
+**clamps our value at 0** before the route (`clamped=true` in the route line), and the reader notes a value below zero or a
+clamp. Untested in play. The `Detrimental` clearing is the sign rule (owner PC's disassembly reading): `DamageHealthContact`
+presumably carries it (Health lost 40 with magnitude +40), so without clearing it ours would be negative.
+
+### The one flag bit that differs from the template (9bc3ec25, owner PC's read-back)
+
+The staged effect's DATA words 24 to 26 read `00000003 00000101 09013F80`; the template `DamageHealthContact` has `09053F80`.
+The difference is the bit `0x00040000` of word 26, the bit `0x4` of the upper half (`0x0905` against `0x0901`). In Mutagen's
+`MagicEffect.Flag` that bit is **`Detrimental`** (`Hostile 0x1`, `Recover 0x2`, `Detrimental 0x4`, ...; read from the
+enum), and it is the only flag the writer clears. The check prints the copy's flags as `Hostile, DispelWithKeywords, NoArea`,
+which are exactly `0x901` (`0x1 + 0x100 + 0x800`); with `Detrimental` the template reads `0x905`. **That the upper half of
+word 26 is the flags field is an inference** from these numbers matching, not a layout read from Starfield's format.
+Why it is cleared: the owner PC's reading of the engine (disassembly, not tested in play) negates an effect's magnitude when
+exactly one of the effect's `Detrimental` and the actor value's "damage is positive" is set. The vanilla spell lowers Health
+by its +40 magnitude, which fits `Detrimental` set on a value without the other flag; our value (`AVFL 00000400`) lacks
+the second, so with `Detrimental` kept the spell would give -100 and the value would stay at 0; cleared it should give +100.
+If stage 20 shows a negative sign, set `Detrimental` again and flag the AVIF damage-is-positive instead.
+
+## Second control: a vanilla instant effect (stage 50)
+
+Asked by the owner PC so one session separates "our effect is wrong" from "Cast on the player from a quest script applies no
+value modifier at all". `stage --control-spell <SPEL editor id>` binds a fifth, optional property, `ControlSpell`; stage 50
+reads Health, casts that vanilla spell on the player, reads Health 3 s later and logs one `vcontrol` line; the reader prints
+"stage 50 vanilla control": Health moved (Cast works, so our effect is at fault), Health did not move (Cast may apply no
+value modifier from a script at all), or not run. Not part of the verdict line and not run without the option. Candidate
+wanted: a self-cast SPEL whose one effect is a value modifier on Health (MGEF DATA word 14 = Health) with an EFIT duration of
+0 (instant), editor id named by the owner PC from Starfield.esm; nothing here reads Starfield.esm.
+Console: `setstage <Q> 50` (the `console` command prints it).
 
 ## What is built
 
@@ -218,5 +282,5 @@ Setting 100` and the script sets the value, so the health part is still seen. Ev
 4. Use one **Rad Dose**. Within 5 s a message: "Rads 100, max health ...". Max health should be 10 lower than N.
 5. Use a second Rad Dose. Message "Rads 200, ...", max health 20 lower than N.
 6. Use one **RadAway**. Message "Rads 0, ..." (200 minus 200), max health back to N.
-7. Watch for a message that says "used, but rads stayed": that means the item's effect did nothing and the script did the change. Screenshot it.
+7. Watch for a message that says "used: the effect left rads at X, expected Y": that means the item's effect gave a wrong number (the PC run of the probe saw RadAway applied once per frame, rads -59,700) and the script set the right one. Until the 3 s settle the screen shows nothing for that item, and rads are kept between 0 and 1000 by the script. Screenshot the message.
 8. Quit without saving. Screenshot each message you saw (or write them down), and tell which of steps 4 to 6 showed a message.
