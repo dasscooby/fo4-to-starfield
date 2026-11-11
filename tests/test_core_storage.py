@@ -3,6 +3,7 @@ FO4TerrainCore.esm whose world holds the spawn cell FO4Core_RedRocketSpawn and a
 persistent and one temporary XMarker in the spawn cell's own groups, the exact masters, the cell the core's own."""
 from pathlib import Path
 import json
+import os
 import re
 import shutil
 import struct
@@ -313,6 +314,66 @@ class InstallPreflightTests(unittest.TestCase):
                 (stage / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
                 core_storage_install.install(args)
                 inst.assert_called_once()
+
+
+class PersistentCellConflictTests(unittest.TestCase):
+    """FAL-314: the topcell build overrides the core world's persistent cell, as FO4SFMission.esm and FO4SFCombinedProbe.esm do."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.txt = os.path.join(self.tmp.name, "Plugins.txt")
+
+    def plugins(self, *lines):
+        with open(self.txt, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+
+    def test_active_mission_or_combined_probe_is_refused_for_topcell(self):
+        for other in ("FO4SFMission.esm", "FO4SFCombinedProbe.esm"):
+            self.plugins("# comment", "*FO4TerrainCore.esm", f"*{other}")
+            problems = make_core_storage.persistent_cell_conflicts({"variant": "topcell"}, self.txt)
+            self.assertEqual(len(problems), 1, problems)
+            self.assertIn(other, problems[0])
+            self.assertIn("two plugins never override it together", problems[0])
+
+    def test_an_unticked_one_or_another_variant_or_no_file_is_fine(self):
+        self.plugins("FO4SFMission.esm", "*FO4TerrainCore.esm")                         # listed, not active
+        self.assertEqual(make_core_storage.persistent_cell_conflicts({"variant": "topcell"}, self.txt), [])
+        self.plugins("*FO4SFMission.esm")
+        for variant in ("full", "cell-only", "temp-only", "world-only"):
+            self.assertEqual(make_core_storage.persistent_cell_conflicts({"variant": variant}, self.txt), [])
+        self.assertEqual(make_core_storage.persistent_cell_conflicts({}, self.txt), [])  # an old stage: run 3's layout
+        self.assertEqual(make_core_storage.persistent_cell_conflicts({"variant": "topcell"}, self.txt + ".none"), [])
+
+    def test_the_installer_never_runs_beside_an_active_overrider_and_rolls_nothing(self):
+        import core_storage_install
+        from types import SimpleNamespace
+        from unittest import mock
+        d = Path(self.tmp.name)
+        stage, game = d / "stage", d / "game"
+        (stage / "Data").mkdir(parents=True)
+        (game / "Data").mkdir(parents=True)
+        (stage / make_core_storage.PLUGIN).write_bytes(b"plugin")
+        core = game / "Data" / "FO4TerrainCore.esm"
+        core.write_bytes(b"core")
+        plan = {"kind": "core-storage-probe", "plugin": make_core_storage.PLUGIN, "plugins": [make_core_storage.PLUGIN], "variant": "topcell",
+                "inputs": {"core": {"sha256": make_core_storage.sha256(str(core))}},
+                "outputs": {make_core_storage.PLUGIN: make_core_storage.sha256(str(stage / make_core_storage.PLUGIN))}}
+        (stage / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
+        self.plugins("*FO4SFCombinedProbe.esm")
+        args = SimpleNamespace(dir=str(stage), starfield=str(game))
+        with mock.patch.object(core_storage_install.exp_install, "plugins_txt", return_value=self.txt), \
+                mock.patch.object(core_storage_install, "installer") as inst:
+            with self.assertRaises(SystemExit) as cm:
+                core_storage_install.install(args)
+            self.assertIn("FO4SFCombinedProbe.esm is active", str(cm.exception))
+            inst.assert_not_called()
+            self.plugins("*FO4TerrainCore.esm")                                          # the overrider ticked off: it runs
+            core_storage_install.install(args)
+            inst.assert_called_once()
+
+    def test_the_stage_records_its_variant_for_the_installer(self):
+        self.assertIn('"variant": a.variant', (ROOT / "scripts" / "core_storage" / "make_core_storage.py").read_text(encoding="utf-8"))
 
 
 class ScriptTests(unittest.TestCase):

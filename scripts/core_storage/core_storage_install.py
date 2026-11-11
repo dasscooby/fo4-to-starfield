@@ -42,6 +42,11 @@ def install(a):
     problems = make_core_storage.core_pin_problems(plan, os.path.join(a.starfield, "Data"))
     if problems:
         sys.exit("core storage probe not installed: " + "; ".join(problems))
+    # Plugins.txt is only read for a stage that overrides the core world's persistent cell (a stage without a variant is run 3's)
+    problems = (make_core_storage.persistent_cell_conflicts(plan, exp_install.plugins_txt())
+                if plan.get("variant", "full") in make_core_storage.PERSISTENT_CELL_VARIANTS else [])
+    if problems:
+        sys.exit("core storage probe not installed: " + "; ".join(problems))
     names = sorted(n for n in os.listdir(d) if n.lower().endswith(".esm"))
     if sorted(plan["plugins"]) != names:
         sys.exit(f"core storage probe not installed: the stage holds {names}, plan.json lists {plan['plugins']}")

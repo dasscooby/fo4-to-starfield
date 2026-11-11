@@ -107,3 +107,12 @@ cell (the planet probe has that layout and ran, but its cell never loaded).
 **The runs.** 1) `topcell` (default): expected to survive; the reader's verdict then answers the storage question (CS_P with
 the player). 2) If it crashes at the same address, `cell-only` / `world-only` as in the ladder above. 3) `persist-only` should
 reproduce the crash (the PC's prediction); `temp-only` should survive.
+
+### Install refusal beside the other persistent-cell overrides (FAL-314 finding)
+
+The `topcell` build overrides the core world's persistent cell, as `FO4SFMission.esm` and `FO4SFCombinedProbe.esm` do, and two
+plugins never override it together. `core_storage_install.py install` now reads Plugins.txt and refuses, before the installer
+runs and with nothing installed, when either of them is ticked ("*Name") and the stage's `plan.json` variant is `topcell`. A
+listed but unticked plugin does not count; the other variants (and a stage from before the variant key) do not override the
+persistent cell and are not refused. The reverse direction (installing the mission or the combined probe beside an active core
+storage probe) is those installers' check, not done here: untick `FO4SFCoreStorage.esm` first.

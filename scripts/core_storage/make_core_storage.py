@@ -142,6 +142,32 @@ def core_pin_problems(plan, data_dir):
     return []
 
 
+# plugins that override the core world's PERSISTENT cell: two plugins never override it together (FAL-273, FAL-314 finding)
+PERSISTENT_CELL_OVERRIDERS = ("FO4SFMission.esm", "FO4SFCombinedProbe.esm")
+# variants that write that override (a stage without a variant key is run 3's, "full": no override)
+PERSISTENT_CELL_VARIANTS = ("topcell",)
+
+
+def active_plugins(plugins_txt_path):
+    """Lower-cased names of the plugins ticked ("*Name") in a Plugins.txt, [] when there is no file."""
+    if not os.path.exists(plugins_txt_path):
+        return []
+    with open(plugins_txt_path, "rb") as f:
+        raw = f.read()
+    text = raw.decode("utf-8-sig", errors="replace")
+    return [line.strip()[1:].strip().lower() for line in text.splitlines() if line.strip().startswith("*")]
+
+
+def persistent_cell_conflicts(plan, plugins_txt_path):
+    """Problems when this stage overrides the core world's persistent cell and another plugin that does is active."""
+    if plan.get("variant", "full") not in PERSISTENT_CELL_VARIANTS:
+        return []
+    ticked = set(active_plugins(plugins_txt_path))
+    return [f"{name} is active in Plugins.txt and also overrides the core world's persistent cell: two plugins never "
+            "override it together (untick it, or stage --variant full / cell-only for this probe)"
+            for name in PERSISTENT_CELL_OVERRIDERS if name.lower() in ticked]
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
