@@ -70,7 +70,7 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(mpa.enable(PSC, []), PSC)
         names = mpa.optional_names(PSC)
         self.assertEqual(names, ["Actor.GetWornItem", "Actor.GetFurnitureReference", "Actor.GetSitState",
-                                 "Actor.IsInPowerArmor", "Form.HasKeyword", "Form.AddKeyword", "Game.GetCameraState"])
+                                 "Actor.IsInPowerArmor", "ObjectReference.HasKeyword", "ObjectReference.AddKeyword", "Game.GetCameraState"])
         self.assertIn('" haskw=" + kb + " addkw=" + ka + " haskw2=" + k2 + " haskwc=" + KwChair(suit)', PSC)
         self.assertIn("if kb == \"false\"", PSC)                                 # AddKeyword only when the game does not see it
 
@@ -86,8 +86,8 @@ class ScriptTests(unittest.TestCase):
 
 
 BASES = {
-    "Form": "Scriptname Form\nint Function GetFormID() native\nbool Function HasKeyword(Keyword k) native\nFunction AddKeyword(Keyword k) native\n",
-    "ObjectReference": "Scriptname ObjectReference extends Form\nfloat Function GetPositionX() native\nfloat Function GetPositionY() native\n"
+    "Form": "Scriptname Form\nint Function GetFormID() native\n",
+    "ObjectReference": "Scriptname ObjectReference extends Form\nbool Function HasKeyword(Keyword k) native\nFunction AddKeyword(Keyword k) native\nfloat Function GetPositionX() native\nfloat Function GetPositionY() native\n"
                        "float Function GetPositionZ() native\nfloat Function GetDistance(ObjectReference a) native\nCell Function GetParentCell() native\n",
     "Actor": "Scriptname Actor extends ObjectReference\nFunction SwitchToPowerArmor(ObjectReference a) native\nFunction SetRace(Race r) native\n"
              "Race Function GetRace() native\nObjectReference Function GetFurnitureReference() native\nint Function GetSitState() native\n"
@@ -121,7 +121,7 @@ class PrecheckTests(unittest.TestCase):
         self.assertEqual(r["missing"], [])
         self.assertTrue(r["required"]["Actor.GetDistance"])                  # declared on ObjectReference
         self.assertEqual(r["optional"], {"Actor.GetWornItem": True, "Actor.GetFurnitureReference": True,
-                                         "Actor.GetSitState": True, "Actor.IsInPowerArmor": False, "Form.HasKeyword": True, "Form.AddKeyword": True,
+                                         "Actor.GetSitState": True, "Actor.IsInPowerArmor": False, "ObjectReference.HasKeyword": True, "ObjectReference.AddKeyword": True,
                                          "Game.GetCameraState": False})
 
     def test_a_missing_required_native_is_named(self):
@@ -319,8 +319,8 @@ class StageTests(unittest.TestCase):
         self.assertFalse(plan["kw_first"])
         self.assertEqual(plan["optional"]["Actor.GetWornItem"], "kept")
         self.assertEqual(plan["optional"]["Actor.GetFurnitureReference"], "kept")
-        self.assertEqual(plan["optional"]["Form.HasKeyword"], "kept")
-        self.assertEqual(plan["optional"]["Form.AddKeyword"], "kept")
+        self.assertEqual(plan["optional"]["ObjectReference.HasKeyword"], "kept")
+        self.assertEqual(plan["optional"]["ObjectReference.AddKeyword"], "kept")
         self.assertTrue(plan["optional"]["Actor.GetSitState"].startswith("declared but did not compile"))
         self.assertEqual(plan["optional"]["Actor.IsInPowerArmor"], "not declared in the base scripts")
         self.assertEqual(plan["optional"]["Game.GetCameraState"], "not declared in the base scripts")

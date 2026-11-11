@@ -113,10 +113,10 @@ string Function KwOnRef(ObjectReference r)
     {Whether the game sees FurnitureTypePowerArmor (0003430B, the keyword of PowerArmorKeyword_DO) on the reference: the
      native's validity test reads the reference's keywords. PC run of 11 Nov: the base FURN listed it and the game said 0.}
     string s = "na"
-;OPT Form.HasKeyword     Keyword k = Game.GetFormFromFile(0x0003430B, "Starfield.esm") as Keyword
-;OPT Form.HasKeyword     if r && k
-;OPT Form.HasKeyword         s = "" + r.HasKeyword(k)
-;OPT Form.HasKeyword     endif
+;OPT ObjectReference.HasKeyword     Keyword k = Game.GetFormFromFile(0x0003430B, "Starfield.esm") as Keyword
+;OPT ObjectReference.HasKeyword     if r && k
+;OPT ObjectReference.HasKeyword         s = "" + r.HasKeyword(k)
+;OPT ObjectReference.HasKeyword     endif
     return s
 EndFunction
 
@@ -125,23 +125,23 @@ string Function KwChair(ObjectReference r)
      comparison the owner PC made on 11 Nov (true on the suit and on the control, while the appended power armor keyword
      read false). Meaningful with the default control, NPCChairTech03_Free_270.}
     string s = "na"
-;OPT Form.HasKeyword     Keyword k = Game.GetFormFromFile(0x00021BF1, "Starfield.esm") as Keyword
-;OPT Form.HasKeyword     if r && k
-;OPT Form.HasKeyword         s = "" + r.HasKeyword(k)
-;OPT Form.HasKeyword     endif
+;OPT ObjectReference.HasKeyword     Keyword k = Game.GetFormFromFile(0x00021BF1, "Starfield.esm") as Keyword
+;OPT ObjectReference.HasKeyword     if r && k
+;OPT ObjectReference.HasKeyword         s = "" + r.HasKeyword(k)
+;OPT ObjectReference.HasKeyword     endif
     return s
 EndFunction
 
 string Function KwAdd(ObjectReference r)
-    {Adds FurnitureTypePowerArmor to the reference by script ("done"), "na" when Form.AddKeyword is not declared or does not
+    {Adds FurnitureTypePowerArmor to the reference by script ("done"), "na" when ObjectReference.AddKeyword is not declared or does not
      compile. Asked for by the owner PC (11 Nov): the base FURN's keyword list is not seen through HasKeyword on a reference,
      the native tests the reference. Only called when HasKeyword is false before the call.}
     string s = "na"
-;OPT Form.AddKeyword     Keyword k = Game.GetFormFromFile(0x0003430B, "Starfield.esm") as Keyword
-;OPT Form.AddKeyword     if r && k
-;OPT Form.AddKeyword         r.AddKeyword(k)
-;OPT Form.AddKeyword         s = "done"
-;OPT Form.AddKeyword     endif
+;OPT ObjectReference.AddKeyword     Keyword k = Game.GetFormFromFile(0x0003430B, "Starfield.esm") as Keyword
+;OPT ObjectReference.AddKeyword     if r && k
+;OPT ObjectReference.AddKeyword         r.AddKeyword(k)
+;OPT ObjectReference.AddKeyword         s = "done"
+;OPT ObjectReference.AddKeyword     endif
     return s
 EndFunction
 

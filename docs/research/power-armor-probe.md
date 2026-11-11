@@ -166,7 +166,7 @@ count, `IsInPowerArmor` and the player's furniture. The fallback (race swap plus
 component (`BGSKeywordForm_Component`, a BFCB block in the record's components). The writer now writes the suit's keywords in
 that component as well as in the KWDA list, so `HasKeyword` may be true on the reference without the console; whether the game
 reads the component for a FURN is not known (the owner PC compares a vanilla keyworded FURN with ours). The script logs
-`haskw=` (`Form.HasKeyword` of 0003430B on the suit reference, an optional reading) on the stage-10 step line before the call,
+`haskw=` (`ObjectReference.HasKeyword` of 0003430B on the suit reference, an optional reading) on the stage-10 step line before the call,
 and the reader prints it: **false** = the call will be refused; **true** = a real entry.
 
 > **WARNING: do not run stage 10 of this kit on a game anyone cares about, and do not stage it for a normal session.** If the
@@ -204,7 +204,7 @@ keywords. The set to run is `race,furniture,keyword,armor` (the owner PC's note:
 armor keyword, add the frame armor).
 
 **Script change (the owner PC's request):** before the call, stage 10 logs `haskw` (`HasKeyword(FurnitureTypePowerArmor)` on
-the suit reference); if it is false the script calls `AddKeyword` on the reference (optional reading `Form.AddKeyword`,
+the suit reference); if it is false the script calls `AddKeyword` on the reference (optional reading `ObjectReference.AddKeyword`,
 `na` when the name does not exist or compile), logs `addkw` (`done` / `na`) and reads `haskw2`, all on the one step line
 that is written before the call. This replaces the console line of the 04:07 session. The owner PC is separately checking
 whether the base FURN's keywords are simply not visible through `HasKeyword` on a reference (one of the copied chair's own
@@ -230,6 +230,26 @@ Two cheap tries (built, untested in game): **`stage --kw-first`** puts Furniture
 (the console showed it flips to 1.00 and the native then accepts the suit). The step line also logs `haskwc=`
 (`HasKeyword(AnimFurnChair)` on the suit reference), so one session shows both readings; the reader says which case it is.
 Not built: a blank furniture record with only the two keywords (a different record shape; say if you want it as the next try).
+
+## The armor-variant session (owner PC, 11 Nov 05:09 to 05:15 UTC, 18b34a0d) and the keyword readings' names
+
+**Verified (owner PC):** staged on the real Starfield.esm with `--armor Clothes_Crowd_Akila_Fatigues_01_NOTPLAYABLE` (0017C68D, a
+body outfit, two keywords, no script, no enchantment, not playable); the plugin has the four default objects, the frame armor
+000808 with `isPowerArmorFrame` in list and component, and the suit's keyword component equal to its KWDA list. Stage 10 line:
+`haskw=false addkw=NA haskw2=false haskwc=true`: **the rebuilt component does not make the appended keyword visible** (the
+chair's own keyword still is), and the script did not add it. Papyrus.0.log again: `FO4SF_PAProbeSuitRef (09000804): is not
+valid power armor furniture.` No crash, nothing else changed.
+
+**Why `addkw=NA`:** the optional reading was keyed on `Form.AddKeyword`, which does not exist. In Starfield's base sources the
+function is on the reference: `ObjectReference.psc` declares `Function AddKeyword(Keyword apKeyword) native` (also `RemoveKeyword`,
+`ResetKeyword`) and its own `bool Function HasKeyword(Keyword apKeyword) native`. The stage output had said so (`'Form.AddKeyword':
+'not declared in the base scripts'`): the name was wrong, not the idea. **Fixed:** both keyword readings are now keyed on
+`ObjectReference.HasKeyword` and `ObjectReference.AddKeyword`, and the offline test's base sources declare them where the real ones
+do, so a name keyed on the wrong script fails the stage test instead of logging `na` in game.
+
+**Reader and the Papyrus log:** `python scripts\planet\make_power_armor_probe.py log --papyrus <path to Papyrus.0.log>` (the flag
+takes the session folder's copy; the default is the game's own `Logs\Script\Papyrus.0.log`). With it the stage-10 result reads
+`refused by the game: error: FO4SF_PAProbeSuitRef (09000804): is not valid power armor furniture.` instead of `no logged change`.
 
 ## Session card
 
