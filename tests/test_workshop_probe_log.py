@@ -42,6 +42,13 @@ class ReaderTests(unittest.TestCase):
         d = probe_log.parse_line("fo4sfws RT=1 READ stage=10 when=now what=bench loaded=True ws=NA haskw=NONE end=TRUE")
         self.assertEqual((d["event"], d["loaded"], d["ws"], d["haskw"], d["end"]), ("read", True, "na", None, True))
 
+    def test_a_word_in_another_case_still_counts_as_the_bench_and_pad(self):
+        """PC 11 Nov: the game printed what=Bench and the verdict said no bench was placed."""
+        lines = [l.replace("what=bench", "what=Bench").replace("what=pad", "what=Pad") for l in GOOD]
+        s = probe_log.summarize(lines)
+        self.assertTrue(s["control"][0])
+        self.assertEqual(set(k for k in s["spawned"]), {"bench", "pad"})
+
     def test_a_cut_line_is_left_out_and_counted(self):
         s = probe_log.summarize(GOOD + [ln(70, "spawn stage=40 what=beacon base=1 ref=2", end=False)])
         self.assertEqual(s["cut"], 1)

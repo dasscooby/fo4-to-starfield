@@ -64,6 +64,8 @@ def parse_line(line):
             d["end"] = v.lower() == "true"
         elif k == "text":
             d[k] = v
+        elif k == "what":
+            d[k] = v.lower()                 # the game may print the word in another case (PC 11 Nov: what=Bench)
         else:
             d[k] = value(k, v)
     return d

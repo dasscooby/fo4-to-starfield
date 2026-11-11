@@ -3,7 +3,7 @@
 // FO4SFWorkshopProbe.esm (master Starfield.esm only; adds records, overrides none). The installed core is NOT a master:
 // nothing here points at a core record, the scripts find the core's workshop base with Game.GetFormFromFile (so the
 // plugin loads wherever it is put and never wants a master that is not there; the core's cells are never overridden).
-//   QUST  FO4SF_WSProbeQuest   start game enabled, stages 10 20 21 22 23 24 30 31 32 33 34 40 50 60, script FO4SF_WSProbeQuest, NO properties
+//   QUST  FO4SF_WSProbeQuest   start game enabled, stages 10 12 13 20 21 22 23 24 30 31 32 33 34 40 50 60, script FO4SF_WSProbeQuest, NO properties
 //   QUST  FO4SF_WSHandQuest    the by-hand mode: start game enabled, one stage, script FO4SF_WSHandQuest, NO properties
 //   MISC  FO4SF_WSKit          the hand mode's item: a copy of one vanilla MISC (the one named by --item, or the first of a
 //                              fixed list found in Starfield.esm), no script, renamed
@@ -66,7 +66,7 @@ static class WorkshopProbe
     const uint QuestId = 0x800, HandQuestId = 0x801, KitId = 0x802;
     const string QuestEdid = "FO4SF_WSProbeQuest", Script = "FO4SF_WSProbeQuest", HandQuestEdid = "FO4SF_WSHandQuest",
         HandScript = "FO4SF_WSHandQuest", KitEdid = "FO4SF_WSKit", KitName = "FO4SF workshop kit";
-    static readonly ushort[] Stages = { 10, 20, 21, 22, 23, 24, 30, 31, 32, 33, 34, 40, 50, 60 };
+    static readonly ushort[] Stages = { 10, 12, 13, 20, 21, 22, 23, 24, 30, 31, 32, 33, 34, 40, 50, 60 };
     // the kit is a copy of the first of these that Starfield.esm has as a MISC; failing all, the lowest form id with a model
     static readonly string[] ItemPrefs = { "Misc_Junk_Fork", "Junk_Fork", "Misc_Fork", "Misc_Cup", "Misc_Mug" };
 

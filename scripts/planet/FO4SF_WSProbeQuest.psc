@@ -15,6 +15,7 @@ Scriptname FO4SF_WSProbeQuest extends Quest
    40  PlaceAtMe of the vanilla outpost beacon base whose id the stager was given (--beacon); 0 = not given, it says so
    50  a reading of every spawned reference now (the trip out of the cell and back: the poll also writes one on its own
        whenever the player's cell changes, then again 2 s and 10 s later)
+   12  the bench placed NOT persistent (moved ahead); 13  the bench placed persistent but NOT moved: which of the two the 11 Nov difference to the console was
    60  Disable and Delete every spawned reference
  Each stage 10 / 21..24 / 30 / 31..34 / 40 writes the reading BEFORE, the call, the reading AFTER and the reading 4 s
  later: so the log says which call changed anything. The owner presses E on the object after each stage (the PC does it by
@@ -44,6 +45,8 @@ int TIMER_POLL = 1
 int TIMER_SETTLE = 100      ; + the stage
 int TIMER_ARRIVE2 = 90
 int TIMER_ARRIVE10 = 91
+int TIMER_ENABLE = 80       ; + 0 the bench, + 1 the pad: the Enable after a Disable, 2 s later (an Enable right after the Disable did not take, PC 11 Nov)
+float ENABLE_S = 2.0
 float POLL_S = 1.0
 float SETTLE_S = 4.0
 int[] StageList
@@ -51,6 +54,8 @@ bool[] DoneList
 ObjectReference BenchRef = None
 ObjectReference PadRef = None
 ObjectReference BeaconRef = None
+ObjectReference TempRef = None      ; stage 12: placed NOT persistent, moved ahead
+ObjectReference StillRef = None     ; stage 13: placed persistent, NOT moved
 Cell LastCell = None
 Form BenchBase = None
 bool CoreFound = false
@@ -59,8 +64,8 @@ bool CoreFound = false
 
 Event OnInit()
     Debug.OpenUserLog(LogName)
-    StageList = new int[13]
-    DoneList = new bool[13]
+    StageList = new int[15]
+    DoneList = new bool[15]
     StageList[0] = 10
     StageList[1] = 20
     StageList[2] = 21
@@ -74,6 +79,8 @@ Event OnInit()
     StageList[10] = 34
     StageList[11] = 40
     StageList[12] = 50
+    StageList[13] = 12
+    StageList[14] = 13
     BenchBase = FindBase()
     Trace("init version=" + Version + " quest=" + GetFormID() + " installed=" + Game.IsPluginInstalled(ProbePlugin) + " core=" + CoreName() + " benchbase=" + Id(BenchBase) + " workshopkw=" + Id(Game.GetFormFromFile(WorkshopKwId, "Starfield.esm")) + " padbase=" + Id(Game.GetFormFromFile(PadBaseId, "Starfield.esm")) + " beaconid=" + BeaconId)
     LastCell = Game.GetPlayer().GetParentCell()
@@ -138,21 +145,21 @@ EndFunction
 
 ; ---------------------------------------------------------------- spawning
 
-ObjectReference Function Spawn(Form base, string what, int stage)
-    {PlaceAtMe the base, persistent, then 2.5 m in front of the player (MoveTo is optional: without it the object stands at the player).}
+ObjectReference Function Spawn(Form base, string what, int stage, bool persist = true, bool move = true)
+    {PlaceAtMe the base (persistent unless persist is false), then 2.5 m in front of the player when move is true (MoveTo is optional: without it the object stands at the player). Stages 12 and 13 vary one of the two.}
     Actor p = Game.GetPlayer()
     if base == None
         Trace("spawn stage=" + stage + " what=" + what + " base=none ref=none")
         return None
     endif
-    ObjectReference r = p.PlaceAtMe(base, 1, true, false, false)
+    ObjectReference r = p.PlaceAtMe(base, 1, persist, false, false)
     bool moved = false
-;OPT ObjectReference.MoveTo     if r
+;OPT ObjectReference.MoveTo     if r && move
 ;OPT ObjectReference.MoveTo         float a = p.GetAngleZ()
 ;OPT ObjectReference.MoveTo         r.MoveTo(p, AheadM * Math.Sin(a), AheadM * Math.Cos(a), 0.0, false)
 ;OPT ObjectReference.MoveTo         moved = true
 ;OPT ObjectReference.MoveTo     endif
-    Trace("spawn stage=" + stage + " what=" + what + " base=" + Id(base) + " ref=" + Id(r) + " moved=" + moved)
+    Trace("spawn stage=" + stage + " what=" + what + " base=" + Id(base) + " ref=" + Id(r) + " moved=" + moved + " persist=" + persist)
     Reading("now", stage, what, r)
     StartTimer(SETTLE_S, TIMER_SETTLE + stage)
     return r
@@ -168,6 +175,10 @@ Event OnTimer(int aiTimerID)
         ReadAll("arrival+2s", 0)
     elseif aiTimerID == TIMER_ARRIVE10
         ReadAll("arrival+10s", 0)
+    elseif aiTimerID == TIMER_ENABLE
+        Reenable(BenchRef, "bench")
+    elseif aiTimerID == TIMER_ENABLE + 1
+        Reenable(PadRef, "pad")
     elseif aiTimerID >= TIMER_SETTLE
         int stage = aiTimerID - TIMER_SETTLE
         if stage == 10 || (stage >= 20 && stage < 30)
@@ -176,14 +187,28 @@ Event OnTimer(int aiTimerID)
             Reading("settled", stage, "pad", PadRef)
         elseif stage == 40
             Reading("settled", stage, "beacon", BeaconRef)
+        elseif stage == 12
+            Reading("settled", stage, "bench_temp", TempRef)
+        elseif stage == 13
+            Reading("settled", stage, "bench_still", StillRef)
         endif
     endif
 EndEvent
+
+Function Reenable(ObjectReference r, string what)
+    if r
+        r.Enable(false)
+        Trace("step what=" + what + " reenable=true ref=" + Id(r))
+        Reading("reenabled", 0, what, r)
+    endif
+EndFunction
 
 Function ReadAll(string when, int stage)
     Reading(when, stage, "bench", BenchRef)
     Reading(when, stage, "pad", PadRef)
     Reading(when, stage, "beacon", BeaconRef)
+    Reading(when, stage, "bench_temp", TempRef)
+    Reading(when, stage, "bench_still", StillRef)
 EndFunction
 
 Function Poll()
@@ -203,7 +228,7 @@ Function Poll()
         endif
         i += 1
     endwhile
-    if GetStageDone(60) && (BenchRef != None || PadRef != None || BeaconRef != None)
+    if GetStageDone(60) && (BenchRef != None || PadRef != None || BeaconRef != None || TempRef != None || StillRef != None)
         Cleanup()
     endif
 EndFunction
@@ -213,7 +238,7 @@ Function Step(int stage)
     if stage == 10
         BenchRef = Spawn(FindBase(), "bench", stage)
     elseif stage == 20
-        Trace("step stage=20 calls=21:DisableEnable 22:Activate 23:SetActorOwner(opt) 24:StartWorkshop(opt) bench=" + Id(BenchRef) + " pad=" + Id(PadRef))
+        Trace("step stage=20 calls=21:Disable,Enable 2 s later 22:Activate 23:SetActorOwner(opt) 24:StartWorkshop(opt) bench=" + Id(BenchRef) + " pad=" + Id(PadRef))
     elseif stage > 20 && stage < 30
         DoCall(stage - 20, stage, "bench", BenchRef)
     elseif stage == 30
@@ -226,6 +251,10 @@ Function Step(int stage)
         else
             BeaconRef = Spawn(Game.GetFormFromFile(BeaconId, "Starfield.esm"), "beacon", stage)
         endif
+    elseif stage == 12
+        TempRef = Spawn(FindBase(), "bench_temp", stage, false, true)
+    elseif stage == 13
+        StillRef = Spawn(FindBase(), "bench_still", stage, true, false)
     elseif stage == 50
         ReadAll("stage50", 50)
     endif
@@ -241,9 +270,13 @@ Function DoCall(int k, int stage, string what, ObjectReference r)
     Reading("before", stage, what, r)
     string call = "na"
     if k == 1
-        call = "DisableEnable"
+        call = "DisableThenEnable"
         r.Disable(false)
-        r.Enable(false)
+        if stage < 30
+            StartTimer(ENABLE_S, TIMER_ENABLE)
+        else
+            StartTimer(ENABLE_S, TIMER_ENABLE + 1)
+        endif
     elseif k == 2
         call = "Activate"
         r.Activate(p, false)
@@ -260,10 +293,14 @@ Function DoCall(int k, int stage, string what, ObjectReference r)
 EndFunction
 
 Function Cleanup()
-    Trace("cleanup bench=" + Id(BenchRef) + " pad=" + Id(PadRef) + " beacon=" + Id(BeaconRef))
+    Trace("cleanup bench=" + Id(BenchRef) + " pad=" + Id(PadRef) + " beacon=" + Id(BeaconRef) + " temp=" + Id(TempRef) + " still=" + Id(StillRef))
     Dispose(BenchRef)
     Dispose(PadRef)
     Dispose(BeaconRef)
+    Dispose(TempRef)
+    Dispose(StillRef)
+    TempRef = None
+    StillRef = None
     BenchRef = None
     PadRef = None
     BeaconRef = None

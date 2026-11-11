@@ -32,17 +32,21 @@ core record: the scripts find the core's workshop base with `Game.GetFormFromFil
 `_Mars` core is tried when that plugin is absent), so the kit loads wherever it sits and never wants a master that is not
 there. If the core's base is not at that local id the log says `none`; the id is the 11 Nov PC run's. The workshop keyword is read from Starfield.esm.
 
-### The console quest (stages set with `setstage FO4SF_WSProbeQuest <n>`; polled once a second)
+### The console quest (stages set with `setstage <index>000800 <n>`; polled once a second)
+
+The console does not know the quest by its editor id (PC, 11 Nov: "Item 'FO4SF_WSProbeQuest' not found"): use the form id, the plugin's load index (the two digits `FO4SFWorkshopProbe.esm` has in the load order, e.g. `0A`) followed by `000800`. The hand quest is `...000801`.
 
 | Stage | What it does |
 |---|---|
 | 10 | `PlaceAtMe` of the core's workshop base, persistent, 2.5 m ahead (`MoveTo` is optional): the BENCH |
 | 20 | logs the sub-stage list; calls nothing |
-| 21 / 22 | on the bench: `Disable` + `Enable`; `Activate(player)` by script |
+| 21 / 22 | on the bench: `Disable`, then `Enable` from a timer 2 s later (an Enable in the same call left it disabled, PC 11 Nov); `Activate(player)` by script |
 | 23 / 24 | on the bench, optional natives: `SetActorOwner(player base)`; `StartWorkshop(true)` |
 | 30 | `PlaceAtMe` of vanilla `OutpostPlayerHouseActivator` 0x024DC7: the PAD, the control for "our base is the problem" |
 | 31 to 34 | the same four calls on the pad |
 | 40 | `PlaceAtMe` of the vanilla outpost beacon base given to the stager with `--beacon <hex id>`; 0 = says so in the log |
+| 12 | `PlaceAtMe` of the bench **not persistent** (moved ahead as in 10): the BENCH_TEMP |
+| 13 | `PlaceAtMe` of the bench persistent, **not moved**: the BENCH_STILL. 12 and 13 separate what the PC's stage 10 (persistent + moved: a workshop) changed against the console (temporary, not moved: no prompt) |
 | 50 | reading of every spawned reference now |
 | 60 | `Disable` + `Delete` every spawned reference |
 
@@ -79,13 +83,13 @@ STATE ONLY, NO SAVE (spawned persistent references stay in a save).
 
 ## Session card (PC, console; one answer per stage)
 
-1. Load the test save, stand in open ground away from every fixed workshop. `setstage FO4SF_WSProbeQuest 10`.
-2. Crosshair on the bench, press E, screenshot the prompt. The log has `spawn` and `read` lines.
-3. `setstage FO4SF_WSProbeQuest 21`, then E and screenshot; repeat for 22, 23, 24. Each stage is one call.
-4. `setstage FO4SF_WSProbeQuest 30` (the invisible pad), E, screenshot; then 31, 32, 33, 34 as above.
-5. If a beacon id was staged: `setstage FO4SF_WSProbeQuest 40`, E, screenshot.
+1. Load the test save, stand in open ground away from every fixed workshop. `setstage <index>000800 10`.
+2. Crosshair on the bench, press E, screenshot the prompt. **If E opens the build mode it stays open: press Esc after every E that opens it**, or every later prompt is photographed inside build mode. The log has `spawn` and `read` lines.
+3. `setstage <index>000800 21`, then E and screenshot (Esc); repeat for 22, 23, 24. After 21 the bench is back 2 s later: wait 5 s before E. Each stage is one call. Stages 12 and 13 (before 20) place the two bench variants; E on each.
+4. `setstage <index>000800 30` (the invisible pad), E, screenshot; then 31, 32, 33, 34 as above.
+5. If a beacon id was staged: `setstage <index>000800 40`, E, screenshot (Esc).
 6. Leave the cell (`coc` to another place, or walk away) and come back. Screenshot the prompt on the bench; the log has the `arrival` lines.
-7. `setstage FO4SF_WSProbeQuest 50` for a last reading, then `60` to clean up. `python scripts\planet\make_workshop_probe.py log`.
+7. `setstage <index>000800 50` for a last reading, then `60` to clean up. `python scripts\planet\make_workshop_probe.py log`.
 
 ## By hand (the owner; card of eight steps)
 

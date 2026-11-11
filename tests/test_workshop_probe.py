@@ -65,9 +65,9 @@ class ScriptTests(unittest.TestCase):
         ran = {int(s) for s in re.findall(r"StageList\[\d+\] = (\d+)", PSC)} | {int(s) for s in re.findall(r"GetStageDone\((\d+)\)", PSC)}
         m = re.search(r"Stages = \{ ([\d, ]+) \}", TOOL_SRC)
         self.assertEqual(sorted(ran), [int(x) for x in m.group(1).split(",")])
-        self.assertEqual(sorted(ran), [10, 20, 21, 22, 23, 24, 30, 31, 32, 33, 34, 40, 50, 60])
-        self.assertEqual(PSC.count("StageList = new int[13]"), 1)
-        self.assertEqual(len(re.findall(r"StageList\[\d+\] = \d+", PSC)), 13)
+        self.assertEqual(sorted(ran), [10, 12, 13, 20, 21, 22, 23, 24, 30, 31, 32, 33, 34, 40, 50, 60])
+        self.assertEqual(PSC.count("StageList = new int[15]"), 1)
+        self.assertEqual(len(re.findall(r"StageList\[\d+\] = \d+", PSC)), 15)
 
     def test_the_log_prefix_and_events_are_the_readers(self):
         from fo4sf.workshop import probe_log
@@ -80,7 +80,8 @@ class ScriptTests(unittest.TestCase):
         self.assertIn('string LogName = "FO4SFWSHand"', HAND_PSC)
 
     def test_the_calls_under_test_are_made_one_per_sub_stage(self):
-        self.assertIn("p.PlaceAtMe(base, 1, true, false, false)", PSC)              # persistent
+        self.assertIn("p.PlaceAtMe(base, 1, persist, false, false)", PSC)           # persistent by default (stage 10)
+        self.assertIn("bool persist = true, bool move = true", PSC)
         self.assertIn("r.Disable(false)", PSC)
         self.assertIn("r.Enable(false)", PSC)
         self.assertIn("r.Activate(p, false)", PSC)
@@ -122,6 +123,20 @@ class ScriptTests(unittest.TestCase):
             self.assertIn('GetFormFromFile(WorkshopKwId, "Starfield.esm")', text)
         self.assertIn("p.GetLeveledActorBase()", PSC)
         self.assertNotIn("GetActorBase", "".join(mws.REQUIRED["Actor"]))
+
+    def test_disable_is_not_followed_by_an_immediate_enable(self):
+        """PC 11 Nov: Disable + Enable in one call left the reference disabled; the Enable comes from a timer 2 s later."""
+        call = PSC.split("Function DoCall")[1].split("Function Cleanup")[0]
+        self.assertNotIn("r.Enable(false)", call)
+        self.assertIn("StartTimer(ENABLE_S, TIMER_ENABLE)", call)
+        self.assertIn("Reenable(BenchRef", PSC)
+        self.assertIn("Reenable(PadRef", PSC)
+
+    def test_stages_12_and_13_vary_persistence_and_the_move(self):
+        self.assertIn('TempRef = Spawn(FindBase(), "bench_temp", stage, false, true)', PSC)
+        self.assertIn('StillRef = Spawn(FindBase(), "bench_still", stage, true, false)', PSC)
+        self.assertIn("p.PlaceAtMe(base, 1, persist, false, false)", PSC)
+        self.assertIn(";OPT ObjectReference.MoveTo     if r && move", PSC)
 
     def test_the_hand_mode_places_the_bench_where_the_kit_vanishes(self):
         self.assertIn("p.GetItemCount(kit) < 1", HAND_PSC)
@@ -256,7 +271,7 @@ class StageTests(unittest.TestCase):
         check = self.run_tool("check", out / PLUGIN, self.master)
         self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
         self.assertIn("masters [Starfield.esm]", check.stdout)
-        self.assertIn("QUST FO4SF_WSProbeQuest flags StartGameEnabled stages [10,20,21,22,23,24,30,31,32,33,34,40,50,60]", check.stdout)
+        self.assertIn("QUST FO4SF_WSProbeQuest flags StartGameEnabled stages [10,12,13,20,21,22,23,24,30,31,32,33,34,40,50,60]", check.stdout)
         self.assertIn("QUST FO4SF_WSHandQuest flags StartGameEnabled stages [10] scripts [FO4SF_WSHandQuest (0 properties)]", check.stdout)
         self.assertIn("records: MiscItem 1, Quest 2", check.stdout)
 
