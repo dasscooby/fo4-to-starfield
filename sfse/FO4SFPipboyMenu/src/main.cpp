@@ -192,6 +192,14 @@ namespace
 	constexpr std::size_t   kKitHintColumns = 72;            // HINT_COLUMNS
 	constexpr std::uint32_t kKitVersion = 1;                 // KIT_VERSION
 	constexpr std::size_t   kKitTestRows = 30;               // the kit_test list
+	constexpr std::size_t   kInventoryListAt = 0xA0;         // libxse RE::TESObjectREFR::inventoryList (BSGuarded: the pointer first)
+	constexpr std::size_t   kInventoryDataAt = 0x28;         // libxse RE::BGSInventoryList::data, BSTArray<BGSInventoryItem>
+	constexpr std::size_t   kInventoryItemSize = 0x28;       // libxse sizeof(RE::BGSInventoryItem)
+	constexpr std::size_t   kItemStacksAt = 0x10;            // libxse RE::BGSInventoryItem::stacks, BSTArray<Stack>
+	constexpr std::size_t   kItemFlagsAt = 0x20;             // libxse RE::BGSInventoryItem::flags (bits 0-2: the equip slot)
+	constexpr std::size_t   kStackSize = 0x10;               // libxse sizeof(RE::BGSInventoryItem::Stack)
+	constexpr std::size_t   kStackCountAt = 0x08;            // libxse's comment says +0x10 beside its size 0x10: the PC's log decides
+	constexpr std::size_t   kKitMaxItems = 512;              // the inventory list's rows, at most
 	constexpr std::string_view kKitChars = " !#%&'()*+,-./0123456789:;<=>?ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_";   // KIT_FONT
 	constexpr auto          kKitTitle = "fo4sfTitle";        // NAMES
 	constexpr auto          kKitHeader = "fo4sfHeaderInfo";
@@ -218,7 +226,7 @@ namespace
 	// VALUE_PROVIDERS and LIST_PROVIDERS; av:<hex> is the actor value of that form id
 	constexpr std::array<std::string_view, 10> kKitValues{ "health", "level", "xp", "carry_max", "rads", "cell", "world",
 		"time", "days", "position" };
-	constexpr std::array<std::string_view, 1> kKitLists{ "kit_test" };
+	constexpr std::array<std::string_view, 2> kKitLists{ "kit_test", "inventory" };
 	constexpr std::string_view kKitActorValue = "av:";
 	// the menus a main-thread snapshot asks the engine about (IsMenuRegistered, IsMenuOpen); only Console is named by
 	// libxse, the rest are guesses, and the first snapshot logs which of them are registered
@@ -1959,6 +1967,93 @@ namespace
 		return rows;
 	}
 
+	// a_len bytes as hex, a comma every 8, for the log; "unreadable" if the read faults
+	std::string KitBytes(std::uintptr_t a_at, std::size_t a_len)
+	{
+		std::array<std::uint8_t, 0x40> bytes{};
+		if (!a_at || a_len > bytes.size() || !Peek(a_at, bytes.data(), a_len)) {
+			return "unreadable";
+		}
+		std::string hex;
+		for (std::size_t i = 0; i < a_len; ++i) {
+			hex += std::format("{}{:02x}", i && i % 8 == 0 ? "," : "", bytes[i]);
+		}
+		return hex;
+	}
+
+	// the inventory list (FAL-426; README, "Stage (e)", lists): the player's BGSInventoryList by its RTTI, each item's
+	// name and count (the sum of its stacks), sorted by name. Reads only, guarded, no lock taken: a torn read shows ?
+	// and never faults. The first read logs the list and its first item's and stack's bytes once (step=kit_inventory),
+	// which settles kStackCountAt on the PC; a list not read is one row and one step=page_unknown what=inventory line
+	std::vector<KitRow> KitInventoryRows()
+	{
+		static bool logged = false;
+		const auto  unread = [](std::string_view a_why, const std::string& a_detail) {
+			Unknown("inventory", std::format("reason={} {}", a_why, a_detail));
+			return std::vector<KitRow>{ { "INVENTORY NOT READ", "", { { "REASON", std::string(a_why) } } } };
+		};
+		if (!CheckSingleton("PlayerCharacter", kPlayerSingleton, kPlayerRtti, g_playerOk)) {
+			return unread("no_player", "");
+		}
+		const auto     player = Singleton(kPlayerSingleton);
+		std::uintptr_t list = 0;
+		ObjectType     listType;
+		if (!Peek(player + kInventoryListAt, list) || !IsType(list, "BGSInventoryList@@", listType)) {
+			return unread("list_type", std::format("list={} type={}", Hex(list), listType.name.empty() ? "unreadable" : listType.name));
+		}
+		ArrayHead items{};
+		if (!Peek(list + kInventoryDataAt, items) || items.size > items.capacity || items.size > kKitMaxItems ||
+			(items.size && !items.data)) {
+			return unread("items", std::format("size={} capacity={} data={}", items.size, items.capacity, Hex(items.data)));
+		}
+		if (!logged) {
+			logged = true;
+			ArrayHead first{};
+			const bool stacked = items.size && Peek(items.data + kItemStacksAt, first) && first.size;
+			REX::INFO("step=kit_inventory list={} type={} size={} capacity={} first_item={} first_stack={}", Hex(list),
+				listType.name, items.size, items.capacity, items.size ? KitBytes(items.data, kInventoryItemSize) : "none",
+				stacked ? KitBytes(first.data, kStackSize) : "none");
+		}
+		std::vector<KitRow> rows;
+		for (std::uint32_t i = 0; i < items.size; ++i) {
+			const auto     item = items.data + i * kInventoryItemSize;
+			std::uintptr_t object = 0;
+			ObjectType     type;
+			if (!Peek(item, object) || !TypeOf(object, type) || !BaseOffset(type, "TESBoundObject@@")) {
+				rows.push_back({ "?", "?", { { "ITEM", std::to_string(i + 1) }, { "OBJECT", Hex(object) } } });
+				continue;
+			}
+			std::uint32_t  formId = 0;
+			std::uintptr_t entry = 0;
+			std::string    name;
+			Peek(object + kFormIdAt, formId);
+			const auto at = BaseOffset(type, "TESFullName@@");
+			if (!at || !CheckSubobject(object, type, *at) || !Peek(object + *at + kFullNameAt, entry) ||
+				!ReadPoolString(entry, name) || name.empty()) {
+				name = std::format("{:08X}", formId);   // no name read: its form id
+			}
+			ArrayHead     stacks{};
+			std::uint64_t count = 0;
+			bool          counted = Peek(item + kItemStacksAt, stacks) && stacks.size <= stacks.capacity &&
+			                        stacks.size <= kKitMaxItems && (!stacks.size || stacks.data);
+			for (std::uint32_t s = 0; counted && s < stacks.size; ++s) {
+				std::uint32_t n = 0;
+				counted = Peek(stacks.data + s * kStackSize + kStackCountAt, n);
+				count += n;
+			}
+			std::uint32_t flags = 0;
+			const bool    equipped = Peek(item + kItemFlagsAt, flags) && (flags & 0x7);
+			rows.push_back({ name, counted ? std::to_string(count) : "?",
+				{ { "FORM", std::format("{:08X}", formId) }, { "TYPE", ShortName(type.name) },
+					{ "STACKS", counted ? std::to_string(stacks.size) : "?" }, { "EQUIPPED", equipped ? "YES" : "NO" } } });
+		}
+		std::ranges::stable_sort(rows, {}, &KitRow::name);
+		if (rows.empty()) {
+			rows.push_back({ "NO ITEMS", "", {} });
+		}
+		return rows;
+	}
+
 	// the selected row's value rows: a label and its value right-aligned, or, for a value longer than its column,
 	// the label alone and the value on the lines below across both columns
 	void KitInfoLines(const std::vector<std::pair<std::string, std::string>>& a_info, KitScreen& a_screen)
@@ -2005,6 +2100,8 @@ namespace
 			}
 		} else if (page.list == "kit_test") {
 			rows = KitTestRows(state);
+		} else if (page.list == "inventory") {
+			rows = KitInventoryRows();
 		} else {
 			for (const auto& line : page.notice) {
 				rows.push_back({ line, "", {} });
