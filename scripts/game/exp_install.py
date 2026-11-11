@@ -32,7 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # cycle.ps1 uses isolated Python, which omits this script's own directory.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import deploy_starfield as deployment  # noqa: E402
-from verify_packed_experiment import verify_archive  # noqa: E402
+from verify_packed_experiment import verify_archive, verify_texture_archive  # noqa: E402
 from experiment_receipts import preserve_receipt  # noqa: E402
 
 RECORD = "FO4SFExp.install.json"
@@ -370,6 +370,8 @@ def verify_relaunch(a, data, plugins, packed, rec, held=frozenset()):
                  f"run plugin_toggle.py on, or off again, before relaunching")
     if packed and os.path.splitext(plugins[0])[0] + " - Main.ba2" not in rec["files"]:
         sys.exit("packed experiment archive is not recorded; uninstall before relaunching")
+    if packed and has_textures(a) and os.path.splitext(plugins[0])[0] + " - Textures.ba2" not in rec["files"]:
+        sys.exit("packed experiment texture archive is not recorded; uninstall before relaunching")
     for relative, identity in rec["files"].items():
         target = data_path(data, relative)
         if not os.path.isfile(target) or digest(target) != identity:
@@ -516,15 +518,27 @@ def cleanup(data, rec_p, rec, *, rollback=False):
     os.remove(rec_p)
 
 
-def build_ba2(a, root, out):
-    """Build a fresh general BA2, preserving the previous archive if validation fails."""
+TEXTURES = "Textures"
+
+
+def has_textures(a):
+    """True with --textures-archive when the stage has a Data\\Textures tree: it goes into its own "<plugin> - Textures.ba2" (DX10), not the
+    General Main archive (the build pieces kit's pictures; every other kit keeps its textures in the Main archive)."""
+    return bool(getattr(a, "textures_archive", False)) and os.path.isdir(os.path.join(a.exp_dir, "Data", TEXTURES))
+
+
+def build_ba2(a, root, out, textures=None):
+    """Build a fresh BA2, preserving the previous archive if validation fails: the General archive of every folder but Textures,
+    or (textures=True) the DX10 archive of the Textures folder."""
     if any(os.path.isfile(os.path.join(root, name)) for name in os.listdir(root)):
         sys.exit("cannot pack root-level Data files; place resources in supported subfolders")
     folders = sorted(d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d)))
+    if textures is not None:                         # False: every folder but Textures (General); True: only Textures (DX10)
+        folders = [d for d in folders if (d.casefold() == TEXTURES.casefold()) == textures]
     if not folders:
-        sys.exit(f"nothing to pack under {root}")
+        sys.exit(f"nothing to pack under {root}" + ("" if not textures else f" (no {TEXTURES} folder)"))
     # Vanilla terrain BTDs/masks use stored General entries. Do not apply the ordinary mesh archive compression.
-    deployment.build_archive(argparse.Namespace(starfield=a.starfield, staging=root), out, folders, "General",
+    deployment.build_archive(argparse.Namespace(starfield=a.starfield, staging=root), out, folders, "DX10" if textures else "General",
                              compression="None")
     return out
 
@@ -609,6 +623,9 @@ def _install(a, packing_dir=None):
         ba2 = os.path.splitext(plugins[0])[0] + " - Main.ba2"
         files = [(s, r) for s, r in files if r in plugins]
         names = [rel for _, rel in files] + [ba2]
+        tex_ba2 = os.path.splitext(plugins[0])[0] + " - Textures.ba2" if has_textures(a) else None
+        if tex_ba2:
+            names.append(tex_ba2)
     targets = {rel: data_path(data, rel) for rel in names}
     destinations = [os.path.normcase(targets[rel]) for rel in names]
     if len(destinations) != len(set(destinations)):
@@ -632,14 +649,22 @@ def _install(a, packing_dir=None):
         key = "plugin/" + plugin if plugin is not None else "Data/" + relative.replace("\\", "/")
         identities[relative] = inputs[key]
     if packed:
-        built = build_ba2(a, os.path.join(a.exp_dir, "Data"), os.path.join(packing_dir, ba2))
+        built = (build_ba2(a, os.path.join(a.exp_dir, "Data"), os.path.join(packing_dir, ba2), textures=False) if tex_ba2
+                 else build_ba2(a, os.path.join(a.exp_dir, "Data"), os.path.join(packing_dir, ba2)))
         files.append((built, ba2))
         identities[ba2] = digest(built)
+        if tex_ba2:
+            built_tex = build_ba2(a, os.path.join(a.exp_dir, "Data"), os.path.join(packing_dir, tex_ba2), textures=True)
+            files.append((built_tex, tex_ba2))
+            identities[tex_ba2] = digest(built_tex)
     if source_inventory(a.exp_dir, plugins) != inputs:
         sys.exit("experiment source inputs changed during preparation; nothing installed")
     if packed:
         try:
-            verify_archive(built, inputs)
+            tex_prefix = "Data/" + TEXTURES + "/"
+            verify_archive(built, {k: v for k, v in inputs.items() if not (tex_ba2 and k.startswith(tex_prefix))})
+            if tex_ba2:
+                verify_texture_archive(built_tex, {k: v for k, v in inputs.items() if k.startswith(tex_prefix)})
         except (OSError, ValueError) as error:
             sys.exit(f"experiment archive validation failed; nothing installed: {error}")
     p = plugins_txt()
@@ -737,6 +762,7 @@ def main(argv=None):
     ap.add_argument("--exp-dir", default="")
     ap.add_argument("--starfield", required=True)
     ap.add_argument("--plugins", default="", help="comma-separated plugin file names to activate")
+    ap.add_argument("--textures-archive", action="store_true", help="with --pack: the staged Data\\Textures tree goes into '<first plugin> - Textures.ba2' (DX10), everything else into Main")
     ap.add_argument("--pack", action="store_true", help="install the staged Data tree as '<first plugin> - Main.ba2'")
     ap.add_argument("--needs", default="", help="runner features the queue needs (runner_features.py); refuse without")
     a = ap.parse_args(argv)
