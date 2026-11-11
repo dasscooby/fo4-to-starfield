@@ -6,7 +6,7 @@ usage:
       sources (Scripts/Source of ContentResources.zip; inheritance followed). Exit 1 when a required one is missing.
   python make_power_armor_probe.py stage --out <dir> [--starfield <Starfield.esm>] [--compiler <exe>]
                                          [--content-resources <zip>] [--control <furniture editor id>]
-                                         [--variant race,furniture,keyword,armor] [--armor <armor editor id>]
+                                         [--variant race,furniture,keyword,armor] [--armor <armor editor id>] [--kw-first]
       1. dotnet/PowerArmorProbe build + check against the Starfield.esm given (offline_check.txt). --variant overrides
          Starfield's empty power armor default objects in the plugin, each on its own (race: PowerArmorRace_DO ->
          FO4SF_PARace; furniture: PowerArmorDefaultFrameFurniture_DO -> the suit, which also gets isPowerArmorFrame; keyword:
@@ -196,7 +196,8 @@ def stage(a):
         sys.exit(f"--variant is a comma list of {', '.join(VARIANTS)}, each once (got {a.variant!r})")
     if "armor" in variant and not a.armor:
         sys.exit("--variant armor copies a plain vanilla armor: name it with --armor <armor editor id> (the tool lists candidates)")
-    opts = ["--control", a.control, "--variant", ",".join(variant)] + (["--armor", a.armor] if a.armor else [])
+    opts = ["--control", a.control, "--variant", ",".join(variant)] + (["--armor", a.armor] if a.armor else []) + (
+        ["--kw-first"] if a.kw_first else [])
     wrote = run(tool + ["build", a.starfield, out] + opts).stdout
     check = run(tool + ["check", os.path.join(out, PLUGIN), a.starfield] + opts).stdout
     with open(os.path.join(out, "offline_check.txt"), "w", encoding="utf-8") as f:
@@ -228,7 +229,7 @@ def stage(a):
     if sha256(a.starfield) != before:
         sys.exit(f"Starfield.esm changed during the build, nothing published; attempt kept in {out}")
     plan = {"kind": "power-armor-probe", "version": 1, "plugins": [PLUGIN], "outputs": stage_files(out),
-            "inputs": {"Starfield.esm": {"sha256": before}}, "control": a.control, "variant": variant, "armor": a.armor, "optional": fate,
+            "inputs": {"Starfield.esm": {"sha256": before}}, "control": a.control, "variant": variant, "armor": a.armor, "kw_first": bool(a.kw_first), "optional": fate,
             "log": "<My Games>/Starfield/Logs/Script/User/FO4SFPAProbe.0.log"}
     with open(os.path.join(out, "plan.json"), "w", encoding="utf-8") as f:
         json.dump(plan, f, indent=1)
@@ -280,6 +281,7 @@ def main(argv=None):
     s.add_argument("--control", default=DEFAULT_CONTROL)
     s.add_argument("--variant", default="", help="comma list of default objects to override: race, furniture, keyword, armor")
     s.add_argument("--armor", default="", help="the plain vanilla armor the armor variant copies (editor ID)")
+    s.add_argument("--kw-first", action="store_true", help="FurnitureTypePowerArmor first in the suit's keyword list")
     g = sub.add_parser("log")
     g.add_argument("--file", default=LOG)
     g.add_argument("--papyrus", default=PAPYRUS_LOG, help="the game's Papyrus.0.log (errors naming our forms are shown)")

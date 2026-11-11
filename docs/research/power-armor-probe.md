@@ -215,6 +215,22 @@ change of a05fbc4d stays until that is known.
 ends inside it, the game may have ended during the call (a crash is a result: see the Papyrus log and the crash dump)`, and
 the verdict stays `CONTROL OK`; the later stages read `not run`. The session is not a failed one.
 
+## The keyword that is not seen (owner PC, 11 Nov 04:23 to 04:27 UTC, `race` kit, console only)
+
+**Verified (owner PC):** `haskeyword` on the suit reference 09000804 (base `FO4SF_PAProbeSuit`, KWDA with both) prints 1.00 for
+`AnimFurnChair` 00021BF1 (the copied chair's own keyword) and **0.00** for `FurnitureTypePowerArmor` 0003430B; on the control
+09000805 (vanilla `NPCChairTech03_Free_270`) 1.00 and 0.00. So base furniture keywords are visible through a reference, and
+exactly the keyword the writer appended is not. The staged record lists it (KSIZ 7, KWDA `00144A65 00021BF1 0018F692
+0012F848 001736FF 002A8007 0003430B`; the vanilla chair has the first six). **Unresolved why:** candidates, none tested: the
+copy keeps something that still describes the original six; the game filters this keyword on furniture; a cached list per
+source form. Evidence `probe-pa-20261111T042249Z\session\kw-base.png` on the PC.
+
+Two cheap tries (built, untested in game): **`stage --kw-first`** puts FurnitureTypePowerArmor first in the suit's keyword list
+(KWDA and component; the check follows the order); and the script keeps `AddKeyword` on the reference as the working route
+(the console showed it flips to 1.00 and the native then accepts the suit). The step line also logs `haskwc=`
+(`HasKeyword(AnimFurnChair)` on the suit reference), so one session shows both readings; the reader says which case it is.
+Not built: a blank furniture record with only the two keywords (a different record shape; say if you want it as the next try).
+
 ## Session card
 
 **Throwaway state only. Do not save at any point.** The race swap (step 20) can break a save; do not autosave, quicksave

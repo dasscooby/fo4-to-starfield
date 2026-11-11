@@ -230,7 +230,7 @@ def summarize(lines, run=-1, papyrus=None):
             result = "refused by the game: " + refusal
         out["steps"][stage] = {"call": step.get("call") if step else None, "result": result, "changed": ch, "states": by,
                                "haskw": step.get("haskw") if step else None, "addkw": step.get("addkw") if step else None,
-                               "haskw2": step.get("haskw2") if step else None}
+                               "haskw2": step.get("haskw2") if step else None, "haskwc": step.get("haskwc") if step else None}
         if step and "settled" not in by and by:
             if "now" not in by:        # the log ends inside the call: step_result already says so, nothing was judged
                 out["problems"].append(f"stage {stage}: no reading after the call (the log ends inside it); nothing is judged")
@@ -294,6 +294,12 @@ def report(summary):
         lines.append("readings the game gave as na: " + ", ".join(summary["unavailable"]))
     s10 = summary["steps"].get(10) or {}
     kw, added, kw2 = s10.get("haskw"), s10.get("addkw"), s10.get("haskw2")
+    if s10.get("haskwc") is True and kw is False:
+        lines.append("the copied chair's own keyword (AnimFurnChair) reads true on the suit reference while FurnitureTypePowerArmor reads "
+                     "false: the base list is visible and the appended keyword is not (PC run of 11 Nov); --kw-first or AddKeyword")
+    elif s10.get("haskwc") is False:
+        lines.append("the copied chair's own keyword (AnimFurnChair) reads false on the suit reference too: the base list is not "
+                     "visible through HasKeyword here (or the control furniture is not the default chair)")
     if kw is False and added == "done":
         lines.append("suit reference HasKeyword(FurnitureTypePowerArmor): false before the call, AddKeyword by script, "
                      f"{'true' if kw2 is True else 'false' if kw2 is False else 'not read'} after")

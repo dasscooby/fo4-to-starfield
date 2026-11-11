@@ -71,7 +71,7 @@ class ScriptTests(unittest.TestCase):
         names = mpa.optional_names(PSC)
         self.assertEqual(names, ["Actor.GetWornItem", "Actor.GetFurnitureReference", "Actor.GetSitState",
                                  "Actor.IsInPowerArmor", "Form.HasKeyword", "Form.AddKeyword", "Game.GetCameraState"])
-        self.assertIn('" haskw=" + kb + " addkw=" + ka + " haskw2=" + k2', PSC)
+        self.assertIn('" haskw=" + kb + " addkw=" + ka + " haskw2=" + k2 + " haskwc=" + KwChair(suit)', PSC)
         self.assertIn("if kb == \"false\"", PSC)                                 # AddKeyword only when the game does not see it
 
     def test_enabling_an_optional_reading_uncomments_exactly_its_lines(self):
@@ -265,6 +265,17 @@ class StageTests(unittest.TestCase):
         self.assertEqual(self.run_tool("check", out / PLUGIN, self.master, "--variant", "race,furniture,keyword").returncode, 1)
         self.assertEqual(self.run_tool("build", self.master, self.root / "v_armor_none", "--variant", v, "--armor", "NoSuchArmor").returncode, 1)
 
+    def test_kw_first_puts_the_power_armor_keyword_first_in_the_list_and_the_check_knows(self):
+        out = self.root / "kwfirst"
+        proc = self.run_tool("build", self.master, out, "--kw-first")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        check = self.run_tool("check", out / PLUGIN, self.master, "--kw-first")
+        self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
+        self.assertIn("FURN FO4SF_PAProbeSuit keywords [0F4A21:Starfield.esm, 000900:Starfield.esm]", check.stdout)
+        self.assertIn("component [0F4A21:Starfield.esm, 000900:Starfield.esm]".replace("component ", "keyword form component "), check.stdout)
+        self.assertEqual(self.run_tool("check", out / PLUGIN, self.master).returncode, 1)          # the default order is a mismatch
+        self.assertEqual(self.run_tool("check", self.root / "b1" / PLUGIN, self.master, "--kw-first").returncode, 1)
+
     def test_variant_overrides_keep_the_form_ids_of_the_vanilla_records(self):
         out = self.root / "v_raw"
         self.assertEqual(self.run_tool("build", self.master, out, "--variant", "race").returncode, 0)
@@ -305,6 +316,7 @@ class StageTests(unittest.TestCase):
         self.assertEqual(sorted(plan["outputs"]), sorted([PLUGIN, "Data/Scripts/FO4SF_PAProbeQuest.pex"]))
         self.assertEqual(plan["inputs"]["Starfield.esm"]["sha256"], mpa.sha256(str(self.master)))
         self.assertEqual(plan["variant"], [])
+        self.assertFalse(plan["kw_first"])
         self.assertEqual(plan["optional"]["Actor.GetWornItem"], "kept")
         self.assertEqual(plan["optional"]["Actor.GetFurnitureReference"], "kept")
         self.assertEqual(plan["optional"]["Form.HasKeyword"], "kept")

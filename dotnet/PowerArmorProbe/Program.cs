@@ -28,7 +28,7 @@
 //              (--armor <editor id>, required with this variant: the tool lists candidates when it is missing) plus
 //              isPowerArmorFrame, in its KWDA list and its keyword form component. The PC crash of 11 Nov (a null frame
 //              armor inside the native) is why: the native takes the frame armor from this default object.
-// usage: PowerArmorProbe build <Starfield.esm> <out dir> [--control <furniture editor id>] [--variant <list>] [--armor <armor editor id>]
+// usage: PowerArmorProbe build <Starfield.esm> <out dir> [--control <furniture editor id>] [--variant <list>] [--armor <armor editor id>] [--kw-first]
 //        PowerArmorProbe check <plugin> <Starfield.esm> [--control <furniture editor id>] [--variant <list>] [--armor <armor editor id>]     exit 1 on a mismatch
 //        PowerArmorProbe fixture <out dir>             a synthetic Starfield.esm holding the three records looked up
 using System.Globalization;
@@ -53,6 +53,7 @@ try
     }
     control = Take("--control", control);
     var armor = Take("--armor", "");
+    PowerArmorProbe.KwFirst = rest.Remove("--kw-first");
     var variants = PowerArmorProbe.ParseVariants(Take("--variant", ""));
     if (rest.Count == 3 && rest[0] == "build") return PowerArmorProbe.Build(rest[1], rest[2], control, variants, armor);
     if (rest.Count == 3 && rest[0] == "check") return PowerArmorProbe.Check(rest[1], rest[2], control, variants, armor);
@@ -83,6 +84,9 @@ static class PowerArmorProbe
     const string KeywordEdid = "FurnitureTypePowerArmor", HumanRaceEdid = "HumanRace", FrameKeywordEdid = "isPowerArmorFrame";
     const uint ArmorKeywordId = 0x807;
     const string ArmorKeywordEdid = "FO4SF_PAArmorKeyword";
+    // --kw-first: FurnitureTypePowerArmor goes first in the suit's keyword list (PC check of 11 Nov: the copied chair's own six
+    // keywords read true on the suit reference and the appended seventh, ours, read false; first is the cheap try, untested)
+    public static bool KwFirst;
     const uint FrameArmorId = 0x808;
     const string FrameArmorEdid = "FO4SF_PAFrameArmor";
     // variant -> the vanilla default object it overrides
@@ -163,7 +167,8 @@ static class PowerArmorProbe
         suit.EditorID = SuitEdid;
         suit.Name = null;
         suit.Keywords ??= new ExtendedList<IFormLinkGetter<IKeywordGetter>>();
-        suit.Keywords.Add(new FormLink<IKeywordGetter>(kw.FormKey));
+        if (KwFirst) suit.Keywords.Insert(0, new FormLink<IKeywordGetter>(kw.FormKey));
+        else suit.Keywords.Add(new FormLink<IKeywordGetter>(kw.FormKey));
         if (variants.Contains("furniture"))
             suit.Keywords.Add(new FormLink<IKeywordGetter>(One(sf.Keywords, FrameKeywordEdid, "KYWD").FormKey));
         // PC run of 11 Nov: `haskeyword 0003430B` on the suit reference printed 0 although the base FURN lists the keyword in
@@ -336,7 +341,8 @@ static class PowerArmorProbe
         if (suit != null)
         {
             var keys = suit.Keywords?.Select(k => k.FormKey).ToList() ?? new();
-            var want = (control.Keywords?.Select(k => k.FormKey) ?? Enumerable.Empty<FormKey>()).Append(kw.FormKey).ToList();
+            var want = (control.Keywords?.Select(k => k.FormKey) ?? Enumerable.Empty<FormKey>()).ToList();
+            if (KwFirst) want.Insert(0, kw.FormKey); else want.Add(kw.FormKey);
             if (variants.Contains("furniture")) want.Add(One(sf.Keywords, FrameKeywordEdid, "KYWD").FormKey);
             Console.WriteLine($"  FURN {suit.EditorID} keywords [{string.Join(", ", keys)}] (control {control.EditorID} {control.FormKey}: {control.Keywords?.Count ?? 0} keywords) marker model {suit.MarkerModel}");
             Need(keys.SequenceEqual(want), $"FURN keywords are not the control's plus {kw.EditorID} {kw.FormKey}" + (variants.Contains("furniture") ? $" plus {FrameKeywordEdid}" : ""));

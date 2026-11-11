@@ -273,6 +273,14 @@ class AddKeywordAndCrashTests(unittest.TestCase):
         out = pl.report(pl.summarize(self.step10("false", "na", "false")))
         self.assertTrue(any("false and AddKeyword is not available" in l and "will be refused" in l for l in out), out)
 
+    def test_the_copied_chairs_own_keyword_reading_parses(self):
+        lines = [l.replace("haskw2=true", "haskw2=true haskwc=true") for l in self.step10("false", "done", "true")]
+        self.assertIs(pl.parse_line([l for l in lines if " step " in l and "stage=10" in l][0])["haskwc"], True)
+        out = pl.report(pl.summarize(lines))
+        self.assertTrue(any("AnimFurnChair) reads true on the suit reference while FurnitureTypePowerArmor reads false" in l for l in out), out)
+        out = pl.report(pl.summarize([l.replace("haskwc=true", "haskwc=false") for l in lines]))
+        self.assertTrue(any("AnimFurnChair) reads false on the suit reference too" in l for l in out))
+
     def test_a_log_that_ends_after_the_before_reading_is_a_crash_result_not_a_failed_session(self):
         lines = head() + sat() + [l for l in steps()[:2]]                       # the step line and 'before', then nothing
         s = pl.summarize(lines)

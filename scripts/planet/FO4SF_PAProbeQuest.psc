@@ -120,6 +120,18 @@ string Function KwOnRef(ObjectReference r)
     return s
 EndFunction
 
+string Function KwChair(ObjectReference r)
+    {Whether the game sees AnimFurnChair (00021BF1), a keyword the copied chair carries in its own list, on the reference: the
+     comparison the owner PC made on 11 Nov (true on the suit and on the control, while the appended power armor keyword
+     read false). Meaningful with the default control, NPCChairTech03_Free_270.}
+    string s = "na"
+;OPT Form.HasKeyword     Keyword k = Game.GetFormFromFile(0x00021BF1, "Starfield.esm") as Keyword
+;OPT Form.HasKeyword     if r && k
+;OPT Form.HasKeyword         s = "" + r.HasKeyword(k)
+;OPT Form.HasKeyword     endif
+    return s
+EndFunction
+
 string Function KwAdd(ObjectReference r)
     {Adds FurnitureTypePowerArmor to the reference by script ("done"), "na" when Form.AddKeyword is not declared or does not
      compile. Asked for by the owner PC (11 Nov): the base FURN's keyword list is not seen through HasKeyword on a reference,
@@ -194,7 +206,7 @@ Function Step10(Actor p)
         ka = KwAdd(suit)
         k2 = KwOnRef(suit)
     endif
-    Trace("step stage=10 call=SwitchToPowerArmor suitref=" + Id(suit) + " haskw=" + kb + " addkw=" + ka + " haskw2=" + k2)
+    Trace("step stage=10 call=SwitchToPowerArmor suitref=" + Id(suit) + " haskw=" + kb + " addkw=" + ka + " haskw2=" + k2 + " haskwc=" + KwChair(suit))
     Reading("before", 10)
     if suit
         p.SwitchToPowerArmor(suit)
