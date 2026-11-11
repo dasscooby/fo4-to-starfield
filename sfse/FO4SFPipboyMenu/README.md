@@ -248,8 +248,10 @@ animation. This stage is the baseline. A page is a few lines of data; adding one
 
 **The movie** (`scripts/ui/make_pipboy_kit.py`, staged with `make_pipboy_probe.py stage <exp> --kit` under the same name
 `Interface/FO4SF_PipboyMenu.swf`) has no code. It draws one dark screen in one phosphor colour (`--color RRGGBB`,
-default `1AFF80`); the screen, the dim text and the footer boxes are derived from that one colour. Its font is stage
-(d)'s 5 x 7 table plus `[ ] < > * ;`. The plugin finds each part by name and changes only `text` and `visible`:
+default `1AFF80`); the screen, the dim text, the footer boxes, the frames and the scan lines are derived from that one
+colour. The Fallout 4 look, first cut (FAL-431, shapes only): the screen's frame with cut corners, scan lines (2 px every
+6 px, also inside each hit area so a click on one still names the area), the filled selection bar and a frame round the
+value rows. Its font is stage (d)'s 5 x 7 table plus `[ ] < > * ;`. The plugin finds each part by name and changes only `text` and `visible`:
 
 | Part | Names | What the plugin does |
 | --- | --- | --- |
@@ -286,7 +288,7 @@ row value is longer than 8 characters shows that value after its label, in the l
 | STAT / STATUS | rows: health, level, experience, carry weight max, rads, cell, world, time; footer HP, LEVEL, XP |
 | STAT / SPECIAL | rows: Strength to Luck, `av:2C2` to `av:2C8` (Starfield.esm keeps Fallout 4's ids); the same footer |
 | INV / ITEMS | `List=inventory`: the player's items, name and count, sorted by name (FAL-426) |
-| DATA / QUESTS | notice: the quest list (our mission first) comes next |
+| DATA / QUESTS | `List=quests`: our mission first, the quest `[Kit] Mission=` names (FAL-431) |
 | DATA / KIT TEST | `List=kit_test`: thirty rows to scroll, select and click |
 | MAP / WORLD | rows: world, cell, position, time, days passed (FAL-426: the map's first content; the drawn map waits for the map track) |
 | RADIO / STATIONS | notice: waits for its own track (the radio) |
@@ -305,11 +307,14 @@ cannot be read it prints `?`, and its reason is logged once as `step=page_unknow
 | `position` | the player's position, whole units | `what=position reason=no_player` |
 | `av:<hex>` | the player's `GetActorValue` with the `ActorValueInfo` form of that form id. The form is looked up once by its id and accepted by its RTTI type, with stage (d)'s `AcceptById`, logged as `step=kit_av av:<id>:form=<0 or 1>:type=<rtti>:...:<used or refused>` | `what=av:<hex> reason=no_such_actor_value` |
 
-Lists: `kit_test` (thirty rows, no read of the game) and `inventory` (FAL-426). The quests come next, as `quests`.
+Lists: `kit_test` (thirty rows, no read of the game), `inventory` (FAL-426) and `quests` (FAL-431). `[Kit]
+Mission=<plugin file>|<local id hex>` names our mission (`FO4SFMission.esm|800`, `FO4SF_Min00` "When Freedom Calls",
+the PC's read of the installed plugin); a wrong one refuses the kit as any wrong line does.
 
 | List | Reads (libxse 9d090c4's layouts, each to be confirmed by the PC's log) | When it cannot |
 | --- | --- | --- |
-| `inventory` | the player's `TESObjectREFR::inventoryList` at `+0xA0`, accepted by its RTTI type `BGSInventoryList`; its `data` array at `+0x28` (at most 512 items); each `BGSInventoryItem` (`0x28` bytes): the object at `+0x00` (an RTTI `TESBoundObject`, its `TESFullName`, else its form id), the stacks at `+0x10` (each `0x10` bytes, the count read at `+0x08`: libxse's comment says `+0x10`, which its own size contradicts), the equip flags at `+0x20`. Rows sorted by name; the value rows: FORM, TYPE, STACKS, EQUIPPED. The first read logs `step=kit_inventory list=<addr> type=<rtti> size=<n> capacity=<n> first_item=<40 bytes> first_stack=<16 bytes>` once, which settles the count's offset | one row `INVENTORY NOT READ` and `what=inventory reason=no_player`, `list_type list=<addr> type=<rtti>` or `items size=<n> capacity=<n> data=<addr>`; an item whose object is not a bound object shows `?` |
+| `inventory` | the player's `TESObjectREFR::inventoryList` at `+0xA0`, accepted by its RTTI type `BGSInventoryList`; its `data` array at `+0x28` (at most 512 items); each `BGSInventoryItem` (`0x28` bytes): the object at `+0x00` (an RTTI `TESBoundObject`, its `TESFullName`, else its form id), the stacks at `+0x10` (each `0x10` bytes, the count the u32 at `+0x08`: the PC's `step=kit_inventory` read `01000000` there, 11 Nov; libxse's comment says `+0x10`, which its own size contradicts), the equip flags at `+0x20`. Rows sorted by name; the value rows: FORM, TYPE, STACKS, EQUIPPED. The first read logs `step=kit_inventory list=<addr> type=<rtti> size=<n> capacity=<n> first_item=<40 bytes> first_stack=<16 bytes>` once, which settles the count's offset | one row `INVENTORY NOT READ` and `what=inventory reason=no_player`, `list_type list=<addr> type=<rtti>` or `items size=<n> capacity=<n> data=<addr>`; an item whose object is not a bound object shows `?` |
+| `quests` | our mission: its `TESFile` by name in the data handler's `compiledFileCollection` at `+0x1580` (`files`, `smallFiles`, `mediumFiles`, each accepted by its RTTI type `TESFile`, the name at `+0x38`), the form id that file gives the local id (full: `compileIndex` `+0x1B7`, then `fileIndex` `+0x218`; small `FE` + 12 bits; medium `FD` + 16 bits) through the engine's lookup, accepted only as an RTTI `TESQuest`; its name (`TESFullName`, `+0x40` in Starfield's RTTI) and its flags (u16 at `+0x10C`, shown raw as FLAGS). The value rows: FORM, FILE, FLAGS, STAGE (`?` until the PC names the stage's offset). The first read logs `step=kit_quest mission=<file>|<id> found=yes form=<id> quest=<addr> type=<rtti> name="<name>" flags=<hex> bytes100=<64 bytes> file_kind=<n> ... tried=<id>:<type>` once (or `found=no` and what was tried). Starfield's own quests are not listed yet | one row `QUESTS NOT READ` and `what=quests reason=no_mission` or `mission_not_found mission=<file>\|<id>` |
 
 **How it runs.** The pattern is stage (d)'s:
 
@@ -357,8 +362,8 @@ and the report). Tab is not bound by default for that reason; `KitNextTab=0x45,0
 - what the keys do in the game at `0x9`;
 - how the layout looks at the PC's resolution (ShowAll keeps the 16:9 stage).
 
-**The look (part 3, next):** scan lines, a slight glow, the list highlight, and a better font. The colour is already
-one setting. The planned route for the font and the Vault Boy pictures:
+**The look (part 3):** the frame, the scan lines, the filled bar and the value rows' frame are in (FAL-431, first cut);
+a slight glow and a better font come next. The colour is already one setting. The planned route for the font and the Vault Boy pictures:
 
 - **Font:** ours, generated like this one. Nothing from either game goes into Git, the kit runs with or without
   Fallout 4 installed, and the tests stay byte-exact.
