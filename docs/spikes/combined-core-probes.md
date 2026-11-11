@@ -817,6 +817,57 @@ from it), the file FOCCPing and FO4SFPipboyMenu use. Uninstall = delete `FOCCSid
 player data and stays. If the game does not reach
 the main menu, delete it at once (rule 7).
 
+**Job focc-P1-2n (where the files land, no save made). Game: CLOSED between launches, launched through
+`sfse_loader.exe`.** For a session that may not make a save (FAL-246, 11 Nov). It checks item 2 alone: the refusals
+with no usable `Dir`, and the folders a load creates with one. It needs FOCCSidecar (P1-1, P1-2 without the ini lines)
+and FO4SFBorder built with `sfse\FO4SFBorder\build.ps1` (after `sfse\FOCCSidecar\fetch_pluginapi.ps1 -Dest
+sfse\FO4SFBorder`). FO4SFBorder is in the owner's installed set: hold the installed dll and ini aside, install the
+built ones with `Mode=1` (probe: reads, never writes game memory), and put the installed pair back at the end. No
+FOCCPing or FO4SFPipboyMenu is needed.
+
+```powershell
+$p = "$sf\Data\SFSE\Plugins"; $sl = "$(Split-Path $saves)\SFSE\Logs"; $rt = "$saves\FO4SF-Runtime"; $had_rt = Test-Path "$p\FO4SF-Runtime.ini"
+New-Item -ItemType Directory "$p\held_$date" | Out-Null
+Move-Item "$p\FO4SFBorder.dll","$p\FO4SFBorder.ini" "$p\held_$date\"
+if ($had_rt) { Move-Item "$p\FO4SF-Runtime.ini" "$p\held_$date\" }
+Copy-Item "D:\Modding\staging\fo4sf_border_$date\FO4SFBorder.dll","D:\Modding\staging\fo4sf_border_$date\FO4SFBorder.ini" $p
+(Get-Content "$p\FO4SFBorder.ini") -replace 'Mode=0','Mode=1' | Set-Content -Encoding ASCII "$p\FO4SFBorder.ini"
+Get-ChildItem $p -Recurse | Select FullName,LastWriteTime | ConvertTo-Json > "D:\Modding\testqueue\focc_P1n_$date.before.json"
+Test-Path $rt
+```
+
+1. **N-1, no ini.** Launch, wait for the main menu, quit. `Get-Content "$sl\FOCCSidecar.log"` must contain
+   `refuse step=runtime_dir file=FO4SF-Runtime.ini reason=not found` and no `step=event` line (an `[E]` prefix is
+   libxse's).
+   `Test-Path $rt` is the same as before.
+2. **N-2, parent missing.** Write `Set-Content -Encoding UTF8 "$p\FO4SF-Runtime.ini" "[Runtime]`r`nDir=$saves\FO4SF-NoParent\FO4SF-Runtime"`,
+   then launch, reach the main menu and quit. Expect `refuse step=runtime_dir dir=<that path> reason=parent_missing`,
+   and `Test-Path "$saves\FO4SF-NoParent"` is `False`.
+3. **N-3, with the ini, a load and no save.** Write `Set-Content -Encoding UTF8 "$p\FO4SF-Runtime.ini" "[Runtime]`r`nDir=$rt"`.
+   Launch, load any existing save from the menu, wait 30 s, and quit to desktop without saving. Expect:
+   - in `FOCCSidecar.log`, `step=runtime_dir dir=<$rt>`;
+   - `$rt\logs\focc_sidecar.log` with the `"event": "load"` line, then `pre_load` and `post_load` for that save
+     (`"found": false` unless a sidecar for it already exists);
+   - `$rt\sidecars` present and empty;
+   - `$rt\logs\fo4sf_border.log` whose `load` line says `"mode": 1`.
+   - If the game made an autosave, there is also a `pre_save` line and a `.focc` file. Write that down; it is not a
+     failure.
+   - `reason=create error=<n>` instead is the Controlled Folder Access answer (Starfield.exe kept out of the save folder).
+4. **After every launch,** `Get-ChildItem $p -Recurse | Select FullName,LastWriteTime` compared with the before list:
+   nothing new or changed under `Data\SFSE\Plugins` except what this card wrote (the ini).
+
+Back out (game closed):
+- Delete `FOCCSidecar.dll`, `FOCCSidecar.ini`, the built `FO4SFBorder.dll`/`.ini` and `FO4SF-Runtime.ini` from `$p`.
+- Move everything in `$p\held_$date` back to `$p`, then remove the empty `held_$date` folder.
+- `$rt` stays (player data). It holds only this card's logs.
+
+Send back:
+- the three `FOCCSidecar.log` tails;
+- `$rt\logs\*.log`;
+- `Get-ChildItem $rt -Recurse`;
+- both directory listings;
+- `build.json` of each dll.
+
 **Job focc-P1-3 (run). Game: launched through `sfse_loader.exe`, not Steam** (cycle.ps1 is not the path here).
 Load the throwaway save, then in the console:
 
