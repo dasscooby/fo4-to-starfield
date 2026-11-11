@@ -26,7 +26,7 @@ IDS_C = [("Main.Singleton", 883591), ("PlayerCharacter.Singleton", 922868), ("Co
          ("GFx.MovieImpl.RTTI", 841612), ("GFx.AS3.MovieRoot.RTTI", 842209), ("GFx.Value.ObjectAddRef", 169745),
          ("GFx.Value.ObjectRelease", 169746), ("GFx.Value.GetMember", 169748), ("GFx.Value.SetMember", 169749),
          ("GFx.Value.Invoke", 169750)]
-IDS_D = [("TESDataHandler.Singleton", 937572)]
+IDS_D = [("TESDataHandler.Singleton", 937572), ("TESForm.LookupByID", 47401)]
 SFSE_RVAS = [("kValueAddRef", "0x3352400"), ("kValueRelease", "0x33524A0"), ("kValueGetMember", "0x33528A0"),
              ("kValueSetMember", "0x3352C90"), ("kValueInvoke", "0x33530B0")]
 
