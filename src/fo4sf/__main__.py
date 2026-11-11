@@ -12,7 +12,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -25,6 +27,40 @@ from .convert_material import parse_bgsm
 MIN_PYTHON = (3, 12)
 
 
+def _git_rev() -> str | None:
+    """Return short git revision if this is a checkout, else None."""
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=Path(__file__).resolve().parents[2],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if r.returncode == 0:
+            return r.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def _env_summary() -> list[str]:
+    """Short environment lines for status: Python, platform, git (if available), oracles count."""
+    lines = []
+    lines.append(f"  python: {sys.version.split()[0]} ({sys.executable})")
+    lines.append(f"  platform: {platform.system()} {platform.release()}")
+    rev = _git_rev()
+    if rev:
+        lines.append(f"  git: {rev}")
+    root = _repo_root()
+    if root:
+        oracle_dir = root / "scripts" / "oracles"
+        if oracle_dir.is_dir():
+            count = len(list(oracle_dir.glob("*.py")))
+            lines.append(f"  oracles: {count} offline diagnostics in scripts/oracles")
+    return lines
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     try:
         cfg = load_config(args.config)
@@ -33,6 +69,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         return 1
 
     print("fo4-to-starfield status")
+    for line in _env_summary():
+        print(line)
     print(f"  config: {Path(args.config or 'config.toml').resolve()}")
     fo4 = cfg.get("fo4", {})
     data_dirs = fo4.get("data_dirs", [])
