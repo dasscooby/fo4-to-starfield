@@ -251,6 +251,43 @@ do, so a name keyed on the wrong script fails the stage test instead of logging 
 takes the session folder's copy; the default is the game's own `Logs\Script\Papyrus.0.log`). With it the stage-10 result reads
 `refused by the game: error: FO4SF_PAProbeSuitRef (09000804): is not valid power armor furniture.` instead of `no logged change`.
 
+## Result of the probe: the entry is alive, its content is missing (owner PC, 11 Nov 05:16 to 05:27 UTC)
+
+**Verified (owner PC; offline read of the recorder dump and Starfield.exe 1.16.244.0, names and offsets only).** Same kit
+(18b34a0d, `race,furniture,keyword,armor`) with the console `addkeyword` in front of stage 10: step line `haskw=true addkw=NA
+haskw2=true haskwc=true` (the `addkw=NA` was the script's wrong name, fixed at 51a03e53: `ObjectReference.AddKeyword`);
+no "not valid power armor furniture" in Papyrus.0.log; about one second later 0xC0000005 at `Starfield.exe+0x12cf1c0`
+(`movzx eax, byte ptr [r8+9]`, r8 = 0). Evidence `probe-pa-20261111T051557Z` on the PC.
+
+What the second null is: the engine has already switched the player to the power armor race (our `FO4SF_PARace`) and is
+equipping the frame armor; the equip routine (0x12cf130, called with the actor and the frame armor) takes the race's body
+part data (race+0x910) and, for each of six engine actor values (a table at 0x5fb49a0; the plugin library names them power
+armor head, torso, left arm, right arm, left leg and right leg condition), scans the parts for one carrying that value and
+reads its limb type without a null check. It failed on the first (head) after scanning all 26 parts: Starfield's
+`HumanBodyPartData` (00003481), which our race copy uses, has 13 parts and none of those values. Fallout 4's `PowerArmorRace`
+uses `PowerArmorBodyPartData` (0001D322), whose parts carry them (00060BDD to 00060BE2 there).
+
+**The order of gates, as found:** (1) the suit base is furniture, (2) the reference has `FurnitureTypePowerArmor`, (3) a frame
+armor exists (`PowerArmorDefaultFrameArmor_DO`), (4) the player's race has power armor body part data. Inferred from the
+same functions, not yet met: the armor's biped slots against a second race's body part data, `PowerArmorArmorKeyword_DO`,
+battery handling, the furniture's 3D and the enter animations. The success path has 141 calls and assumes real power armor
+content (a skeleton, armor addons for the power armor race, animations); Starfield ships none of it, and each missing piece
+costs one game crash to find.
+
+**Answer to the question of this probe (A2, P1, A3):** Fallout 4's power armor entry is alive in Starfield, gated by the
+furniture base, `FurnitureTypePowerArmor` on the **reference**, a frame armor, power armor body part data on the race, and then
+assets. The engine side exists; the content side has to be brought. `SetRace` on the player works both ways (the race swap is
+reversible within a session; a save through it is untested). **Open:** why the keyword appended to the base FURN's list is not
+seen through `HasKeyword` on the reference while the copied chair's own keywords are (neither the reordering nor the keyword
+form component changed it); `AddKeyword` on the reference is the working route.
+
+**Recommendation of the owner PC for the stage scope:** the climb-in by script now: `SetRace` (proven both ways), equip our
+frame and armor pieces, our own sit or camera flow, a flag of ours for "in power armor"; keep the native as a research line
+that becomes useful once Fallout 4's power armor race, skeleton and addons are converted. One more variant is possible for the
+record and was **not built**: our race with its own body part data (a copy of `HumanBodyPartData` with six parts' actor
+values set to the engine's six); its form ids must be read from Starfield.esm, not assumed from Fallout 4, and there is no
+Starfield.esm on the box that built this kit. Nothing further is planned by crash-and-read.
+
 ## Session card
 
 **Throwaway state only. Do not save at any point.** The race swap (step 20) can break a save; do not autosave, quicksave
