@@ -40,7 +40,17 @@ def installer(argv):
         exp_install.RECORD = saved
 
 
+def prepacked_supported():
+    """True when exp_install.py itself knows --prepacked (FAL-274, #723). Without it the flag would reach an installer that
+    rejects it, or one that builds its own archive: the wrapper refuses before anything is installed."""
+    with open(exp_install.__file__, encoding="utf-8") as f:
+        return "--prepacked" in f.read()
+
+
 def install(a):
+    if getattr(a, "prepacked", "") and not prepacked_supported():
+        sys.exit("--prepacked is not supported by this exp_install.py (it lands with FAL-274 / #723); nothing installed. "
+                 "Install without --prepacked to pack the archive here.")
     d = os.path.abspath(a.dir)
     plan = make_power_armor_probe.load_plan(d)
     problems = make_power_armor_probe.verify_stage(d, plan, os.path.join(a.starfield, "Data"))
@@ -51,13 +61,15 @@ def install(a):
     if sorted(plan["plugins"]) != names:
         sys.exit(f"power armor probe not installed: the stage holds {names}, plan.json lists {plan['plugins']}")
     return installer(["install", "--exp-dir", d, "--starfield", a.starfield, "--pack",
-                      "--plugins", ",".join(plan["plugins"])])
+                      "--plugins", ",".join(plan["plugins"])] +
+                     (["--prepacked", a.prepacked] if getattr(a, "prepacked", "") else []))
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cmd", choices=("install", "uninstall", "status", "order", "active"))
     ap.add_argument("--dir", default="", help="the staged power armor probe folder (install)")
+    ap.add_argument("--prepacked", default="", help="verify and install this existing archive; never build")
     ap.add_argument("--starfield", required=True, help="the game folder (Starfield.exe)")
     a = ap.parse_args(argv)
     if a.cmd == "install":
