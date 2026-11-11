@@ -143,14 +143,15 @@ class EntryScriptTests(unittest.TestCase):
     def test_the_entry_does_every_move_and_the_exit_undoes_each(self):
         put_on = ENTRY_PSC.split("Function PutOn()")[1].split("EndFunction")[0]
         take_off = ENTRY_PSC.split("Function TakeOff()")[1].split("EndFunction")[0]
-        self.assertIn("p.SetRace(kitRace)", put_on)                              # the kit race, proven both ways by the console probe
+        self.assertNotIn("SetRace", ENTRY_PSC.split("Function PutOn()")[1].split("Function EntryVerdict")[0])   # PC run of #733: the swap removed the body
         self.assertEqual(put_on.count("p.AddItem("), 3)
         self.assertEqual(put_on.count("p.EquipItem("), 3)
         self.assertIn("SetPaValue(p, 1.0)", put_on)
         self.assertEqual(take_off.count("p.UnequipItem("), 3)
         self.assertEqual(take_off.count("p.RemoveItem("), 3)
         self.assertIn("SetPaValue(p, 0.0)", take_off)
-        self.assertIn("p.SetRace(StartRace)", take_off)                          # back to the race the player started with
+        self.assertNotIn("p.SetRace(", ENTRY_PSC)                                # the entry never touches the race
+        self.assertIn("p.GetRace() != StartRace", ENTRY_PSC)                     # but says on screen when something else did
         self.assertIn("StartRace = p.GetRace()", ENTRY_PSC.split("Event OnInit()")[1])
         for item in ("FrameId", "PieceHelmId", "PieceTorsoId"):                  # every item added is equipped, unequipped and removed
             for call in ("AddItem", "EquipItem"):
@@ -415,7 +416,7 @@ class StageTests(unittest.TestCase):
             self.assertRegex(check.stdout, rf"ARMO {edid} \S+ slot {slot} armatures 0 \(art: none\)")
         self.assertIn("REFR 00080B:FO4SFPowerArmorProbe.esm FO4SF_PAEntryFurnRef base 00080A:FO4SFPowerArmorProbe.esm at (3, 0, 0)", check.stdout)
 
-    def test_the_three_armor_name_the_kit_race_and_the_hand_script_is_off_the_record_without_with_hand(self):
+    def test_the_three_armor_name_humanrace_not_the_copy_and_the_hand_script_is_off_the_record_without_with_hand(self):
         """FAL-361 PC run of #733: 'armor cannot be equipped by the passed in actor's race'; the hand quest's OnInit ran unflagged."""
         out = self.root / "e0"
         self.assertEqual(self.run_tool("build", self.master, out).returncode, 0)
@@ -426,7 +427,7 @@ class StageTests(unittest.TestCase):
         out2 = self.root / "e0b"
         self.assertEqual(self.run_tool("build", self.master, out2, "--with-hand").returncode, 0)
         self.assertGreater((out2 / PLUGIN).read_bytes().count(b"FO4SF_PAHandQuest"), 1)
-        self.assertIn("armor.Race.SetTo(Own(RaceId))", TOOL_SRC)
+        self.assertIn("armor.Race.SetTo(humanRace.FormKey)", TOOL_SRC)            # no race swap: the pieces are for HumanRace
 
     def test_art_options_copy_a_vanilla_armo_and_check_needs_the_same_options(self):
         out = self.root / "e2"

@@ -180,10 +180,10 @@ Same plugin (`FO4SFPowerArmorProbe.esm`, still master Starfield.esm only, adds r
 | ARMO `FO4SF_PAFrame` (0x80D, slot BODY), `FO4SF_PAPieceHelm` (0x80E, Hat), `FO4SF_PAPieceTorso` (0x80F, UpperBody1VisOnly) | our frame and two pieces: a name, a slot, weight and value 0, no script |
 | RACE `FO4SF_PARace` (0x802, from the console probe) | the kit race: a copy of HumanRace |
 
-**The entry** (sit on the entry chair; the script waits 2 s): `SetRace` to the kit race, `AddItem` and `EquipItem` of the frame and
-both pieces, `SetValue` of our value to 1. It reads the state back after 1 s and 4 s and says on screen which of the four held.
+**The entry** (sit on the entry chair; the script waits 2 s): `AddItem` and `EquipItem` of the frame and
+both pieces, `SetValue` of our value to 1; **no race swap** (see "PC rerun" below). It reads the state back after 1 s and 4 s and says on screen which held, and whether the race changed.
 **The exit** (sit on the vanilla chair on the left, or 120 s in the suit): value to 0, `UnequipItem` and `RemoveItem` of the three,
-`SetRace` back to the race the player started with (taken at start), read back after 1 s and 4 s. Sit state 3 within 1.5 units of the
+read back after 1 s and 4 s. Sit state 3 within 1.5 units of the
 chair is the trigger (the console probe's seated control was 0.12 units away); when the game has no `GetSitState` the first walk up to
 the entry chair is the trigger, once, and the exit is the 120 s timer.
 
@@ -199,17 +199,17 @@ Names the script guesses are `;OPT` lines (the stager compiles each alone and ke
 
 ### What the player sees, and what is honestly missing
 
-* **Third person, as built (no art given):** the kit race is a copy of HumanRace with the same skeleton and graph, and the three ARMO
-  have **no armature**, so nothing changes on the body. The only visible results are the on-screen lines, three items appearing
+* **Third person, as built (no art given):** the player stays HumanRace, and the three ARMO have **no armature**, so nothing
+  changes on the body. The only visible results are the on-screen lines, three items appearing
   in and leaving the inventory, and (if the game can read it) the value. **First person:** the same, no arms or camera change.
 * **With `--frame-art` / `--piece-art`:** the vanilla armor's armatures are worn: third person shows that armor over the character
-  (a copied suit's own slots and look decide whether it looks like a frame); whether Starfield accepts a vanilla ARMO's armatures
-  on a copied race is unknown until run.
+  (a copied suit's own slots and look decide whether it looks like a frame); a vanilla ARMA names HumanRace (or the races it was made
+  for), which the player is, so the equip should be accepted; unknown until run.
 * **Missing, not attempted:** a climb-in animation (the engine's own did nothing); a power armor HUD or camera; a steel frame as art
   (no frame model is made here); a fusion core, damage or carry-weight rules (the value is only ours: nothing reads it, so
   nothing changes in play); the Starfield power armor state (`IsInPowerArmor` is not in Starfield's scripts); stopping the player
-  from taking the pieces off by hand (`EquipItem` is called with prevent-removal false); a save made while in the suit. The race swap
-  can break a save: **throwaway state only, no save.**
+  from taking the pieces off by hand (`EquipItem` is called with prevent-removal false); a save made while in the suit. Throwaway state only,
+  no save (a first-time script that adds items is still not a save-safe design).
 
 ### Card (eight steps; throwaway character, no console, game closed first for the install)
 
@@ -233,3 +233,19 @@ quest moved the player and called `SwitchToPowerArmor` over the entry run), so t
 temporary reference of a cell that is not loaded (FAL-316); the entry quest looks the chairs up again once the player is in the room,
 where they resolve, so the log's init line is expected to say none. Third person and the inventory were not captured; with the race
 fix the equip should now put the (art-less) pieces on, still nothing visible without `--frame-art`.
+
+### PC rerun of #733 at f5d38adb: the race swap is dropped (FAL-361)
+
+Verified by the PC (10:15 to 10:21 UTC): naming the copied race on the ARMO did not help (same three equip errors, `RNAM` was the copy).
+The cause is the armature: a race is accepted by an ARMA's race list, the ARMO here had none, and the copy is in no vanilla ARMA. Worse,
+**third person in the copied race showed only a floating head and hair**: HumanRace's skin (`Skin_Naked` 000D64, armatures 012204 and
+030580) names HumanRace and two other races, not the copy. The hand quest stayed silent (no hand log); `init` still logs refs none
+(unresolved temporary refs, as before). So the race copy is the wrong tool without its own skin and armatures.
+
+Changed (option b of the PC's two, offline only, awaiting a third PC run): **the entry no longer calls `SetRace`**; the player stays
+HumanRace; the three ARMO name HumanRace (with `--frame-art` / `--piece-art` they keep the copied vanilla ARMO's own race and armature);
+the value stays as it was; `check` refuses an ARMO that names the copied race. The screen says "race CHANGED" if anything else changes
+it. `FO4SF_PARace` stays in the plugin for the console probe (its stage 20/30 swap is the PC-proven both-ways result) and is only
+logged at init. **Not done:** (a) the own-skin kit race (copies of Skin_Naked and its two ARMA naming the copy, plus armatures per
+piece); worth it only if the suit needs its own skeleton or size. **Equip may still be refused** with no art: an ARMO with no armature
+may not equip even for HumanRace; the rerun decides, and `--frame-art` is the fallback (give it any vanilla ARMO).

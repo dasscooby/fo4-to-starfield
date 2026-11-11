@@ -12,8 +12,8 @@
 //   QUST  FO4SF_PAHandQuest      the by-hand mode (FAL-273): start game enabled, NO properties, script FO4SF_PAHandQuest: moves the player
 //                                into the cell, says on screen what stands where and what the engine answered to SwitchToPowerArmor
 //   QUST  FO4SF_PAEntryQuest     the power armor ENTRY by script (FAL-361, piece B of FAL-359): start game enabled, NO properties.
-//                                On sitting on FURN FO4SF_PAEntryFurn (a copy of the control, no keyword) it sets the player's RACE to
-//                                FO4SF_PARace, adds and equips ARMO FO4SF_PAFrame, FO4SF_PAPieceHelm, FO4SF_PAPieceTorso and sets AVIF
+//                                On sitting on FURN FO4SF_PAEntryFurn (a copy of the control, no keyword) it does NOT swap the race (PC run: the copy has
+//                                no skin); it adds and equips ARMO FO4SF_PAFrame, FO4SF_PAPieceHelm, FO4SF_PAPieceTorso and sets AVIF
 //                                FO4SF_PAInPowerArmor to 1; sitting on the control chair undoes all of it. The by-hand quest above is
 //                                start game enabled only with --with-hand (the two would both move the player and both talk).
 //   QUST  FO4SF_PAProbeQuest     start game enabled, stages 10 / 20 / 30, script FO4SF_PAProbeQuest with NO properties
@@ -160,7 +160,7 @@ static class PowerArmorProbe
             armor.VirtualMachineAdapter = null;
             armor.FirstPersonFlags = slot;
             armor.Keywords = null;
-            armor.Race.SetTo(Own(RaceId));          // PC run of #733: 'armor cannot be equipped by the passed in actor's race' without it
+            if (art == null) armor.Race.SetTo(humanRace.FormKey);   // no race swap (PC run of #733: the copied race has no skin): the player stays HumanRace
             armor.Value = 0;
             armor.Weight = 0;
             mod.Armors.Add(armor);
@@ -351,7 +351,8 @@ static class PowerArmorProbe
             Need(ar.FirstPersonFlags == slot, $"ARMO {edid} is not in slot {slot}");
             Need((ar.Armatures?.Count ?? 0) == (art?.Armatures?.Count ?? 0), $"ARMO {edid} armatures differ from {artEdid ?? "none"}");
             Need(ar.VirtualMachineAdapter == null, $"ARMO {edid} carries a script");
-            Need(ar.Race.FormKey == Own(RaceId), $"ARMO {edid} does not name the kit race (it could not be equipped)");
+            Need(ar.Race.FormKey != Own(RaceId), $"ARMO {edid} names the copied race (no race swap: it has no skin)");
+            if (art == null) Need(ar.Race.FormKey == humanRace.FormKey, $"ARMO {edid} does not name HumanRace");
         }
 
         var cell = mod.Cells.Records.SelectMany(b => b.SubBlocks).SelectMany(s => s.Cells).SingleOrDefault();

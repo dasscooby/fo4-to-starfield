@@ -6,12 +6,12 @@ Scriptname FO4SF_PAEntryQuest extends Quest
       persistent arrival marker). When the game has no such call it says to type  coc FO4SF_PAProbeCell.
    2. In the room: the ENTRY chair (FURN FO4SF_PAEntryFurn, a copy of the vanilla chair with no keyword) stands 3 units ahead of the
       arrival; the vanilla chair on the left is the EXIT.
-   3. Sitting on the entry chair puts the suit on after 2 s, in four moves, each said on screen: Actor.SetRace to the kit race
-      (RACE FO4SF_PARace, proven both ways by the console probe), AddItem + EquipItem of our frame and two pieces (ARMO
-      FO4SF_PAFrame, FO4SF_PAPieceHelm, FO4SF_PAPieceTorso), and SetValue of our value FO4SF_PAInPowerArmor (AVIF) to 1. The
-      state is read 1 s and 4 s later and the screen says whether all four held.
-   4. Sitting on the vanilla chair (or 120 s in the suit) takes it off: the value to 0, the pieces unequipped and removed, the race
-      back to the one the player started with; again read 1 s and 4 s later.
+   3. Sitting on the entry chair puts the suit on after 2 s, in three moves, each said on screen: AddItem + EquipItem of our
+      frame and two pieces (ARMO FO4SF_PAFrame, FO4SF_PAPieceHelm, FO4SF_PAPieceTorso, for HumanRace), and SetValue of our value
+      FO4SF_PAInPowerArmor (AVIF) to 1. THE RACE IS NOT SWAPPED: the PC run of #733 showed the copied race has no skin (only the head
+      is drawn) and refuses every armature. The state is read 1 s and 4 s later and the screen says whether it all held.
+   4. Sitting on the vanilla chair (or 120 s in the suit) takes it off: the value to 0, the pieces unequipped and removed;
+      again read 1 s and 4 s later.
  Everything said on screen is also one line in the user log "FO4SFPAEntry" (My Games\Starfield\Logs\Script\User\FO4SFPAEntry.0.log):
  FO4SFPAENTRY rt=<real time s> <event> key=value ... end=true. Optional readings are lines that begin with ";OPT <Base.Name> ":
  scripts/planet/make_power_armor_probe.py stage compiles each on its own and keeps the ones that compile (as FO4SF_PAHandQuest.psc);
@@ -23,7 +23,7 @@ Scriptname FO4SF_PAEntryQuest extends Quest
 string LogName = "FO4SFPAEntry"
 string ProbePlugin = "FO4SFPowerArmorProbe.esm"
 int CellId = 0x800          ; CELL FO4SF_PAProbeCell
-int KitRaceId = 0x802       ; RACE FO4SF_PARace, a copy of HumanRace
+int KitRaceId = 0x802       ; RACE FO4SF_PARace, a copy of HumanRace: only logged at init, never set (the swap removed the body)
 int ControlRefId = 0x805    ; REFR the vanilla chair: the EXIT
 int ArrivalRefId = 0x808    ; REFR the arrival XMarker (persistent)
 int EntryRefId = 0x80B      ; REFR the entry chair (FURN FO4SF_PAEntryFurn)
@@ -185,11 +185,9 @@ EndFunction
 string Function StateText(string suffix)
     {The state: race (kit or not), items in the bag, items equipped, the value, the sit state.}
     Actor p = Game.GetPlayer()
-    string raceText = "race is the start race"
-    if p.GetRace() == Thing(KitRaceId) as Race
-        raceText = "race is the KIT race"
-    elseif p.GetRace() != StartRace
-        raceText = "race is another one (" + Id(p.GetRace()) + ")"
+    string raceText = "race unchanged"
+    if p.GetRace() != StartRace
+        raceText = "race CHANGED (" + Id(p.GetRace()) + ")"
     endif
     string worn = "equipped: not in this game's scripts"
     int n = EquippedCount(p)
@@ -204,8 +202,6 @@ EndFunction
 Function PutOn()
     Actor p = Game.GetPlayer()
     Trace("enter cycle=" + Cycle + " " + StateText("before"))
-    Race kitRace = Thing(KitRaceId) as Race
-    p.SetRace(kitRace)
     p.AddItem(Thing(FrameId), 1, true)
     p.AddItem(Thing(PieceHelmId), 1, true)
     p.AddItem(Thing(PieceTorsoId), 1, true)
@@ -215,7 +211,7 @@ Function PutOn()
     SetPaValue(p, 1.0)
     Phase = 2
     InSuitSeconds = 0
-    Say("Suit ON requested: race set, frame and two pieces added and equipped, value set. Reading it back...")
+    Say("Suit ON requested: frame and two pieces added and equipped, value set (the race is not touched). Reading it back...")
     StartTimer(READ1_S, TIMER_READ1)
     StartTimer(READ2_S, TIMER_READ2)
 EndFunction
@@ -230,9 +226,8 @@ Function TakeOff()
     p.RemoveItem(Thing(FrameId), 1, true)
     p.RemoveItem(Thing(PieceHelmId), 1, true)
     p.RemoveItem(Thing(PieceTorsoId), 1, true)
-    p.SetRace(StartRace)
     Phase = 0
-    Say("Suit OFF requested: value cleared, pieces unequipped and removed, race set back. Reading it back...")
+    Say("Suit OFF requested: value cleared, pieces unequipped and removed. Reading it back...")
     StartTimer(READ1_S, TIMER_XREAD1)
     StartTimer(READ2_S, TIMER_XREAD2)
 EndFunction
@@ -241,8 +236,8 @@ Function EntryVerdict()
     {Did all four things hold 4 s after the entry? The screen says which did not.}
     Actor p = Game.GetPlayer()
     string missing = ""
-    if p.GetRace() != Thing(KitRaceId) as Race
-        missing += " race"
+    if p.GetRace() != StartRace
+        missing += " race-changed"
     endif
     if HeldCount(p) < 3
         missing += " items-in-bag"
@@ -254,7 +249,7 @@ Function EntryVerdict()
         missing += " value"
     endif
     if missing == ""
-        Say("Result: the suit is ON. Race, pieces and value all hold. Look at the character in first person (F) and third person.")
+        Say("Result: the suit is ON. Pieces and value hold, race untouched. Look at the character in first person (F) and third person.")
     else
         Say("Result: the suit is only partly on. Did not hold:" + missing + ". Write down what you see.")
     endif
@@ -265,7 +260,7 @@ Function ExitVerdict()
     Actor p = Game.GetPlayer()
     string left = ""
     if p.GetRace() != StartRace
-        left += " race"
+        left += " race-changed"
     endif
     if HeldCount(p) > 0
         left += " items-in-bag"
@@ -277,7 +272,7 @@ Function ExitVerdict()
         left += " value"
     endif
     if left == ""
-        Say("Result: the suit is OFF. Race, pieces and value are back as they were. Sit on the new chair to do it again, or quit without saving.")
+        Say("Result: the suit is OFF. Pieces and value are back as they were. Sit on the new chair to do it again, or quit without saving.")
     else
         Say("Result: the exit did NOT undo everything. Still set:" + left + ". Write down what you see.")
     endif
