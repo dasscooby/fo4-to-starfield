@@ -468,6 +468,22 @@ class StageTests(unittest.TestCase):
         self.assertEqual(miss.returncode, 1)
         self.assertIn("0 ARMO named NoSuchArmor", miss.stderr)
 
+    def test_copies_keep_the_sources_keywords_value_weight_and_health(self):
+        """PC run of #733 at 59a76008: the copies were worn but not drawn; they had no KSIZ/KWDA and a zero DATA, the vanilla set drew."""
+        out = self.root / "e6"
+        self.assertEqual(self.run_tool("build", self.master, out).returncode, 0)
+        check = self.run_tool("check", out / PLUGIN, self.master)
+        self.assertEqual(check.returncode, 0, check.stdout)
+        self.assertEqual(check.stdout.count("keywords 2 (source 2), value 7 weight 7.5 health 100"), 3)       # frame, helmet, pack
+        data = (out / PLUGIN).read_bytes()
+        self.assertEqual(data.count(b"KSIZ"), 3 + 2)             # the three copies + the two furniture (suit, entry) carry keywords
+        self.assertIn("if (art == null) { armor.Keywords = null; armor.Value = 0; armor.Weight = 0; }", TOOL_SRC)
+        # a copy stripped of its keywords is refused by check: rebuild with none-art then check against the default art
+        none = ["--frame-art", "none", "--piece-art", "none", "--pack-art", "none"]
+        self.assertEqual(self.run_tool("build", self.master, self.root / "e7", *none).returncode, 0)
+        bad = self.run_tool("check", self.root / "e7" / PLUGIN, self.master)
+        self.assertEqual(bad.returncode, 1)
+
     def test_art_is_not_optional_by_default_and_none_is_the_explicit_opt_out(self):
         """PC run of #733: an ARMO with no armature cannot be equipped, so a stage always carries art unless `none` is said."""
         self.assertIn('FrameArt = "Spacesuit_Mark1_Body", PieceArt = "Spacesuit_Mark1_Helmet"', TOOL_SRC)

@@ -164,10 +164,10 @@ static class PowerArmorProbe
             armor.Name = name;
             armor.VirtualMachineAdapter = null;
             if (art == null) armor.FirstPersonFlags = slot;          // copied art keeps its own slot: a helmet copy forced into Hat was not drawn (PC run)
-            armor.Keywords = null;
+            // a copy keeps the source's keywords, value, weight and health: the game goes by the keywords for a spacesuit part (PC run of
+            // #733 at 59a76008: a copy without KSIZ/KWDA and with a zero DATA was worn but not drawn, the vanilla set drew)
+            if (art == null) { armor.Keywords = null; armor.Value = 0; armor.Weight = 0; }
             if (art == null) armor.Race.SetTo(humanRace.FormKey);   // no race swap (PC run of #733: the copied race has no skin): the player stays HumanRace
-            armor.Value = 0;
-            armor.Weight = 0;
             mod.Armors.Add(armor);
         }
 
@@ -356,6 +356,14 @@ static class PowerArmorProbe
             Need(art == null ? ar.FirstPersonFlags == slot : ar.FirstPersonFlags == art.FirstPersonFlags, $"ARMO {edid} is not in slot {(art == null ? slot : art.FirstPersonFlags)}");
             Need((ar.Armatures?.Count ?? 0) == (art?.Armatures?.Count ?? 0), $"ARMO {edid} armatures differ from {artEdid ?? "none"}");
             Need(ar.VirtualMachineAdapter == null, $"ARMO {edid} carries a script");
+            if (art != null)
+            {
+                var wantKw = art.Keywords?.Select(k => k.FormKey).ToList() ?? new();
+                var gotKw = ar.Keywords?.Select(k => k.FormKey).ToList() ?? new();
+                Console.WriteLine($"    keywords {gotKw.Count} (source {wantKw.Count}), value {ar.Value} weight {ar.Weight} health {ar.Health} (source {art.Value} / {art.Weight} / {art.Health})");
+                Need(gotKw.SequenceEqual(wantKw), $"ARMO {edid} keywords differ from {artEdid} (the game goes by them for a spacesuit part)");
+                Need(ar.Value == art.Value && ar.Weight == art.Weight && ar.Health == art.Health, $"ARMO {edid} value, weight or health differ from {artEdid}");
+            }
             Need(ar.Race.FormKey != Own(RaceId), $"ARMO {edid} names the copied race (no race swap: it has no skin)");
             if (art == null) Need(ar.Race.FormKey == humanRace.FormKey, $"ARMO {edid} does not name HumanRace");
         }
@@ -441,11 +449,12 @@ static class PowerArmorProbe
         });
         mod.Furniture.Add(new Furniture(Sf(0x0027D6), Release) { EditorID = "SynthAlreadyPowerArmor",
             Keywords = new ExtendedList<IFormLinkGetter<IKeywordGetter>> { new FormLink<IKeywordGetter>(kw.FormKey) } });
+        ExtendedList<IFormLinkGetter<IKeywordGetter>> Kws() => new() { new FormLink<IKeywordGetter>(other.FormKey), new FormLink<IKeywordGetter>(kw.FormKey) };
         ExtendedList<ArmorAddonModel> Addons(params uint[] ids) => new(ids.Select(i => new ArmorAddonModel { ArmorAddon = new FormLinkNullable<IArmorAddonGetter>(Sf(i)) }));
-        mod.Armors.Add(new Armor(Sf(0x0030A1), Release) { EditorID = "SynthArmorArt", Name = "Synthetic art armor", FirstPersonFlags = FirstPersonFlag.BODY, Armatures = Addons(0x0030A2, 0x0030A3) });
-        mod.Armors.Add(new Armor(Sf(0x0030A4), Release) { EditorID = "Spacesuit_Mark1_Body", Name = "Synthetic suit body", FirstPersonFlags = FirstPersonFlag.BODY, Armatures = Addons(0x0030A5) });
-        mod.Armors.Add(new Armor(Sf(0x0030A8), Release) { EditorID = "Spacesuit_Mark1_Backpack", Name = "Synthetic suit pack", FirstPersonFlags = FirstPersonFlag.Backpack, Armatures = Addons(0x0030A9) });
-        mod.Armors.Add(new Armor(Sf(0x0030A6), Release) { EditorID = "Spacesuit_Mark1_Helmet", Name = "Synthetic suit helmet", FirstPersonFlags = FirstPersonFlag.Hat, Armatures = Addons(0x0030A7) });
+        mod.Armors.Add(new Armor(Sf(0x0030A1), Release) { EditorID = "SynthArmorArt", Name = "Synthetic art armor", Keywords = Kws(), Value = 7, Weight = 7.5f, Health = 100, FirstPersonFlags = FirstPersonFlag.BODY, Armatures = Addons(0x0030A2, 0x0030A3) });
+        mod.Armors.Add(new Armor(Sf(0x0030A4), Release) { EditorID = "Spacesuit_Mark1_Body", Name = "Synthetic suit body", Keywords = Kws(), Value = 7, Weight = 7.5f, Health = 100, FirstPersonFlags = FirstPersonFlag.BODY, Armatures = Addons(0x0030A5) });
+        mod.Armors.Add(new Armor(Sf(0x0030A8), Release) { EditorID = "Spacesuit_Mark1_Backpack", Name = "Synthetic suit pack", Keywords = Kws(), Value = 7, Weight = 7.5f, Health = 100, FirstPersonFlags = FirstPersonFlag.Backpack, Armatures = Addons(0x0030A9) });
+        mod.Armors.Add(new Armor(Sf(0x0030A6), Release) { EditorID = "Spacesuit_Mark1_Helmet", Name = "Synthetic suit helmet", Keywords = Kws(), Value = 7, Weight = 7.5f, Health = 100, FirstPersonFlags = FirstPersonFlag.Hat, Armatures = Addons(0x0030A7) });
         Directory.CreateDirectory(outDir);
         mod.BeginWrite.ToPath(Path.Combine(outDir, "Starfield.esm")).WithNoLoadOrder().Write();
         Console.WriteLine($"wrote {Path.Combine(outDir, "Starfield.esm")}");

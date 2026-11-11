@@ -296,3 +296,19 @@ Changed offline (awaiting a fifth PC run):
 
 Not changed: the look. Whether copies of the vanilla suit pieces draw over the character's own gear is what the PC run decides; the
 gear-restore should be read from the outfit in third person after the exit, not only from the log.
+
+### PC run of #733 at 59a76008: the logic passes, the copies are not drawn (FAL-361)
+
+Verified by the PC (12:02 to 12:09 UTC, test save, no save): entry `unequipped item=` x3 (the character's own suit, helmet and pack),
+`saved worn=3 watch=true`, equipped 3 of 3, value 1, "the suit is ON"; exit `restored worn=3`, bag 0, equipped 0, value 0; **in third
+person after the exit the character's own suit, pack and helmet are back** (the `OnItemUnequipped` record works). With the suit ON the
+character is in plain clothes: the three copies are worn and not drawn. A console `additem` + `equipitem` of the vanilla Mark 1 body
+01754D, helmet 01754F and pack 01754E draws fully, so the game draws a vanilla set and the fault is in the copies. A record compare
+(staged FO4SF_PAFrame against 01754D): the copy had **no KSIZ / KWDA** (vanilla: five keywords) and a DATA of twelve zero bytes (vanilla
+value, weight 7.5, health); the five armature links, RNAM, BO64 and templates matched.
+
+Changed offline (awaiting a seventh PC run): the tool no longer strips the copied ARMO: keywords, value, weight and health stay the
+source's (only an armature-less piece, `none`, is built bare); `check` prints them and refuses a copy whose keywords, value, weight or
+health differ from its source. **Whether the keywords are the whole cause is the PC's inference, not yet shown**: if the copies still
+do not draw, the next suspect is the copy's missing instance data (templates and object-template combinations) or a keyword the game
+reads from the FormID of the original. Not seen yet: first person, the inventory screen, a second enter and leave, the 120 s exit.
