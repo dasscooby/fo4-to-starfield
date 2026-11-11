@@ -12,6 +12,9 @@ OVERLAY_PNAM_MARS = 4
 WORLD_EDID = "FO4Core_Commonwealth"
 WORLD_OBJECT_LOD_PREFIX = "meshes/lod/generated/"
 CONVERTED_FO4_LOD_PREFIX = "meshes/fo4core/lod/"
+FO4_PER_OBJECT_LOD_PREFIX = "meshes/lod/"
+FO4_LODSETTINGS_PREFIX = "lodsettings/"
+FO4_LODSETTINGS_WORLDS = ("commonwealth", "diamondcity", "sanctuaryhillsworld")
 LODSETTINGS_DIR = "lodsettings"
 
 
@@ -36,3 +39,34 @@ def is_starfield_world_lod_mesh(relpath):
 
 def is_converted_fo4_lod_mesh(relpath):
     return _slash(relpath).startswith(CONVERTED_FO4_LOD_PREFIX)
+
+
+def is_fo4_per_object_lod_nif(relpath):
+    """FO4 meshes/lod/**/*.nif (per-object LOD models). Not Starfield generated world LOD."""
+    p = _slash(relpath)
+    if p.startswith(WORLD_OBJECT_LOD_PREFIX) or p.startswith(CONVERTED_FO4_LOD_PREFIX):
+        return False
+    return p.startswith(FO4_PER_OBJECT_LOD_PREFIX) and p.endswith(".nif")
+
+
+def is_fo4_world_object_lod_tile(relpath):
+    """FO4 .bto world object-LOD tile. FORMAT-GAP vs Starfield meshes/lod/generated."""
+    return _slash(relpath).endswith(".bto")
+
+
+def is_fo4_terrain_lod_tile(relpath):
+    """FO4 .btr terrain LOD tile. Overlay BTD already has LOD0-4."""
+    return _slash(relpath).endswith(".btr")
+
+
+def is_fo4_lodsettings(relpath):
+    """FO4 LODSettings/<world>.lod for the three worlds in Fallout4 - Meshes.ba2.
+
+    Commonwealth is 16 bytes. Starfield overlay files share the lodsettings/ directory
+    (e.g. fo4core_commonwealth.lod) and must not match.
+    """
+    p = _slash(relpath)
+    if not (p.startswith(FO4_LODSETTINGS_PREFIX) and p.endswith(".lod")):
+        return False
+    world = p.rsplit("/", 1)[-1][:-4]
+    return world in FO4_LODSETTINGS_WORLDS

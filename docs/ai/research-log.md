@@ -3,6 +3,20 @@
 New findings go here (newest first). Each entry: question, method, evidence, **status**: verified /
 supported hypothesis / unresolved. Older research lives in docs/JOURNAL.md and docs/spikes/; link, don't copy.
 
+## 2026-10-22 Grok: FO4 LOD mesh kinds vs Starfield surface-map world LOD
+
+- Question: how to convert Fallout 4 LOD meshes so the 3D surface map shows Commonwealth structures.
+- Method: `Ba2.read` on depot 377163 `Fallout4 - Meshes.ba2` (42,416 GNRL). Path counts + 16-byte headers.
+  Offline. No CK, no assets in Git.
+- **Verified** counts: 3,997 `meshes/lod/**/*.nif` (Gamebryo); 497 `.bto` (Commonwealth 465 / Sanctuary 22 /
+  Diamond City 10, Gamebryo tiles); 6,205 `.btr`; 3 FO4 `LODSettings/*.lod`. Commonwealth `.lod` is **16 bytes**
+  `a0ffa0ffa00100000400000020000000`. Starfield overlay `.lod` is commonly 20 bytes ([object-lod.md](../terrain/object-lod.md)).
+- **Supported**: convert per-object `meshes/lod/*.nif` as STAT under `meshes/fo4core/lod/` only. Surface map
+  still needs CK `lodsettings` + `meshes/lod/generated`. Using those STAT as DistantLOD sources is **unresolved**
+  until the CK trial.
+- **Not go**: copy `.bto` / `.btr` / FO4 16-byte `.lod` into Starfield generated paths.
+- Plan: [docs/terrain/fo4-lod-meshes.md](../terrain/fo4-lod-meshes.md).
+
 ## 2026-10-18 Grok: #359 collision-vs-mesh AABB oracle (fo4-native bounds decode)
 
 - Question: can `sfcollision.py` and `fo4collision.py` decode the Havok blobs the converter writes for `fo4-native` collision far enough to compare a converted model's collision AABB with its drawn-mesh AABB.

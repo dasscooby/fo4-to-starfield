@@ -34,7 +34,8 @@ not FO4's 2D local map. There is no separate "surface map mesh" record group.
 
 World object LOD is **not** the converted FO4 `*_lod.nif` files. Those are ordinary meshes. Starfield world LOD
 is the `lodsettings` + `meshes/lod/generated/` pair ([JOURNAL.md](../JOURNAL.md) 11 Oct: every vanilla overlay has
-a `.lod`; core64k has none).
+a `.lod`; core64k has none). How the four FO4 LOD kinds (per-object NIF, `.bto`, `.btr`, 16-byte `LODSettings`)
+map onto that contract is [fo4-lod-meshes.md](fo4-lod-meshes.md).
 
 ## Why ours would show Mars (**verified** records)
 
