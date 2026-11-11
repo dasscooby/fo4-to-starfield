@@ -22,6 +22,7 @@ Task: FAL-359 (stage plan tracks 7 and 8, settlements and C.A.M.P.s). Status: **
 | Stage (precheck, scan, resources, stage, log) | `scripts/planet/make_workshop_probe.py` |
 | Ride-along installer, own record `Data\FO4SFWorkshopProbe.install.json` | `scripts/planet/workshop_probe_install.py` |
 | Log reader | `src/fo4sf/workshop/probe_log.py` |
+| By-hand log reader (`make_workshop_probe.py hand`) | `src/fo4sf/workshop/probe_log.py` (`summarize_hand`) |
 | Tests | `tests/test_workshop_probe.py`, `_log.py`, `_install.py` |
 
 `FO4SFWorkshopProbe.esm` adds three records and overrides none (a core cell is never overridden, the core-storage runs showed
@@ -140,17 +141,17 @@ The beacon base is `OutpostBeaconActivator` 002C60E9 (PC survey): stage with `--
 * Notes for any card: east of the arrival point (x = 8 and 16 in the player's frame) the test character falls about 9 m, so place things north or west of where `cow 04000803 12 27` lands. Send Esc only when build mode is known to be open: in plain play it opens the pause menu on QUICKSAVE.
 * Open: a save and reload (the owner's own play), RENAME / REMOVE OUTPOST on the beacon, the map marker, power and cargo. A second kit item that gives the resources would take the console out of the card: not built (say if wanted).
 
-## Owner card: settlement or C.A.M.P. by hand (PASSED on the PC at 1c455a3c)
+## Owner card: settlement or C.A.M.P. by hand (PASSED on the PC at c82b2858: all three kits, and a station built with nothing from the console; not tested: save and reload, a second drop of each kit, RENAME / REMOVE OUTPOST, building at the beacon, a new game)
 
-The kit item places a **bench** (a workshop: build a station and settle around it). A beacon variant is not in the hand quest.
+The hand quest gives **three kit items** 20 s after the game starts: "FO4SF workshop kit" (a bench: a workshop to build a station and settle around), "FO4SF beacon kit" (the vanilla outpost beacon: OUTPOST BEACON / BUILD [E] / RENAME, REMOVE OUTPOST [R], the C.A.M.P.), "FO4SF resource kit" (40 Iron and 40 Aluminum, the two ids the PC proved). Each comes back to the inventory when dropped. No console.
 
 1. Install the kit (card above, game closed), start Starfield, load a throwaway save in open ground, north or west of where you stand if the ground drops. Do not save.
-2. Wait 20 s: the screen says you have a "FO4SF workshop kit".
-3. Open the inventory and drop the kit.
-4. The bench stands 2.5 m in front of you within a second; the dropped kit lies beside it.
-5. Look at the bench: the prompt must read WORKSHOP / BUILD [E]. Press E: build mode opens.
-6. Leave build mode with Esc **only while build mode is open** (in plain play Esc opens the pause menu).
-7. To build: `player.additem 0000556E 40` and `player.additem 0000557D 40` (Iron, Aluminum; the other station resources are in `additem.txt`, the tool's reading only), then E on the bench, pick a station, place it.
+2. Wait 20 s: the screen says you have three kits.
+3. Open the inventory and drop the resource kit: the screen says you have 40 Iron and 40 Aluminum.
+4. Drop the workshop kit: the bench stands 2.5 m in front of you within a second.
+5. Look at the bench: the prompt must read WORKSHOP / BUILD [E]. Press E: build mode opens; pick the Industrial Workbench and place it. Straight ahead the ghost may read "Needs support" or "Overlapping Player": turn the view to the side before pressing E to place it. Dropped kits are physics objects and roll on a slope.
+6. Leave build mode with Esc **only while build mode is open** (in plain play Esc opens the pause menu). To try the C.A.M.P.: drop the beacon kit, look at the beacon, read the prompt, press E.
+7. Write down each prompt and what E did. `python scripts\planet\make_workshop_probe.py hand` prints what the kits did.
 8. Quit without saving, then uninstall the kit.
 
 ## Piece B (the power armor entry by script)

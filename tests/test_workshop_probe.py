@@ -138,6 +138,20 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("p.PlaceAtMe(base, 1, persist, false, false)", PSC)
         self.assertIn(";OPT ObjectReference.MoveTo     if r && move", PSC)
 
+    def test_the_hand_kits_ids_and_the_proven_resource_ids(self):
+        ids = const_ids(TOOL_SRC)
+        for name in ("KitId", "BeaconKitId", "ResKitId"):
+            m = re.search(rf"^int {name} = (0x[0-9A-Fa-f]+)", HAND_PSC, re.M)
+            self.assertEqual(int(m.group(1), 16), ids[name], name)
+        self.assertRegex(HAND_PSC, r"(?m)^int IronId = 0x00556E")          # PC-proven 11 Nov: player.additem 0000556E gave Iron
+        self.assertRegex(HAND_PSC, r"(?m)^int AluminumId = 0x00557D")
+        self.assertRegex(HAND_PSC, r"(?m)^int BeaconId = 0x2C60E9")
+        for call in ("PlaceBeacon(p, bkit)", "GiveResources(p, rkit)", "PlaceBench(p, kit)"):
+            self.assertIn(call, HAND_PSC)
+        self.assertEqual(HAND_PSC.count("p.AddItem(rkit, 1, true)"), 2)    # given at the start and returned on each drop
+        self.assertIn("Trace(\"placed_beacon", HAND_PSC)
+        self.assertIn("Trace(\"resources", HAND_PSC)
+
     def test_the_hand_mode_places_the_bench_where_the_kit_vanishes(self):
         self.assertIn("p.GetItemCount(kit) < 1", HAND_PSC)
         self.assertIn("p.AddItem(kit, 1, true)", HAND_PSC)
@@ -267,13 +281,15 @@ class StageTests(unittest.TestCase):
         out = self.root / "b1"
         proc = self.run_tool("build", self.master, out)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        self.assertIn("copy of Misc_Junk_Fork", proc.stdout)
+        self.assertIn("copies of Misc_Junk_Fork", proc.stdout)
         check = self.run_tool("check", out / PLUGIN, self.master)
         self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
         self.assertIn("masters [Starfield.esm]", check.stdout)
         self.assertIn("QUST FO4SF_WSProbeQuest flags StartGameEnabled stages [10,12,13,20,21,22,23,24,30,31,32,33,34,40,50,60]", check.stdout)
         self.assertIn("QUST FO4SF_WSHandQuest flags StartGameEnabled stages [10] scripts [FO4SF_WSHandQuest (0 properties)]", check.stdout)
-        self.assertIn("records: MiscItem 1, Quest 2", check.stdout)
+        self.assertIn("records: MiscItem 3, Quest 2", check.stdout)
+        for e in ("FO4SF_WSKit", "FO4SF_WSBeaconKit", "FO4SF_WSResKit"):
+            self.assertIn(f"MISC {e} 00080", check.stdout)
 
     def test_the_plugin_adds_records_and_overrides_none(self):
         """Raw bytes: every record carries load index 1 (our own plugin; Starfield.esm is master 0)."""
@@ -298,8 +314,8 @@ class StageTests(unittest.TestCase):
                 i += 24 + size
         walk(data, 0, len(data))
         self.assertTrue(ids and all(f >> 24 == 1 for f in ids), [hex(f) for f in ids if f >> 24 != 1])
-        self.assertEqual({k: v for k, v in kinds.items() if k != b"TES4"}, {b"MISC": 1, b"QUST": 2})
-        self.assertEqual(sorted(f & 0xFFFFFF for f in ids), [0x800, 0x801, 0x802])
+        self.assertEqual({k: v for k, v in kinds.items() if k != b"TES4"}, {b"MISC": 3, b"QUST": 2})
+        self.assertEqual(sorted(f & 0xFFFFFF for f in ids), [0x800, 0x801, 0x802, 0x803, 0x804])
 
     def test_an_item_that_is_not_there_is_refused_by_name(self):
         proc = self.run_tool("build", self.master, self.root / "b5", "--item", "NoSuchMisc")
@@ -310,7 +326,7 @@ class StageTests(unittest.TestCase):
         out = self.root / "b6"
         proc = self.run_tool("build", self.master, out, "--item", "Misc_Other")
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        self.assertIn("copy of Misc_Other", proc.stdout)
+        self.assertIn("copies of Misc_Other", proc.stdout)
         self.assertEqual(self.run_tool("check", out / PLUGIN, self.master, "--item", "Misc_Other").returncode, 0)
         wrong = self.run_tool("check", out / PLUGIN, self.master, "--item", "Misc_Junk_Fork")
         self.assertEqual(wrong.returncode, 1, wrong.stdout)
