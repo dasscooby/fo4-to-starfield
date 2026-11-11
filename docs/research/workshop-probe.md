@@ -89,7 +89,7 @@ STATE ONLY, NO SAVE (spawned persistent references stay in a save).
 4. `setstage <index>000800 30` (the invisible pad), E, screenshot; then 31, 32, 33, 34 as above.
 5. If a beacon id was staged: `setstage <index>000800 40`, E, screenshot (Esc).
 6. Leave the cell (`coc` to another place, or walk away) and come back. Screenshot the prompt on the bench; the log has the `arrival` lines.
-7. `setstage <index>000800 50` for a last reading, then `60` to clean up. `python scripts\planet\make_workshop_probe.py log`.
+7. `setstage <index>000800 50` for a last reading, then `60` to clean up. For the pad (30), press Esc first if a beacon's build mode is open. `python scripts\planet\make_workshop_probe.py log`.
 
 ## By hand (the owner; card of eight steps)
 
@@ -121,6 +121,27 @@ E on the workshop and build; whichever station reads "Missing resources" is a CO
 The Papyrus compile (the PC's compiler); the stage against the real Starfield.esm; ContentResources.zip (not on the build
 box: the `scan` output, the fate of every optional native and the beacon id are all still unread); the whole game session.
 The beacon base is `OutpostBeaconActivator` 002C60E9 (PC survey): stage with `--beacon 2C60E9`.
+
+## Result of the PC run at 8a3e39b2 (Claude, 11 Nov, third session; not re-run here)
+
+* A bench placed by the script (`PlaceAtMe`, persistent, then `MoveTo` 2.5 m ahead) **is a workshop**: prompt WORKSHOP / BUILD [E], build mode, a station built on open ground far from any placed workshop. It survives leaving the cell and coming back. No extra call was needed (stages 22 to 24 and 32 to 34 changed nothing).
+* The same base from the console `placeatme` gave no prompt: the difference is the script's persistent placement (stages 12 and 13 at 40039ed2 split it from `MoveTo`).
+* The vanilla beacon `OutpostBeaconActivator` 002C60E9 placed by the script is a full outpost beacon (OUTPOST BEACON / BUILD [E] / RENAME, REMOVE OUTPOST [R]; build mode with the game's first-time box). From the console it gave no prompt.
+* `GetWorkshop()` reads None on all of them, also on the working bench: it is not a test of "is a workshop".
+* Not answered: the pad (the beacon's build mode was still open: Esc first), a save and reload, no-persist placement, RENAME / REMOVE OUTPOST, map marker, power and cargo, the hand drop.
+
+## Owner card: settlement or C.A.M.P. by hand (written from the PC result; the drop step is untested)
+
+The kit item places a **bench** (a workshop: build a station and settle around it). A beacon variant is not in the hand quest yet.
+
+1. Install the kit (card above, game closed), start Starfield, load a throwaway save in open ground. Do not save.
+2. Wait 20 s: the screen says you have a "FO4SF workshop kit".
+3. Open the inventory and drop the kit.
+4. The bench stands 2.5 m in front of you within a second.
+5. Look at it: the prompt must read WORKSHOP / BUILD [E]. Press E: build mode opens.
+6. Press Esc to leave build mode whenever you want to photograph a prompt.
+7. To build: `player.additem 0000556E 40` and `player.additem 0000557D 40` (Iron, Aluminum; the other station resources are in `additem.txt` and are the tool's reading only), then E on the bench, pick a station, place it.
+8. Quit without saving, then uninstall the kit.
 
 ## Piece B (the power armor entry by script)
 
