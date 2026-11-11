@@ -7,6 +7,33 @@ comes after the current testing, and it is the brief Codex and Grok work from. S
 Two independent reviews of this document (17 Oct) are folded in; their corrections are the reason several claims
 below are narrower than the first draft.
 
+## This stage, 10 November 2026 (evening): the scope and the Pip-Boy decision
+
+Dates and times in this section are UTC. The order of work below stands; this section names what the current stage
+covers and records one decision.
+
+**The stage's scope** (the owner, 10 Nov, about 18:23 UTC): get the launcher ready, and overhaul the harder Starfield
+mechanics: player creation, the Pip-Boy, the map, a base for radiation (mutations and more hang from it), power armor,
+settlements, C.A.M.P.s (the Fallout 76 kind), and whatever else the team finds to be hard. Each agent was asked to name
+further hard things to build or look at in this stage.
+
+| Track | State (10 Nov) | Seen |
+|---|---|---|
+| Launcher | Recovery after an interrupted install merged (#713); a notice when script logging is off (#695) | offline tests only |
+| Pip-Boy | Our own menu and movie open and close, ten toggles matched in the log (#704). Step two (draft #711): the menu shows the player's live position, equal to the console's reading, and a click on its button is heard by the plugin and counted back onto the screen; with flag set 0x9 the menu holds the mouse and the movement keys, and no flag set pauses the game. The script-to-plugin ping and the save sidecar of the same draft are not run (they need saves). A first test for a screen on an object in the world is draft #717 | steps one and two in game, 10 Nov; ping, sidecar and #717 offline tests only |
+| The map | A storage test for the terrain core (#707) crashed 32 s after travel to Red Rocket with its add-on plugin; icon types by table merged (#703) | crash in game, 10 Nov; icons offline |
+| Radiation base | Our own "Rads" value stores and reads back; raising it through a spell crashed twice; the crash record points to the effect record written without the value it should change, unconfirmed until the fixed build runs (#709) | in game, 10 Nov (half) |
+| Power armor | Test plugin and script (#708) | offline tests only |
+| Player creation, settlements, C.A.M.P.s | A survey of the game's own functions, records and menus; nothing built | not started |
+
+**Pip-Boy decision** (the owner, 10 Nov, about 21:31 UTC): the Pip-Boy sits on the wrist, as in Fallout 4. The flat
+on-screen menu proven that evening is the base and the fallback. The Pip-Boy row below ("Nothing is built or run")
+was overtaken the same day by #704.
+
+**Being studied:** a "standalone" style of install, where the launcher keeps a separate, stripped-down game folder so
+the conversion runs like its own game. The separate FO4SF game folder itself is already on main (#647, 1 Nov; offline
+tests only, [fo4sf-instance.md](ai/fo4sf-instance.md)); the stripped-down, standalone form is not built.
+
 ## Current update, 10 November 2026: the order of work
 
 The owner's direction of 10 November (about 15:26 UTC), in their words: "We shouldn't be focusing on Preston and stuff

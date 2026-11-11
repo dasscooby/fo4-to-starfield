@@ -3,6 +3,7 @@ drawn as dot-matrix blocks, written as a SWF from pure Python (no Flash tool, no
 
 usage: python scripts/ui/make_probe_swf.py --out <file.swf> [--label TEXT | --no-label] [--color RRGGBB]
                                            [--ink RRGGBB] [--width 1920] [--height 1080] [--uncompressed]
+                                           [--channel]
        python scripts/ui/make_probe_swf.py --read <file.swf>         the header and every tag, as JSON
 
 The movie, in the shape Starfield's own menu movies have (compressed "CWS", SWF version 12, the ActionScript 3 flag in
@@ -12,9 +13,13 @@ FileAttributes; the PC's look at them with JPEXS, 10 Nov 2026), with nothing tha
   DefineShape3 (32)    id 2: the label, one square per lit pixel of a 5 x 7 font (squares never touch: no shared edges)
   PlaceObject2 (26)    id 1 at depth 1, id 2 at depth 2, identity matrices
   ShowFrame (1), End (0)
-No SetBackgroundColor: a menu movie draws over the game. Every path is drawn clockwise on screen (y down) with its
-fill on the right of each edge (FillStyle1), the side its inside is on. Output is deterministic: the same arguments
-give the same bytes (no time, no random). The file goes where --out says; nothing is written into the repo.
+--channel (FAL-216, the plugin's Stage=3) adds, before the placements, DefineFont3 (id 3: the same 5 x 7 table as
+glyphs), DefineEditText (id 4: one read-only line in that font) and DefineSprite (id 7: a dark button with the label
+CLICK, shapes 5 and 6), placed by name as "fo4sfPosition" (depth 3) and "fo4sfButton" (depth 4); still no code.
+Without --channel the bytes are exactly stage (b)'s. No SetBackgroundColor: a menu movie draws over the game. Every
+shape's path is drawn clockwise on screen (y down) with its fill on the right of each edge (FillStyle1), the side its
+inside is on; the glyphs are drawn anticlockwise with FillStyle0. Output is deterministic: the same arguments give the
+same bytes (no time, no random). The file goes where --out says; nothing is written into the repo.
 """
 import argparse
 import json
@@ -160,28 +165,39 @@ def define_shape3(shape_id, squares, rgb):
     body = struct.pack("<H", shape_id) + rect(xmin, xmax, ymin, ymax)
     body += bytes([1, 0x00, (rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF, 0xFF])   # one solid fill, RGBA
     body += bytes([0])                                                                  # no line styles
+    return tag(DEFINE_SHAPE3, body + square_records(squares, f"shape {shape_id}"))
+
+
+def square_records(squares, what, glyph=False):
+    """NumFillBits 1, NumLineBits 0 and one closed path per square. A shape's squares are clockwise on screen (y down)
+    with the fill on their right (FillStyle1); a glyph's (glyph=True) are anticlockwise with the fill on their left
+    (FillStyle0), the style the SWF specification requires of DefineFont3 glyphs. An empty list is a glyph with no
+    outline (space)."""
     b = Bits()
     b.ub(1, 4)                                                                          # NumFillBits
     b.ub(0, 4)                                                                          # NumLineBits
     first = True
     for x, y, w, h in squares:
         if w <= 0 or h <= 0:
-            raise SwfError(f"shape {shape_id}: empty square {(x, y, w, h)}")
-        # StyleChangeRecord: TypeFlag 0, NewStyles 0, LineStyle 0, FillStyle1 (first path only), FillStyle0 0, MoveTo 1
+            raise SwfError(f"{what}: empty square {(x, y, w, h)}")
+        # StyleChangeRecord: TypeFlag 0, NewStyles 0, LineStyle 0, FillStyle1, FillStyle0 (first path only), MoveTo 1
         b.ub(0, 1)
         b.ub(0, 1)
         b.ub(0, 1)
-        b.ub(1 if first else 0, 1)
-        b.ub(0, 1)
+        b.ub(1 if first and not glyph else 0, 1)
+        b.ub(1 if first and glyph else 0, 1)
         b.ub(1, 1)
         n = sb_bits(x, y)
         b.ub(n, 5)
         b.sb(x, n)                                                                      # MoveTo is absolute
         b.sb(y, n)
         if first:
-            b.ub(1, 1)                                                                  # FillStyle1 = fill 1
+            b.ub(1, 1)                                                                  # FillStyle1 or 0 = fill 1
             first = False
-        for vertical, delta in ((False, w), (True, h), (False, -w), (True, -h)):        # right, down, left, up
+        # a shape: right, down, left, up; a glyph: down, right, up, left
+        edges = ((True, h), (False, w), (True, -h), (False, -w)) if glyph else \
+                ((False, w), (True, h), (False, -w), (True, -h))
+        for vertical, delta in edges:
             nb = sb_bits(delta)
             nb = max(nb, 2)
             b.ub(1, 1)                                                                  # TypeFlag: edge
@@ -192,7 +208,7 @@ def define_shape3(shape_id, squares, rgb):
             b.sb(delta, nb)
     b.ub(0, 1)                                                                          # EndShapeRecord
     b.ub(0, 5)
-    return tag(DEFINE_SHAPE3, body + b.align())
+    return b.align()
 
 
 def place_object2(char_id, depth):
@@ -223,8 +239,92 @@ def label_squares(text, box):
     return out
 
 
-def movie_bytes(width=1920, height=1080, color=PIPBOY_GREEN, ink=INK, label=LABEL, compressed=True):
-    """The whole movie. width/height in pixels; label None or "" for the rectangle alone."""
+# ------------------------------------------------------------------------------------------------ the data channel
+# --channel (FAL-216): the movie FO4SFPipboyMenu's Stage=3 talks to. Two named children of the root, which the plugin
+# finds with getChildByName: a text field it writes (the player's position) and a sprite whose click it hears (the
+# plugin adds the listener itself, so the movie still carries no code). The field's font is embedded, built from the
+# same 5 x 7 table, so its text shows without any of the game's fonts.
+FONT_ID, FIELD_ID, BUTTON_RECT_ID, BUTTON_LABEL_ID, BUTTON_ID = 3, 4, 5, 6, 7
+FIELD_NAME, BUTTON_NAME = "fo4sfPosition", "fo4sfButton"
+FIELD_TEXT = "POSITION: WAITING"
+FONT_NAME = "FO4SFDot"
+BUTTON_LABEL = "CLICK"
+EM = 1024 * 20                   # DefineFont3 glyph units: the 1024 em square at 20 units each
+PX = EM // 8                     # one font pixel: seven rows above the baseline, one below
+FIELD_PX = 32                    # the field's font height (one em) in screen pixels
+DEFINE_EDIT_TEXT, DEFINE_SPRITE, DEFINE_FONT3 = 37, 39, 75
+TAG_NAMES.update({DEFINE_EDIT_TEXT: "DefineEditText", DEFINE_SPRITE: "DefineSprite", DEFINE_FONT3: "DefineFont3"})
+
+
+def glyph_squares(ch):
+    """The lit pixels of one character as squares in em units; the baseline is y 0 and the rows are above it."""
+    dot = int(round(PX * DOT))
+    return [(col * PX, (row - 7) * PX, dot, dot)
+            for row, bits in enumerate(FONT[ch]) for col in range(5) if bits >> (4 - col) & 1]
+
+
+def define_font3(font_id=FONT_ID):
+    """DefineFont3 of every character in FONT, with layout: advance six pixels, ascent seven, descent one, no
+    kerning. Wide offsets, and wide codes (DefineFont3 always has them); the code table is in ascending order."""
+    chars = sorted(FONT)
+    shapes = [square_records(glyph_squares(c), f"glyph {c!r}", glyph=True) for c in chars]
+    offsets, at = [], 4 * (len(chars) + 1)                                             # from the offset table's start
+    for s in shapes:
+        offsets.append(at)
+        at += len(s)
+    name = FONT_NAME.encode("ascii")
+    body = struct.pack("<HBBB", font_id, 0x80 | 0x08 | 0x04, 0, len(name)) + name      # HasLayout WideOffsets WideCodes
+    body += struct.pack("<H", len(chars)) + b"".join(struct.pack("<I", o) for o in offsets) + struct.pack("<I", at)
+    body += b"".join(shapes) + b"".join(struct.pack("<H", ord(c)) for c in chars)
+    body += struct.pack("<hhh", 7 * PX, PX, 0)                                          # ascent, descent, leading
+    body += b"".join(struct.pack("<h", 6 * PX) for _ in chars)
+    for c in chars:
+        sq = glyph_squares(c)
+        body += rect(min((x for x, _, _, _ in sq), default=0), max((x + w for x, _, w, _ in sq), default=0),
+                     min((y for _, y, _, _ in sq), default=0), max((y + h for _, y, _, h in sq), default=0))
+    return tag(DEFINE_FONT3, body + struct.pack("<H", 0))                               # KerningCount 0
+
+
+def define_edit_text(field_id, box, font_id, height, rgb, text):
+    """DefineEditText: one line, read-only, not selectable, the embedded font (UseOutlines), the given colour and
+    initial text; no variable name (an ActionScript 2 feature)."""
+    x, y, w, h = box
+    body = struct.pack("<H", field_id) + rect(x, x + w, y, y + h)
+    # HasText, ReadOnly, HasTextColor, HasFont; NoSelect, UseOutlines
+    body += bytes([0x80 | 0x08 | 0x04 | 0x01, 0x10 | 0x01])
+    body += struct.pack("<HH", font_id, height)
+    body += bytes([(rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF, 0xFF])
+    body += b"\x00" + text.encode("ascii") + b"\x00"                                    # VariableName "", InitialText
+    return tag(DEFINE_EDIT_TEXT, body)
+
+
+def define_sprite(sprite_id, control_tags):
+    return tag(DEFINE_SPRITE, struct.pack("<HH", sprite_id, 1) + b"".join(control_tags) + tag(SHOW_FRAME) + tag(END))
+
+
+def place_named(char_id, depth, name):
+    # flags: HasName (0x20) | HasMatrix (0x04) | HasCharacter (0x02); the MATRIX is identity; then the instance name
+    return tag(PLACE_OBJECT2, bytes([0x26]) + struct.pack("<HH", depth, char_id) + bytes([0x00]) +
+               name.encode("ascii") + b"\x00")
+
+
+def channel_tags(box, color, ink):
+    """The definitions and the two named placements of the data channel inside the rectangle `box` (twips): the
+    field along its top edge, the button centred above its bottom edge (clear of a centred label)."""
+    bx, by, bw, bh = box
+    pad = 24 * TWIPS
+    field = (bx + pad, by + pad, bw - 2 * pad, FIELD_PX * TWIPS * 3 // 2)
+    button = (bx + (bw - 360 * TWIPS) // 2, by + bh - pad - 90 * TWIPS, 360 * TWIPS, 90 * TWIPS)
+    defs = define_font3() + define_edit_text(FIELD_ID, field, FONT_ID, FIELD_PX * TWIPS, ink, FIELD_TEXT)
+    defs += define_shape3(BUTTON_RECT_ID, [button], ink)
+    defs += define_shape3(BUTTON_LABEL_ID, label_squares(BUTTON_LABEL, button), color)
+    defs += define_sprite(BUTTON_ID, [place_object2(BUTTON_RECT_ID, 1), place_object2(BUTTON_LABEL_ID, 2)])
+    return defs, [place_named(FIELD_ID, 3, FIELD_NAME), place_named(BUTTON_ID, 4, BUTTON_NAME)]
+
+
+def movie_bytes(width=1920, height=1080, color=PIPBOY_GREEN, ink=INK, label=LABEL, compressed=True, channel=False):
+    """The whole movie. width/height in pixels; label None or "" for the rectangle alone; channel adds the data
+    channel's field and button (FAL-216). Without channel the bytes are stage (b)'s."""
     if width <= 0 or height <= 0:
         raise SwfError("the stage needs a positive size")
     W, H = width * TWIPS, height * TWIPS
@@ -236,6 +336,10 @@ def movie_bytes(width=1920, height=1080, color=PIPBOY_GREEN, ink=INK, label=LABE
     if label:
         body += define_shape3(LABEL_ID, label_squares(label, box), ink)
         tags.append(place_object2(LABEL_ID, 2))
+    if channel:
+        defs, places = channel_tags(box, color, ink)
+        body += defs
+        tags += places
     body += b"".join(tags) + tag(SHOW_FRAME) + tag(END)
     length = 8 + len(body)
     if compressed:
@@ -271,6 +375,11 @@ def read_shape(data):
     pos += 1
     if nline:
         raise SwfError(f"shape {shape_id}: {nline} line styles, none are written")
+    return {"id": shape_id, "bounds": bounds, "fills": fills, "paths": read_records(data, pos, f"shape {shape_id}")[0]}
+
+
+def read_records(data, pos, what):
+    """The shape records at data[pos:] as paths (point lists with their fill styles) and the byte after the end."""
     r = BitReader(data, pos)
     fill_bits, line_bits = r.ub(4), r.ub(4)
     paths, cur, fill0, fill1, x, y = [], None, 0, 0, 0, 0
@@ -280,7 +389,7 @@ def read_shape(data):
             if flags == 0:
                 break
             if flags & 0x10:
-                raise SwfError(f"shape {shape_id}: new styles are never written")
+                raise SwfError(f"{what}: new styles are never written")
             if flags & 0x01:                                                           # MoveTo
                 n = r.ub(5)
                 x, y = r.sb(n), r.sb(n)
@@ -294,7 +403,7 @@ def read_shape(data):
             paths.append(cur)
             continue
         if r.ub(1) == 0:
-            raise SwfError(f"shape {shape_id}: curved edges are never written")
+            raise SwfError(f"{what}: curved edges are never written")
         n = r.ub(4) + 2
         if r.ub(1):                                                                    # general line
             x, y = x + r.sb(n), y + r.sb(n)
@@ -303,9 +412,9 @@ def read_shape(data):
         else:
             x += r.sb(n)
         if cur is None:
-            raise SwfError(f"shape {shape_id}: an edge before any MoveTo")
+            raise SwfError(f"{what}: an edge before any MoveTo")
         cur["points"].append((x, y))
-    return {"id": shape_id, "bounds": bounds, "fills": fills, "paths": paths}
+    return paths, r.align()
 
 
 def read_movie(path_or_bytes):
@@ -326,6 +435,15 @@ def read_movie(path_or_bytes):
     pos = r.align()
     rate, count = struct.unpack_from("<HH", body, pos)
     pos += 4
+    tags, pos = read_tags(body, pos)
+    if pos != len(body):
+        raise SwfError(f"{len(body) - pos} bytes after the End tag")
+    return {"signature": sig, "version": version, "file_length": length, "frame": frame,
+            "frame_rate": rate / 256, "frame_count": count, "tags": tags}
+
+
+def read_tags(body, pos):
+    """The tags from body[pos:] up to and including End (a sprite's own list too) and the byte after End."""
     tags = []
     while pos < len(body):
         code_len = struct.unpack_from("<H", body, pos)[0]
@@ -345,18 +463,117 @@ def read_movie(path_or_bytes):
         elif code == DEFINE_SHAPE3:
             t.update(read_shape(data))
         elif code == PLACE_OBJECT2:
-            flags = data[0]
-            t["flags"] = flags
-            t["depth"] = struct.unpack_from("<H", data, 1)[0]
-            if flags & 0x02:
-                t["character"] = struct.unpack_from("<H", data, 3)[0]
+            t.update(read_place(data))
+        elif code == DEFINE_SPRITE:
+            t["id"], t["frame_count"] = struct.unpack_from("<HH", data, 0)
+            t["tags"], end = read_tags(data, 4)
+            if end != len(data):
+                raise SwfError(f"sprite {t['id']}: {len(data) - end} bytes after its End tag")
+        elif code == DEFINE_EDIT_TEXT:
+            t.update(read_edit_text(data))
+        elif code == DEFINE_FONT3:
+            t.update(read_font3(data))
         tags.append(t)
         if code == END:
             break
-    if pos != len(body):
-        raise SwfError(f"{len(body) - pos} bytes after the End tag")
-    return {"signature": sig, "version": version, "file_length": length, "frame": frame,
-            "frame_rate": rate / 256, "frame_count": count, "tags": tags}
+    return tags, pos
+
+
+def read_cstring(data, pos, what):
+    end = data.find(b"\x00", pos)
+    if end < 0:
+        raise SwfError(f"{what}: string without its terminating zero")
+    return data[pos:end].decode("latin-1"), end + 1
+
+
+def read_place(data):
+    """PlaceObject2: flags, depth, character and, when no colour transform or ratio comes before it, the instance
+    name."""
+    flags = data[0]
+    t = {"flags": flags, "depth": struct.unpack_from("<H", data, 1)[0]}
+    pos = 3
+    if flags & 0x02:
+        t["character"] = struct.unpack_from("<H", data, pos)[0]
+        pos += 2
+    if flags & 0x20 and not flags & 0x18:
+        if flags & 0x04:                                                               # MATRIX
+            r = BitReader(data, pos)
+            for _ in range(2):                                                         # scale, rotate
+                if r.ub(1):
+                    n = r.ub(5)
+                    r.sb(n)
+                    r.sb(n)
+            n = r.ub(5)
+            r.sb(n)
+            r.sb(n)
+            pos = r.align()
+        t["instance"] = read_cstring(data, pos, f"placement at depth {t['depth']}")[0]
+    return t
+
+
+def read_edit_text(data):
+    """DefineEditText: id, bounds, the two flag bytes, font and height, colour, variable name and initial text."""
+    field_id = struct.unpack_from("<H", data, 0)[0]
+    r = BitReader(data, 2)
+    t = {"id": field_id, "bounds": read_rect(r)}
+    pos = r.align()
+    f1, f2 = data[pos], data[pos + 1]
+    t["flags"] = [f1, f2]
+    pos += 2
+    if f1 & 0x01:
+        t["font"], t["height"] = struct.unpack_from("<HH", data, pos)
+        pos += 4
+    if f2 & 0x80 or f1 & 0x02 or f2 & 0x20:
+        raise SwfError(f"field {field_id}: font class, max length and layout are never written")
+    if f1 & 0x04:
+        t["color"] = tuple(data[pos:pos + 4])
+        pos += 4
+    t["variable"], pos = read_cstring(data, pos, f"field {field_id}")
+    if f1 & 0x80:
+        t["text"], pos = read_cstring(data, pos, f"field {field_id}")
+    if pos != len(data):
+        raise SwfError(f"field {field_id}: {len(data) - pos} bytes after its text")
+    return t
+
+
+def read_font3(data):
+    """DefineFont3 as written here: id, flags, name, the code table, each glyph's paths, advances, ascent, descent."""
+    font_id, flags, _lang, name_len = struct.unpack_from("<HBBB", data, 0)
+    pos = 5
+    name = data[pos:pos + name_len].decode("latin-1")
+    pos += name_len
+    if flags & 0x0C != 0x0C:
+        raise SwfError(f"font {font_id}: wide offsets and wide codes are always written")
+    n = struct.unpack_from("<H", data, pos)[0]
+    pos += 2
+    table = pos
+    offsets = struct.unpack_from(f"<{n + 1}I", data, pos)
+    glyphs = []
+    for i in range(n):
+        paths, end = read_records(data, table + offsets[i], f"font {font_id} glyph {i}")
+        if end != table + (offsets[i + 1] if i + 1 < n else offsets[n]):
+            raise SwfError(f"font {font_id} glyph {i}: its records end at {end}, not at the next offset")
+        glyphs.append(paths)
+    pos = table + offsets[n]
+    codes = struct.unpack_from(f"<{n}H", data, pos)
+    pos += 2 * n
+    t = {"id": font_id, "font_flags": flags, "font_name": name, "codes": "".join(map(chr, codes)), "glyphs": glyphs}
+    if flags & 0x80:
+        t["ascent"], t["descent"], t["leading"] = struct.unpack_from("<hhh", data, pos)
+        pos += 6
+        t["advances"] = list(struct.unpack_from(f"<{n}h", data, pos))
+        pos += 2 * n
+        bounds = []
+        for _ in range(n):
+            r = BitReader(data, pos)
+            bounds.append(read_rect(r))
+            pos = r.align()
+        t["glyph_bounds"] = bounds
+        t["kerning"] = struct.unpack_from("<H", data, pos)[0]
+        pos += 2
+    if pos != len(data):
+        raise SwfError(f"font {font_id}: {len(data) - pos} bytes after its tables")
+    return t
 
 
 def summary(movie):
@@ -367,6 +584,12 @@ def summary(movie):
         t = dict(t)
         if "paths" in t:
             t["paths"] = len(t["paths"])
+        if "glyphs" in t:
+            t["glyphs"] = len(t["glyphs"])
+            t.pop("glyph_bounds", None)
+            t.pop("advances", None)
+        if "tags" in t:
+            t["tags"] = summary({"tags": t["tags"]})["tags"]
         out["tags"].append(t)
     return out
 
@@ -382,6 +605,8 @@ def main(argv=None):
     ap.add_argument("--width", type=int, default=1920, help="the stage in pixels")
     ap.add_argument("--height", type=int, default=1080)
     ap.add_argument("--uncompressed", action="store_true", help="FWS instead of CWS")
+    ap.add_argument("--channel", action="store_true",
+                    help=f"add the data channel (FAL-216): the field {FIELD_NAME!r} and the button {BUTTON_NAME!r}")
     a = ap.parse_args(argv)
     try:
         if a.read:
@@ -390,7 +615,8 @@ def main(argv=None):
         if not a.out:
             ap.error("--out or --read is needed")
         data = write_movie(a.out, width=a.width, height=a.height, color=int(a.color, 16), ink=int(a.ink, 16),
-                           label=None if a.no_label else a.label, compressed=not a.uncompressed)
+                           label=None if a.no_label else a.label, compressed=not a.uncompressed,
+                           channel=a.channel)
     except (SwfError, ValueError, OSError, zlib.error) as e:
         print(f"make_probe_swf: {e}", file=sys.stderr)
         return 1

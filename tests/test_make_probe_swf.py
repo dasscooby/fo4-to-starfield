@@ -158,6 +158,103 @@ class ReadBackTest(unittest.TestCase):
         self.assertEqual(m["tags"][2]["fills"], [(0xAB, 0xCD, 0xEF, 0xFF)])
 
 
+class ChannelTest(unittest.TestCase):
+    """--channel (FAL-216): the stage (b) movie plus an embedded font, the named field and the named button sprite."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.movie = swf.read_movie(swf.movie_bytes(channel=True))
+        cls.tags = cls.movie["tags"]
+        cls.by_name = {}
+        for t in cls.tags:
+            cls.by_name.setdefault(t["name"], []).append(t)
+
+    def test_without_channel_the_bytes_are_stage_b(self):
+        self.assertEqual(swf.movie_bytes(channel=False), swf.movie_bytes())
+        names = [t["name"] for t in swf.read_movie(swf.movie_bytes())["tags"]]
+        self.assertNotIn("DefineFont3", names)
+
+    def test_tag_order_and_no_code(self):
+        self.assertEqual([t["name"] for t in self.tags],
+                         ["FileAttributes", "DefineShape3", "DefineShape3", "DefineFont3", "DefineEditText",
+                          "DefineShape3", "DefineShape3", "DefineSprite", "PlaceObject2", "PlaceObject2",
+                          "PlaceObject2", "PlaceObject2", "ShowFrame", "End"])
+        body = zlib.decompress(swf.movie_bytes(channel=True)[8:])
+        codes = [c for c, _ in raw_tags(body)[0]]
+        for code in (12, 59, 72, 76, 82, 9):                      # DoAction, DoInitAction, DoABC, SymbolClass, BG
+            self.assertNotIn(code, codes)
+
+    def test_named_placements(self):
+        places = [(t["depth"], t["character"], t.get("instance")) for t in self.by_name["PlaceObject2"]]
+        self.assertEqual(places, [(1, 1, None), (2, 2, None), (3, swf.FIELD_ID, "fo4sfPosition"),
+                                  (4, swf.BUTTON_ID, "fo4sfButton")])
+
+    def test_font_covers_the_table_with_layout(self):
+        font = self.by_name["DefineFont3"][0]
+        self.assertEqual(font["id"], swf.FONT_ID)
+        self.assertEqual(font["font_name"], "FO4SFDot")
+        self.assertEqual(font["codes"], "".join(sorted(swf.FONT)))
+        self.assertEqual(font["font_flags"] & 0x8C, 0x8C)            # HasLayout, WideOffsets, WideCodes
+        self.assertEqual((font["ascent"], font["descent"], font["kerning"]), (7 * swf.PX, swf.PX, 0))
+        self.assertEqual(set(font["advances"]), {6 * swf.PX})
+
+    def test_glyphs_are_the_table_drawn_anticlockwise_with_fill0(self):
+        font = self.by_name["DefineFont3"][0]
+        for ch, paths in zip(font["codes"], font["glyphs"]):
+            lit = sum(bin(row).count("1") for row in swf.FONT[ch])
+            self.assertEqual(len(paths), lit, ch)
+            for i, p in enumerate(paths):
+                self.assertEqual(len(p["points"]), 5)
+                self.assertEqual(p["points"][0], p["points"][-1])
+                self.assertLess(signed_area2(p["points"]), 0, ch)    # anticlockwise on screen
+                self.assertEqual((p["fill0"], p["fill1"]), (1, 0))
+                xs = [x for x, _ in p["points"]]
+                ys = [y for _, y in p["points"]]
+                self.assertTrue(0 <= min(xs) and max(xs) <= 5 * swf.PX, ch)
+                self.assertTrue(-7 * swf.PX <= min(ys) and max(ys) <= 0, ch)
+        space = font["glyphs"][font["codes"].index(" ")]
+        self.assertEqual(space, [])
+
+    def test_field(self):
+        field = self.by_name["DefineEditText"][0]
+        self.assertEqual(field["id"], swf.FIELD_ID)
+        self.assertEqual((field["font"], field["height"]), (swf.FONT_ID, swf.FIELD_PX * 20))
+        self.assertEqual(field["flags"], [0x8D, 0x11])               # HasText ReadOnly HasTextColor HasFont; NoSelect
+                                                                     # UseOutlines
+        self.assertEqual(field["variable"], "")
+        self.assertEqual(field["text"], "POSITION: WAITING")
+        self.assertTrue(set(field["text"]) <= set(swf.FONT))
+        rect_ = self.by_name["DefineShape3"][0]["bounds"]
+        b = field["bounds"]
+        self.assertTrue(rect_[0] < b[0] < b[1] < rect_[1] and rect_[2] < b[2] < b[3] < rect_[3])
+
+    def test_button_sprite_inside_the_rectangle_and_clear_of_the_label(self):
+        sprite = self.by_name["DefineSprite"][0]
+        self.assertEqual(sprite["id"], swf.BUTTON_ID)
+        self.assertEqual([(t["depth"], t.get("character")) for t in sprite["tags"] if t["name"] == "PlaceObject2"],
+                         [(1, swf.BUTTON_RECT_ID), (2, swf.BUTTON_LABEL_ID)])
+        self.assertEqual([t["name"] for t in sprite["tags"]][-2:], ["ShowFrame", "End"])
+        shapes = {t["id"]: t for t in self.by_name["DefineShape3"]}
+        box, label = shapes[swf.RECT_ID]["bounds"], shapes[swf.LABEL_ID]["bounds"]
+        button = shapes[swf.BUTTON_RECT_ID]["bounds"]
+        field = self.by_name["DefineEditText"][0]["bounds"]
+        self.assertTrue(box[0] < button[0] < button[1] < box[1] and box[2] < button[2] < button[3] < box[3])
+        self.assertLess(field[3], label[2])                          # field above the label
+        self.assertLess(label[3], button[2])                         # label above the button
+
+    def test_cli_channel(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "c.swf")
+            r = subprocess.run([sys.executable, SCRIPT, "--out", out, "--channel"], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            with open(out, "rb") as f:
+                self.assertEqual(f.read(), swf.movie_bytes(channel=True))
+            r = subprocess.run([sys.executable, SCRIPT, "--read", out], capture_output=True, text=True)
+            info = json.loads(r.stdout)
+            font = [t for t in info["tags"] if t["name"] == "DefineFont3"][0]
+            self.assertEqual(font["glyphs"], len(swf.FONT))
+
+
 class RefusalTest(unittest.TestCase):
     def test_unknown_character(self):
         with self.assertRaises(swf.SwfError):
