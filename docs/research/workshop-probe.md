@@ -47,7 +47,7 @@ there. If the core's base is not at that local id the log says `none`; the id is
 | 60 | `Disable` + `Delete` every spawned reference |
 
 Every placing stage and every call stage writes the reference's reading before, the call, the reading after and the reading
-4 s later: loaded 3D, workshop keyword, disabled, `IsWorkshop` (optional), cell, position, distance. So the log says which
+4 s later: loaded 3D, workshop keyword, disabled, `GetWorkshop` (optional), cell, position, distance. So the log says which
 call changed anything. **Whether E gives WORKSHOP / BUILD [E] is not readable by Papyrus: it is the screenshot after each
 stage.** Item 2 (leave the cell and come back): whenever the player's cell changes the poll writes a reading of every spawned
 reference at once, +2 s and +10 s (`when=arrival...`); the trip itself is the PC's, the log only records what the bench reads on return.
