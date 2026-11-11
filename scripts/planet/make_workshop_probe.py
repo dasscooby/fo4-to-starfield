@@ -19,6 +19,8 @@ usage:
       actually calls. Post it before the PC session.
   python make_workshop_probe.py resources [--starfield <Starfield.esm>] [--match <regex>] [--out <additem.txt>]
       read only: the COBJ of the workbench stations, their components, the player.additem lines (dotnet/WorkshopProbe).
+  python make_workshop_probe.py hand [--file <FO4SFWSHand.0.log>]
+      the by-hand log (the kits dropped: benches, beacons, resources given); exit 0 when something was placed or given.
   python make_workshop_probe.py log [--file <FO4SFWorkshop.0.log>]
       the run's user log as one table and a verdict (src/fo4sf/workshop/probe_log.py); exit 0 when the bench and the
       control pad were both placed, 1 when the session is inconclusive.
@@ -322,6 +324,19 @@ Session card: docs/research/workshop-probe.md. THROWAWAY STATE ONLY, NO SAVE (sp
     return 0
 
 
+HAND_LOG = os.path.join(os.path.dirname(LOG), "FO4SFWSHand.0.log")
+
+
+def hand(a):
+    if not os.path.isfile(a.file):
+        print(f"no log at {a.file}")
+        return 2
+    with open(a.file, encoding="utf-8", errors="replace") as f:
+        s = probe_log.summarize_hand(f)
+    print("\n".join(probe_log.report_hand(s)))
+    return 0 if s["ok"][0] else 1
+
+
 def log(a):
     if not os.path.isfile(a.file):
         print(f"no log at {a.file}")
@@ -353,10 +368,12 @@ def main(argv=None):
     rs.add_argument("--starfield", default=os.path.join(STARFIELD, "Data", "Starfield.esm"))
     rs.add_argument("--match", default="Workbench|Lab|Station")
     rs.add_argument("--out", default=None)
+    h = sub.add_parser("hand")
+    h.add_argument("--file", default=HAND_LOG)
     g = sub.add_parser("log")
     g.add_argument("--file", default=LOG)
     a = p.parse_args(argv)
-    return {"precheck": precheck, "stage": stage, "log": log, "scan": scan, "resources": resources}[a.cmd](a)
+    return {"precheck": precheck, "stage": stage, "log": log, "scan": scan, "resources": resources, "hand": hand}[a.cmd](a)
 
 
 if __name__ == "__main__":

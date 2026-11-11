@@ -98,5 +98,40 @@ class ReaderTests(unittest.TestCase):
         self.assertFalse(probe_log.summarize(lines)["control"][0])
 
 
+HAND = [
+    "[x] FO4SFWSHAND rt=1.0 init quest=1 installed=true core=FO4TerrainCore.esm benchbase=33554 kit=2 end=true",
+    "[x] FO4SFWSHAND rt=21.0 say text=You have three kits: workshop (bench), beacon (outpost beacon), resource (Iron and Aluminum). end=true",
+    "[x] FO4SFWSHAND rt=30.5 placed n=1 ref=-16735872 base=67776205 moved=true loaded=true haskw=true cell=1 end=true",
+    "[x] FO4SFWSHAND rt=33.0 placed_beacon n=1 ref=-16735871 base=2900201 moved=true loaded=true cell=1 end=true",
+    "[x] FO4SFWSHAND rt=35.0 resources n=1 iron=21870 aluminum=21885 count=40 have_iron=40 have_aluminum=40 end=true",
+    "[x] FO4SFWSHAND rt=36.0 say text=Given 40 Iron and 40 Aluminum (you now have 40 and 40). end=true",
+]
+
+
+class HandReaderTests(unittest.TestCase):
+    def test_a_say_line_keeps_its_spaces_and_a_cut_line_is_counted(self):
+        d = probe_log.parse_hand_line(HAND[1])
+        self.assertTrue(d["text"].startswith("You have three kits: workshop (bench)"))
+        s = probe_log.summarize_hand(HAND + ["[x] FO4SFWSHAND rt=40.0 placed n=2 ref=1"])
+        self.assertEqual(s["cut"], 1)
+        self.assertEqual(len(s["benches"]), 1)
+
+    def test_the_verdict_lists_what_was_dropped(self):
+        s = probe_log.summarize_hand(HAND)
+        self.assertEqual((len(s["benches"]), len(s["beacons"]), len(s["resources"])), (1, 1, 1))
+        text = "\n".join(probe_log.report_hand(s))
+        self.assertIn("ok: 1 bench(es), 1 beacon(s), resources given 1 time(s)", text)
+        self.assertIn("have_iron=40", text)
+        self.assertIn("placed_beacon n=1", text)
+
+    def test_kits_given_but_nothing_dropped_and_an_empty_log_are_inconclusive(self):
+        s = probe_log.summarize_hand(HAND[:2])
+        self.assertFalse(s["ok"][0])
+        self.assertIn("none was dropped", s["ok"][1])
+        s = probe_log.summarize_hand([])
+        self.assertFalse(s["ok"][0])
+        self.assertIn("did not run", s["ok"][1])
+
+
 if __name__ == "__main__":
     unittest.main()

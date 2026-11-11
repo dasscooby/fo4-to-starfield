@@ -144,3 +144,62 @@ def report(s):
     out.append(("ok: " if s["control"][0] else "INCONCLUSIVE: ") + s["control"][1] +
                ". The prompt on the object (E) is the screenshot, not the log.")
     return out
+
+
+# ---------------------------------------------------------------- the by-hand log (FO4SFWSHand.0.log)
+
+HAND = re.compile(r"FO4SFWSHAND rt=(?P<rt>[-+\d.eE]+) (?P<event>\w+)(?P<rest>.*?)\s*end=true\s*$", re.IGNORECASE)
+HAND_EVENTS = ("init", "say", "placed", "placed_beacon", "resources")
+
+
+def parse_hand_line(line):
+    """{"rt", "event", key: value ...} of one by-hand line, None for any other or a cut line (no end=true). A say line's text
+    runs to end=true (it holds spaces)."""
+    m = HAND.search(line)
+    if not m or m.group("event").lower() not in HAND_EVENTS:
+        return None
+    d = {"rt": float(m.group("rt")), "event": m.group("event").lower()}
+    rest = m.group("rest").strip()
+    if d["event"] == "say":
+        d["text"] = rest[5:] if rest.lower().startswith("text=") else rest
+        return d
+    for k, v in TOKEN.findall(rest):
+        d[k.lower()] = value(k.lower(), v)
+    return d
+
+
+def summarize_hand(lines):
+    """{"events", "cut", "benches": [placed lines], "beacons": [...], "resources": [...], "gave_kits": bool, "ok": (bool, text)}"""
+    events, cut = [], 0
+    for ln in lines:
+        d = parse_hand_line(ln)
+        if d is not None:
+            events.append(d)
+        elif re.search(r"FO4SFWSHAND", ln, re.IGNORECASE):
+            cut += 1
+    benches = [e for e in events if e["event"] == "placed"]
+    beacons = [e for e in events if e["event"] == "placed_beacon"]
+    res = [e for e in events if e["event"] == "resources"]
+    gave = any(e["event"] == "say" and "you have" in e.get("text", "").lower() for e in events)
+    what = [f"{len(benches)} bench(es)" if benches else None, f"{len(beacons)} beacon(s)" if beacons else None,
+            f"resources given {len(res)} time(s)" if res else None]
+    placed = [w for w in what if w]
+    ok = (bool(placed), ", ".join(placed) if placed else
+          ("kits were given but none was dropped" if gave else "no kit was given and nothing was dropped (the quest did not run, or the plugin was not loaded)"))
+    return {"events": events, "cut": cut, "benches": benches, "beacons": beacons, "resources": res, "gave_kits": gave, "ok": ok}
+
+
+def report_hand(s):
+    out = []
+    for e in s["events"]:
+        if e["event"] == "say":
+            out.append(f"{e['rt']:>8.1f}  say  {e.get('text', '')}")
+        elif e["event"] in ("placed", "placed_beacon"):
+            out.append(f"{e['rt']:>8.1f}  {e['event']} n={e.get('n')} ref={fmt(e.get('ref'))} moved={fmt(e.get('moved'))} loaded={fmt(e.get('loaded'))}" +
+                       (f" haskw={fmt(e.get('haskw'))}" if "haskw" in e else ""))
+        elif e["event"] == "resources":
+            out.append(f"{e['rt']:>8.1f}  resources n={e.get('n')} have_iron={fmt(e.get('have_iron'))} have_aluminum={fmt(e.get('have_aluminum'))}")
+    if s["cut"]:
+        out.append(f"{s['cut']} line(s) without end=true were cut and left out")
+    out.append(("ok: " if s["ok"][0] else "INCONCLUSIVE: ") + s["ok"][1] + ". The prompt on the object (E) is the screenshot, not the log.")
+    return out

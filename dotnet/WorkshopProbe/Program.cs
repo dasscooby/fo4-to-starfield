@@ -63,9 +63,11 @@ static class WorkshopProbe
     public static readonly ModKey Plugin = ModKey.FromFileName("FO4SFWorkshopProbe.esm");
 
     // the layout (scripts/planet/FO4SF_WSProbeQuest.psc and FO4SF_WSHandQuest.psc carry the same ids)
-    const uint QuestId = 0x800, HandQuestId = 0x801, KitId = 0x802;
+    const uint QuestId = 0x800, HandQuestId = 0x801, KitId = 0x802, BeaconKitId = 0x803, ResKitId = 0x804;
     const string QuestEdid = "FO4SF_WSProbeQuest", Script = "FO4SF_WSProbeQuest", HandQuestEdid = "FO4SF_WSHandQuest",
-        HandScript = "FO4SF_WSHandQuest", KitEdid = "FO4SF_WSKit", KitName = "FO4SF workshop kit";
+        HandScript = "FO4SF_WSHandQuest", KitEdid = "FO4SF_WSKit", KitName = "FO4SF workshop kit",
+        BeaconKitEdid = "FO4SF_WSBeaconKit", BeaconKitName = "FO4SF beacon kit", ResKitEdid = "FO4SF_WSResKit", ResKitName = "FO4SF resource kit";
+    static readonly (uint Id, string Edid, string Name)[] Kits = { (KitId, KitEdid, KitName), (BeaconKitId, BeaconKitEdid, BeaconKitName), (ResKitId, ResKitEdid, ResKitName) };
     static readonly ushort[] Stages = { 10, 12, 13, 20, 21, 22, 23, 24, 30, 31, 32, 33, 34, 40, 50, 60 };
     // the kit is a copy of the first of these that Starfield.esm has as a MISC; failing all, the lowest form id with a model
     static readonly string[] ItemPrefs = { "Misc_Junk_Fork", "Junk_Fork", "Misc_Fork", "Misc_Cup", "Misc_Mug" };
@@ -125,11 +127,14 @@ static class WorkshopProbe
         mod.ModHeader.Flags |= StarfieldModHeader.HeaderFlag.Master;               // as every plugin of ours that loads
         mod.ModHeader.Author = "fo4-to-starfield";
 
-        var kit = (MiscItem)item.Duplicate(Own(KitId), new MiscItem.TranslationMask(defaultOn: true) { Name = false });
-        kit.EditorID = KitEdid;
-        kit.Name = KitName;
-        kit.VirtualMachineAdapter = null;                                          // the vanilla item's scripts stay with it
-        mod.MiscItems.Add(kit);
+        foreach (var k in Kits)                                                    // three droppable items: bench, beacon, resources
+        {
+            var kit = (MiscItem)item.Duplicate(Own(k.Id), new MiscItem.TranslationMask(defaultOn: true) { Name = false });
+            kit.EditorID = k.Edid;
+            kit.Name = k.Name;
+            kit.VirtualMachineAdapter = null;                                      // the vanilla item's scripts stay with it
+            mod.MiscItems.Add(kit);
+        }
 
         mod.Quests.Add(MakeQuest(QuestId, QuestEdid, "FO4SF workshop probe", Script, Stages));
         mod.Quests.Add(MakeQuest(HandQuestId, HandQuestEdid, "FO4SF workshop by hand", HandScript, new ushort[] { 10 }));
@@ -139,7 +144,7 @@ static class WorkshopProbe
 
         Write(mod, outDir, SfEsm);
         var path = Path.Combine(outDir, Plugin.FileName);
-        Console.WriteLine($"wrote {path} ({new FileInfo(path).Length:N0} bytes): MISC {KitEdid} = copy of {item.EditorID} {item.FormKey}, " +
+        Console.WriteLine($"wrote {path} ({new FileInfo(path).Length:N0} bytes): MISC {string.Join(", ", Kits.Select(k => k.Edid))} = copies of {item.EditorID} {item.FormKey}, " +
                           $"QUST {QuestEdid} stages [{string.Join(",", Stages)}], QUST {HandQuestEdid}");
         return 0;
     }
@@ -184,17 +189,19 @@ static class WorkshopProbe
         Need(masters.SequenceEqual(new[] { SfEsm }), "masters are not exactly [Starfield.esm]");
         var foreign = mod.EnumerateMajorRecords().Where(r => r.FormKey.ModKey != Plugin).Select(r => r.FormKey.ToString()).ToList();
         Need(foreign.Count == 0, $"records of another plugin (overrides): {string.Join(", ", foreign)}");
-        Need(mod.EnumerateMajorRecords().Count() == 3, "not exactly three records (MISC and two QUST)");
+        Need(mod.EnumerateMajorRecords().Count() == 5, "not exactly five records (three MISC and two QUST)");
 
-        var kit = mod.MiscItems.SingleOrDefault();
-        Need(kit?.FormKey == Own(KitId) && kit.EditorID == KitEdid, "not exactly our MISC");
-        if (kit != null)
+        Need(mod.MiscItems.Count() == 3, "not exactly three MISC");
+        foreach (var k in Kits)
         {
+            var kit = mod.MiscItems.FirstOrDefault(m => m.FormKey == Own(k.Id));
+            Need(kit != null && kit.EditorID == k.Edid, $"no MISC {k.Edid}");
+            if (kit == null) continue;
             Console.WriteLine($"  MISC {kit.EditorID} {kit.FormKey} name {kit.Name?.String} (copy of {item.EditorID} {item.FormKey}) scripts {kit.VirtualMachineAdapter?.Scripts.Count ?? 0}");
-            Need(kit.Name?.String == KitName, "the MISC is not renamed");
-            Need((kit.VirtualMachineAdapter?.Scripts.Count ?? 0) == 0, "the MISC carries a script");
+            Need(kit.Name?.String == k.Name, $"{k.Edid} is not renamed");
+            Need((kit.VirtualMachineAdapter?.Scripts.Count ?? 0) == 0, $"{k.Edid} carries a script");
             Console.WriteLine($"  model {kit.Model?.File} (copied item {item.Model?.File})");
-            Need(kit.Model?.File?.ToString() == item.Model?.File?.ToString(), "the MISC model differs from the copied item's");
+            Need(kit.Model?.File?.ToString() == item.Model?.File?.ToString(), $"{k.Edid} model differs from the copied item's");
         }
         void QuestCheck(uint id, string edid, string script, IEnumerable<ushort> stages)
         {
