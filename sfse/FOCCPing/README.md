@@ -23,7 +23,7 @@ named in section 4 is owed before anything built on it ships; a spike dll ships 
 | File | Role |
 |---|---|
 | `xmake.lua` | the plugin target in the shape of libxse/commonlibsf-template: `includes("lib/commonlibsf")`, the `commonlibsf.plugin` rule (it writes the SFSE version data), no install step |
-| `src/main.cpp` | the plugin: load, the messaging listener, the native bound at `kPostDataLoad` |
+| `src/main.cpp` | the plugin: the version guard, the checks before use (its own Address Library read, the `NativeFunctionBase` slots, the VM's type), the messaging listener, the native bound at `kPostDataLoad` |
 | `src/pch.h` | the precompiled header (`RE/Starfield.h`, `SFSE/SFSE.h`) |
 | `build.ps1` | PC build: xmake in the loaded MSVC environment into a new staging folder; `build.json` with every sha256 and both library commits |
 
@@ -50,19 +50,61 @@ compiler here).
 - **Binding the native.** libxse has no `SFSE::SetPapyrusCallback` (the old trampoline hook at
   `REL::ID(169912) + 0x514`, an id of the pre-1.15.216 space). `main.cpp` registers an SFSE messaging listener and,
   on `kPostDataLoad` (all game data loaded), binds through `RE::GameVM::GetSingleton()->GetVM()->BindNativeMethod("FOCC",
-  "Ping", &Ping, true, false)` (callable from tasklets, not latent). `ID::GameVM::Singleton` is `937585` in
+  "Ping", &Ping, std::nullopt, false)` (no tasklet flag, not latent). `ID::GameVM::Singleton` is `937585` in
   `include/RE/IDs.h` (the auto-generated 1.15.216+ ids). A global native takes `std::monostate` in the self slot
   (`RE/B/BSScriptUtil.h`). `FOCC.pex` is linked when the console first calls `FOCC_B0.Ping`, after the bind. No hook,
-  no trampoline (`SFSE::Init(a_sfse, { .trampoline = false, .hook = false })`).
-- **Unverified until the first launch:** that the GameVM singleton is set by `kPostDataLoad` (a null VM logs "no
-  script VM at PostDataLoad" and binds nothing: `got=0` in game, the log line on the card), and that a native bound
-  after the VM's own `BindEverythingToScript` is callable (the library's `IVirtualMachine::BindNativeMethod` is the
-  same virtual that call uses).
+  no trampoline (`SFSE::Init(a_sfse, { .trampoline = false, .hook = false })`). The tasklet flag is left out on purpose:
+  with it, libxse also calls `IVirtualMachine::SetCallableFromTasklets`, one of an overloaded pair (libxse slots 0x1F
+  and 0x20) whose order MSVC may lay out reversed, so the call could land on the other overload. Without it neither is
+  called, and the VM keeps its own default for a native (a call from a tasklet then runs on the main thread).
+
+## What is checked before the bind (FAL-216: the ids, library pin and checks of PR #704)
+
+The plugin calls nothing it has not checked, and any mismatch is one `refuse step=<step>` line in `FOCCPing.log`, with
+the plugin idle (no bind; the game runs on, and B0-2 reads `got=0`):
+
+1. **Runtime 1.16.244.0 only** (`refuse step=version runtime=<v> expected=1.16.244.0`).
+2. **The game image** is a PE32+ executable, whose size bounds every check below (`refuse step=image`).
+3. **The Address Library, read by the plugin itself** from `versionlib-1-16-244-0.bin` next to the dll: format 5, game
+   version 1.16.244.0, pointer size 8 (`refuse step=address_library reason=missing|short_header|header`); every id
+   below the file's count, non-zero and inside `Starfield.exe`'s image (`refuse step=id name=<n> id=<i>
+   reason=beyond_count|short_file|missing|outside_image`); then libxse's own lookup of each id must give the same
+   offset (`reason=library_mismatch`). So libxse's lookup, which stops the game with a message box on a missing id,
+   can never meet one.
+4. **The game's own `NativeFunctionBase` vtable** (id 480710): its locator says offset 0 and the type descriptor that
+   libxse's RTTI id 853245 names (`refuse step=rtti vtable=NativeFunctionBase`), and its slots 0x06, 0x0F, 0x10, 0x14
+   and 0x15 are the five functions libxse's `NativeFunctionBase` forwards to (`refuse step=slots ... have=<rva>
+   want=<rva>`). These are the functions the VM calls through our function object, so the ids and libxse's
+   `IFunction` layout are both proven against the game before anything is bound.
+5. **At `kPostDataLoad`:** the GameVM singleton is a `GameVM` by RTTI (id 865426, offset 0), the VM it holds is a
+   `BSScript::Internal::VirtualMachine` by RTTI (id 870795; the `IVirtualMachine` subobject, offset logged), and the
+   VM's slot 0x1E (libxse's `BindNativeMethod(IFunction*)`, the one call into the VM) is inside the image
+   (`refuse step=object name=GameVM|VirtualMachine ...`). Reading the object pointers is guarded: a fault is a
+   refusal line, not a crash.
+
+| Name | Id | Source | Checked by |
+| --- | --- | --- | --- |
+| GameVM.Singleton | 937585 | libxse | file + libxse lookup; the object's RTTI |
+| GameVM RTTI | 865426 | libxse `RTTI_GameVM` | the singleton's locator |
+| VirtualMachine RTTI | 870795 | libxse `RTTI_BSScript__Internal__VirtualMachine` | the VM's locator |
+| BSStringPool.GetEntry, Entry.Release | 1186742, 139340 | libxse | file + libxse lookup (the function's names) |
+| NativeFunctionBase vtable | 480710 | libxse `VTABLE_BSScript__NF_util__NativeFunctionBase` | RTTI: offset 0, id 853245 |
+| NativeFunctionBase RTTI | 853245 | libxse | the vtable's locator |
+| NativeFunctionBase GetParam, Call, GetSourceFilename, GetParamInfo, Unk_15 | 138061, 138074, 138065, 138067, 138068 | libxse | vtable slots 0x06, 0x0F, 0x10, 0x14, 0x15 |
+| Stack.GetPageForFrame, StackFrame.GetVariable | 138020, 84986 | libxse | file + libxse lookup (read when Ping is called) |
+
+**Still unverified until the launch:** that slot 0x1E is `BindNativeMethod` (one source, libxse; only its place in
+the image is checked), and that a native bound after the VM's own `BindEverythingToScript` is callable. B0-2's
+`got=42` settles both.
+
 - **Log:** `Documents\My Games\Starfield\SFSE\Logs\FOCCPing.log` (`SFSE::Init` opens it, named after the plugin).
-  Lines: `FOCCPing v0.2.0.0` (the library's own, from `SFSE::Init`), `FOCCPing loaded on runtime 1.16.244.0`,
-  `listening for PostDataLoad; FOCC.Ping binds then`, `bound FOCC.Ping` (or the two error lines above), then one
-  `ping N -> N+1` per call. A log that stops after "listening for PostDataLoad" with the game gone is a fault in
-  the bind itself (a wrong offset behind `ID::GameVM::Singleton`; no message box, a crash dump), not a timing finding.
+  Lines: `FOCCPing v0.3.0.0` (the library's own, from `SFSE::Init`), `FOCCPing loaded on runtime 1.16.244.0`,
+  `step=image`, `step=address_library ... format=5 version=1.16.244.0`, fourteen `step=id` lines, `step=rtti
+  vtable=NativeFunctionBase offset=0x0 slots=0x06,0x0F,0x10,0x14,0x15 match`, `listening for PostDataLoad; FOCC.Ping
+  binds then`; at the main menu `step=object name=GameVM`, `step=object name=VirtualMachine`, `step=bind slot=0x1e`,
+  `bound FOCC.Ping`; then one `ping N -> N+1` per call. "no script VM at PostDataLoad: FOCC.Ping not bound" means the
+  singleton or its VM was null then (a timing finding). A log that stops after `step=bind` with the game gone is a
+  fault in the bind itself (slot 0x1E is not what libxse says; a crash dump, no message box).
 
 ## Building on the owner's PC (runbook section B0, job B0-2)
 
@@ -89,17 +131,25 @@ the first run's junctions, project copy and xmake state, so the library is not r
 version, the compiler banner, the two library commits against the pinned ones, and every sha256. Compile errors on a
 first build against a new library are expected and cheap.
 
+**Build card for the PC (FAL-216).** From a checkout at the PR head, in the PC's x64 environment, a new staging folder
+each time: the command above. Expect exit `0`, then `FOCCPing.dll`, `FOCCPing.pdb` and `build.json` in `-Out`;
+`build.json` names libxse `9d090c4c521f4f2c1aa00bb05923c380d47ae596` and `9fbb74d628134ab4ea3a3cf5c0ed3f7eeabbd01d`
+and the dll's sha256. Post the exit code, the dll's sha256 and, on exit 1, `xmake_output.txt` whole. The dll's own
+version reads `0.3.0` (the log's first line, `FOCCPing v0.3.0.0`); an older `v0.2.0.0` in the log is the pre-FAL-216
+build and must not be used.
+
 ## Install and run (the owner's line; game closed for the copies)
 
 1. The Address Library's `.bin` into `<Starfield>\Data\SFSE\Plugins\` (its own name; `versionlib-1-16-244-0.bin` is
    what the library opens). The first row of `Format-Hex <path> | Select-Object -First 1` opens with `05 00 00 00`
-   (format 5; the v22 file on the PC, 5,099,968 bytes, does). It is not installed yet on the PC (28 Oct): Install held
-   it in `D:\Modding\staging\addresslib_v22` after the header check, to go in together with the dll.
+   (format 5; the v22 file on the PC, 5,099,968 bytes, does). The PC keeps it in `D:\Modding\staging\addresslib_v22`;
+   FO4SFPipboyMenu's sessions (FAL-187) put the same file in and take it out again. The plugin reads this file itself
+   before anything else (section "What is checked before the bind").
 2. `FOCCPing.dll` into the same folder.
 3. Launch through `sfse_loader.exe`. The kit's rule: a dll that keeps the game from the main menu is deleted at once.
 4. Runbook job B0-2: `cgf "FOCC_B0.Gmst"`, `cgf "FOCC_B0.Ping" 41`, `save focc_b0_a`, load it, `cgf "FOCC_B0.Ping" 43`,
    `cgf "FOCC_B0.Gmst"`; expect `b0 pong sent=41 got=42` and `got=44`. Collect `focc.0.log`, `FOCCPing.log` (as
    `sfse\FOCCPing.log`), the loader's output and, on `got=0`, `Papyrus.0.log`; judge
    `python -m fo4sf.combined.probes b0 <folder>`.
-5. Uninstall (game closed): delete `FOCCPing.dll` before any other experiment. The Address Library file can stay; it
-   does nothing on its own.
+5. Uninstall (game closed): delete `FOCCPing.dll` before any other experiment. Delete `versionlib-1-16-244-0.bin`
+   too, unless it was there before the session (it does nothing on its own, but the owner's set is put back exactly).

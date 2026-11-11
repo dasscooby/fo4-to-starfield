@@ -199,6 +199,101 @@ class PcRunTests(unittest.TestCase):
         self.assertEqual((s["steps"][20]["result"], s["steps"][30]["result"]), ("race set", "restored"))
 
 
+REFUSED = ("[11/10/2026 - 08:42:09PM] error: FO4SF_PAProbeSuitRef (09000804): is not valid power armor furniture.\n"
+           "stack:\n\t[Actor (00000014)].Actor.SwitchToPowerArmor() - \"<native>\" Line ?")
+
+
+class PapyrusTests(unittest.TestCase):
+    """The PC run of 11 Nov: the probe log said no change, the game's Papyrus log said it refused (FAL-212)."""
+    def test_a_refusal_naming_our_suit_is_shown_and_overrides_no_logged_change(self):
+        lines = head() + sat() + steps()
+        plain = pl.summarize(lines)
+        self.assertEqual(plain["steps"][10]["result"], "no logged change")
+        self.assertFalse(plain["papyrus_read"])
+        s = pl.summarize(lines, papyrus=["noise line", *REFUSED.splitlines()])
+        self.assertEqual(s["papyrus"], ["error: FO4SF_PAProbeSuitRef (09000804): is not valid power armor furniture."])
+        self.assertEqual(s["steps"][10]["result"],
+                         "refused by the game: error: FO4SF_PAProbeSuitRef (09000804): is not valid power armor furniture.")
+        self.assertIn("SwitchToPowerArmor: refused by the game", s["verdict"])
+        out = pl.report(s)
+        self.assertIn("game Papyrus log: error: FO4SF_PAProbeSuitRef (09000804): is not valid power armor furniture.", out)
+        self.assertEqual(s["steps"][20]["result"], "race set")                       # the other steps are untouched
+
+    def test_other_scripts_errors_and_repeats_are_left_out(self):
+        errs = pl.papyrus_errors(["error: Quest XYZ: bad", "warning: FO4SF_PAProbeQuest: something", "x error: FO4SF_PAProbeQuest: something",
+                                  "warning: FO4SF_PAProbeQuest: something", "info FO4SF_PAProbeQuest fine"])
+        self.assertEqual(errs, ["warning: FO4SF_PAProbeQuest: something", "error: FO4SF_PAProbeQuest: something"])
+
+    def test_a_papyrus_log_with_no_errors_of_ours_changes_nothing_and_says_it_was_read(self):
+        s = pl.summarize(head() + sat() + steps(), papyrus=["error: Other thing"])
+        self.assertEqual(s["steps"][10]["result"], "no logged change")
+        self.assertTrue(s["papyrus_read"])
+        self.assertFalse(any("was not read" in l for l in pl.report(s)))
+
+    def test_without_the_papyrus_log_the_report_says_a_refusal_would_be_invisible(self):
+        self.assertTrue(any("Papyrus log was not read" in l for l in pl.report(pl.summarize(head() + sat() + steps()))))
+
+    def test_a_failed_control_still_says_not_judged_with_a_refusal(self):
+        s = pl.summarize(head() + steps(), papyrus=REFUSED.splitlines())
+        out = "\n".join(pl.report(s))
+        self.assertIn("stage 10 SwitchToPowerArmor: not judged", out)
+        self.assertTrue(s["verdict"].startswith("INCONCLUSIVE"))
+
+
+class HasKeywordTests(unittest.TestCase):
+    def with_haskw(self, value):
+        return [l.replace("suitref=%d" % s32(SUITREF), "suitref=%d haskw=%s" % (s32(SUITREF), value), 1) if " step " in l and "stage=10" in l else l
+                for l in head() + sat() + steps()]
+
+    def test_the_keyword_check_on_the_reference_is_reported(self):
+        s = pl.summarize(self.with_haskw("false"))
+        self.assertIs(s["steps"][10]["haskw"], False)
+        self.assertTrue(any("HasKeyword(FurnitureTypePowerArmor) before the call: false" in l for l in pl.report(s)))
+        s = pl.summarize(self.with_haskw("true"))
+        self.assertTrue(any("before the call: true" in l and "throwaway" in l for l in pl.report(s)))
+
+    def test_an_unavailable_check_says_nothing(self):
+        for v in ("na", None):
+            s = pl.summarize(self.with_haskw(v) if v else head() + sat() + steps())
+            self.assertFalse(any("HasKeyword(FurnitureTypePowerArmor)" in l for l in pl.report(s)))
+
+
+class AddKeywordAndCrashTests(unittest.TestCase):
+    def step10(self, kb, ka, k2):
+        return [l.replace("suitref=%d" % s32(SUITREF), "suitref=%d haskw=%s addkw=%s haskw2=%s" % (s32(SUITREF), kb, ka, k2), 1)
+                if " step " in l and "stage=10" in l else l for l in head() + sat() + steps()]
+
+    def test_the_keyword_added_by_script_is_reported_before_and_after(self):
+        out = pl.report(pl.summarize(self.step10("false", "done", "true")))
+        self.assertIn("suit reference HasKeyword(FurnitureTypePowerArmor): false before the call, AddKeyword by script, true after", out)
+        out = pl.report(pl.summarize(self.step10("false", "done", "false")))
+        self.assertTrue(any("AddKeyword by script, false after" in l for l in out))
+
+    def test_without_add_keyword_a_false_keyword_still_says_the_call_will_be_refused(self):
+        out = pl.report(pl.summarize(self.step10("false", "na", "false")))
+        self.assertTrue(any("false and AddKeyword is not available" in l and "will be refused" in l for l in out), out)
+
+    def test_the_copied_chairs_own_keyword_reading_parses(self):
+        lines = [l.replace("haskw2=true", "haskw2=true haskwc=true") for l in self.step10("false", "done", "true")]
+        self.assertIs(pl.parse_line([l for l in lines if " step " in l and "stage=10" in l][0])["haskwc"], True)
+        out = pl.report(pl.summarize(lines))
+        self.assertTrue(any("AnimFurnChair) reads true on the suit reference while FurnitureTypePowerArmor reads false" in l for l in out), out)
+        out = pl.report(pl.summarize([l.replace("haskwc=true", "haskwc=false") for l in lines]))
+        self.assertTrue(any("AnimFurnChair) reads false on the suit reference too" in l for l in out))
+
+    def test_a_log_that_ends_after_the_before_reading_is_a_crash_result_not_a_failed_session(self):
+        lines = head() + sat() + [l for l in steps()[:2]]                       # the step line and 'before', then nothing
+        s = pl.summarize(lines)
+        self.assertTrue(s["control"][0])
+        self.assertTrue(s["steps"][10]["result"].startswith("no reading after the call: the log ends inside it"), s["steps"][10]["result"])
+        self.assertTrue(s["verdict"].startswith("CONTROL OK"), s["verdict"])
+        self.assertEqual(s["steps"][20]["result"], "not run")
+        self.assertIn("the game may have ended during the call", "\n".join(pl.report(s)))
+        notes = [p for p in s["problems"] if p.startswith("stage 10")]
+        self.assertEqual(notes, ["stage 10: no reading after the call (the log ends inside it); nothing is judged"])    # FAL-339
+        self.assertNotIn("judged on the reading right after the call", "\n".join(pl.report(s)))
+
+
 class TableTests(unittest.TestCase):
     def test_the_quests_form_id_is_printed_for_setstage(self):
         out = pl.report(pl.summarize(head() + sat() + steps()))

@@ -54,6 +54,8 @@ def value(key, text):
             return xyz if len(xyz) == 3 else text
         except ValueError:
             return text
+    if key == "addkw":                       # "done" or "na"
+        return low
     if key == "worn" and text == "-1":        # the script's value when Actor.GetWornItem is not available
         return "na"
     if key in ID_KEYS:
@@ -154,6 +156,11 @@ def step_result(stage, step, states, start):
         return "not run", []
     before = states.get("before")
     last = states.get("settled") or states.get("now")
+    if before is not None and last is None:
+        # the reading right after the call is logged at once: a log that stops here ends inside the call. A crash is a
+        # result (PC run of 11 Nov: 0xC0000005 inside the native, null frame armor), not a failed session.
+        return ("no reading after the call: the log ends inside it, the game may have ended during the call (a crash is a "
+                "result: see the Papyrus log and the crash dump)"), []
     if before is None or last is None:
         return "no readings", []
     ch = changes(before, last)
@@ -170,11 +177,35 @@ def step_result(stage, step, states, start):
     return ("restored", ch) if orig is not None and race == orig else ("not restored", ch)
 
 
-def summarize(lines, run=-1):
+OURS = re.compile(r"FO4SF_PA|FO4SFPowerArmorProbe|FO4SFPAProbe", re.IGNORECASE)
+REFUSAL = re.compile(r"SwitchToPowerArmor|power armor furniture", re.IGNORECASE)
+
+
+def papyrus_errors(lines):
+    """The error and warning lines of the game's own Papyrus log (Logs\\Script\\Papyrus.0.log) that name our forms, in
+    order, without repeats, the game's time stamp cut. The probe's user log cannot see a refusal: the PC run of 11 Nov
+    read "no logged change" while the game wrote "FO4SF_PAProbeSuitRef (09000804): is not valid power armor furniture."
+    from Actor.SwitchToPowerArmor()."""
+    out = []
+    for line in lines:
+        t = line.strip()
+        m = re.search(r"\b(error|warning)\b", t, re.IGNORECASE)
+        if not m or not OURS.search(t):
+            continue
+        t = t[m.start():]
+        if t not in out:
+            out.append(t)
+    return out
+
+
+def summarize(lines, run=-1, papyrus=None):
     """{"runs", "run", "cut", "init", "start", "control": (ok, why), "steps": {stage: {"call", "result", "changed",
-    "states": {when: line}}}, "unavailable": [reading names logged na], "problems", "verdict"} of one run (the latest)."""
+    "states": {when: line}}}, "unavailable": [reading names logged na], "papyrus": [errors naming our forms],
+    "problems", "verdict"} of one run (the latest). papyrus is the lines of the game's Papyrus log (or None, not read):
+    a stage-10 refusal in it overrides the probe log's "no logged change"."""
     rs, cut = runs(lines)
-    out = {"runs": len(rs), "cut": cut, "init": None, "start": None, "control": (False, "no log"), "steps": {},
+    errs = papyrus_errors(papyrus) if papyrus is not None else []
+    out = {"runs": len(rs), "cut": cut, "papyrus": errs, "papyrus_read": papyrus is not None, "init": None, "start": None, "control": (False, "no log"), "steps": {},
            "states": [], "unavailable": [], "problems": [], "verdict": "INCONCLUSIVE: no log lines"}
     if not rs:
         return out
@@ -194,9 +225,17 @@ def summarize(lines, run=-1):
         step = next((e for e in r if e["event"] == "step" and e.get("stage") == stage), None)
         by = {s["when"]: s for s in states if s.get("stage") == stage and isinstance(s.get("when"), str)}
         result, ch = step_result(stage, step, by, start)
-        out["steps"][stage] = {"call": step.get("call") if step else None, "result": result, "changed": ch, "states": by}
+        refusal = next((e for e in errs if REFUSAL.search(e)), None) if stage == 10 and step else None
+        if refusal:                 # the call ran and the game refused it: not "no logged change"
+            result = "refused by the game: " + refusal
+        out["steps"][stage] = {"call": step.get("call") if step else None, "result": result, "changed": ch, "states": by,
+                               "haskw": step.get("haskw") if step else None, "addkw": step.get("addkw") if step else None,
+                               "haskw2": step.get("haskw2") if step else None, "haskwc": step.get("haskwc") if step else None}
         if step and "settled" not in by and by:
-            out["problems"].append(f"stage {stage}: no settled reading (the 4 s timer never ran); judged on the reading right after the call")
+            if "now" not in by:        # the log ends inside the call: step_result already says so, nothing was judged
+                out["problems"].append(f"stage {stage}: no reading after the call (the log ends inside it); nothing is judged")
+            else:
+                out["problems"].append(f"stage {stage}: no settled reading (the 4 s timer never ran); judged on the reading right after the call")
     if cut:
         out["problems"].append(f"{cut} line(s) without end=true were left out (cut)")
     if len(rs) > 1:
@@ -253,6 +292,29 @@ def report(summary):
         lines.append(f"stage {stage} {s['call'] or '-'}: {shown}")
     if summary.get("unavailable"):
         lines.append("readings the game gave as na: " + ", ".join(summary["unavailable"]))
+    s10 = summary["steps"].get(10) or {}
+    kw, added, kw2 = s10.get("haskw"), s10.get("addkw"), s10.get("haskw2")
+    if s10.get("haskwc") is True and kw is False:
+        lines.append("the copied chair's own keyword (AnimFurnChair) reads true on the suit reference while FurnitureTypePowerArmor reads "
+                     "false: the base list is visible and the appended keyword is not (PC run of 11 Nov); --kw-first or AddKeyword")
+    elif s10.get("haskwc") is False:
+        lines.append("the copied chair's own keyword (AnimFurnChair) reads false on the suit reference too: the base list is not "
+                     "visible through HasKeyword here (or the control furniture is not the default chair)")
+    if kw is False and added == "done":
+        lines.append("suit reference HasKeyword(FurnitureTypePowerArmor): false before the call, AddKeyword by script, "
+                     f"{'true' if kw2 is True else 'false' if kw2 is False else 'not read'} after")
+    elif kw is False:
+        lines.append("suit reference HasKeyword(FurnitureTypePowerArmor) before the call: false" + (
+            " and AddKeyword is not available (na)" if added == "na" else "") +
+            ": the game does not see the keyword on the reference, the call will be refused (PC run of 11 Nov: the base "
+            "FURN's KWDA list was not seen)")
+    elif kw is True:
+        lines.append("suit reference HasKeyword(FurnitureTypePowerArmor) before the call: true (a real entry: it can crash the "
+                     "game on a null the kit does not supply: throwaway sessions only)")
+    if summary.get("papyrus"):
+        lines += ["game Papyrus log: " + e for e in summary["papyrus"]]
+    elif not summary.get("papyrus_read"):
+        lines.append("note: the game's Papyrus log was not read (--papyrus): a refusal by the game is not visible in the probe log")
     lines += ["note: " + p for p in summary.get("problems", [])]
     lines.append(summary["verdict"])
     return lines

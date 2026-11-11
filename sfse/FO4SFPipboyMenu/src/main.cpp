@@ -1,0 +1,2106 @@
+// FO4SFPipboyMenu: Pip-Boy step 1 (FAL-187; README.md in this folder). Can a plugin of ours register a menu of its
+// own and show a movie of its own on Starfield 1.16.244? One named menu, FO4SF_PipboyMenu, opened and closed on one
+// key, every step in its own log. Stage=1 (a): the menu with no movie; Stage=2 (b): the same menu showing
+// Interface/FO4SF_PipboyMenu.swf (scripts/ui/make_probe_swf.py), loaded from "FO4SFPipboyProbe - Main.ba2".
+//
+// Built on libxse/commonlibsf 9d090c4 for SFSE, the Address Library, the logger, UI::RegisterMenu, UI::IsMenuOpen,
+// UIMessageQueue::AddMessage and BSFixedString, but NOT on its IMenu class: every IMenu virtual there is
+// REL::ID{ 0 } (include/RE/IDs.h), and a lookup of id 0 stops the game with a message box. The menu object is the
+// engine's own: the engine's IMenu constructor, then a copy of the engine's IMenu primary vtable with only our
+// slots replaced, and the engine's RTTI locator in the slot before the copy (the two other vtables are the engine's,
+// as the constructor set them).
+//
+// Nothing is called before it is checked (README, "Where every id comes from"):
+//   - the runtime is 1.16.244.0 (SFSE's), else nothing but the refusal line;
+//   - the Address Library file next to this dll is read here first (format 5, game version 1.16.244.0, every id we
+//     use below its count, non-zero and inside Starfield.exe's image), so libxse's own lookup can never hit a
+//     missing id; then each id is looked up again through libxse and must give the same offset;
+//   - the three IMenu vtables carry IMenu's RTTI (complete object locator: x64, subobject offsets 0, 0x10, 0x50, type
+//     ".?AVIMenu@@", the type descriptor libxse's RTTI id names);
+//   - the primary vtable's slots are the functions their ids name: 0x00 the scalar deleting destructor, 0x06
+//     LoadMovie (also SFSE 0.2.21's own hook address, 0x2551AB0), 0x08 ProcessMessage, 0x0A IsMovieLoaded; 0x03 and
+//     0x04 (GetName, GetRootPath) are the same pure-virtual stub;
+//   - the constructor's first 0x200 bytes load the primary vtable's address (lea r64, [rip+disp32]).
+// Any mismatch is one "refuse step=<step>" line and the plugin stays idle: no registration, no call into the game.
+//
+// Slots replaced in the copy: 0x00 (our destructor wrapper: the engine's destructor without its delete, then our
+// free, since the object is ours), 0x03 GetName, 0x04 GetRootPath (""), 0x05 GetViewScaleMode (ShowAll), 0x06 LoadMovie
+// (stage a: true without a movie; stage b: the engine's, logged, with addEventDispatcher forced off: our movie has no
+// engine event backend), 0x08 ProcessMessage (logged; stage a answers kShow itself, as the engine's refuses a menu
+// without a movie), and in stage a 0x0A IsMovieLoaded (true). The key is polled on a worker thread; every UI call runs
+// on the main thread through SFSE's task interface.
+//
+// Stage=3 (c), FAL-216: stage (b) plus the data channel, with the movie make_probe_swf.py --channel writes. Inside our
+// ProcessMessage, on the engine's own thread for this menu: at kShow the plugin finds the movie's two named children
+// (getChildByName) and adds a click listener on the button whose handler is ours; at kShow and at every kUpdate (sent
+// every 500 ms while the menu is open) it writes the player's position into the text field and reads it back. Pause
+// state and the input holders (the UI menu stack and ControlMap's active input contexts) are logged at show, while
+// open, at hide, on the main thread after each toggle, and on a second key. FlagSets cycles the menu flags per open.
+// Checked first, at stage c only: 13 more ids (singletons of Main, the player and ControlMap; five RTTI type
+// descriptors, by name; five Scaleform Value functions, each equal to SFSE 0.2.21's own address for 1.16.244), then,
+// before first use, the type of every object: Main, the player, ControlMap, the movie (GFx::MovieImpl) and its root
+// (GFx::AS3::MovieRoot), whose two slots we call (0x30 CreateFunction, 0x32 GetVariable; libxse and SFSE agree on
+// both) must be inside the image. Reads of engine objects whose layout only libxse states (input contexts, the pause
+// byte, the position) are guarded: a fault logs "fault" instead of stopping the game. A snapshot's menus= lists the
+// open menus among a few known names, through the engine's IsMenuRegistered and IsMenuOpen, on the main thread only
+// (libxse's menu stack at UI+0x3F0 read empty in every FAL-216 snapshot, the pause menu's too); off it, "-".
+//
+// Stage c with ClickCall set (FAL-246, native to script): each click also reaches a quest. On the main thread (SFSE's
+// task interface) the plugin asks the script VM to run one global Papyrus function with no arguments
+// (ClickCall=FOCC_B0.Click: the combined probe's B0 script, which resolves its probe quest and logs "b0 click" there)
+// through IVirtualMachine::DispatchStaticCall, libxse's slot 0x2F. Checked first, at stage c: 3 more ids (FOCCPing's
+// GameVM singleton and two RTTI ids, the RTTI ids by name); before the first call, the GameVM singleton is a GameVM by
+// RTTI, the VM it holds (libxse GameVM::impl, +0xE0) a BSScript::Internal::VirtualMachine by RTTI at offset 0, and its
+// vtable's slots 0x00 to 0x2F are inside the image. No arguments: a BSScrapArray that grows calls
+// ScrapHeap::Allocate, which libxse 9d090c4 states as REL::ID{ 0 }, so the argument function never touches the array.
+// No callback: a null functor, as the public precedents pass.
+//
+// Stage=4 (d), FAL-272: the STAT page, the first page the owner uses by hand. Stage (c)'s checks, with the movie
+// make_probe_swf.py --page writes: a tab line and seven lines the plugin writes at kShow and every kUpdate, and two
+// buttons, NEXT TAB (the other set of lines) and CLOSE (the menu closes, as on F10). The values are collected on the
+// main thread (SFSE's task, before each kShow and kUpdate) and only written on the menu's thread. Every value is read,
+// not called for, except two calls: the player's own GetActorValue, and the engine's lookup of a form by its form id
+// (TESForm::LookupByID, equal to SFSE 0.2.21's GetFormByNumericID). The health, carry weight and experience are the
+// actor values Starfield.esm's ActorValueInfo forms 0x2D4, 0x2DC and 0x2C9 name, and the game time its GameHour (0x38)
+// and GameDaysPassed (0x39) globals: each accepted by its form id and RTTI type (at 3eb30d71 four of them did not pass
+// an editor-ID check). FO4SF_Rads is found by editor ID at local id 0x800 of any plugin; the level is the player's base
+// TESNPC's TESActorBaseData; the place is the parent cell's and its worldspace's names. (The data handler's per-type
+// form lists, read at 5a4e6016, were empty: their raw entries are logged once, step=page_form_arrays, to settle the
+// layout.)
+// Checked before use: each form's type by its RTTI name; each base class's offset (ActorValueOwner, TESActorBaseData,
+// TESFullName) from the RTTI class hierarchy, and that subobject's vtable naming the same complete type there; the
+// string reader on our own menu name first; and which ActorValueOwner slot is GetActorValue (libxse declares a virtual
+// destructor before it, SFSE 0.2.21 does not): slot 0 must be the adjustor thunk to the player's destructor. A value
+// that fails its check prints "?" and its reason is logged once. PageFlagSets (default 0x9, the flag set at which the
+// FAL-216 clicks reached our menu) cycles per open like FlagSets.
+
+#include "pch.h"
+
+#include <cctype>
+#include <cmath>
+#include <mutex>
+#include <optional>
+#include <set>
+#include <vector>
+
+// Win32 calls that libxse's REX::W32 does not wrap, imported the way REX/W32.cpp imports its own (REX/W32/BASE.h):
+// libxse refuses a <windows.h> included before it
+REX_W32_IMPORT(std::int16_t, GetAsyncKeyState, std::int32_t);
+REX_W32_IMPORT(void*, GetForegroundWindow);
+REX_W32_IMPORT(std::uint32_t, GetWindowThreadProcessId, void*, std::uint32_t*);
+REX_W32_IMPORT(std::uint32_t, GetCurrentProcessId);
+
+#include "world.h"   // FAL-250: the world-surface census and candidate (World=1; README.md, "World surface")
+
+namespace
+{
+	using namespace std::string_view_literals;
+
+	constexpr auto          kMenuName = "FO4SF_PipboyMenu";
+	constexpr REL::Version  kRuntime{ 1, 16, 244, 0 };
+	constexpr std::uint32_t kLoadMovieRva = 0x2551AB0;       // SFSE 0.2.21 sfse/Hooks_Scaleform.cpp: IMenu_LoadMovie
+	constexpr std::uint32_t kPrecedentCtorRva = 0x25516B0;   // a public precedent's base IMenu constructor (logged only)
+	constexpr std::size_t   kMenuBytes = 0x400;              // IMenu is 0x138; the engine's own menus are larger
+	constexpr std::size_t   kSlots = 0x20;                   // primary vtable entries copied (IMenu declares 0x00-0x1A)
+	constexpr std::size_t   kCtorScan = 0x200;
+	constexpr std::size_t   kHeaderBytes = 96;               // Address Library format 5 header (libxse REL/IDDB.cpp)
+	constexpr char          kTypeName[] = ".?AVIMenu@@";
+	constexpr auto          kFieldName = "fo4sfPosition";    // make_probe_swf.py FIELD_NAME
+	constexpr auto          kButtonName = "fo4sfButton";     // make_probe_swf.py BUTTON_NAME
+	constexpr std::size_t   kMovieRootAt = 0x18;             // GFx::Movie: RefCountBase 0x00, StateBag 0x10, root 0x18
+	constexpr std::size_t   kCreateFunctionSlot = 0x30;      // GFx::ASMovieRootBase (libxse and SFSE 0.2.21 agree)
+	constexpr std::size_t   kGetVariableSlot = 0x32;
+	constexpr std::size_t   kMainPausedAt = 0x448;           // libxse RE::Main::isGameMenuPaused
+	constexpr std::size_t   kContextsAt = 0x2A8;             // libxse RE::ControlMap::activeInputContexts (16-byte items)
+	constexpr std::size_t   kPositionAt = 0x80 + 0x0C;       // libxse RE::TESObjectREFR::data (0x80), OBJ_REFR::location
+	constexpr std::size_t   kMaxListed = 16;                 // contexts listed per snapshot
+	constexpr std::size_t   kMaxFlagSets = 4;
+	constexpr std::size_t   kGameVmImplAt = 0xE0;            // libxse RE::GameVM::impl (BSTSmartPointer<IVirtualMachine>)
+	constexpr std::size_t   kDispatchStaticCallSlot = 0x2F;  // libxse IVirtualMachine::DispatchStaticCall
+	constexpr std::size_t   kMaxName = 64;                   // ClickCall: each of the script's and function's names
+
+	// stage d (the STAT page)
+	constexpr std::uint32_t kDataHandlerRva = 0x5FD9B28;     // SFSE 0.2.21 sfse/GameData.h: TESDataHandler::GetSingleton
+	constexpr std::uint32_t kLookupByIdRva = 0x5DE3B0;       // SFSE 0.2.21 sfse/GameForms.cpp: TESForm::GetFormByNumericID
+	constexpr std::uint32_t kCoreFormIds = 0x1000;           // Starfield.esm form ids searched for the actor values
+	constexpr std::uint32_t kRadsLocalId = 0x800;            // FO4SF_Rads in FO4SFRadsProbe.esm (dotnet/RadsProbe AvifId)
+	constexpr std::uint32_t kGameHourId = 0x38;              // Starfield.esm GLOB GameHour (docs/ai/test-queue.md)
+	constexpr std::uint32_t kGameDaysPassedId = 0x39;        // Starfield.esm GLOB GameDaysPassed
+	constexpr std::uint32_t kHealthId = 0x2D4;               // Starfield.esm AVIF Health (the PC's read, 11 Nov)
+	constexpr std::uint32_t kCarryWeightId = 0x2DC;          // Starfield.esm AVIF CarryWeight
+	constexpr std::uint32_t kExperienceId = 0x2C9;           // Starfield.esm AVIF Experience
+	constexpr std::size_t   kFormArrayEntries = 0xE0;        // form-list entries logged (SFSE: 0xDA before unk14E0)
+	constexpr std::size_t   kFormArraysAt = 0x70;            // TESDataHandler::formArrays, libxse and SFSE agree: 0x18
+	constexpr std::size_t   kFormArrayBytes = 0x18;          //   each, a lock, then a BSTArray of TESForm*
+	constexpr std::size_t   kGlobType = 0x0A;                // FormType kGLOB, libxse and SFSE agree
+	constexpr std::size_t   kAvifType = 0x6D;                // FormType kAVIF, libxse and SFSE agree
+	constexpr std::size_t   kFormIdAt = 0x28;                // TESForm::formID, libxse and SFSE agree
+	constexpr std::size_t   kGlobalEditorIdAt = 0x30;        // libxse RE::TESGlobal::formEditorID (a BSFixedString first)
+	constexpr std::size_t   kGlobalBytesAt = 0x28;           // the TESGlobal bytes logged and searched for the
+	constexpr std::size_t   kGlobalBytes = 0x20;             //   value (libxse's +0x40 read -3.5924 at a156037c)
+	constexpr float         kGlobalMinutes = 3.0f;           // GameHour and GameDaysPassed's fraction agree this close
+	constexpr float         kMaxDays = 1000000.0f;           // GameDaysPassed below this
+	constexpr std::size_t   kAvifEditorIdAt = 0x40;          // libxse RE::ActorValueInfo::editorID
+	constexpr std::size_t   kBaseObjectAt = 0x80 + 0x18;     // libxse RE::TESObjectREFR::data, OBJ_REFR::objectReference
+	constexpr std::size_t   kParentCellAt = 0xB0;            // libxse RE::TESObjectREFR::parentCell
+	constexpr std::size_t   kCellWorldAt = 0x118;            // libxse RE::TESObjectCELL::cellWorldspace
+	constexpr std::size_t   kLevelAt = 0x08 + 0x06;          // libxse RE::TESActorBaseData::actorData, ACTOR_BASE_DATA::level
+	constexpr std::size_t   kFullNameAt = 0x08;              // libxse RE::TESFullName::fullName (a BSFixedStringCS)
+	constexpr std::size_t   kPageLines = 7;                  // make_probe_swf.py PAGE_LINES
+	constexpr std::size_t   kPageColumns = 54;               // make_probe_swf.py page_columns(): the characters of a line
+	constexpr std::string_view kPageChars = " !#%&'()+,-./0123456789:=?ABCDEFGHIJKLMNOPQRSTUVWXYZ_";   // PAGE_FONT
+	constexpr auto          kTabFieldName = "fo4sfTab";      // make_probe_swf.py TAB_FIELD
+	constexpr auto          kLineFieldName = "fo4sfLine";    // make_probe_swf.py LINE_FIELD, then 0 to 6
+	constexpr auto          kTabButtonName = "fo4sfTabButton";       // make_probe_swf.py TAB_BUTTON
+	constexpr auto          kCloseButtonName = "fo4sfCloseButton";   // make_probe_swf.py CLOSE_BUTTON
+	// the menus a main-thread snapshot asks the engine about (IsMenuRegistered, IsMenuOpen); only Console is named by
+	// libxse, the rest are guesses, and the first snapshot logs which of them are registered
+	constexpr std::array<const char*, 14> kKnownMenus{ "FO4SF_PipboyMenu", "HUDMenu", "CursorMenu", "PauseMenu",
+		"Console", "LoadingMenu", "FaderMenu", "DataMenu", "InventoryMenu", "MainMenu", "DialogueMenu", "ContainerMenu",
+		"BarterMenu", "SleepWaitMenu" };
+
+	struct Id
+	{
+		const char*   name;
+		std::uint32_t id;
+		const char*   source;
+	};
+
+	enum : std::size_t
+	{
+		kUISingleton,
+		kRegisterMenu,
+		kIsMenuOpen,
+		kQueueSingleton,
+		kAddMessage,
+		kStringGetEntry,
+		kStringRelease,
+		kVtblPrimary,
+		kVtblInput,
+		kVtblSink,
+		kRtti,
+		kCtor,
+		kDtor,
+		kLoadMovie,
+		kProcessMessage,
+		kIsMovieLoaded,
+		kIdCountB,                       // stages a and b check the ids above; stage c all of them
+		kMainSingleton = kIdCountB,
+		kPlayerSingleton,
+		kControlMapSingleton,
+		kMainRtti,
+		kPlayerRtti,
+		kControlMapRtti,
+		kMovieImplRtti,
+		kMovieRootRtti,
+		kValueAddRef,
+		kValueRelease,
+		kValueGetMember,
+		kValueSetMember,
+		kValueInvoke,
+		kGameVmSingleton,                // FAL-246: the click reaches a quest
+		kGameVmRtti,
+		kVmRtti,
+		kIdCountC,                       // stage c checks the ids above; stage d all of them
+		kDataHandlerSingleton = kIdCountC,
+		kLookupById,
+		kIdCount
+	};
+
+	// README, "Where every id comes from": libxse = libxse/commonlibsf 9d090c4 include/RE/IDs*.h; precedent = a
+	// public precedent's CommonLibSF fork, annotated for 1.16.244 (its offsets are logged here, never assumed)
+	constexpr std::array<Id, kIdCount> kIds{ {
+		{ "UI.Singleton", 937580, "libxse" },
+		{ "UI.RegisterMenu", 130463, "libxse" },
+		{ "UI.IsMenuOpen", 130475, "libxse" },
+		{ "UIMessageQueue.Singleton", 937897, "libxse" },
+		{ "UIMessageQueue.AddMessage", 130659, "libxse" },
+		{ "BSStringPool.GetEntry", 1186742, "libxse" },
+		{ "BSStringPool.Entry.Release", 139340, "libxse" },
+		{ "IMenu.vtable.primary", 475515, "libxse VTABLE_IMenu, checked by RTTI" },
+		{ "IMenu.vtable.BSInputEventUser", 475517, "libxse VTABLE_IMenu[1], checked by RTTI" },  // +0x10, 10 slots
+		{ "IMenu.vtable.BSTEventSink", 475519, "libxse VTABLE_IMenu[0], checked by RTTI" },     // +0x50, 2 slots
+		{ "IMenu.RTTI", 844868, "libxse RTTI_IMenu" },
+		{ "IMenu.ctor", 130615, "precedent" },
+		{ "IMenu.scalar_deleting_dtor", 130616, "precedent" },
+		{ "IMenu.LoadMovie", 130618, "precedent" },
+		{ "IMenu.ProcessMessage", 130624, "precedent" },
+		{ "IMenu.IsMovieLoaded", 130619, "precedent" },
+		{ "Main.Singleton", 883591, "libxse" },
+		{ "PlayerCharacter.Singleton", 922868, "libxse" },
+		{ "ControlMap.Singleton", 938003, "libxse" },
+		{ "Main.RTTI", 859948, "libxse RTTI_Main, checked by name" },
+		{ "PlayerCharacter.RTTI", 860819, "libxse RTTI_PlayerCharacter, checked by name" },
+		{ "ControlMap.RTTI", 867481, "libxse RTTI_ControlMap, checked by name" },
+		{ "GFx.MovieImpl.RTTI", 841612, "libxse RTTI_Scaleform__GFx__MovieImpl, checked by name" },
+		{ "GFx.AS3.MovieRoot.RTTI", 842209, "libxse RTTI_Scaleform__GFx__AS3__MovieRoot, checked by name" },
+		{ "GFx.Value.ObjectAddRef", 169745, "libxse, equal to SFSE's" },
+		{ "GFx.Value.ObjectRelease", 169746, "libxse, equal to SFSE's" },
+		{ "GFx.Value.GetMember", 169748, "libxse, equal to SFSE's" },
+		{ "GFx.Value.SetMember", 169749, "libxse, equal to SFSE's" },
+		{ "GFx.Value.Invoke", 169750, "libxse, equal to SFSE's" },
+		{ "GameVM.Singleton", 937585, "libxse, as FOCCPing" },
+		{ "GameVM.RTTI", 865426, "libxse RTTI_GameVM, checked by name" },
+		{ "BSScript.Internal.VirtualMachine.RTTI", 870795, "libxse RTTI_BSScript__Internal__VirtualMachine, checked by name" },
+		{ "TESDataHandler.Singleton", 937572, "libxse, equal to SFSE's" },
+		{ "TESForm.LookupByID", 47401, "libxse, equal to SFSE's" },
+	} };
+
+	// stage c: each RTTI id's type name after its ".?AV" (class) or ".?AU" (struct) prefix, and SFSE 0.2.21's own
+	// 1.16.244 address of each Value function (sfse/ScaleformValue.h at 48535cc, ObjectInterface); the Address Library
+	// offset must equal it
+	constexpr std::array<std::pair<std::size_t, std::string_view>, 7> kRttiNames{ {
+		{ kMainRtti, "Main@@"sv },
+		{ kPlayerRtti, "PlayerCharacter@@"sv },
+		{ kControlMapRtti, "ControlMap@@"sv },
+		{ kMovieImplRtti, "MovieImpl@GFx@Scaleform@@"sv },
+		{ kMovieRootRtti, "MovieRoot@AS3@GFx@Scaleform@@"sv },
+		{ kGameVmRtti, "GameVM@@"sv },
+		{ kVmRtti, "VirtualMachine@Internal@BSScript@@"sv },
+	} };
+	constexpr std::array<std::pair<std::size_t, std::uint32_t>, 5> kSfseRvas{ {
+		{ kValueAddRef, 0x3352400 },
+		{ kValueRelease, 0x33524A0 },
+		{ kValueGetMember, 0x33528A0 },
+		{ kValueSetMember, 0x3352C90 },
+		{ kValueInvoke, 0x33530B0 },
+	} };
+
+	using Ctor_t = void* (*)(void*);
+	using Dtor_t = void* (*)(void*, std::uint32_t);
+	using LoadMovie_t = bool (*)(void*, bool, bool);
+	using ProcessMessage_t = RE::UI_MESSAGE_RESULT (*)(void*, RE::UIMessageData&);
+
+	// the primary vtable copy, with the engine's RTTI complete object locator in the slot before it, where MSVC's
+	// dynamic_cast reads it. The engine casts a shown menu from IMenu to GameMenuBase (FAL-187 hang dump at b3f352b7);
+	// without the locator the cast read the global that happened to lie before the copy, and the game hung
+	struct PrimaryVtable
+	{
+		std::uintptr_t                     locator;
+		std::array<std::uintptr_t, kSlots> slots;
+	};
+	static_assert(sizeof(PrimaryVtable) == (1 + kSlots) * sizeof(std::uintptr_t));   // no padding: locator is slots[-1]
+
+	// INI (FO4SFPipboyMenu.ini next to the dll)
+	int           g_stage = 0;      // 0 off, 1 = (a), 2 = (b), 3 = (c), 4 = (d)
+	std::uint32_t g_key = 0x79;     // F10
+	std::uint32_t g_flags = 0;      // OR'ed into the flags the constructor set
+	bool          g_keepAlive = true;
+
+	std::uintptr_t                           g_base = 0;
+	std::size_t                              g_imageSize = 0;
+	std::array<std::uint32_t, kIdCount>      g_rva{};
+	PrimaryVtable                            g_vtbl{};
+	Ctor_t                                   g_ctor = nullptr;
+	Dtor_t                                   g_engineDtor = nullptr;
+	LoadMovie_t                              g_engineLoadMovie = nullptr;
+	ProcessMessage_t                         g_engineProcessMessage = nullptr;
+	const SFSE::TaskInterface*               g_task = nullptr;
+	std::atomic<bool>                        g_registered{ false };
+	std::atomic<std::uint32_t>               g_created{ 0 };
+	std::atomic<std::uint32_t>               g_otherMessages{ 0 };
+	std::atomic<int>                         g_expectOpen{ -1 };
+
+	// stage c (INI FlagSets, SnapshotKey)
+	std::array<std::uint32_t, kMaxFlagSets>  g_flagSets{};
+	std::size_t                              g_flagSetCount = 0;
+	std::uint32_t                            g_snapshotKey = 0x7A;   // F11; 0 = none
+	std::atomic<std::uint32_t>               g_ctorFlags{ 0 };
+	std::atomic<std::uint32_t>               g_shows{ 0 };
+	std::atomic<std::uint32_t>               g_updates{ 0 };
+	std::atomic<std::uint32_t>               g_clicks{ 0 };
+	std::atomic<std::uint32_t>               g_snapshots{ 0 };
+	std::atomic<bool>                        g_open{ false };          // the main thread's last IsMenuOpen
+	std::atomic<bool>                        g_channelOff{ false };    // a channel check refused: no more channel calls
+	std::atomic<const void*>                 g_listenedMovie{ nullptr };   // the movie our click listener is on
+	std::atomic<const void*>                 g_checkedMovie{ nullptr };    // the movie whose root RootOf checked
+	std::atomic<int>                         g_mainOk{ -1 };           // -1 unchecked, 0 refused, 1 checked
+	std::atomic<int>                         g_playerOk{ -1 };
+	std::atomic<int>                         g_controlMapOk{ -1 };
+
+	// stage c, FAL-246 (INI ClickCall=<script>.<function>; empty = off)
+	std::string                              g_clickScript;
+	std::string                              g_clickFunction;
+	std::atomic<int>                         g_gameVmOk{ -1 };
+	std::uintptr_t                           g_checkedVm = 0;          // main thread only: the VM whose type was checked
+	bool                                     g_vmOff = false;          // main thread only: a VM check refused
+
+	// stage d (INI PageFlagSets): the page. The text is collected on the main thread and written on the menu's
+	std::atomic<std::uint32_t>               g_tab{ 0 };               // the shown tab: 0 STATUS, 1 DATA
+	std::atomic<std::uint32_t>               g_tabClicks{ 0 };
+	std::atomic<std::uint32_t>               g_closeClicks{ 0 };
+	std::atomic<std::uint32_t>               g_pageWrites{ 0 };
+	std::atomic<bool>                        g_refreshNow{ false };    // NEXT TAB: the key thread sends an update now
+	std::atomic<bool>                        g_closeNow{ false };      // CLOSE: the key thread closes the menu
+	std::mutex                               g_pageLock;
+	std::array<std::array<std::string, kPageLines + 1>, 2> g_pageText;   // [tab][0] the tab line, [1..7] the lines
+
+	std::uintptr_t Address(std::size_t a_id) { return g_base + g_rva[a_id]; }
+
+	std::size_t IdCount() { return g_stage == 4 ? kIdCount : g_stage == 3 ? kIdCountC : kIdCountB; }
+
+	bool InImage(std::uintptr_t a_addr, std::size_t a_len)
+	{
+		return a_addr >= g_base && a_len <= g_imageSize && a_addr - g_base <= g_imageSize - a_len;
+	}
+
+	std::string Hex(std::uintptr_t a_value) { return std::format("{:#x}", a_value); }
+
+	const RE::BSFixedString& MenuName()
+	{
+		// process lifetime: a BSFixedString destructor calls the engine (the main thread makes it first)
+		static auto* const name = new RE::BSFixedString(kMenuName);
+		return *name;
+	}
+
+	bool IsOurs(const void* a_menu)
+	{
+		return a_menu && *static_cast<const std::uintptr_t*>(a_menu) == reinterpret_cast<std::uintptr_t>(g_vtbl.slots.data());
+	}
+
+	const void* MovieOf(const void* a_menu)
+	{
+		return static_cast<const RE::IMenu*>(a_menu)->uiMovie.get();
+	}
+
+	bool Refuse(std::string_view a_step, const std::string& a_what);
+
+	// ------------------------------------------------------------------------------------------- stage c: reading
+	// A read behind a pointer the engine handed us, or of a layout only libxse states: an access fault returns false
+	// instead of stopping the game (a structured exception handler; no C++ object lives in this frame)
+	bool Peek(std::uintptr_t a_addr, void* a_out, std::size_t a_len)
+	{
+		__try {
+			std::memcpy(a_out, reinterpret_cast<const void*>(a_addr), a_len);
+			return true;
+		} __except (1 /* EXCEPTION_EXECUTE_HANDLER */) {
+			return false;
+		}
+	}
+
+	template <class T>
+	bool Peek(std::uintptr_t a_addr, T& a_out)
+	{
+		return Peek(a_addr, &a_out, sizeof(T));
+	}
+
+	// the mangled name in an RTTI type descriptor (inside the image), or "" if it leaves the image unterminated
+	std::string TypeNameAt(std::uintptr_t a_descriptor)
+	{
+		std::string name;
+		for (std::size_t i = 0; i < 96 && InImage(a_descriptor + 0x10 + i, 1); ++i) {
+			const char c = *reinterpret_cast<const char*>(a_descriptor + 0x10 + i);
+			if (!c) {
+				return name;
+			}
+			name += (c >= 0x20 && c < 0x7F) ? c : '?';
+		}
+		return {};
+	}
+
+	bool NameIs(std::string_view a_name, std::string_view a_tail)   // ".?AV" + tail (a class) or ".?AU" + tail (a struct)
+	{
+		return a_name.size() == 4 + a_tail.size() && (a_name.starts_with(".?AV") || a_name.starts_with(".?AU")) &&
+		       a_name.substr(4) == a_tail;
+	}
+
+	struct ObjectType
+	{
+		std::uintptr_t descriptor = 0;
+		std::uintptr_t hierarchy = 0;   // the complete type's class hierarchy descriptor
+		std::uint32_t  offset = 0;
+		std::string    name;
+	};
+
+	// an object's type through its vtable's complete object locator; false if a read faults or leaves the image
+	bool TypeOf(std::uintptr_t a_object, ObjectType& a_out)
+	{
+		std::uintptr_t vt = 0;
+		if (!a_object || !Peek(a_object, vt) || !InImage(vt - 8, 8)) {
+			return false;
+		}
+		const auto col = *reinterpret_cast<const std::uintptr_t*>(vt - 8);
+		if (!InImage(col, 0x14) || *reinterpret_cast<const std::uint32_t*>(col) != 1) {
+			return false;
+		}
+		a_out.offset = *reinterpret_cast<const std::uint32_t*>(col + 0x04);
+		a_out.descriptor = g_base + *reinterpret_cast<const std::uint32_t*>(col + 0x0C);
+		a_out.hierarchy = g_base + *reinterpret_cast<const std::uint32_t*>(col + 0x10);
+		a_out.name = TypeNameAt(a_out.descriptor);
+		return !a_out.name.empty();
+	}
+
+	std::string ShortName(std::string_view a_name)   // ".?AVHUDMenu@@" -> "HUDMenu@@" -> "HUDMenu"
+	{
+		if (a_name.size() > 4) {
+			a_name.remove_prefix(4);
+		}
+		if (a_name.ends_with("@@")) {
+			a_name.remove_suffix(2);
+		}
+		return std::string(a_name);
+	}
+
+	// a singleton is the type its RTTI id names (the same descriptor, at subobject offset 0), checked once; a null
+	// singleton is not cached (it may not exist yet)
+	bool CheckSingleton(std::string_view a_what, std::size_t a_singleton, std::size_t a_rtti, std::atomic<int>& a_state)
+	{
+		const auto state = a_state.load();
+		if (state >= 0) {
+			return state == 1;
+		}
+		std::uintptr_t object = 0;
+		if (!Peek(Address(a_singleton), object) || !object) {
+			REX::INFO("step=object name={} result=null", a_what);
+			return false;
+		}
+		ObjectType type;
+		const bool known = TypeOf(object, type);
+		if (!known || type.descriptor != Address(a_rtti) || type.offset != 0) {
+			a_state = 0;
+			Refuse("object", std::format("name={} object={} type={} offset={} (its reads stay off)", a_what, Hex(object),
+				known ? type.name : "unreadable", Hex(type.offset)));
+			return false;
+		}
+		a_state = 1;
+		REX::INFO("step=object name={} object={} type={}", a_what, Hex(object), type.name);
+		return true;
+	}
+
+	std::uintptr_t Singleton(std::size_t a_singleton)
+	{
+		std::uintptr_t object = 0;
+		Peek(Address(a_singleton), object);
+		return object;
+	}
+
+	struct ArrayHead   // BSTArray (libxse): size, capacity, data
+	{
+		std::uint32_t  size;
+		std::uint32_t  capacity;
+		std::uintptr_t data;
+	};
+
+	std::string ReadPaused()
+	{
+		if (!CheckSingleton("Main", kMainSingleton, kMainRtti, g_mainOk)) {
+			return "?";
+		}
+		std::uint8_t paused = 0;
+		return Peek(Singleton(kMainSingleton) + kMainPausedAt, paused) ? std::to_string(paused) : "fault";
+	}
+
+	// which of kKnownMenus are open, through the engine's own IsMenuRegistered and IsMenuOpen (the calls Register and
+	// Toggle make): main thread only. The first call logs which names are registered, so a wrong guess shows
+	std::string ReadMenus()
+	{
+		auto* ui = RE::UI::GetSingleton();
+		if (!ui) {
+			return "no_ui";
+		}
+		// process lifetime, as MenuName(): made once, on the main thread
+		static const auto* const names = [] {
+			auto* list = new std::vector<RE::BSFixedString>();
+			for (const auto* name : kKnownMenus) {
+				list->emplace_back(name);
+			}
+			return list;
+		}();
+		static bool logged = false;
+		std::string open;
+		std::string registered;
+		std::string unknown;
+		std::size_t count = 0;
+		for (std::size_t i = 0; i < names->size(); ++i) {
+			const auto& name = (*names)[i];
+			if (!ui->IsMenuRegistered(name)) {
+				unknown += std::format("{}{}", unknown.empty() ? "" : ",", kKnownMenus[i]);
+				continue;
+			}
+			registered += std::format("{}{}", registered.empty() ? "" : ",", kKnownMenus[i]);
+			if (ui->IsMenuOpen(name)) {
+				open += std::format("{}{}", count++ ? "," : "", kKnownMenus[i]);
+			}
+		}
+		if (!logged) {
+			logged = true;
+			REX::INFO("step=menu_names registered={} not_registered={}", registered.empty() ? "none" : registered,
+				unknown.empty() ? "none" : unknown);
+		}
+		return std::format("{}[{}]", count, open);
+	}
+
+	// ControlMap's active input contexts in stored order (their ids)
+	std::string ReadContexts()
+	{
+		if (!CheckSingleton("ControlMap", kControlMapSingleton, kControlMapRtti, g_controlMapOk)) {
+			return "?";
+		}
+		ArrayHead list{};
+		if (!Peek(Singleton(kControlMapSingleton) + kContextsAt, list)) {
+			return "fault";
+		}
+		std::string out = std::format("{}[", list.size);
+		for (std::uint32_t i = 0; i < list.size && i < kMaxListed; ++i) {
+			std::uint8_t id = 0;
+			out += std::format("{}{}", i ? "," : "", Peek(list.data + 16ull * i, id) ? std::to_string(id) : "fault");
+		}
+		return out + "]";
+	}
+
+	// pause state and who holds input, on whichever thread calls it (a_main: the main thread, where menus= is read)
+	void Snapshot(std::string_view a_tag, bool a_main = false)
+	{
+		const auto n = ++g_snapshots;
+		const auto paused = ReadPaused();
+		const auto menus = a_main ? ReadMenus() : "-";
+		const auto contexts = ReadContexts();
+		REX::INFO("step=snapshot n={} tag={} paused={} menus={} contexts={} expected_open={}", n, a_tag, paused, menus,
+			contexts, g_expectOpen.load());
+	}
+
+	bool ReadPosition(std::array<float, 3>& a_xyz)
+	{
+		return CheckSingleton("PlayerCharacter", kPlayerSingleton, kPlayerRtti, g_playerOk) &&
+		       Peek(Singleton(kPlayerSingleton) + kPositionAt, a_xyz);
+	}
+
+	// ------------------------------------------------------------------------------------------- stage c: the channel
+	// our movie's ActionScript 3 root, checked once per movie: the pointer at +0x18 of the movie is a
+	// GFx::AS3::MovieRoot by RTTI, and its slots 0x30 and 0x32 are inside the image. The movie's own type is logged.
+	RE::Scaleform::GFx::ASMovieRootBase* RootOf(const void* a_menu)
+	{
+		const auto movie = reinterpret_cast<std::uintptr_t>(MovieOf(a_menu));
+		if (!movie || g_channelOff) {
+			return nullptr;
+		}
+		std::uintptr_t root = 0;
+		if (g_checkedMovie != MovieOf(a_menu)) {
+			ObjectType movieType;
+			ObjectType rootType;
+			std::uintptr_t vt = 0;
+			const bool movieKnown = TypeOf(movie, movieType);
+			if (!Peek(movie + kMovieRootAt, root) || !TypeOf(root, rootType) || rootType.descriptor != Address(kMovieRootRtti)) {
+				g_channelOff = true;
+				Refuse("channel", std::format("what=movie_root movie={} movie_type={} root={} root_type={}", Hex(movie),
+					movieKnown ? movieType.name : "unreadable", Hex(root), rootType.name.empty() ? "unreadable" : rootType.name));
+				return nullptr;
+			}
+			Peek(root, vt);
+			const auto* slot = reinterpret_cast<const std::uintptr_t*>(vt);
+			if (!InImage(vt, (kGetVariableSlot + 1) * 8) || !InImage(slot[kCreateFunctionSlot], 1) || !InImage(slot[kGetVariableSlot], 1)) {
+				g_channelOff = true;
+				Refuse("channel", std::format("what=root_slots root={} vtable={}", Hex(root), Hex(vt)));
+				return nullptr;
+			}
+			REX::INFO("step=movie_root movie={} movie_type={} root={} root_type={} root_offset={} create_function={} get_variable={}",
+				Hex(movie), movieKnown ? movieType.name : "unreadable", Hex(root), rootType.name, Hex(rootType.offset),
+				Hex(slot[kCreateFunctionSlot] - g_base), Hex(slot[kGetVariableSlot] - g_base));
+			g_checkedMovie = MovieOf(a_menu);
+		} else {
+			Peek(movie + kMovieRootAt, root);
+		}
+		return reinterpret_cast<RE::Scaleform::GFx::ASMovieRootBase*>(root);
+	}
+
+	int TypeCode(const RE::Scaleform::GFx::Value& a_value) { return static_cast<int>(a_value.GetType()); }
+
+	// the root's child of that instance name (getChildByName, an ActionScript 3 DisplayObjectContainer method)
+	bool ChildOf(RE::Scaleform::GFx::Value& a_root, const char* a_name, RE::Scaleform::GFx::Value& a_out)
+	{
+		const RE::Scaleform::GFx::Value name(a_name);
+		return a_root.Invoke("getChildByName", &a_out, &name, 1) && a_out.IsObject();
+	}
+
+	// ------------------------------------------------------------------------------------------- stage c: click to quest
+	// FAL-246, main thread only. The script VM: the GameVM singleton is a GameVM (RTTI, offset 0, once), the VM it holds a
+	// BSScript::Internal::VirtualMachine (RTTI at offset 0: IVirtualMachine is its first base), and its vtable's slots up
+	// to DispatchStaticCall's are inside the image. nullptr while there is none (logged) or after a refusal
+	RE::BSScript::IVirtualMachine* ScriptVm()
+	{
+		if (g_vmOff || !CheckSingleton("GameVM", kGameVmSingleton, kGameVmRtti, g_gameVmOk)) {
+			return nullptr;
+		}
+		std::uintptr_t vm = 0;
+		if (!Peek(Singleton(kGameVmSingleton) + kGameVmImplAt, vm) || !vm) {
+			REX::INFO("step=object name=VirtualMachine result=null");
+			return nullptr;
+		}
+		if (vm != g_checkedVm) {
+			ObjectType     type;
+			std::uintptr_t vt = 0;
+			const bool     known = TypeOf(vm, type) && Peek(vm, vt);
+			if (!known || type.descriptor != Address(kVmRtti) || type.offset != 0 ||
+				!InImage(vt, (kDispatchStaticCallSlot + 1) * 8)) {
+				g_vmOff = true;
+				Refuse("object", std::format("name=VirtualMachine object={} type={} offset={} vtable={} (no click reaches a script)",
+					Hex(vm), known ? type.name : "unreadable", Hex(type.offset), Hex(vt)));
+				return nullptr;
+			}
+			const auto* slot = reinterpret_cast<const std::uintptr_t*>(vt);
+			for (std::size_t i = 0; i <= kDispatchStaticCallSlot; ++i) {
+				if (!InImage(slot[i], 1)) {
+					g_vmOff = true;
+					Refuse("object", std::format("name=VirtualMachine vtable={} slot={} reason=outside_image", Hex(vt), Hex(i)));
+					return nullptr;
+				}
+			}
+			g_checkedVm = vm;
+			REX::INFO("step=object name=VirtualMachine object={} type={} dispatch_static_call={}", Hex(vm), type.name,
+				Hex(slot[kDispatchStaticCallSlot] - g_base));
+		}
+		return reinterpret_cast<RE::BSScript::IVirtualMachine*>(vm);
+	}
+
+	// after click n: the VM queues one call of the ClickCall function and runs it on its own schedule; that function's
+	// own log line says when it ran
+	void DispatchClick(std::uint32_t a_n)
+	{
+		auto* const vm = ScriptVm();
+		if (!vm) {
+			REX::INFO("step=dispatch n={} call={}.{} result=no_vm", a_n, g_clickScript, g_clickFunction);
+			return;
+		}
+		const RE::BSFixedString                                        script(g_clickScript.c_str());
+		const RE::BSFixedString                                        function(g_clickFunction.c_str());
+		const RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> noCallback{};
+		// no arguments: growing the array would call ScrapHeap::Allocate, REL::ID{ 0 } in libxse 9d090c4
+		const auto noArguments = [](RE::BSScrapArray<RE::BSScript::Variable>&) { return true; };
+		const bool queued = vm->DispatchStaticCall(script, function, noArguments, noCallback, 0);
+		REX::INFO("step=dispatch n={} call={}.{} queued={}", a_n, g_clickScript, g_clickFunction, queued ? 1 : 0);
+	}
+
+	// the button's click handler: Scaleform calls it from the movie. Static and never released by us: the movie holds
+	// its own references (Scaleform's count at +0x08) on top of ours, so the count never reaches zero
+	class ClickHandler final : public RE::Scaleform::GFx::FunctionHandler
+	{
+	public:
+		void Call(const Params& a_params) override
+		{
+			const auto n = ++g_clicks;
+			REX::INFO("step=click n={} args={} movie={}", n, a_params.argCount, Hex(reinterpret_cast<std::uintptr_t>(a_params.movie)));
+			if (!g_clickScript.empty()) {   // FAL-246: on to the script VM, from the main thread
+				g_task->AddTask([n]() { DispatchClick(n); });
+			}
+		}
+	};
+	ClickHandler g_clickHandler;
+
+	// once per movie, at kShow: our function as the button's "click" listener
+	void ChannelListen(const void* a_menu)
+	{
+		auto* const root = RootOf(a_menu);
+		const auto  movie = MovieOf(a_menu);
+		if (!root || g_listenedMovie == movie) {
+			return;
+		}
+		g_listenedMovie = movie;
+		RE::Scaleform::GFx::Value top;
+		RE::Scaleform::GFx::Value button;
+		RE::Scaleform::GFx::Value function;
+		const bool gotRoot = root->GetVariable(&top, "root") && top.IsObject();
+		const bool gotButton = gotRoot && ChildOf(top, kButtonName, button);
+		bool       added = false;
+		if (gotButton) {
+			root->CreateFunction(&function, &g_clickHandler);
+			if (!function.IsUndefined()) {
+				std::array<RE::Scaleform::GFx::Value, 2> args;
+				args[0] = "click";
+				args[1] = function;
+				added = button.Invoke("addEventListener", nullptr, args.data(), args.size());
+			}
+		}
+		REX::INFO("step=listen root={} button={} function_type={} added={} event=click", gotRoot ? 1 : 0, gotButton ? 1 : 0,
+			TypeCode(function), added ? 1 : 0);
+	}
+
+	// at kShow and every kUpdate: the player's position into the field, then read back
+	void ChannelWrite(const void* a_menu, std::uint32_t a_n)
+	{
+		auto* const root = RootOf(a_menu);
+		if (!root) {
+			return;
+		}
+		std::array<float, 3> xyz{};
+		const bool  havePosition = ReadPosition(xyz) && std::isfinite(xyz[0]) && std::isfinite(xyz[1]) && std::isfinite(xyz[2]);
+		const auto  clicks = g_clicks.load();
+		const auto  text = havePosition ? std::format("X {:.1f} Y {:.1f} Z {:.1f} CLICKS {}", xyz[0], xyz[1], xyz[2], clicks) :
+		                                  std::format("NO POSITION CLICKS {}", clicks);
+		RE::Scaleform::GFx::Value top;
+		RE::Scaleform::GFx::Value field;
+		RE::Scaleform::GFx::Value back;
+		const bool gotRoot = root->GetVariable(&top, "root") && top.IsObject();
+		const bool gotField = gotRoot && ChildOf(top, kFieldName, field);
+		const bool set = gotField && field.SetMember("text", RE::Scaleform::GFx::Value(text.c_str()));
+		const bool got = gotField && field.GetMember("text", &back) && back.IsString();
+		const std::string read = got ? back.GetString() : "";
+		if (a_n <= 20 || a_n % 20 == 0 || read != text) {
+			REX::INFO("step=field n={} root={} field={} set={} read_back={} match={} text=\"{}\" read=\"{}\"", a_n,
+				gotRoot ? 1 : 0, gotField ? 1 : 0, set ? 1 : 0, got ? 1 : 0, read == text ? "yes" : "no", text, read);
+		}
+	}
+
+	std::uint32_t FlagSetIndex(std::uint32_t a_n) { return g_flagSetCount ? (a_n - 1) % static_cast<std::uint32_t>(g_flagSetCount) : 0; }
+	std::uint32_t FlagSet(std::uint32_t a_n) { return g_flagSetCount ? g_flagSets[FlagSetIndex(a_n)] : 0; }
+
+	// at kShow, before the engine handles it: the constructor's flags | Flags | this open's FlagSets entry
+	void ApplyFlagSet(void* a_self, std::uint32_t a_show)
+	{
+		auto*      imenu = static_cast<RE::IMenu*>(a_self);
+		const auto had = imenu->flags;
+		const auto want = g_ctorFlags.load() | g_flags | FlagSet(a_show);
+		if (had != want) {
+			imenu->flags = want;
+			imenu->flagsUpdated = true;
+		}
+		REX::INFO("step=flags show={} set={} had={} now={}", a_show, FlagSetIndex(a_show), Hex(had), Hex(imenu->flags));
+	}
+
+	// ------------------------------------------------------------------------------------------- stage d: the page
+	// Up to PageCollect, everything runs on the main thread (SFSE's task, before each kShow and kUpdate): the reads,
+	// the two calls into the game (LookupByID, GetActorValue) and the text. PageWrite and the click handlers run on the
+	// menu's.
+
+	bool SameText(std::string_view a_left, std::string_view a_right)   // ASCII, either case
+	{
+		return a_left.size() == a_right.size() &&
+		       std::equal(a_left.begin(), a_left.end(), a_right.begin(), [](char a_l, char a_r) {
+				   return std::toupper(static_cast<unsigned char>(a_l)) == std::toupper(static_cast<unsigned char>(a_r));
+			   });
+	}
+
+	// a line as the page's font draws it: upper case, a character the font lacks as "?", at most kPageColumns
+	std::string PageText(std::string_view a_text)
+	{
+		std::string out;
+		for (const char c : a_text.substr(0, kPageColumns)) {
+			const auto up = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+			out += kPageChars.find(up) != std::string_view::npos ? up : '?';
+		}
+		return out;
+	}
+
+	// a page value that could not be read: "?", and its reason logged once per kind
+	std::string Unknown(std::string_view a_what, const std::string& a_why)
+	{
+		static std::set<std::string, std::less<>> noted;
+		if (noted.emplace(a_what).second) {
+			REX::INFO("step=page_unknown what={} {}", a_what, a_why);
+		}
+		return "?";
+	}
+
+	// the characters of a BSStringPool entry (libxse BSStringPool::Entry: 0x18 bytes, then the characters; an external
+	// entry, flag 0x02 at +0x14, points on at +0x08; the last one's length is at +0x08). An entry of 0 is "". False if
+	// a read faults or the chain is longer than four
+	bool ReadPoolString(std::uintptr_t a_entry, std::string& a_out)
+	{
+		a_out.clear();
+		for (int hop = 0; a_entry; ++hop) {
+			std::uint8_t flags = 0;
+			if (hop == 4 || !Peek(a_entry + 0x14, flags)) {
+				return false;
+			}
+			if (!(flags & 0x02)) {
+				break;
+			}
+			if (!Peek(a_entry + 0x08, a_entry)) {
+				return false;
+			}
+		}
+		if (!a_entry) {
+			return true;
+		}
+		std::uint32_t          length = 0;
+		std::array<char, 128>  text{};
+		if (!Peek(a_entry + 0x08, length)) {
+			return false;
+		}
+		const auto n = std::min<std::size_t>(length, text.size());
+		if (n && !Peek(a_entry + 0x18, text.data(), n)) {
+			return false;
+		}
+		a_out.assign(text.data(), std::find(text.data(), text.data() + n, '\0'));
+		return true;
+	}
+
+	static_assert(sizeof(RE::BSFixedString) == sizeof(std::uintptr_t));   // the pool entry pointer alone
+
+	// the string reader on a string of ours before any of the game's: our menu name, as the engine's pool holds it
+	bool CheckStrings()
+	{
+		std::string read;
+		const auto  entry = *reinterpret_cast<const std::uintptr_t*>(&MenuName());
+		if (!ReadPoolString(entry, read) || !SameText(read, kMenuName)) {
+			return Refuse("page", std::format("what=strings entry={} read=\"{}\" (no names, no form lists)", Hex(entry),
+				PageText(read)));
+		}
+		REX::INFO("step=page_strings self_test=ok read=\"{}\"", read);
+		return true;
+	}
+
+	// the object is a complete a_tail (".?AV" or ".?AU" + tail) by its RTTI
+	bool IsType(std::uintptr_t a_object, std::string_view a_tail, ObjectType& a_type)
+	{
+		return a_object && TypeOf(a_object, a_type) && NameIs(a_type.name, a_tail) && a_type.offset == 0;
+	}
+
+	// the offset of the base class a_tail inside the complete type, from its RTTI class hierarchy descriptor (+0x08
+	// the count, +0x0C the base class array; each base class descriptor: +0x00 its type descriptor, +0x08 mdisp, +0x0C
+	// pdisp). None if the base is absent, virtual (pdisp not -1) or listed more than once
+	std::optional<std::uint32_t> BaseOffset(const ObjectType& a_type, std::string_view a_tail)
+	{
+		const auto hierarchy = a_type.hierarchy;
+		if (!InImage(hierarchy, 0x10)) {
+			return std::nullopt;
+		}
+		const auto count = *reinterpret_cast<const std::uint32_t*>(hierarchy + 0x08);
+		const auto array = g_base + *reinterpret_cast<const std::uint32_t*>(hierarchy + 0x0C);
+		if (count == 0 || count > 512 || !InImage(array, 4ull * count)) {
+			return std::nullopt;
+		}
+		std::optional<std::uint32_t> found;
+		std::size_t                  matches = 0;
+		for (std::uint32_t i = 0; i < count; ++i) {
+			const auto base = g_base + reinterpret_cast<const std::uint32_t*>(array)[i];
+			if (!InImage(base, 0x1C)) {
+				return std::nullopt;
+			}
+			if (!NameIs(TypeNameAt(g_base + *reinterpret_cast<const std::uint32_t*>(base)), a_tail)) {
+				continue;
+			}
+			const auto mdisp = *reinterpret_cast<const std::int32_t*>(base + 0x08);
+			const auto pdisp = *reinterpret_cast<const std::int32_t*>(base + 0x0C);
+			if (pdisp != -1 || mdisp < 0) {
+				return std::nullopt;
+			}
+			found = static_cast<std::uint32_t>(mdisp);
+			++matches;
+		}
+		return matches == 1 ? found : std::nullopt;
+	}
+
+	// the subobject at a_offset is a base of the object's complete type: its vtable's locator names that same
+	// complete type at that offset
+	bool CheckSubobject(std::uintptr_t a_object, const ObjectType& a_type, std::uint32_t a_offset)
+	{
+		ObjectType sub;
+		return TypeOf(a_object + a_offset, sub) && sub.descriptor == a_type.descriptor && sub.offset == a_offset;
+	}
+
+	// the target of an adjustor thunk, rcx moved down by a_adjust (sub rcx, imm; add rcx, -imm; or lea rcx,
+	// [rcx-imm]) then jmp rel32: what MSVC puts in a secondary base's vtable for a virtual the complete class
+	// overrides. 0 if the code is not one
+	std::uintptr_t ThunkTarget(std::uintptr_t a_code, std::uint32_t a_adjust)
+	{
+		if (!InImage(a_code, 12)) {
+			return 0;
+		}
+		const auto* code = reinterpret_cast<const std::uint8_t*>(a_code);
+		const auto  imm8 = static_cast<std::int8_t>(code[3]);
+		std::int32_t imm32;
+		std::memcpy(&imm32, code + 3, sizeof imm32);
+		const auto  adjust = static_cast<std::int64_t>(a_adjust);
+		std::size_t at = 0;
+		if (code[0] != 0x48) {
+			return 0;
+		} else if ((code[1] == 0x83 && code[2] == 0xE9 && imm8 == adjust) || (code[1] == 0x83 && code[2] == 0xC1 && imm8 == -adjust) ||
+				   (code[1] == 0x8D && code[2] == 0x49 && imm8 == -adjust)) {
+			at = 4;
+		} else if ((code[1] == 0x81 && code[2] == 0xE9 && imm32 == adjust) || (code[1] == 0x81 && code[2] == 0xC1 && imm32 == -adjust) ||
+				   (code[1] == 0x8D && code[2] == 0x89 && imm32 == -adjust)) {
+			at = 7;
+		} else {
+			return 0;
+		}
+		if (code[at] != 0xE9) {
+			return 0;
+		}
+		std::int32_t rel;
+		std::memcpy(&rel, code + at + 1, sizeof rel);
+		return a_code + at + 5 + static_cast<std::intptr_t>(rel);
+	}
+
+	struct PageForms
+	{
+		bool           scanned = false;
+		bool           strings = false;    // ReadPoolString read our menu name back
+		bool           avifs = false;      // the actor values were looked up: a name not found is not installed
+		bool           globals = false;    // the globals were looked up
+		std::uintptr_t health = 0;         // ActorValueInfo forms
+		std::uintptr_t carryWeight = 0;
+		std::uintptr_t experience = 0;
+		std::uintptr_t rads = 0;
+		std::uintptr_t gameHour = 0;       // TESGlobal forms
+		std::uintptr_t gameDaysPassed = 0;
+		std::size_t    globalValueAt = 0;  // the TESGlobal value's offset, once FindGlobalValue found it (0: not yet)
+		bool           globalBytes = false;  // the globals' bytes were logged
+		std::uint32_t  ownerOffset = 0;    // ActorValueOwner inside PlayerCharacter
+		std::uintptr_t ownerVtable = 0;
+		std::uintptr_t getActorValue = 0;  // its checked GetActorValue slot
+	};
+	PageForms g_forms;   // main thread only
+
+	struct Want
+	{
+		std::string_view editorId;
+		std::uintptr_t*  form;
+	};
+
+	// the data handler (its id is SFSE's own address, CheckPageIds), a TESDataHandler by its RTTI; only its form-list
+	// memory is logged
+	std::uintptr_t DataHandler()
+	{
+		const auto handler = Singleton(kDataHandlerSingleton);
+		ObjectType type;
+		if (!IsType(handler, "TESDataHandler@@", type)) {
+			Refuse("object", std::format("name=TESDataHandler object={} type={} offset={} (the page's form lists stay unread)",
+				Hex(handler), type.name.empty() ? "unreadable" : type.name, Hex(type.offset)));
+			return 0;
+		}
+		REX::INFO("step=object name=TESDataHandler object={} type={}", Hex(handler), type.name);
+		return handler;
+	}
+
+	// the data handler's form lists as raw memory, once: at 5a4e6016 the size read at +0x70 + type x 0x18 + 0x08 was 0
+	// for AVIF and GLOB, so the next run logs the three qwords of every entry that is not all zero (the first 48) and
+	// of those two types, to settle the layout. Reads only, guarded
+	void LogFormArrays(std::uintptr_t a_handler)
+	{
+		std::array<std::uint64_t, 3> avif{};
+		std::array<std::uint64_t, 3> glob{};
+		std::string                  nonzero;
+		std::size_t                  count = 0;
+		for (std::size_t i = 0; i < kFormArrayEntries; ++i) {
+			std::array<std::uint64_t, 3> q{};
+			if (!Peek(a_handler + kFormArraysAt + i * kFormArrayBytes, q)) {
+				nonzero += std::format(" {:#x}:fault", i);
+				break;
+			}
+			if (i == kAvifType) {
+				avif = q;
+			}
+			if (i == kGlobType) {
+				glob = q;
+			}
+			if ((q[0] || q[1] || q[2]) && count++ < 48) {
+				nonzero += std::format(" {:#x}:{:x}/{:x}/{:x}", i, q[0], q[1], q[2]);
+			}
+		}
+		REX::INFO("step=page_form_arrays avif={:x}/{:x}/{:x} glob={:x}/{:x}/{:x} nonzero_count={}{}", avif[0], avif[1],
+			avif[2], glob[0], glob[1], glob[2], count, nonzero);
+	}
+
+	using LookupById_t = void* (*)(std::uint32_t);
+
+	// a form by its form id, through the engine's own lookup (libxse TESForm::LookupByID and SFSE 0.2.21
+	// GetFormByNumericID: the same address, CheckPageIds, and the same TESForm* (u32) declaration); main thread only
+	std::uintptr_t FormById(std::uint32_t a_formId)
+	{
+		return reinterpret_cast<std::uintptr_t>(reinterpret_cast<LookupById_t>(Address(kLookupById))(a_formId));
+	}
+
+	// the editor ID of a form of type a_type by its RTTI (a BSFixedString at a_editorIdAt), or "" if the form is not
+	// that type or its name does not read
+	std::string EditorIdOf(std::uintptr_t a_form, std::string_view a_type, std::size_t a_editorIdAt)
+	{
+		ObjectType     type;
+		std::uintptr_t entry = 0;
+		std::string    id;
+		if (!IsType(a_form, a_type, type) || !Peek(a_form + a_editorIdAt, entry) || !ReadPoolString(entry, id)) {
+			return {};
+		}
+		return id;
+	}
+
+	// a Want gets the form if its editor ID is the Want's name and it has none yet
+	template <std::size_t N>
+	void Match(std::array<Want, N>& a_want, std::uintptr_t a_form, std::string_view a_editorId)
+	{
+		for (auto& want : a_want) {
+			if (!*want.form && SameText(a_editorId, want.editorId)) {
+				*want.form = a_form;
+			}
+		}
+	}
+
+	// a form by its fixed form id, accepted by its RTTI type alone (at 3eb30d71 the editor-ID check passed Health 0x2D4
+	// and not 0x2C9, 0x2DC, 0x38 or 0x39): what the lookup gave is logged in full, its type name, the four bytes at
+	// +0x2C (the form type byte among them) and the editor ID as read
+	std::string AcceptById(std::uint32_t a_id, std::string_view a_name, std::string_view a_type, std::size_t a_editorIdAt,
+		std::uintptr_t& a_out)
+	{
+		const auto     form = FormById(a_id);
+		ObjectType     type;
+		std::uintptr_t entry = 0;
+		std::string    name;
+		std::uint32_t  bytes = 0;
+		if (IsType(form, a_type, type)) {
+			a_out = form;
+			if (Peek(form + a_editorIdAt, entry)) {
+				ReadPoolString(entry, name);
+			}
+		}
+		if (form) {
+			Peek(form + 0x2C, bytes);
+		}
+		return std::format("{}:{:x}:form={}:type={}:bytes2c={:08x}:name={}:{}", a_name, a_id, form ? 1 : 0,
+			type.name.empty() ? "unreadable" : type.name, bytes, name.empty() ? "-" : name, a_out ? "used" : "refused");
+	}
+
+	// the page's forms by form id: the globals and actor values by their fixed ids and RTTI type (AcceptById); every
+	// ActorValueInfo among Starfield.esm's ids 0x001 to 0xFFF listed with its editor ID as read, once; FO4SF_Rads by its
+	// editor ID at local id 0x800 of each full plugin (01 to FD) and each light plugin (FE000 to FEFFF)
+	void FindForms()
+	{
+		std::string known = AcceptById(kGameHourId, "GameHour", "TESGlobal@@", kGlobalEditorIdAt, g_forms.gameHour);
+		known += " " + AcceptById(kGameDaysPassedId, "GameDaysPassed", "TESGlobal@@", kGlobalEditorIdAt, g_forms.gameDaysPassed);
+		known += " " + AcceptById(kHealthId, "Health", "ActorValueInfo@@", kAvifEditorIdAt, g_forms.health);
+		known += " " + AcceptById(kCarryWeightId, "CarryWeight", "ActorValueInfo@@", kAvifEditorIdAt, g_forms.carryWeight);
+		known += " " + AcceptById(kExperienceId, "Experience", "ActorValueInfo@@", kAvifEditorIdAt, g_forms.experience);
+		g_forms.globals = true;
+		std::uint32_t typed = 0;
+		std::string   avifs;
+		for (std::uint32_t id = 1; id < kCoreFormIds; ++id) {
+			const auto form = FormById(id);
+			ObjectType type;
+			if (!form || !IsType(form, "ActorValueInfo@@", type)) {
+				continue;
+			}
+			++typed;
+			const auto name = EditorIdOf(form, "ActorValueInfo@@", kAvifEditorIdAt);
+			if (avifs.size() < 2000) {
+				avifs += std::format("{}{:x}={}", avifs.empty() ? "" : ",", id, name.empty() ? "-" : name);
+			}
+		}
+		std::array<Want, 1> rads{ { { "FO4SF_Rads", &g_forms.rads } } };
+		std::uint32_t       radsId = 0;
+		for (std::uint32_t i = 0; i < 0xFD + 0x1000 && !g_forms.rads; ++i) {
+			const auto id = i < 0xFD ? ((i + 1) << 24) | kRadsLocalId : 0xFE000000u | ((i - 0xFD) << 12) | kRadsLocalId;
+			const auto form = FormById(id);
+			if (form) {
+				Match(rads, form, EditorIdOf(form, "ActorValueInfo@@", kAvifEditorIdAt));
+				radsId = g_forms.rads ? id : 0;
+			}
+		}
+		g_forms.avifs = typed > 0;
+		REX::INFO("step=page_forms lookup=by_form_id known={} avif_typed={} rads={} avif_ids={}", known, typed,
+			g_forms.rads ? std::format("{:08X}", radsId) : "not_installed", avifs.empty() ? "none" : avifs);
+	}
+
+	// the player's ActorValueOwner and its GetActorValue slot: the base's offset from PlayerCharacter's RTTI
+	// hierarchy, its vtable's locator naming PlayerCharacter at that offset, and slot 0x00 the adjustor thunk to the
+	// player's own slot 0x00, its destructor. Then GetActorValue is slot 0x01, libxse's declaration (SFSE 0.2.21
+	// declares no destructor and would put it at 0x00). Anything else: no actor values on the page
+	bool CheckActorValues()
+	{
+		ObjectType type;
+		const auto player = Singleton(kPlayerSingleton);
+		if (!CheckSingleton("PlayerCharacter", kPlayerSingleton, kPlayerRtti, g_playerOk) || !TypeOf(player, type)) {
+			return false;
+		}
+		const auto     at = BaseOffset(type, "ActorValueOwner@@");
+		std::uintptr_t primary = 0;
+		std::uintptr_t owner = 0;
+		if (!at || !CheckSubobject(player, type, *at) || !Peek(player, primary) || !Peek(player + *at, owner) ||
+			!InImage(primary, 8) || !InImage(owner, 2 * 8)) {
+			return Refuse("page", std::format("what=actor_value_owner offset={} (no actor values)", at ? Hex(*at) : "none"));
+		}
+		const auto* slots = reinterpret_cast<const std::uintptr_t*>(owner);
+		const auto  destructor = *reinterpret_cast<const std::uintptr_t*>(primary);
+		const auto  target0 = ThunkTarget(slots[0], *at);
+		const auto  target1 = ThunkTarget(slots[1], *at);
+		const auto  rva = [](std::uintptr_t a_addr) { return InImage(a_addr, 1) ? Hex(a_addr - g_base) : Hex(a_addr); };
+		if (target0 != destructor || !InImage(slots[1], 1)) {
+			return Refuse("page", std::format("what=get_actor_value offset={} slot0={} target0={} slot1={} target1={} "
+				"destructor={} (no actor values)", Hex(*at), rva(slots[0]), rva(target0), rva(slots[1]), rva(target1),
+				rva(destructor)));
+		}
+		g_forms.ownerOffset = *at;
+		g_forms.ownerVtable = owner;
+		g_forms.getActorValue = slots[1];
+		REX::INFO("step=page_actor_values owner_offset={} destructor_slot=0x00 get_actor_value_slot=0x01 slot={} target={}",
+			Hex(*at), rva(slots[1]), rva(target1));
+		return true;
+	}
+
+	// once a player exists: the string reader, the actor-value slot, the form-list layout and the forms, each logged once
+	void PageScan()
+	{
+		if (g_forms.scanned || !Singleton(kPlayerSingleton)) {
+			return;
+		}
+		g_forms.scanned = true;
+		g_forms.strings = CheckStrings();
+		CheckActorValues();
+		if (const auto handler = DataHandler()) {
+			LogFormArrays(handler);
+		}
+		if (g_forms.strings) {
+			FindForms();
+		}
+	}
+
+	using GetActorValue_t = float (*)(void*, const void*);
+
+	// the player's value of an actor value, as a whole number: the engine's GetActorValue (the slot CheckActorValues
+	// checked, called only while the player's ActorValueOwner vtable is still the checked one), or "?"
+	std::string ActorValueText(std::string_view a_what, std::uintptr_t a_info)
+	{
+		if (!a_info) {
+			return Unknown(a_what, std::format("reason={}", g_forms.avifs ? "no_such_actor_value" : "actor_values_unread"));
+		}
+		const auto     player = Singleton(kPlayerSingleton);
+		std::uintptr_t vtable = 0;
+		if (!g_forms.getActorValue || !player || !Peek(player + g_forms.ownerOffset, vtable) || vtable != g_forms.ownerVtable) {
+			return Unknown(a_what, "reason=no_get_actor_value");
+		}
+		const auto value = reinterpret_cast<GetActorValue_t>(g_forms.getActorValue)(
+			reinterpret_cast<void*>(player + g_forms.ownerOffset), reinterpret_cast<const void*>(a_info));
+		return std::isfinite(value) ? std::format("{:.0f}", value) : Unknown(a_what, "reason=not_finite");
+	}
+
+	// the player's level: the base TESNPC's TESActorBaseData (its offset from the RTTI hierarchy), ACTOR_BASE_DATA::level
+	std::string LevelText()
+	{
+		const auto     player = Singleton(kPlayerSingleton);
+		std::uintptr_t base = 0;
+		ObjectType     type;
+		std::uint16_t  level = 0;
+		if (g_playerOk != 1 || !Peek(player + kBaseObjectAt, base) || !IsType(base, "TESNPC@@", type)) {
+			return Unknown("level", std::format("reason=base base={} type={}", Hex(base), type.name.empty() ? "unreadable" : type.name));
+		}
+		const auto at = BaseOffset(type, "TESActorBaseData@@");
+		if (!at || !CheckSubobject(base, type, *at) || !Peek(base + *at + kLevelAt, level)) {
+			return Unknown("level", std::format("reason=actor_base_data offset={}", at ? Hex(*at) : "none"));
+		}
+		return std::to_string(level);
+	}
+
+	// a form's name, read through its TESFullName base (offset from the RTTI hierarchy, checked like the player's), and
+	// its form id: "NAME (0001ABCD)", "NO NAME (...)" when it has none
+	std::string NameText(std::string_view a_what, std::uintptr_t a_form, const ObjectType& a_type)
+	{
+		const auto     at = BaseOffset(a_type, "TESFullName@@");
+		std::uintptr_t entry = 0;
+		std::uint32_t  formId = 0;
+		std::string    name;
+		Peek(a_form + kFormIdAt, formId);
+		if (!at || !CheckSubobject(a_form, a_type, *at) || !Peek(a_form + *at + kFullNameAt, entry) || !ReadPoolString(entry, name)) {
+			return std::format("{} ({:08X})", Unknown(a_what, std::format("reason=full_name offset={}", at ? Hex(*at) : "none")), formId);
+		}
+		return std::format("{} ({:08X})", name.empty() ? "NO NAME" : name, formId);
+	}
+
+	// the player's parent cell and its worldspace ("NONE (INTERIOR)" when it has none)
+	std::pair<std::string, std::string> PlaceText()
+	{
+		const auto     player = Singleton(kPlayerSingleton);
+		std::uintptr_t cell = 0;
+		std::uintptr_t world = 0;
+		ObjectType     cellType;
+		ObjectType     worldType;
+		if (g_playerOk != 1 || !Peek(player + kParentCellAt, cell) || !IsType(cell, "TESObjectCELL@@", cellType)) {
+			return { Unknown("cell", std::format("reason=cell cell={} type={}", Hex(cell),
+						 cellType.name.empty() ? "unreadable" : cellType.name)),
+				"?" };
+		}
+		auto cellText = NameText("cell_name", cell, cellType);
+		if (!Peek(cell + kCellWorldAt, world)) {
+			return { cellText, Unknown("world", "reason=fault") };
+		}
+		if (!world) {
+			return { cellText, "NONE (INTERIOR)" };
+		}
+		if (!IsType(world, "TESWorldSpace@@", worldType)) {
+			return { cellText, Unknown("world", std::format("reason=type world={} type={}", Hex(world),
+								   worldType.name.empty() ? "unreadable" : worldType.name)) };
+		}
+		return { cellText, NameText("world_name", world, worldType) };
+	}
+
+	// GameHour and GameDaysPassed read as floats at one offset: both in range (an hour in [0, 24), a day count above 0
+	// and below kMaxDays) and the hour within kGlobalMinutes of the day count's fraction, else false
+	bool ReadTime(std::size_t a_at, float& a_hour, float& a_days)
+	{
+		if (!a_at || !g_forms.gameHour || !g_forms.gameDaysPassed || !Peek(g_forms.gameHour + a_at, a_hour) ||
+			!Peek(g_forms.gameDaysPassed + a_at, a_days) || !std::isfinite(a_hour) || !std::isfinite(a_days) ||
+			a_hour < 0.0f || a_hour >= 24.0f || a_days <= 0.0f || a_days >= kMaxDays) {
+			return false;
+		}
+		const auto apart = std::fabs(std::fmod(a_days, 1.0f) * 24.0f - a_hour);
+		return std::min(apart, 24.0f - apart) * 60.0f <= kGlobalMinutes;
+	}
+
+	// the 32 bytes of a TESGlobal from kGlobalBytesAt, as hex and as eight floats
+	std::string GlobalBytes(std::uintptr_t a_form)
+	{
+		std::array<std::uint8_t, kGlobalBytes> bytes{};
+		if (!a_form || !Peek(a_form + kGlobalBytesAt, bytes.data(), bytes.size())) {
+			return "unreadable";
+		}
+		std::string hex;
+		std::string floats;
+		for (std::size_t i = 0; i < bytes.size(); i += 4) {
+			float value = 0.0f;
+			std::memcpy(&value, bytes.data() + i, sizeof(value));
+			hex += std::format("{}{:02x}{:02x}{:02x}{:02x}", i ? "," : "", bytes[i], bytes[i + 1], bytes[i + 2],
+				bytes[i + 3]);
+			floats += std::format("{}{:.4f}", i ? "," : "", value);
+		}
+		return std::format("hex={} floats={}", hex, floats);
+	}
+
+	// the TESGlobal value's offset, not taken from a header: the first 4-byte slot of the logged bytes at which
+	// ReadTime accepts both globals. Tried at each collect until found; both globals' bytes are logged at the first try
+	void FindGlobalValue()
+	{
+		if (g_forms.globalValueAt || !g_forms.gameHour || !g_forms.gameDaysPassed) {
+			return;
+		}
+		if (!g_forms.globalBytes) {
+			g_forms.globalBytes = true;
+			REX::INFO("step=page_globals from={} game_hour {} game_days_passed {}", Hex(kGlobalBytesAt),
+				GlobalBytes(g_forms.gameHour), GlobalBytes(g_forms.gameDaysPassed));
+		}
+		for (std::size_t at = kGlobalBytesAt; at < kGlobalBytesAt + kGlobalBytes; at += 4) {
+			float hour = 0.0f;
+			float days = 0.0f;
+			if (ReadTime(at, hour, days)) {
+				g_forms.globalValueAt = at;
+				REX::INFO("step=page_globals value_at={} game_hour={:.4f} game_days_passed={:.4f}", Hex(at), hour,
+					days);
+				return;
+			}
+		}
+	}
+
+	// the game time from the GameHour and GameDaysPassed globals, at the offset FindGlobalValue found: "08:23   DAY 1"
+	std::string TimeText()
+	{
+		float hour = 0.0f;
+		float days = 0.0f;
+		if (!ReadTime(g_forms.globalValueAt, hour, days)) {
+			const auto reason = !g_forms.globals        ? "globals_unread" :
+			                    !g_forms.globalValueAt ? "no_value_offset" :
+			                                             "out_of_range";
+			return Unknown("time", std::format("reason={}", reason));
+		}
+		const auto minutes = static_cast<int>(hour * 60.0f);
+		return std::format("{:02}:{:02}   DAY {}", minutes / 60 % 24, minutes % 60, static_cast<long long>(days) + 1);
+	}
+
+	// both tabs' text, on the main thread before each kShow and kUpdate; the menu's thread copies one tab of it
+	void PageCollect()
+	{
+		PageScan();
+		FindGlobalValue();
+		const auto [cell, world] = PlaceText();
+		const auto rads = g_forms.rads ? ActorValueText("rads", g_forms.rads) :
+		                  g_forms.avifs ? std::string("NOT INSTALLED") :
+		                                  Unknown("rads", "reason=actor_values_unread");
+		std::array<float, 3> xyz{};
+		float                hour = 0.0f;
+		float                days = 0.0f;
+		const bool           position = ReadPosition(xyz) && std::isfinite(xyz[0]) && std::isfinite(xyz[1]) && std::isfinite(xyz[2]);
+		const bool           haveDays = ReadTime(g_forms.globalValueAt, hour, days);
+		const auto           shows = g_shows.load();
+		std::array<std::array<std::string, kPageLines + 1>, 2> text{ {
+			{ "TAB 1 OF 2: STATUS",
+				std::format("HEALTH {}", ActorValueText("health", g_forms.health)),
+				std::format("LEVEL {}   XP {}", LevelText(), ActorValueText("experience", g_forms.experience)),
+				std::format("CARRY WEIGHT MAX {}", ActorValueText("carry_weight", g_forms.carryWeight)),
+				std::format("RADS {}", rads),
+				std::format("CELL {}", cell),
+				std::format("WORLD {}", world),
+				std::format("TIME {}", TimeText()) },
+			{ "TAB 2 OF 2: DATA",
+				position ? std::format("POSITION X {:.1f} Y {:.1f} Z {:.1f}", xyz[0], xyz[1], xyz[2]) : "POSITION ?",
+				std::format("UPDATES {}   (TWO A SECOND)", g_updates.load()),
+				std::format("NEXT TAB CLICKS {}   CLOSE CLICKS {}", g_tabClicks.load(), g_closeClicks.load()),
+				std::format("OPENS {}   FLAGS {}", shows, Hex(FlagSet(shows ? shows : 1))),
+				std::format("GAME PAUSED {}", ReadPaused()),
+				std::format("MENUS {}", ReadMenus()),
+				haveDays ? std::format("DAYS PASSED {:.4f}", days) : "DAYS PASSED ?" },
+		} };
+		for (auto& tab : text) {
+			for (auto& line : tab) {
+				line = PageText(line);
+			}
+		}
+		std::scoped_lock lock(g_pageLock);
+		g_pageText = std::move(text);
+	}
+
+	// the two buttons' click handlers, called by Scaleform on the menu's thread (static, never released, as the
+	// channel's): they only count and raise a flag; the key thread acts on it through the main thread
+	class TabHandler final : public RE::Scaleform::GFx::FunctionHandler
+	{
+	public:
+		void Call(const Params& a_params) override
+		{
+			const auto n = ++g_tabClicks;
+			const auto tab = (g_tab.fetch_add(1) + 1) % 2;
+			g_refreshNow = true;
+			REX::INFO("step=click button=tab n={} args={} tab={}", n, a_params.argCount, tab);
+		}
+	};
+	TabHandler g_tabHandler;
+
+	class CloseHandler final : public RE::Scaleform::GFx::FunctionHandler
+	{
+	public:
+		void Call(const Params& a_params) override
+		{
+			const auto n = ++g_closeClicks;
+			g_closeNow = true;
+			REX::INFO("step=click button=close n={} args={}", n, a_params.argCount);
+		}
+	};
+	CloseHandler g_closeHandler;
+
+	// once per movie, at kShow: our two functions as the buttons' "click" listeners
+	void PageListen(const void* a_menu)
+	{
+		auto* const root = RootOf(a_menu);
+		const auto  movie = MovieOf(a_menu);
+		if (!root || g_listenedMovie == movie) {
+			return;
+		}
+		g_listenedMovie = movie;
+		RE::Scaleform::GFx::Value top;
+		const bool                gotRoot = root->GetVariable(&top, "root") && top.IsObject();
+		const std::array<std::pair<const char*, RE::Scaleform::GFx::FunctionHandler*>, 2> buttons{ {
+			{ kTabButtonName, &g_tabHandler }, { kCloseButtonName, &g_closeHandler } } };
+		for (const auto& [name, handler] : buttons) {
+			RE::Scaleform::GFx::Value button;
+			RE::Scaleform::GFx::Value function;
+			const bool                gotButton = gotRoot && ChildOf(top, name, button);
+			bool                      added = false;
+			if (gotButton) {
+				root->CreateFunction(&function, handler);
+				if (!function.IsUndefined()) {
+					std::array<RE::Scaleform::GFx::Value, 2> args;
+					args[0] = "click";
+					args[1] = function;
+					added = button.Invoke("addEventListener", nullptr, args.data(), args.size());
+				}
+			}
+			REX::INFO("step=listen name={} root={} button={} function_type={} added={} event=click", name, gotRoot ? 1 : 0,
+				gotButton ? 1 : 0, TypeCode(function), added ? 1 : 0);
+		}
+	}
+
+	// at kShow and every kUpdate, on the menu's thread: the shown tab's text into the tab line and the seven lines,
+	// each read back. Logged for n = 1 to 20, then every 20th, and on the first 20 that do not read back
+	void PageWrite(const void* a_menu, std::uint32_t a_update)
+	{
+		auto* const root = RootOf(a_menu);
+		if (!root) {
+			return;
+		}
+		static std::atomic<std::uint32_t>        mismatches{ 0 };
+		const auto                               tab = g_tab.load() % 2;
+		std::array<std::string, kPageLines + 1> text;
+		{
+			std::scoped_lock lock(g_pageLock);
+			text = g_pageText[tab];
+		}
+		RE::Scaleform::GFx::Value top;
+		const bool                gotRoot = root->GetVariable(&top, "root") && top.IsObject();
+		std::size_t               found = 0;
+		std::size_t               set = 0;
+		std::size_t               match = 0;
+		for (std::size_t i = 0; gotRoot && i < text.size(); ++i) {
+			const auto                name = i == 0 ? std::string(kTabFieldName) : std::format("{}{}", kLineFieldName, i - 1);
+			RE::Scaleform::GFx::Value field;
+			RE::Scaleform::GFx::Value back;
+			if (!ChildOf(top, name.c_str(), field)) {
+				continue;
+			}
+			++found;
+			set += field.SetMember("text", RE::Scaleform::GFx::Value(text[i].c_str())) ? 1 : 0;
+			match += field.GetMember("text", &back) && back.IsString() && text[i] == back.GetString() ? 1 : 0;
+		}
+		const auto n = ++g_pageWrites;
+		if (n <= 20 || n % 20 == 0 || (match != text.size() && mismatches++ < 20)) {
+			std::string all;
+			for (const auto& line : text) {
+				all += std::format("{}{}", all.empty() ? "" : " | ", line);
+			}
+			REX::INFO("step=page n={} update={} tab={} root={} fields={}/{} set={} match={} text=\"{}\"", n, a_update, tab,
+				gotRoot ? 1 : 0, found, text.size(), set, match, all);
+		}
+	}
+
+	// ------------------------------------------------------------------------------------------- the menu's slots
+	void* MenuDestroy(void* a_self, std::uint32_t a_flags)
+	{
+		REX::INFO("step=destroy menu={} flags={}", Hex(reinterpret_cast<std::uintptr_t>(a_self)), a_flags);
+		if (const auto movie = MovieOf(a_self)) {   // stage c: a later movie at the same address is checked again
+			if (g_listenedMovie == movie) {
+				g_listenedMovie = nullptr;
+			}
+			if (g_checkedMovie == movie) {
+				g_checkedMovie = nullptr;
+			}
+		}
+		g_engineDtor(a_self, a_flags & ~1u);   // the engine's IMenu destructor, without its delete: the memory is ours
+		if (a_flags & 1) {
+			std::free(a_self);
+		}
+		REX::INFO("step=destroyed menu={}", Hex(reinterpret_cast<std::uintptr_t>(a_self)));
+		return a_self;
+	}
+
+	const char* MenuGetName(const void*) { return kMenuName; }
+
+	// "" binds no menu object in the movie: our movie has no code (a file path here is read as a clip path)
+	const char* MenuGetRootPath(const void*) { return ""; }
+
+	std::int32_t MenuGetViewScaleMode(void*) { return 1; }   // Scaleform ShowAll: the whole stage, aspect kept
+
+	bool MenuLoadMovie(void* a_self, bool a_dispatcher, bool a_arg2)
+	{
+		const auto menu = Hex(reinterpret_cast<std::uintptr_t>(a_self));
+		if (g_stage == 1) {
+			REX::INFO("step=load_movie menu={} dispatcher={} arg2={} stage=a result=skipped", menu, a_dispatcher, a_arg2);
+			return true;
+		}
+		if (MovieOf(a_self)) {
+			REX::INFO("step=load_movie menu={} dispatcher={} arg2={} stage=b result=already_loaded", menu, a_dispatcher, a_arg2);
+			return true;
+		}
+		REX::INFO("step=load_movie menu={} dispatcher={} arg2={} stage=b calling", menu, a_dispatcher, a_arg2);
+		const bool loaded = g_engineLoadMovie(a_self, false, a_arg2);
+		REX::INFO("step=load_movie menu={} stage=b result={} movie={}", menu, loaded ? 1 : 0,
+			Hex(reinterpret_cast<std::uintptr_t>(MovieOf(a_self))));
+		return loaded;
+	}
+
+	RE::UI_MESSAGE_RESULT MenuProcessMessage(void* a_self, RE::UIMessageData& a_message)
+	{
+		const auto type = a_message.type;
+		if (g_stage >= 3 && type == RE::UI_MESSAGE_TYPE::kShow) {
+			ApplyFlagSet(a_self, ++g_shows);
+		}
+		if (g_stage >= 2 && type == RE::UI_MESSAGE_TYPE::kShow && !MovieOf(a_self)) {
+			REX::INFO("step=load_movie menu={} caller=plugin before=show", Hex(reinterpret_cast<std::uintptr_t>(a_self)));
+			MenuLoadMovie(a_self, false, false);
+		}
+		const auto result = g_stage == 1 && type == RE::UI_MESSAGE_TYPE::kShow ?
+		                        RE::UI_MESSAGE_RESULT::kHandled :
+		                        g_engineProcessMessage(a_self, a_message);
+		const bool showOrHide = type == RE::UI_MESSAGE_TYPE::kShow || type == RE::UI_MESSAGE_TYPE::kHide;
+		if (showOrHide || g_otherMessages.fetch_add(1) < 20) {
+			const auto name = type == RE::UI_MESSAGE_TYPE::kShow ? "show"sv :
+			                  type == RE::UI_MESSAGE_TYPE::kHide ? "hide"sv :
+			                  type == RE::UI_MESSAGE_TYPE::kUpdate ? "update"sv :
+			                                                         "other"sv;
+			REX::INFO("step=message menu={} type={} raw={} result={}", Hex(reinterpret_cast<std::uintptr_t>(a_self)), name,
+				static_cast<std::uint32_t>(type), static_cast<std::int64_t>(result));
+		}
+		if (g_stage >= 3) {   // stages c and d: after the engine's own handling, on its thread for this menu
+			if (type == RE::UI_MESSAGE_TYPE::kShow) {
+				if (g_stage == 4) {   // the page opens on its first tab
+					g_tab = 0;
+					PageListen(a_self);
+					PageWrite(a_self, 0);
+				} else {
+					ChannelListen(a_self);
+					ChannelWrite(a_self, 0);
+				}
+				Snapshot("show");
+			} else if (type == RE::UI_MESSAGE_TYPE::kUpdate) {
+				const auto n = ++g_updates;
+				if (g_stage == 4) {
+					PageWrite(a_self, n);
+				} else {
+					ChannelWrite(a_self, n);
+				}
+				if (n % 10 == 1) {
+					Snapshot("open");
+				}
+			} else if (type == RE::UI_MESSAGE_TYPE::kHide) {
+				Snapshot("hide");
+			}
+		}
+		return result;
+	}
+
+	bool MenuIsMovieLoaded(void*) { return true; }   // stage a: the admission check the engine's answers with uiMovie
+
+	// the creator UI calls on kShow. The engine passes uninitialised storage for a Scaleform::Ptr<IMenu> (MSVC's hidden
+	// return slot); the menu pointer is written there owning the constructor's reference, as the engine's own creators do
+	RE::Scaleform::Ptr<RE::IMenu>* Create(RE::Scaleform::Ptr<RE::IMenu>* a_out)
+	{
+		const auto n = ++g_created;
+		void*      menu = std::calloc(1, kMenuBytes);
+		if (!menu) {
+			REX::ERROR("refuse step=create n={} reason=out_of_memory", n);
+			std::construct_at(a_out);
+			return a_out;
+		}
+		g_ctor(menu);
+		const auto base = reinterpret_cast<std::uintptr_t>(menu);
+		const auto vtables = *reinterpret_cast<const std::uintptr_t*>(base) == Address(kVtblPrimary) &&
+		                     *reinterpret_cast<const std::uintptr_t*>(base + 0x10) == Address(kVtblInput) &&
+		                     *reinterpret_cast<const std::uintptr_t*>(base + 0x50) == Address(kVtblSink);
+		auto*      refs = reinterpret_cast<volatile std::uint32_t*>(base + 0x08);   // Scaleform RefCountImplCore
+		const auto ctorRefs = *refs;
+		*reinterpret_cast<std::uintptr_t*>(base) = reinterpret_cast<std::uintptr_t>(g_vtbl.slots.data());
+		// what the engine's dynamic_cast reads on our object: the locator one slot before its primary vtable
+		const auto rtti = *reinterpret_cast<const std::uintptr_t*>(*reinterpret_cast<const std::uintptr_t*>(base) - 8) ==
+		                  *reinterpret_cast<const std::uintptr_t*>(Address(kVtblPrimary) - 8);
+		auto* imenu = static_cast<RE::IMenu*>(menu);
+		imenu->menuName = MenuName();
+		const auto ctorFlags = imenu->flags;
+		const auto extra = g_flags | (g_stage >= 3 ? FlagSet(n) : 0);   // stages c and d: this open's flag set
+		g_ctorFlags = ctorFlags;
+		if (extra) {
+			imenu->flags |= extra;
+			imenu->flagsUpdated = true;
+		}
+		if (g_keepAlive && ctorRefs == 1) {
+			REX::W32::InterlockedIncrement(refs);   // a public precedent's count: never released to zero
+		}
+		REX::INFO("step=create n={} menu={} vtables={} rtti={} refcount={} keep_alive={} ctor_flags={} flags={} depth={}{}",
+			n, Hex(base), vtables ? "engine" : "UNEXPECTED", rtti ? "engine" : "UNEXPECTED", ctorRefs, g_keepAlive ? 1 : 0,
+			Hex(ctorFlags), Hex(imenu->flags), Hex(*reinterpret_cast<const std::uint8_t*>(base + 0x110)),
+			g_stage >= 3 ? std::format(" set={}", FlagSetIndex(n)) : "");
+		std::memcpy(static_cast<void*>(a_out), &menu, sizeof(menu));
+		return a_out;
+	}
+
+	// ------------------------------------------------------------------------------------------- checks before use
+	bool Refuse(std::string_view a_step, const std::string& a_what)
+	{
+		REX::ERROR("refuse step={} {}", a_step, a_what);
+		return false;
+	}
+
+	bool CheckImage()
+	{
+		g_base = reinterpret_cast<std::uintptr_t>(REX::W32::GetModuleHandleW(nullptr));
+		if (!g_base) {
+			return Refuse("image", "reason=no_module");
+		}
+		const auto nt = g_base + *reinterpret_cast<const std::int32_t*>(g_base + 0x3C);
+		if (*reinterpret_cast<const std::uint32_t*>(nt) != 0x00004550 ||               // "PE\0\0"
+			*reinterpret_cast<const std::uint16_t*>(nt + 0x18) != 0x20B) {              // PE32+
+			return Refuse("image", "reason=not_pe32plus");
+		}
+		g_imageSize = *reinterpret_cast<const std::uint32_t*>(nt + 0x18 + 0x38);       // SizeOfImage
+		REX::INFO("step=image base={} size={}", Hex(g_base), Hex(g_imageSize));
+		return true;
+	}
+
+	bool ReadAddressLibrary(const std::filesystem::path& a_file)
+	{
+		std::ifstream in(a_file, std::ios::binary);
+		if (!in) {
+			return Refuse("address_library", std::format("reason=missing file={}", a_file.filename().string()));
+		}
+		std::array<std::uint8_t, kHeaderBytes> head{};
+		in.read(reinterpret_cast<char*>(head.data()), head.size());
+		if (!in) {
+			return Refuse("address_library", "reason=short_header");
+		}
+		const auto u32 = [&](std::size_t a_at) {
+			std::uint32_t v;
+			std::memcpy(&v, head.data() + a_at, sizeof v);
+			return v;
+		};
+		// format, game version [4], name [64], pointer size, data format, offset count (libxse HEADER_V5)
+		const auto format = u32(0);
+		const REL::Version version{ static_cast<std::uint16_t>(u32(4)), static_cast<std::uint16_t>(u32(8)),
+			static_cast<std::uint16_t>(u32(12)), static_cast<std::uint16_t>(u32(16)) };
+		const auto pointerSize = u32(84);
+		const auto count = u32(92);
+		REX::INFO("step=address_library file={} format={} version={} pointer_size={} count={}", a_file.filename().string(),
+			format, version.string(), pointerSize, count);
+		if (format != 5 || version != kRuntime || pointerSize != 8) {
+			return Refuse("address_library", "reason=header (format 5, version 1.16.244.0 and pointer size 8 expected)");
+		}
+		for (std::size_t i = 0; i < IdCount(); ++i) {
+			const auto& id = kIds[i];
+			if (id.id >= count) {
+				return Refuse("id", std::format("name={} id={} reason=beyond_count count={}", id.name, id.id, count));
+			}
+			std::uint32_t offset = 0;
+			in.seekg(static_cast<std::streamoff>(kHeaderBytes + 4ull * id.id));
+			in.read(reinterpret_cast<char*>(&offset), sizeof offset);
+			if (!in) {
+				return Refuse("id", std::format("name={} id={} reason=short_file", id.name, id.id));
+			}
+			if (!offset) {
+				return Refuse("id", std::format("name={} id={} reason=missing", id.name, id.id));
+			}
+			if (offset >= g_imageSize) {
+				return Refuse("id", std::format("name={} id={} rva={} reason=outside_image", id.name, id.id, Hex(offset)));
+			}
+			g_rva[i] = offset;
+			REX::INFO("step=id name={} id={} rva={} source={}", id.name, id.id, Hex(offset), id.source);
+		}
+		// the same ids through libxse (the lookups RE::UI and BSFixedString make): same file, same offsets
+		for (std::size_t i = 0; i < IdCount(); ++i) {
+			const auto viaLibrary = REL::ID(kIds[i].id).offset();
+			if (viaLibrary != g_rva[i]) {
+				return Refuse("id", std::format("name={} id={} reason=library_mismatch file={} libxse={}", kIds[i].name,
+					kIds[i].id, Hex(g_rva[i]), Hex(viaLibrary)));
+			}
+		}
+		return true;
+	}
+
+	bool CheckVtable(std::size_t a_id, std::uint32_t a_subobject, std::string_view a_which)
+	{
+		const auto vt = Address(a_id);
+		if (!InImage(vt - 8, 8 + kSlots * 8)) {
+			return Refuse("rtti", std::format("vtable={} reason=outside_image", a_which));
+		}
+		const auto col = *reinterpret_cast<const std::uintptr_t*>(vt - 8);
+		if (!InImage(col, 0x14)) {
+			return Refuse("rtti", std::format("vtable={} reason=locator_outside_image locator={}", a_which, Hex(col)));
+		}
+		const auto signature = *reinterpret_cast<const std::uint32_t*>(col);
+		const auto offset = *reinterpret_cast<const std::uint32_t*>(col + 0x04);
+		const auto typeDescriptor = g_base + *reinterpret_cast<const std::uint32_t*>(col + 0x0C);
+		if (signature != 1 || offset != a_subobject) {
+			return Refuse("rtti", std::format("vtable={} reason=locator signature={} offset={} expected_offset={}", a_which,
+				signature, Hex(offset), Hex(a_subobject)));
+		}
+		if (!InImage(typeDescriptor + 0x10, sizeof kTypeName)) {
+			return Refuse("rtti", std::format("vtable={} reason=type_outside_image", a_which));
+		}
+		const auto* name = reinterpret_cast<const char*>(typeDescriptor + 0x10);
+		if (std::memcmp(name, kTypeName, sizeof kTypeName) != 0) {
+			std::string seen;
+			for (std::size_t i = 0; i < 48 && InImage(typeDescriptor + 0x10 + i, 1) && name[i]; ++i) {
+				seen += (name[i] >= 0x20 && name[i] < 0x7F) ? name[i] : '?';
+			}
+			return Refuse("rtti", std::format("vtable={} reason=type type={}", a_which, seen));
+		}
+		if (typeDescriptor != Address(kRtti)) {
+			return Refuse("rtti", std::format("vtable={} reason=type_descriptor locator={} rtti_id={}", a_which,
+				Hex(typeDescriptor - g_base), Hex(g_rva[kRtti])));
+		}
+		REX::INFO("step=rtti vtable={} offset={} type={}", a_which, Hex(offset), kTypeName);
+		return true;
+	}
+
+	bool CheckSlots()
+	{
+		const auto* slot = reinterpret_cast<const std::uintptr_t*>(Address(kVtblPrimary));
+		const auto  want = [&](std::size_t a_slot, std::size_t a_id, std::string_view a_what) {
+            if (slot[a_slot] == Address(a_id)) {
+				return true;
+			}
+			return Refuse("slots", std::format("slot={} what={} have={} want={}", Hex(a_slot), a_what,
+				InImage(slot[a_slot], 1) ? Hex(slot[a_slot] - g_base) : Hex(slot[a_slot]), Hex(g_rva[a_id])));
+		};
+		if (!want(0x00, kDtor, "scalar_deleting_dtor") || !want(0x06, kLoadMovie, "LoadMovie") ||
+			!want(0x08, kProcessMessage, "ProcessMessage") || !want(0x0A, kIsMovieLoaded, "IsMovieLoaded")) {
+			return false;
+		}
+		if (g_rva[kLoadMovie] != kLoadMovieRva) {
+			return Refuse("slots", std::format("what=LoadMovie rva={} sfse_hook_rva={}", Hex(g_rva[kLoadMovie]), Hex(kLoadMovieRva)));
+		}
+		if (slot[0x03] != slot[0x04]) {
+			return Refuse("slots", "what=GetName_GetRootPath reason=not_one_pure_virtual_stub");
+		}
+		std::string all;
+		for (std::size_t i = 0; i <= 0x1A; ++i) {
+			all += std::format("{}{}", i ? "," : "", InImage(slot[i], 1) ? Hex(slot[i] - g_base) : "outside");
+		}
+		REX::INFO("step=slots dtor=ok load_movie=ok process_message=ok is_movie_loaded=ok slot5_pure={} rvas={}",
+			slot[0x05] == slot[0x03] ? "yes" : "no", all);
+		return true;
+	}
+
+	bool CheckCtor()
+	{
+		const auto ctor = Address(kCtor);
+		if (!InImage(ctor, kCtorScan + 7)) {
+			return Refuse("ctor", "reason=outside_image");
+		}
+		const auto* code = reinterpret_cast<const std::uint8_t*>(ctor);
+		for (std::size_t i = 0; i + 7 <= kCtorScan; ++i) {
+			// lea r64, [rip+disp32]: REX.W (0x48-0x4F), 0x8D, ModRM mod=00 rm=101
+			if ((code[i] & 0xF8) == 0x48 && code[i + 1] == 0x8D && (code[i + 2] & 0xC7) == 0x05) {
+				std::int32_t disp;
+				std::memcpy(&disp, code + i + 3, sizeof disp);
+				if (ctor + i + 7 + static_cast<std::intptr_t>(disp) == Address(kVtblPrimary)) {
+					REX::INFO("step=ctor rva={} vtable_ref_at={} precedent_offset={}", Hex(g_rva[kCtor]), Hex(i),
+						g_rva[kCtor] == kPrecedentCtorRva ? "match" : "differs");
+					return true;
+				}
+			}
+		}
+		return Refuse("ctor", std::format("rva={} reason=no_primary_vtable_reference first={}", Hex(g_rva[kCtor]), Hex(kCtorScan)));
+	}
+
+	// stage c: each Value function's offset is SFSE 0.2.21's own address for it, and each RTTI id names its type
+	bool CheckChannelIds()
+	{
+		for (const auto& [id, rva] : kSfseRvas) {
+			if (g_rva[id] != rva) {
+				return Refuse("channel_ids", std::format("name={} rva={} sfse_rva={}", kIds[id].name, Hex(g_rva[id]), Hex(rva)));
+			}
+		}
+		for (const auto& [id, tail] : kRttiNames) {
+			const auto name = TypeNameAt(Address(id));
+			if (!NameIs(name, tail)) {
+				return Refuse("channel_ids", std::format("name={} type={} expected=.?AV{}", kIds[id].name,
+					name.empty() ? "unreadable" : name, tail));
+			}
+		}
+		REX::INFO("step=channel_ids value_functions=sfse_equal rtti_names=ok");
+		return true;
+	}
+
+	// stage d: the data handler's id and the form lookup's id are SFSE 0.2.21's own addresses for them
+	bool CheckPageIds()
+	{
+		for (const auto& [id, rva] : { std::pair{ kDataHandlerSingleton, kDataHandlerRva }, std::pair{ kLookupById, kLookupByIdRva } }) {
+			if (g_rva[id] != rva) {
+				return Refuse("page_ids", std::format("name={} rva={} sfse_rva={}", kIds[id].name, Hex(g_rva[id]), Hex(rva)));
+			}
+		}
+		REX::INFO("step=page_ids data_handler=sfse_equal lookup_by_id=sfse_equal");
+		return true;
+	}
+
+	bool CheckEverything(const std::filesystem::path& a_dir)
+	{
+		if (!CheckImage() || !ReadAddressLibrary(a_dir / "versionlib-1-16-244-0.bin") ||
+			!CheckVtable(kVtblPrimary, 0x00, "primary") || !CheckVtable(kVtblInput, 0x10, "BSInputEventUser") ||
+			!CheckVtable(kVtblSink, 0x50, "BSTEventSink") || !CheckSlots() || !CheckCtor() ||
+			(g_stage >= 3 && !CheckChannelIds()) || (g_stage == 4 && !CheckPageIds())) {
+			return false;
+		}
+		const auto* engine = reinterpret_cast<const std::uintptr_t*>(Address(kVtblPrimary));
+		g_vtbl.locator = *reinterpret_cast<const std::uintptr_t*>(Address(kVtblPrimary) - 8);   // checked by CheckVtable
+		std::copy_n(engine, kSlots, g_vtbl.slots.begin());
+		g_ctor = reinterpret_cast<Ctor_t>(Address(kCtor));
+		g_engineDtor = reinterpret_cast<Dtor_t>(engine[0x00]);
+		g_engineLoadMovie = reinterpret_cast<LoadMovie_t>(engine[0x06]);
+		g_engineProcessMessage = reinterpret_cast<ProcessMessage_t>(engine[0x08]);
+		g_vtbl.slots[0x00] = reinterpret_cast<std::uintptr_t>(&MenuDestroy);
+		g_vtbl.slots[0x03] = reinterpret_cast<std::uintptr_t>(&MenuGetName);
+		g_vtbl.slots[0x04] = reinterpret_cast<std::uintptr_t>(&MenuGetRootPath);
+		g_vtbl.slots[0x05] = reinterpret_cast<std::uintptr_t>(&MenuGetViewScaleMode);
+		g_vtbl.slots[0x06] = reinterpret_cast<std::uintptr_t>(&MenuLoadMovie);
+		g_vtbl.slots[0x08] = reinterpret_cast<std::uintptr_t>(&MenuProcessMessage);
+		if (g_stage == 1) {
+			g_vtbl.slots[0x0A] = reinterpret_cast<std::uintptr_t>(&MenuIsMovieLoaded);
+		}
+		REX::INFO("step=ready stage={} replaced=0x00,0x03,0x04,0x05,0x06,0x08{} locator={}",
+			g_stage == 1 ? "a" : g_stage == 2 ? "b" : g_stage == 3 ? "c" : "d", g_stage == 1 ? ",0x0A" : "",
+			Hex(g_vtbl.locator - g_base));
+		return true;
+	}
+
+	// ------------------------------------------------------------------------------------------- open, close, state
+	void Toggle(std::uint32_t a_n)
+	{
+		auto* ui = RE::UI::GetSingleton();
+		auto* queue = RE::UIMessageQueue::GetSingleton();
+		if (!ui || !queue) {
+			REX::ERROR("refuse step=toggle n={} reason=no_ui_or_queue", a_n);
+			return;
+		}
+		const bool open = ui->IsMenuOpen(MenuName());
+		if (g_stage == 4 && !open) {
+			PageCollect();   // the page's text before the show
+		}
+		g_expectOpen = open ? 0 : 1;
+		queue->AddMessage(MenuName(), open ? RE::UI_MESSAGE_TYPE::kHide : RE::UI_MESSAGE_TYPE::kShow);
+		REX::INFO("step=toggle n={} was_open={} sent={}", a_n, open ? 1 : 0, open ? "hide" : "show");
+	}
+
+	// stage d: the CLOSE button, heard on the menu's thread, closes the menu here, on the main thread, as F10 does
+	void Close(std::uint32_t a_n)
+	{
+		auto* ui = RE::UI::GetSingleton();
+		auto* queue = RE::UIMessageQueue::GetSingleton();
+		if (!ui || !queue) {
+			REX::ERROR("refuse step=close n={} reason=no_ui_or_queue", a_n);
+			return;
+		}
+		const bool open = ui->IsMenuOpen(MenuName());
+		g_expectOpen = 0;
+		if (open) {
+			queue->AddMessage(MenuName(), RE::UI_MESSAGE_TYPE::kHide);
+		}
+		REX::INFO("step=close n={} by=button was_open={} sent={}", a_n, open ? 1 : 0, open ? "hide" : "none");
+	}
+
+	void CheckState(std::uint32_t a_n)
+	{
+		auto* ui = RE::UI::GetSingleton();
+		if (!ui) {
+			return;
+		}
+		const int open = ui->IsMenuOpen(MenuName()) ? 1 : 0;
+		const int expected = g_expectOpen;
+		g_open = open == 1;
+		REX::INFO("step=state n={} open={} expected={} match={}", a_n, open, expected, open == expected ? "yes" : "no");
+		if (g_stage >= 3) {
+			Snapshot(open ? "main_after_open" : "main_after_close", true);
+		}
+	}
+
+	// stages c and d, every 500 ms while the menu is open (and at once after NEXT TAB): one kUpdate, on which our
+	// ProcessMessage refreshes the field or the page; the page's text is collected here first
+	void SendUpdate()
+	{
+		auto* ui = RE::UI::GetSingleton();
+		auto* queue = RE::UIMessageQueue::GetSingleton();
+		if (!ui || !queue || !ui->IsMenuOpen(MenuName())) {
+			g_open = false;
+			return;
+		}
+		if (g_stage == 4) {
+			PageCollect();
+		}
+		queue->AddMessage(MenuName(), RE::UI_MESSAGE_TYPE::kUpdate);
+	}
+
+	bool GameInFront()
+	{
+		std::uint32_t pid = 0;
+		W32_IMPL_GetWindowThreadProcessId(W32_IMPL_GetForegroundWindow(), &pid);
+		return pid == W32_IMPL_GetCurrentProcessId();
+	}
+
+	std::uint32_t KeyThread(void*)
+	{
+		std::uint32_t presses = 0;
+		std::uint32_t ticks = 0;
+		bool          down = false;
+		bool          snapDown = false;
+		for (;;) {
+			REX::W32::Sleep(30);
+			const bool now = (W32_IMPL_GetAsyncKeyState(static_cast<std::int32_t>(g_key)) & 0x8000) != 0;
+			if (now && !down && GameInFront()) {
+				const auto n = ++presses;
+				g_task->AddTask([n]() { Toggle(n); });
+				REX::W32::Sleep(750);   // the engine handles the message on a later frame
+				g_task->AddTask([n]() { CheckState(n); });
+			}
+			down = now;
+			if (g_stage < 3) {
+				continue;
+			}
+			if (g_stage == 4) {   // the page's buttons, heard on the menu's thread; a close counts as a press
+				if (g_refreshNow.exchange(false)) {   // SendUpdate sends nothing once the menu is closed
+					g_task->AddTask([]() { SendUpdate(); });
+				}
+				if (g_closeNow.exchange(false)) {
+					const auto n = ++presses;
+					g_task->AddTask([n]() { Close(n); });
+					REX::W32::Sleep(750);
+					g_task->AddTask([n]() { CheckState(n); });
+				}
+			}
+			// stage c: the snapshot key (a main-thread snapshot, the control), and the refresh while open
+			const bool snap = g_snapshotKey && (W32_IMPL_GetAsyncKeyState(static_cast<std::int32_t>(g_snapshotKey)) & 0x8000) != 0;
+			if (snap && !snapDown && GameInFront()) {
+				g_task->AddTask([]() { Snapshot("key", true); });
+			}
+			snapDown = snap;
+			if (g_open && ++ticks % 17 == 0) {   // 17 x 30 ms
+				g_task->AddTask([]() { SendUpdate(); });
+			}
+		}
+	}
+
+	void Register()
+	{
+		auto* ui = RE::UI::GetSingleton();
+		if (!ui) {
+			Refuse("register", "reason=no_ui");
+			return;
+		}
+		if (ui->IsMenuRegistered(MenuName())) {
+			Refuse("register", "reason=name_taken");
+			return;
+		}
+		ui->RegisterMenu(kMenuName, &Create);
+		if (!ui->IsMenuRegistered(MenuName())) {
+			Refuse("register", "reason=not_taken");
+			return;
+		}
+		g_registered = true;
+		const auto hooked = *reinterpret_cast<const std::uint8_t*>(Address(kLoadMovie)) == 0xE9;   // SFSE's branch
+		REX::INFO("step=register result=ok name={} load_movie_hooked_by_sfse={}", kMenuName, hooked ? "yes" : "no");
+		World::Start(g_task);
+		const auto thread = REX::W32::CreateThread(nullptr, 0, &KeyThread, nullptr, 0, nullptr);
+		if (!thread) {
+			Refuse("key_thread", "reason=create_failed");
+			return;
+		}
+		REX::W32::CloseHandle(thread);
+		REX::INFO("step=key_thread key={}{}", Hex(g_key), g_stage >= 3 ? std::format(" snapshot_key={}", Hex(g_snapshotKey)) : "");
+	}
+
+	void OnMovieCreated(RE::IMenu* a_menu)
+	{
+		World::OnMovieCreated(a_menu);
+		if (IsOurs(a_menu)) {
+			REX::INFO("step=sfse_movie_created menu={} movie={}", Hex(reinterpret_cast<std::uintptr_t>(a_menu)),
+				Hex(reinterpret_cast<std::uintptr_t>(MovieOf(a_menu))));
+		}
+	}
+
+	void OnMessage(SFSE::MessagingInterface::Message* a_msg)
+	{
+		if (a_msg && a_msg->type == SFSE::MessagingInterface::kPostDataLoad) {
+			REX::INFO("step=post_data_load");
+			g_task->AddTask([]() { Register(); });   // the first main-thread task after game data loaded
+		}
+	}
+
+	std::uint32_t ReadNumber(const std::filesystem::path& a_ini, const wchar_t* a_key, std::uint32_t a_default)
+	{
+		std::array<wchar_t, 64> text{};
+		REX::W32::GetPrivateProfileStringW(L"FO4SFPipboyMenu", a_key, L"", text.data(), static_cast<std::uint32_t>(text.size()),
+			a_ini.c_str());
+		return text[0] ? static_cast<std::uint32_t>(std::wcstoul(text.data(), nullptr, 0)) : a_default;   // 0x.. or decimal
+	}
+
+	// a value as ASCII; any other character as '?'
+	std::string ReadText(const std::filesystem::path& a_ini, const wchar_t* a_key)
+	{
+		std::array<wchar_t, 160> text{};
+		REX::W32::GetPrivateProfileStringW(L"FO4SFPipboyMenu", a_key, L"", text.data(), static_cast<std::uint32_t>(text.size()),
+			a_ini.c_str());
+		std::string out;
+		for (const wchar_t* at = text.data(); *at; ++at) {
+			out += (*at > 0x20 && *at < 0x7F) ? static_cast<char>(*at) : '?';
+		}
+		return out;
+	}
+
+	// stage c, FAL-246: ClickCall=<script>.<function>, two Papyrus names of up to 64 letters, digits and '_' (no digit
+	// first); "" = off. False if malformed
+	bool ParseClickCall(std::string_view a_call)
+	{
+		const auto name = [](std::string_view a_name) {
+			if (a_name.empty() || a_name.size() > kMaxName || (a_name[0] >= '0' && a_name[0] <= '9')) {
+				return false;
+			}
+			for (const char c : a_name) {
+				if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_')) {
+					return false;
+				}
+			}
+			return true;
+		};
+		if (a_call.empty()) {
+			return true;
+		}
+		const auto dot = a_call.find('.');
+		if (dot == std::string_view::npos || !name(a_call.substr(0, dot)) || !name(a_call.substr(dot + 1))) {
+			return false;
+		}
+		g_clickScript = a_call.substr(0, dot);
+		g_clickFunction = a_call.substr(dot + 1);
+		return true;
+	}
+
+	// stage c: FlagSets=<n>,<n>,..., stage d: PageFlagSets (up to four, 0x.. or decimal); open k uses entry
+	// (k - 1) mod count
+	void ReadFlagSets(const std::filesystem::path& a_ini, const wchar_t* a_key, const wchar_t* a_default)
+	{
+		std::array<wchar_t, 128> text{};
+		REX::W32::GetPrivateProfileStringW(L"FO4SFPipboyMenu", a_key, a_default, text.data(),
+			static_cast<std::uint32_t>(text.size()), a_ini.c_str());
+		const wchar_t* at = text.data();
+		while (*at && g_flagSetCount < kMaxFlagSets) {
+			wchar_t*   end = nullptr;
+			const auto value = std::wcstoul(at, &end, 0);
+			if (end == at) {
+				break;
+			}
+			g_flagSets[g_flagSetCount++] = static_cast<std::uint32_t>(value);
+			at = end;
+			while (*at == L',' || *at == L' ') {
+				++at;
+			}
+		}
+	}
+}
+
+SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
+{
+	SFSE::Init(a_sfse, { .trampoline = false, .hook = false });
+
+	std::array<wchar_t, 1024> path{};
+	const auto len = REX::W32::GetModuleFileNameW(REX::W32::GetCurrentModule(), path.data(), static_cast<std::uint32_t>(path.size()));
+	const auto dir = std::filesystem::path(std::wstring(path.data(), len)).parent_path();
+	const auto ini = dir / "FO4SFPipboyMenu.ini";
+	g_stage = static_cast<int>(ReadNumber(ini, L"Stage", 0));
+	g_key = ReadNumber(ini, L"Key", 0x79);
+	g_flags = ReadNumber(ini, L"Flags", 0);
+	g_keepAlive = ReadNumber(ini, L"KeepAlive", 1) != 0;
+	const auto runtime = a_sfse->RuntimeVersion();
+	REX::INFO("step=load runtime={} stage={} key={} flags={} keep_alive={}", runtime.string(), g_stage, Hex(g_key),
+		Hex(g_flags), g_keepAlive ? 1 : 0);
+
+	// true in every case: a plugin that stays loaded and idle leaves its refusal line, the finding the job card reads
+	if (g_stage < 1 || g_stage > 4) {
+		REX::INFO("step=off (Stage=1, 2, 3 or 4 in FO4SFPipboyMenu.ini to probe)");
+		return true;
+	}
+	std::string clickCall;
+	bool        clickCallOk = true;
+	if (g_stage >= 3) {
+		g_snapshotKey = ReadNumber(ini, L"SnapshotKey", 0x7A);
+		if (g_stage == 4) {
+			ReadFlagSets(ini, L"PageFlagSets", L"0x9");
+		} else {
+			ReadFlagSets(ini, L"FlagSets", L"0x0,0x8,0x9");
+			clickCall = ReadText(ini, L"ClickCall");
+			clickCallOk = ParseClickCall(clickCall);
+		}
+		std::string sets;
+		for (std::size_t i = 0; i < g_flagSetCount; ++i) {
+			sets += std::format("{}{}", i ? "," : "", Hex(g_flagSets[i]));
+		}
+		REX::INFO("step=load_{} flag_sets={} snapshot_key={} click_call={}", g_stage == 4 ? "d" : "c",
+			sets.empty() ? "none" : sets, Hex(g_snapshotKey), clickCall.empty() ? "none" : clickCall);
+	}
+	if (runtime != kRuntime) {
+		Refuse("version", std::format("runtime={} expected={}", runtime.string(), kRuntime.string()));
+		return true;
+	}
+	if (g_key == 0 || g_key > 0xFE) {
+		Refuse("ini", std::format("key={}", Hex(g_key)));
+		return true;
+	}
+	if (g_stage >= 3 && (g_snapshotKey > 0xFE || g_snapshotKey == g_key)) {
+		Refuse("ini", std::format("snapshot_key={} key={}", Hex(g_snapshotKey), Hex(g_key)));
+		return true;
+	}
+	if (!clickCallOk) {
+		Refuse("ini", std::format("click_call={} (<script>.<function>: two Papyrus names, or empty)", clickCall));
+		return true;
+	}
+	if (!CheckEverything(dir)) {
+		return true;
+	}
+	World::Configure(ini, g_stage, g_key, g_base, g_imageSize);
+	const auto messaging = SFSE::GetMessagingInterface();
+	g_task = SFSE::GetTaskInterface();
+	if (!messaging || !g_task || !messaging->RegisterListener(&OnMessage)) {
+		Refuse("listen", std::format("messaging={} task={}", messaging ? 1 : 0, g_task ? 1 : 0));
+		return true;
+	}
+	if (const auto menus = SFSE::GetMenuInterface()) {
+		menus->Register(&OnMovieCreated);
+	}
+	REX::INFO("step=listen (the menu registers on the first main-thread task after PostDataLoad)");
+	return true;
+}

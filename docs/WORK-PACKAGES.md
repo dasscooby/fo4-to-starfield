@@ -1,3 +1,5 @@
+> **Historical (6 to 7 October 2026):** the first work-package list; its statuses were not kept up to date. The current order of work is in [ROADMAP.md](ROADMAP.md).
+
 # Work packages
 
 Each package is independent, with inputs, outputs and an acceptance test. Status values: `ready` (can start
