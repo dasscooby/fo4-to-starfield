@@ -23,6 +23,7 @@
 //                         object is a form list (FO4SF_BPList1.., ids 852..) of one RECIPE per variant (FO4SF_BPInner<n>, ids 860..), each
 //                         making its shell, as the vanilla bed entries (co_Outpost_Furniture_BedList02_Beds: nine _Decor recipes among them)
 //                [--inner same|bare]   the inner recipes' filing: same as the list recipe (default) or no workbench keyword and no filter
+//                [--lead none|shells]   the form list's order: only the recipes (default) or the shells first, then the recipes (as the vanilla list)
 //        BuildPieces check <plugin> <Starfield.esm> <core.esm> [same options]     exit 1 on a mismatch
 //        BuildPieces fixture <out dir>              a synthetic Starfield.esm and core (out/Starfield.esm, out/FO4TerrainCore.esm)
 using System.Text;
@@ -47,7 +48,8 @@ try
         return v;
     }
     bool Flag(string name) => rest.Remove(name);
-    var o = new BuildPieces.Options(Opt("--cobj") ?? BuildPieces.DefaultCobj, Opt("--shell") ?? "clone", Opt("--category") ?? "vanilla", Opt("--pieces"), Opt("--tab"), Opt("--set"), Opt("--workbench"), Opt("--filter"), Flag("--variants"), Opt("--inner") ?? "same");
+    var o = new BuildPieces.Options(Opt("--cobj") ?? BuildPieces.DefaultCobj, Opt("--shell") ?? "clone", Opt("--category") ?? "vanilla", Opt("--pieces"), Opt("--tab"), Opt("--set"), Opt("--workbench"), Opt("--filter"), Flag("--variants"), Opt("--inner") ?? "same", Opt("--lead") ?? "none");
+    if (o.Lead != "none" && o.Lead != "shells") throw new BuildPieces.Refusal("--lead is none or shells");
     if (o.Set != null && !BuildPieces.Sets.ContainsKey(o.Set)) throw new BuildPieces.Refusal("--set is one of: " + string.Join(", ", BuildPieces.Sets.Keys));
     if ((o.Workbench != null || o.Filter != null) && (o.Tab != null || o.Category != "vanilla")) throw new BuildPieces.Refusal("--workbench and --filter are their own choice: not together with --tab or --category add|replace");
     if (o.Inner != "same" && o.Inner != "bare") throw new BuildPieces.Refusal("--inner is same or bare");
@@ -66,13 +68,13 @@ catch (BuildPieces.Refusal r)
     return 1;
 }
 Console.Error.WriteLine("usage: BuildPieces menu <Starfield.esm> | core <core.esm> | pieces <core.esm> | build <Starfield.esm> <core.esm> <out dir> | " +
-                        "check <plugin> <Starfield.esm> <core.esm> | fixture <out dir>   [--pieces a,b,c] [--shell clone|plain] [--category vanilla|add|replace] [--workbench <keyword>] [--filter <keyword|own>] [--variants] [--tab <structures|furniture|decorations|miscellaneous|storage|defenses|keyword editor id>] [--set fo4] [--cobj <editor id>]");
+                        "check <plugin> <Starfield.esm> <core.esm> | fixture <out dir>   [--pieces a,b,c] [--shell clone|plain] [--category vanilla|add|replace] [--workbench <keyword>] [--filter <keyword|own>] [--variants] [--inner same|bare] [--lead none|shells] [--tab <structures|furniture|decorations|miscellaneous|storage|defenses|keyword editor id>] [--set fo4] [--cobj <editor id>]");
 return 2;
 
 static class BuildPieces
 {
     public class Refusal(string m) : Exception(m);
-    public record Options(string Cobj, string Shell, string Category, string? Pieces, string? Tab = null, string? Set = null, string? Workbench = null, string? Filter = null, bool Variants = false, string Inner = "same");
+    public record Options(string Cobj, string Shell, string Category, string? Pieces, string? Tab = null, string? Set = null, string? Workbench = null, string? Filter = null, bool Variants = false, string Inner = "same", string Lead = "none");
     public record Piece(int N, uint CoreId, string Edid, string Model, string Name);
     // one recipe of the menu: a single piece, or (--variants) several shells in one form list (the menu's "VARIANTS" entry); ListIdx -1 = no list
     public record Entry(int K, string Name, List<Piece> Members, int ListIdx)
@@ -497,6 +499,9 @@ static class BuildPieces
             {
                 var fl = new FormList(e.Key, Release) { EditorID = $"FO4SF_BPList{e.ListIdx + 1}" };
                 // the vanilla way (co_Outpost_Furniture_BedList02_Beds): the list holds one RECIPE per variant, each making one shell
+                // --lead shells: the variants' own objects come first in the list, then the recipes (the vanilla list's order: a pack-in and Furniture, then recipes)
+                if (o.Lead == "shells")
+                    foreach (var m in e.Members) fl.Items.Add(new FormLink<IStarfieldMajorRecordGetter>(Own(ShellBase + (uint)(m.N - 1))));
                 foreach (var m in e.Members)
                 {
                     fl.Items.Add(new FormLink<IStarfieldMajorRecordGetter>(Own(e.RecipeId(m))));
@@ -605,7 +610,7 @@ static class BuildPieces
             {
                 var fl = mod.FormLists.FirstOrDefault(x => x.FormKey == e.Key);
                 Need(fl?.EditorID == $"FO4SF_BPList{e.ListIdx + 1}", $"no FLST FO4SF_BPList{e.ListIdx + 1} at {e.Key}");
-                Need(fl != null && fl.Items.Select(i => i.FormKey).SequenceEqual(e.Members.Select(m => Own(e.RecipeId(m)))), $"form list {e.ListIdx + 1} is not the recipes of the variants [{string.Join(", ", e.Members.Select(m => m.N))}]");
+                Need(fl != null && fl.Items.Select(i => i.FormKey).SequenceEqual((o.Lead == "shells" ? e.Members.Select(m => Own(ShellBase + (uint)(m.N - 1))) : Enumerable.Empty<FormKey>()).Concat(e.Members.Select(m => Own(e.RecipeId(m))))), $"form list {e.ListIdx + 1} is not the recipes of the variants [{string.Join(", ", e.Members.Select(m => m.N))}]");
                 foreach (var m in e.Members)
                 {
                     var ir = mod.ConstructibleObjects.FirstOrDefault(c => c.FormKey == Own(e.RecipeId(m)));

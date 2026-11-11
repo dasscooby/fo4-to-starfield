@@ -11,8 +11,8 @@ usage:
       read only: every native the script needs, looked up in Starfield's base sources. Exit 1 when one is missing.
   python make_build_pieces.py stage --out <dir> [--starfield ..] [--core ..] [--compiler ..] [--content-resources ..]
                                      [--pieces a,b,c] [--shell clone|plain] [--category vanilla|add|replace] [--cobj ..]
-                                     [--tab ..] [--workbench <kywd>] [--filter <kywd|own>] [--variants] [--inner same|bare]
-                                     [--pictures N] [--template-filing] [--set fo4]
+                                     [--tab ..] [--workbench <kywd>] [--filter <kywd|own>] [--variants (EXPERIMENTAL: crashes the game at load)] [--inner same|bare] [--lead none|shells]
+                                     [--pictures N (default: every piece with --set fo4)] [--template-filing] [--set fo4]
       1. dotnet/BuildPieces build + check against the Starfield.esm and core given (offline_check.txt);
       2. the Papyrus compile of FO4SF_BPQuest with the core ids put in (the ;COREIDS line);
       3. plan.json (SHA-256 of every file and of both inputs, the variant, the pieces) and README.txt. Built in a new
@@ -91,8 +91,12 @@ def variant_opts(a):
     if a.filter:
         o += ["--filter", a.filter]
     if a.variants:
-        o += ["--variants", "--inner", a.inner]
+        o += ["--variants", "--inner", a.inner, "--lead", a.lead]
     return o
+
+
+VARIANTS_WARNING = ("WARNING: --variants is EXPERIMENTAL. At 47dc064b the game crashed before the main menu (0xC0000005) with it, "
+                    "with and without pictures. Do not use it in a kit you want to keep; the default stage (no --variants) works.")
 
 
 def default_filing(a):
@@ -183,7 +187,9 @@ def load_plan(stage_dir):
 def stage(a):
     final = os.path.abspath(a.out)
     default_applied = default_filing(a)
-    if not 0 <= a.pictures <= MAX_PIECES:
+    if a.variants:
+        print(VARIANTS_WARNING, file=sys.stderr)
+    if a.pictures is not None and not 0 <= a.pictures <= MAX_PIECES:
         sys.exit(f"--pictures is 0 to {MAX_PIECES}")
     if os.path.exists(final):
         sys.exit(f"{final} exists: stage into a new folder (an earlier stage is never overwritten)")
@@ -213,7 +219,7 @@ def stage(a):
     with open(os.path.join(out, SCRIPT + ".psc"), "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
     shutil.rmtree(work)
-    pictures = write_pictures(out, pieces, a.pictures)
+    pictures = write_pictures(out, pieces, len(pieces) if a.pictures is None and a.set else (a.pictures or 0))   # --set fo4: a picture for every piece unless --pictures N says otherwise
     menu_txt = tool(["menu", a.starfield, "--cobj", a.cobj], check=False).stdout
     with open(os.path.join(out, "menu.txt"), "w", encoding="utf-8") as f:
         f.write(menu_txt)
@@ -223,7 +229,7 @@ def stage(a):
             "inputs": {"Starfield.esm": {"sha256": sf_before}, "core": {"name": os.path.basename(a.core), "sha256": core_before}},
             "variant": {"shell": a.shell, "category": a.category, "tab": a.tab or None, "set": a.set or None, "cobj": a.cobj,
                          "workbench": a.workbench or None, "filter": a.filter or None, "variants": bool(a.variants),
-                         "inner": a.inner if a.variants else None, "pictures": pictures, "default_filing": default_applied}, "pieces": pieces,
+                         "inner": a.inner if a.variants else None, "lead": a.lead if a.variants else None, "pictures": pictures, "default_filing": default_applied}, "pieces": pieces,
             "log": "<My Games>/Starfield/Logs/Script/User/FO4SFBP.0.log"}
     with open(os.path.join(out, "plan.json"), "w", encoding="utf-8") as f:
         json.dump(plan, f, indent=1)
@@ -231,7 +237,7 @@ def stage(a):
     with open(os.path.join(out, "README.txt"), "w", encoding="utf-8") as f:
         f.write(f"""Build pieces ({datetime.date.today().isoformat()}). docs/research/build-pieces.md
 {PLUGIN} (sha256 {plan['outputs'][PLUGIN]}): {len(pieces)} buildables for the outpost build menu, one recipe each (a copy of {a.cobj}),
-variant shell={a.shell} category={a.category} tab={a.tab or 'none'} workbench={a.workbench or 'template'} filter={a.filter or 'template'} variants={'yes (inner recipes ' + a.inner + ')' if a.variants else 'no'} set={a.set or 'none'} pictures={len(pictures)}. Pieces: {names}.
+variant shell={a.shell} category={a.category} tab={a.tab or 'none'} workbench={a.workbench or 'template'} filter={a.filter or 'template'} variants={'EXPERIMENTAL (inner recipes ' + a.inner + ', list lead ' + a.lead + '): crashed the game at load at 47dc064b' if a.variants else 'no'} set={a.set or 'none'} pictures={len(pictures)}. Pieces: {names}.
 Master Starfield.esm only; adds records, overrides none; the installed core is not a master (its model paths were read at stage time).
 Checked against Starfield.esm {sf_before} and {os.path.basename(a.core)} {core_before}. Re-stage after a game or core update.
 {('Pictures: ' + ', '.join(pictures) + ' (the installer packs them into FO4SFBuildPieces - Textures.ba2).' + chr(10)) if pictures else ''}Install (the owner's word, game closed; loose scripts are not read, the installer packs them into ba2 archives):
@@ -268,12 +274,13 @@ def main(argv=None):
         sp.add_argument("--tab", default="", help="file the recipes under a vanilla outpost category keyword (structures, furniture, decorations, miscellaneous, storage, defenses or an editor id); needs --category add|replace")
         sp.add_argument("--workbench", default="", help="the recipes' workbench keyword (a keyword editor id or 6 hex digits of its form id), chosen apart from the filter; not with --tab or --category add|replace")
         sp.add_argument("--filter", default="", help="the recipes' only filter keyword (editor id, 6 hex digits, or 'own' = a keyword of our own with a full name); the template's workbench stays unless --workbench")
-        sp.add_argument("--variants", action="store_true", help="one recipe per group (junk walls 01..07, pier shack walls, roofs) whose created object is a form list of the group's shells")
+        sp.add_argument("--variants", action="store_true", help="EXPERIMENTAL, OFF by default: crashed the game before the main menu at 47dc064b (PC, 11 Nov). One recipe per group (junk walls 01..07, pier shack walls, roofs) whose created object is a form list of recipes; stage it only to test the crash, one --inner/--lead rung at a time")
+        sp.add_argument("--lead", choices=("none", "shells"), default="none", help="--variants: the form list holds only the recipes (none) or the shells first and then the recipes (as the vanilla list)")
         sp.add_argument("--shell", choices=("clone", "plain"), default="clone")
         sp.add_argument("--category", choices=("vanilla", "add", "replace"), default="vanilla")
         sp.add_argument("--cobj", default=DEFAULT_COBJ)
         sp.add_argument("--inner", choices=("same", "bare"), default="same", help="--variants: the filing of the recipes inside the list: same as the list's recipe, or bare (no workbench keyword, no filter)")
-        sp.add_argument("--pictures", type=int, default=0, help="draw 128 x 128 pictures for the first N pieces' shells (BC3, DX10 header); the installer puts them in a texture archive")
+        sp.add_argument("--pictures", type=int, default=None, help="draw 128 x 128 pictures for the first N pieces' shells (BC3, DX10 header); the installer puts them in a texture archive. Default: every piece with --set fo4 (the game showed them at 47dc064b), none otherwise; 0 = none")
         sp.add_argument("--template-filing", action="store_true", help="--set fo4: keep the template's workbench keyword and filters (the CRAFTING tab) instead of the default 2CFDE6 / 06D72D")
     m = sub.add_parser("menu")
     m.add_argument("--starfield", default=sfp)

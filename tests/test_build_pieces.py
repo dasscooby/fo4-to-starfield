@@ -335,6 +335,26 @@ class ToolTests(unittest.TestCase):
         wrong = self.run_tool("check", out / PLUGIN, self.sf, self.core, "--set", "fo4")           # without --variants the same plugin fails
         self.assertEqual(wrong.returncode, 1)
 
+    def test_variants_lead_shells_puts_the_shells_before_the_recipes_in_the_list(self):
+        opts = ["--set", "fo4", "--variants", "--lead", "shells"]
+        out = self.build("b-lead", *opts)
+        c = self.run_tool("check", out / PLUGIN, self.sf, self.core, *opts)
+        self.assertEqual(c.returncode, 0, c.stdout + c.stderr)
+        m = self.run_tool("menu", out / PLUGIN, "--cobj", "FO4SF_BPRecipe1")
+        self.assertIn("FLST 4 item(s)", m.stdout)
+        self.assertLess(m.stdout.index("000802 FO4SF_BPShell1"), m.stdout.index("000860 FO4SF_BPInner1"))
+        plain = self.run_tool("check", out / PLUGIN, self.sf, self.core, "--set", "fo4", "--variants")
+        self.assertEqual(plain.returncode, 1)                                               # --lead none does not fit a shells-first list
+        bad = self.run_tool("build", self.sf, self.core, str(self.root / "b-lead-bad"), "--set", "fo4", "--variants", "--lead", "x")
+        self.assertEqual(bad.returncode, 1)
+        self.assertIn("--lead is none or shells", bad.stderr)
+
+    def test_variants_inner_recipes_never_point_back_at_their_list_or_parent(self):
+        out = self.build("b-noloop", "--set", "fo4", "--variants")
+        for n, shell in ((1, "000802 FO4SF_BPShell1"), (3, "000804 FO4SF_BPShell3")):
+            m = self.run_tool("menu", out / PLUGIN, "--cobj", f"FO4SF_BPInner{n}")
+            self.assertIn(f"created object {shell} type Furniture", m.stdout)               # makes its own shell, not a list or a recipe
+
     def test_variants_inner_recipes_bare_have_no_workbench_keyword_and_no_filter(self):
         opts = ["--set", "fo4", "--variants", "--inner", "bare"]
         out = self.build("b-bare", *opts)
@@ -484,7 +504,7 @@ class StageTests(unittest.TestCase):
         self.assertEqual(plan["plugins"], [PLUGIN])
         self.assertEqual(sorted(plan["outputs"]), sorted([PLUGIN, "Data/Scripts/FO4SF_BPQuest.pex"]))
         self.assertEqual(plan["variant"], {"shell": "clone", "category": "add", "tab": None, "set": None, "cobj": "co_Outpost_Crafting_WorkbenchIndustrialStation",
-                                       "workbench": None, "filter": None, "variants": False, "inner": None, "pictures": [], "default_filing": False})
+                                       "workbench": None, "filter": None, "variants": False, "inner": None, "lead": None, "pictures": [], "default_filing": False})
         self.assertEqual([p["core_id"] for p in plan["pieces"]], [0x0A2002, 0x0A2003, 0x0A2005, 0x0A2006])
         self.assertEqual(plan["inputs"]["Starfield.esm"]["sha256"], mbp.wp.sha256(str(self.sf)))
         self.assertEqual(plan["inputs"]["core"]["sha256"], mbp.wp.sha256(str(self.core)))
@@ -524,9 +544,32 @@ class StageTests(unittest.TestCase):
         code, kept_tpl = self.stage("stage-fo4-tpl", "--set", "fo4", "--template-filing")
         self.assertEqual(code, 0)
         tv = json.loads((kept_tpl / "plan.json").read_text())["variant"]
-        self.assertEqual((tv["workbench"], tv["filter"], tv["default_filing"], tv["pictures"]), (None, None, False, []))
+        self.assertEqual((tv["workbench"], tv["filter"], tv["default_filing"]), (None, None, False))
+        self.assertEqual(len(tv["pictures"]), 5)                                           # --set fo4 alone: a picture for every piece, no --variants
+        self.assertFalse(tv["variants"])
         with self.assertRaises(SystemExit):
             self.stage("stage-fo4-bad", "--set", "fo4", "--pictures", "41")
+
+    def test_set_fo4_stages_every_picture_without_variants_and_zero_turns_them_off(self):
+        code, final = self.stage("stage-fo4-def", "--set", "fo4")
+        self.assertEqual(code, 0)
+        v = json.loads((final / "plan.json").read_text())["variant"]
+        self.assertEqual((v["variants"], v["inner"], v["lead"], len(v["pictures"])), (False, None, None, 5))
+        for n in range(2, 7):
+            self.assertTrue((final / "Data" / "Textures" / "Interface" / "WorkshopIcons" / PLUGIN / f"0000080{n}cl.dds").is_file())
+        code, none = self.stage("stage-fo4-nopic", "--set", "fo4", "--pictures", "0")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads((none / "plan.json").read_text())["variant"]["pictures"], [])
+        code, plain = self.stage("stage-plain-nopic")                                       # no --set: no pictures unless asked
+        self.assertEqual(json.loads((plain / "plan.json").read_text())["variant"]["pictures"], [])
+
+    def test_variants_are_experimental_in_help_warning_and_readme(self):
+        r = subprocess.run([sys.executable, str(ROOT / "scripts" / "planet" / "make_build_pieces.py"), "stage", "--help"], capture_output=True, text=True)
+        self.assertIn("EXPERIMENTAL, OFF by default", r.stdout)
+        code, final = self.stage("stage-exp", "--set", "fo4", "--variants")
+        self.assertEqual(code, 0)
+        self.assertIn("EXPERIMENTAL", (final / "README.txt").read_text())
+        self.assertIn("crashed the game", (final / "README.txt").read_text())
 
     def test_an_own_filing_switch_beats_the_fo4_default(self):
         code, final = self.stage("stage-fo4-own", "--set", "fo4", "--workbench", "000E01", "--filter", "000E22")
