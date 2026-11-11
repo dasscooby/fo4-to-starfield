@@ -710,10 +710,20 @@ which is the open load-scaling probe; routes with more than one hop.
 Settles: **CC-02** option C' / B: whether an SFSE plugin can keep a file per save keyed to the save name through
 `kMessage_PreSaveGame` / `kMessage_PostLoadGame` (**verified** messages, PluginAPI.h lines 103-110;
 Hooks_Serialization.cpp), and what happens to orphans when a save is deleted (no delete message, so the plugin never
-deletes; `sidecar.orphans` lists). No SFSE build has ever happened in this project or on the PC (docs/terrain/source-
-patch.md: no cl, cmake, Visual Studio), so the first step is a toolchain check and an **owner decision** to install
-Visual Studio Build Tools 2022 with the C++ workload (several GB). The SFSE loader, dll and plugin folder names are
-what the Nexus archive ships and are unverified here; the first card confirms them.
+deletes; `sidecar.orphans` lists).
+
+**Correction (FAL-216, 10 Nov 2026).** This card used to say that no SFSE build had ever happened in this project or on
+the PC. That was true when it was written (21 Oct: no cl, cmake or Visual Studio, docs/terrain/source-patch.md) and
+has been wrong since 23 Oct. The journal records: `sfse/FO4SFBorder` (#522) built with its hashes verified on the PC
+(23 Oct) and run in game through `sfse_loader.exe` on card B (24 Oct, "Phase 0: gate 2 ticked"); on 28 Oct the owner
+approved the toolchain and Install put a portable MSVC 14.44 with the Windows SDK under `D:\Modding\tools`, the PC built
+this plugin's first version (`D:\Modding\staging\focc_sfse_20261028c`, exit 0, never installed) and FOCCPing against
+the old CommonLibSF (570,368 bytes, never installed: that library could not read the format-5 Address Library); on 10
+Nov the PC built FO4SFPipboyMenu (PR #704) against libxse/commonlibsf `9d090c4`; its first stage (a) stopped safely at
+its own RTTI check, and at `782f944a` both its stages passed in the game (20:02 and 20:06 UTC). Neither FOCCSidecar
+nor FOCCPing has run in the game yet. Since FAL-216 both build like
+FO4SFPipboyMenu: libxse `9d090c4` (`lib\commonlib-shared` at `9fbb74d`) through xmake, the same version guard
+(1.16.244.0 only) and the same `refuse step=` lines (their READMEs).
 
 **What P1 does not settle: save identity and the in-game tick (card P1b, 6 Nov 2026; nothing written or run).** P1
 keys a sidecar to the save name (`sidecar.sidecar_name`: safe name, hash of the name, `.focc`). The risk register's
@@ -770,33 +780,34 @@ Expect a JSON of findings (cl.exe, Windows SDK, `sfse_loader.exe` beside Starfie
 take that environment with `-Env`, and the JSON's `toolchain` reads `environment`; both refuse a loaded environment
 whose `cl.exe` banner does not say x64, so an x86 developer prompt cannot produce a dll the 64-bit game cannot load.)
 
-**Job focc-P1-1 (header and build). Game: any.**
+**Job focc-P1-1 (build). Game: any.** The libxse build since FAL-216 (`sfse/FOCCSidecar/README.md`, build card);
+no header is fetched for it.
 
 ```powershell
-powershell -File sfse\FOCCSidecar\fetch_pluginapi.ps1 -Commit <pinned sfse commit> -Sha256 <hash from the README>
-powershell -File sfse\FOCCSidecar\build.ps1 -Out "D:\Modding\staging\focc_sfse_$date" -Env D:\Modding\tools\msvc_env.ps1
+powershell -File sfse\FOCCSidecar\build.ps1 -Out "D:\Modding\staging\focc_sidecar_$date" -Env D:\Modding\tools\msvc_env.ps1
 $LASTEXITCODE
-Get-Content "D:\Modding\staging\focc_sfse_$date\build.json"
-Get-FileHash -Algorithm SHA256 "D:\Modding\staging\focc_sfse_$date\FOCCSidecar.dll"
+Get-Content "D:\Modding\staging\focc_sidecar_$date\build.json"
+Get-FileHash -Algorithm SHA256 "D:\Modding\staging\focc_sidecar_$date\FOCCSidecar.dll"
 ```
 
-Expect `0`, `build.json` with the sha256 of every source and the dll, a matching hash. `PluginAPI.h` is MIT and stays
-out of git (.gitignore); compile errors on the first build are expected and cheap (struct names from the F4SE lineage
-may differ): paste them whole.
+Expect `0`, `build.json` with both library commits, the sha256 of every source and the dll, and a matching hash.
+Compile errors on the first libxse build of this plugin are expected and cheap: paste `xmake_output.txt` whole.
 
 **Job focc-P1-2 (install by hand). Game: CLOSED.** No installer of ours covers SFSE plugins; the copy is recorded here.
 
 ```powershell
 New-Item -ItemType Directory -Force "$sf\Data\SFSE\Plugins" | Out-Null
-Copy-Item "D:\Modding\staging\focc_sfse_$date\FOCCSidecar.dll" "$sf\Data\SFSE\Plugins\FOCCSidecar.dll"
-Copy-Item "D:\Modding\staging\focc_sfse_$date\FOCCSidecar.ini" "$sf\Data\SFSE\Plugins\FOCCSidecar.ini"
+Copy-Item "D:\Modding\staging\focc_sidecar_$date\FOCCSidecar.dll" "$sf\Data\SFSE\Plugins\FOCCSidecar.dll"
+Copy-Item "D:\Modding\staging\focc_sidecar_$date\FOCCSidecar.ini" "$sf\Data\SFSE\Plugins\FOCCSidecar.ini"
 (Get-Content "$sf\Data\SFSE\Plugins\FOCCSidecar.ini") -replace 'bEnabled=0','bEnabled=1' | Set-Content -Encoding ASCII "$sf\Data\SFSE\Plugins\FOCCSidecar.ini"
 Get-Content "$sf\Data\SFSE\Plugins\FOCCSidecar.ini"
 Get-FileHash -Algorithm SHA256 "$sf\Data\SFSE\Plugins\FOCCSidecar.dll"
 ```
 
-Expect the ini to read `bEnabled=1` (the build writes 0, the kill switch; without 1 the dll loads idle and writes no
-`FOCCSidecar\` folder, so P1-3 would be INCONCLUSIVE). Uninstall = delete `FOCCSidecar.dll` and `FOCCSidecar.ini` (and the `FOCCSidecar\` folder beside it once collected). If the game does not reach
+Expect the ini to read `bEnabled=1` (the build writes 0, the kill switch; without 1 the dll loads idle, logs `step=off`
+and writes no `FOCCSidecar\` folder, so P1-3 would be INCONCLUSIVE). The libxse build also wants
+`versionlib-1-16-244-0.bin` in the same folder (SFSE checks that an Address Library user has it; the plugin reads no id
+from it), the file FOCCPing and FO4SFPipboyMenu use. Uninstall = delete `FOCCSidecar.dll` and `FOCCSidecar.ini` (and the `FOCCSidecar\` folder beside it once collected). If the game does not reach
 the main menu, delete it at once (rule 7).
 
 **Job focc-P1-3 (run). Game: launched through `sfse_loader.exe`, not Steam** (cycle.ps1 is not the path here).
@@ -812,6 +823,7 @@ loader, in the save menu delete `focc_p1_b`, quit.
 ```powershell
 $out = "D:\Modding\testqueue\focc_P1_$date"; New-Item -ItemType Directory -Force "$out\sfse" | Out-Null
 Copy-Item "$sf\Data\SFSE\Plugins\FOCCSidecar\focc_sidecar.log" "$out\sfse\"
+Copy-Item "$(Split-Path $saves)\SFSE\Logs\FOCCSidecar.log" "$out\sfse\"   # the plugin's own log (step= and refuse step= lines)
 Copy-Item "$sf\Data\SFSE\Plugins\FOCCSidecar\sidecars" "$out\sfse\sidecars" -Recurse
 Get-ChildItem $saves -Filter *.sfs | Select Name,Length | ConvertTo-Json > "$out\saves.json"
 $env:PYTHONPATH = "src"; python -m fo4sf.combined.probes p1 $out; $LASTEXITCODE
