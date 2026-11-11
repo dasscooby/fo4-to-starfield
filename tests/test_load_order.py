@@ -53,30 +53,47 @@ class LoadOrderTests(unittest.TestCase):
         self.assertEqual(self.read(), before)                         # nothing written
         self.assertEqual([n for n in os.listdir(os.path.dirname(self.txt)) if ".bak-" in n], [])
 
-    def test_the_morning_order_keeps_port_first_and_only_the_tail_moves(self):
+    def test_two_kits_after_markers_and_an_unticked_bridge_keep_their_positions(self):
+        # FAL-354: play's load_order=fix moved both kits ahead of markers and the held bridge.
+        kits = ["FO4SFPipboyProbe.esm", "FO4SFRadsProbe.esm"]
+        for p in kits:
+            plugin(os.path.join(self.data, p), ["FO4Port.esm"])
+        lines = ["# owner order"] + ["*" + p for p in GAME[:-1]] + [GAME[-1]] + ["*" + p for p in kits]
+        for bom, nl in ((b"", "\n"), (b"\xef\xbb\xbf", "\r\n")):
+            with self.subTest(bom=bom, nl=nl):
+                self.write(lines, bom=bom, nl=nl)
+                old = self.read()
+                self.assertEqual(self.run_("check"), 0)
+                self.assertEqual(self.run_("fix"), 0)
+                self.assertEqual(self.read(), old)
+        self.assertEqual([n for n in os.listdir(os.path.dirname(self.txt)) if ".bak-" in n], [])
+
+    def test_markers_and_bridge_still_follow_their_masters(self):
+        plugin(os.path.join(self.data, "FO4SFBridge.esm"), ["FO4SFMapMarkers.esm"])
+        self.write(["*FO4SFBridge.esm", "*FO4SFMapMarkers.esm", "*FO4TerrainCore.esm"])
+        self.assertEqual(self.run_("fix"), 0)
+        self.assertEqual(self.read().decode("utf-8-sig").split(),
+                         ["*FO4TerrainCore.esm", "*FO4SFMapMarkers.esm", "*FO4SFBridge.esm"])
+        self.assertEqual(self.run_("check"), 0)
+
+    def test_the_morning_order_keeps_port_first_and_the_unticked_bridge_in_place(self):
         # 2026-10-22 05:50 local: FO4Port first, as the map markers install recorded it. File order holds (the
-        # install tools put the lines there), so Port stays; only the bridge line, which the markers install had
-        # pushed above the markers, goes last
+        # install tools put the lines there). Even an unticked bridge above markers keeps its place (FAL-354).
         morning = ["*FO4Port.esm", "*FO4TerrainCore.esm", "*Other.esm", "*FO4TerrainCore_Mars.esm", "*FO4ActorRaider.esm",
                    "*FO4SFMission.esm", "FO4SFBridge.esm", "*FO4SFMapMarkers.esm"]
         self.write(morning)
         old = self.read()
-        self.assertEqual(self.run_("check"), 9)
+        self.assertEqual(self.run_("check"), 0)
         self.assertEqual(self.read(), old)                            # check never writes
-        self.assertTrue(any("FO4SFBridge.esm: line 7 -> 8" in s for s in self.said), self.said)
         self.assertEqual(self.run_("fix"), 0)
-        self.assertEqual(self.read(), b"\xef\xbb\xbf" + "\r\n".join(
-            ["*FO4Port.esm", "*FO4TerrainCore.esm", "*Other.esm", "*FO4TerrainCore_Mars.esm", "*FO4ActorRaider.esm",
-             "*FO4SFMission.esm", "*FO4SFMapMarkers.esm", "FO4SFBridge.esm"]).encode() + b"\r\n")   # the bridge stays unticked
-        bak = [n for n in os.listdir(os.path.dirname(self.txt)) if ".bak-" in n]
-        with open(os.path.join(os.path.dirname(self.txt), bak[0]), "rb") as f:
-            self.assertEqual(f.read(), old)
+        self.assertEqual(self.read(), old)
+        self.assertEqual([n for n in os.listdir(os.path.dirname(self.txt)) if ".bak-" in n], [])
         self.assertEqual(self.run_("check"), 0)
 
     def test_the_full_install_order_of_the_runner_tools_is_the_target(self):
         # the owner's PC, 2026-10-28 (Install thread): the install, map-marker and bridge tools had just written this
-        # file, and the old grouped target would have moved 7 lines. The runner's own rules move only the markers
-        # line, which the later CombinedProbe install had been appended after, to just before the bridge.
+        # file, and the old grouped target would have moved 7 lines. FAL-354 also removes the remaining marker/bridge
+        # groups: the later CombinedProbe install must keep its place after the markers.
         plugin(os.path.join(self.data, "FO4SFQuestProbe.esm"), ["Starfield.esm"])
         for p in ("FO4SFDoorsAnim.esm", "FO4SFCombinedProbe.esm"):
             plugin(os.path.join(self.data, p), ["FO4TerrainCore.esm"])
@@ -84,10 +101,10 @@ class LoadOrderTests(unittest.TestCase):
               "*FO4TerrainCore_Mars.esm", "*FO4ActorRaider.esm", "*FO4SFMission.esm", "*FO4SFDoorsAnim.esm",
               "*FO4Port.esm", "*FO4SFMapMarkers.esm", "*FO4SFCombinedProbe.esm", "*FO4SFBridge.esm"]
         self.write(pc)
-        self.assertEqual(self.run_("check"), 9)
+        before = self.read()
+        self.assertEqual(self.run_("check"), 0)
         self.assertEqual(self.run_("fix"), 0)
-        self.assertEqual(self.read().decode("utf-8-sig").split("\r\n")[:-1],
-                         pc[:9] + ["*FO4SFCombinedProbe.esm", "*FO4SFMapMarkers.esm", "*FO4SFBridge.esm"])
+        self.assertEqual(self.read(), before)
         self.assertEqual(self.run_("check"), 0)
 
     def test_a_second_fix_in_the_same_second_keeps_the_first_copy(self):
@@ -95,10 +112,11 @@ class LoadOrderTests(unittest.TestCase):
         import datetime
         fixed = datetime.datetime(2026, 10, 22, 19, 40, 0)
         with mock.patch.object(load_order.datetime, "datetime", mock.Mock(now=mock.Mock(return_value=fixed))):
+            # A real master-order repair still keeps each backup; group-only changes no longer rewrite anything.
             self.write(["*FO4SFMapMarkers.esm"] + ["*" + p for p in GAME if p != "FO4SFMapMarkers.esm"])
             first = self.read()
             self.assertEqual(self.run_("fix"), 0)
-            self.write(["*FO4SFBridge.esm"] + ["*" + p for p in GAME if p != "FO4SFBridge.esm"])
+            self.write(["*FO4TerrainCore_Mars.esm"] + ["*" + p for p in GAME if p != "FO4TerrainCore_Mars.esm"])
             self.assertEqual(self.run_("fix"), 0)
         folder = os.path.dirname(self.txt)
         baks = sorted(n for n in os.listdir(folder) if ".bak-" in n)
@@ -106,7 +124,7 @@ class LoadOrderTests(unittest.TestCase):
         with open(os.path.join(folder, baks[0]), "rb") as f:
             self.assertEqual(f.read(), first)
 
-    def test_a_plugin_loads_after_its_master_whatever_its_group(self):
+    def test_a_plugin_loads_after_its_master(self):
         plugin(os.path.join(self.data, "FO4SFMission.esm"), ["FO4Port.esm"])
         self.write(["*" + p for p in GAME])
         self.assertEqual(self.run_("fix"), 0)

@@ -2,22 +2,12 @@
 
 usage: python load_order.py check|fix --starfield <game dir>
 
-The target is the order the test runner's own tools leave behind (cycle.ps1 before every launch: exp_install.py
-order, map_markers_install.py order, bridge_install.py order), so a file those tools just wrote is already in it and
-play changes nothing on a test install (two exceptions below):
-  1. every line keeps its place, in file order, except that
-  2. a plugin loads after every master it names that is on a line (exp_install order moves an experiment that stands
-     before a master to just after it; here the same holds for any plugin), and
-  3. FO4SFMapMarkers.esm goes after everything else and FO4SFBridge.esm last of all (map_markers_install order, then
-     bridge_install order: nothing depends on their indexes, and every planned test addresses the experiment's
-     records by load index, so a line above them would shift every index).
-So the cores, FO4Port and the experiments stay in the order their installs appended them. The order the game itself
-wrote on the owner's PC on 2026-10-22 (TerrainCore, TerrainCore_Mars, ActorRaider, Mission, Port, MapMarkers,
-Bridge) is in the target too. Until 2026-10-28 the target also sorted the cores, the experiments and FO4Port into fixed
-groups; on the full install of 2026-10-28 that would have moved 7 lines the install tools had just placed (Install
-thread), so the groups went. Inactive lines keep their place and stay inactive: a plugin held off by plugin_toggle.py
-is never ticked here. A plugin that is not ours but has one of ours among its masters (a patch) comes right after that
-master.
+The target preserves file order whenever every plugin follows its masters. A plugin before one of its masters
+waits for that master; among the ready lines, the earliest in the original file goes next. This applies to every
+plugin, including patches, map markers and the bridge. No plugin is forced to the end: a later-installed test kit
+must not move ahead of markers or a held bridge just because play runs (FAL-354, 11 Nov 2026).
+Inactive lines stay inactive: a plugin held off by plugin_toggle.py is never ticked here. The install tools can
+choose positions when installing or explicitly ordering their components; play preserves any already-valid order.
 
 check exits 0 when the order is the target, 9 when it is not (the changes are printed), 6 when it cannot be judged
 (an active plugin of ours missing from Data, an active plugin whose master is neither active nor loaded by the game,
@@ -35,8 +25,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "src"))
 import exp_install  # noqa: E402
 from fo4sf.core.loadset import OUR_PREFIXES  # noqa: E402,F401  (the project's one list; ours() reads it)
 
-MARKERS, BRIDGE = "fo4sfmapmarkers.esm", "fo4sfbridge.esm"
-
 
 def name(line):
     return line.strip().lstrip("*").strip()
@@ -49,20 +37,11 @@ def ours(plugin):
     return low.endswith((".esm", ".esp", ".esl")) and low.startswith(OUR_PREFIXES)
 
 
-def group(plugin):
-    """0 for any plugin line, 1 for the map markers, 2 for the bridge (module doc); None for a line that is no plugin."""
-    low = plugin.casefold()
-    if not low.endswith((".esm", ".esp", ".esl")):
-        return None
-    return {MARKERS: 1, BRIDGE: 2}.get(low, 0)
-
-
 def target(lines, masters):
     """(new lines, problems). masters: {plugin casefold: [master, ...]} for the plugins whose headers were read.
     One stable sort over every line: a plugin is placed only after each of its masters that is on a line, and among
-    the lines ready to place the next is the earliest in file order, the markers and the bridge waiting until nothing
-    else is left (by group). So file order holds, a patch comes right after its master, and any chain of masters keeps
-    every master first (Codex, #487)."""
+    the lines ready to place the next is the earliest in file order. Already-valid orders stay byte-identical,
+    including kits after markers/the bridge; any chain of masters keeps every master first (Codex, #487/FAL-354)."""
     problems, seen, nodes = [], set(), []
     for k, ln in enumerate(lines):
         p = name(ln)
@@ -71,8 +50,7 @@ def target(lines, masters):
             if p.casefold() in seen:
                 problems.append(f"{p} is listed more than once")
             seen.add(p.casefold())
-        g = group(p) if plug else None
-        nodes.append(((g or 0, k), p.casefold() if plug else None, ln))
+        nodes.append((k, p.casefold() if plug else None, ln))
     active = {name(ln).casefold() for ln in lines if ln.strip().startswith("*")}
     for ln in lines:
         p = name(ln)

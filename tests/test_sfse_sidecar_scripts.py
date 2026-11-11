@@ -1,6 +1,8 @@
-"""FOCCSidecar's PC scripts (sfse/FOCCSidecar): the compiler route contract. check_toolchain.ps1 and build.ps1 take a
-loaded MSVC environment (cl.exe on PATH with INCLUDE and LIB set, the PC's portable toolchain under D:\\Modding\\tools
-since 28 Oct 2026) before they look for Visual Studio with vswhere, and the runbook passes it with -Env."""
+"""FOCCSidecar's PC scripts and plugin (sfse/FOCCSidecar) as text. check_toolchain.ps1, the runbook's read-only P1-0
+check, takes a loaded MSVC environment (cl.exe on PATH with INCLUDE and LIB set, the PC's portable toolchain under
+D:\\Modding\\tools since 28 Oct 2026) before it looks for Visual Studio with vswhere. Since FAL-216 the plugin is built
+like FO4SFPipboyMenu (PR #704) and FOCCPing: libxse/commonlibsf 9d090c4 through xmake (build.ps1 is theirs with this
+plugin's name and its codec files), with the same version guard and refusal lines. No compiler for the dll here."""
 import re
 import unittest
 from pathlib import Path
@@ -15,16 +17,14 @@ class CompilerRouteTests(unittest.TestCase):
     readme = (PLUGIN / "README.md").read_text(encoding="utf-8")
     runbook = (ROOT / "docs" / "spikes" / "combined-core-probes.md").read_text(encoding="utf-8")
 
-    def test_both_scripts_take_the_environment_script_and_dot_source_it(self):
-        for text in (self.check, self.build):
-            self.assertIn("[string]$Env = ''", text)
-            self.assertIn("if ($Env) {\n  if (-not (Test-Path $Env)) { \"-Env $Env not found\"; exit 1 }\n  . $Env\n}", text)
+    def test_the_check_takes_the_environment_script_and_dot_sources_it(self):
+        self.assertIn("[string]$Env = ''", self.check)
+        self.assertIn("if ($Env) {\n  if (-not (Test-Path $Env)) { \"-Env $Env not found\"; exit 1 }\n  . $Env\n}", self.check)
 
     def test_a_loaded_environment_comes_before_vswhere(self):
-        for text in (self.check, self.build):
-            env = text.index("Get-Command cl.exe -ErrorAction SilentlyContinue")
-            self.assertIn("$clOnPath -and $env:INCLUDE -and $env:LIB", text)
-            self.assertLess(env, text.index("vswhere.exe"))
+        env = self.check.index("Get-Command cl.exe -ErrorAction SilentlyContinue")
+        self.assertIn("$clOnPath -and $env:INCLUDE -and $env:LIB", self.check)
+        self.assertLess(env, self.check.index("vswhere.exe"))
 
     def test_the_check_reports_which_toolchain_it_found(self):
         self.assertIn("$r.toolchain = 'environment'", self.check)
@@ -43,33 +43,80 @@ class CompilerRouteTests(unittest.TestCase):
         self.assertIn("if ($banner -notmatch '\\bx64\\b') {", self.build)
         self.assertIn("Nothing was built.\"; exit 1 }", self.build)
 
-    def test_the_build_calls_vcvars64_only_on_the_visual_studio_route(self):
-        self.assertIn("$enter = if ($vcvars) { @(\"call `\"$vcvars`\" >nul || exit /b 90\") } else { @() }", self.build)
-        self.assertIn("toolchain = $toolchain", self.build)
-        # the compiler line itself is unchanged
-        self.assertIn("cl.exe /nologo /std:c++20 /EHsc /O2 /W4 /DUNICODE /D_UNICODE /LD", self.build)
-        # the script still never deletes or overwrites
-        self.assertNotIn("Remove-Item", self.build)
+    def test_the_build_is_the_pipboy_menus_with_this_plugins_name_and_codec_files(self):
+        pipboy = (ROOT / "sfse" / "FO4SFPipboyMenu" / "build.ps1").read_text(encoding="utf-8")
+        body = lambda text: text[text.index("param("):]
+        mine = body(self.build).replace("FOCCSidecar", "X").replace("bEnabled=0", "Stage=0")
+        theirs = body(pipboy).replace("FO4SFPipboyMenu", "X")
+        mine = mine.replace("$sources = @('xmake.lua', 'src\\main.cpp', 'src\\pch.h', 'codec.h', 'sha256.h', 'sha256.cpp', 'X.ini')",
+                            "$sources = @('xmake.lua', 'src\\main.cpp', 'src\\pch.h', 'src\\world.cpp', 'src\\world.h', 'X.ini')")  # FAL-250 adds world.*
+        mine = mine.replace("plugin_version = '0.2.0'", "plugin_version = '0.1.0'")
+        self.assertEqual(mine, theirs)
+        self.assertIn("$PinnedLib = '9d090c4c521f4f2c1aa00bb05923c380d47ae596'", self.build)
+        self.assertIn("$PinnedShared = '9fbb74d628134ab4ea3a3cf5c0ed3f7eeabbd01d'", self.build)
+        self.assertIn('"xmake.exe build -y FOCCSidecar 2>&1 || exit /b 91",', self.build)
         self.assertIn("this script never overwrites", self.build)
-
-    def test_the_compiler_line_and_its_link_flags_are_one_batch_line(self):
-        # Install, 28 Oct 2026: inside the @( ) array the comma bound tighter than +, so the "/link ..." half of the cl
-        # line became its own batch line (cl linked without /PDB and /IMPLIB; cmd ran "/link", exit 9009). The
-        # concatenation lives in its own statement now, and the array holds the one variable.
-        cl = re.search(r'^\$cl = "cl\.exe /nologo [^\n]*" \+\n\s+"/link /PDB:[^\n]*"$', self.build, re.M)
-        self.assertIsNotNone(cl, "the cl line and its /link flags must be one $cl assignment")
-        self.assertIn('@("cd /d `"$src`" || exit /b 91", $cl, "exit /b %ERRORLEVEL%") | Set-Content', self.build)
-        array = self.build[self.build.index('@("@echo off") + $enter + @("cd /d'):]
-        array = array[:array.index("Set-Content")]
-        self.assertFalse(any(line.rstrip().endswith("+") for line in array.splitlines()), array)
-        # the C4245 Install saw at FOCCSidecar.cpp(59): the enumerator is an int, the handle an unsigned 32-bit
-        cpp = (PLUGIN / "FOCCSidecar.cpp").read_text(encoding="utf-8")
-        self.assertIn("PluginHandle g_handle = static_cast<PluginHandle>(kPluginHandle_Invalid);", cpp)
+        self.assertNotIn("Remove-Item $", self.build)
+        self.assertNotIn("PluginAPI", self.build)
 
     def test_the_runbook_and_readme_pass_the_environment(self):
-        # the two sidecar lines (check_toolchain.ps1, build.ps1) and, since the libxse port, the B0-2 card's FOCCPing build line
+        # the sidecar's two lines (check_toolchain.ps1, build.ps1) and the B0-2 card's FOCCPing build line
         self.assertEqual(self.runbook.count("-Env D:\\Modding\\tools\\msvc_env.ps1"), 3)
         self.assertIn("-Env D:\\Modding\\tools\\msvc_env.ps1", self.readme)
+        self.assertIn("sfse\\FOCCSidecar\\build.ps1 -Out D:\\Modding\\staging\\focc_sidecar_", self.readme)
+
+
+class LibxsePluginTests(unittest.TestCase):
+    main = (PLUGIN / "src" / "main.cpp").read_text(encoding="utf-8")
+    xmake = (PLUGIN / "xmake.lua").read_text(encoding="utf-8")
+    ini = (PLUGIN / "FOCCSidecar.ini").read_text(encoding="utf-8")
+    readme = (PLUGIN / "README.md").read_text(encoding="utf-8")
+
+    def test_the_folder_holds_the_libxse_plugin_and_not_the_old_one(self):
+        files = sorted(p.relative_to(PLUGIN).as_posix() for p in PLUGIN.rglob("*") if p.is_file())
+        self.assertEqual(files, ["FOCCSidecar.ini", "README.md", "build.ps1", "check_toolchain.ps1", "codec.h",
+                                 "fetch_pluginapi.ps1", "sha256.cpp", "sha256.h", "src/main.cpp", "src/pch.h",
+                                 "xmake.lua"])
+        self.assertIn('includes("lib/commonlibsf")', self.xmake)
+        self.assertIn('add_rules("commonlibsf.plugin", {', self.xmake)
+        self.assertIn('set_values("commonlib.plugin.install", false)', self.xmake)
+        self.assertIn('add_files("src/**.cpp", "sha256.cpp")', self.xmake)
+        self.assertIn('add_includedirs("src", ".")', self.xmake)
+        self.assertIn("bEnabled=0", self.ini)
+
+    def test_the_guard_comes_before_anything_is_created_or_registered(self):
+        load = self.main[self.main.index("SFSE_PLUGIN_LOAD("):]
+        self.assertIn("SFSE::Init(a_sfse, { .trampoline = false, .hook = false });", load)
+        self.assertIn("constexpr REL::Version  kRuntime{ 1, 16, 244, 0 };", self.main)
+        guard = load.index('Refuse("version"')
+        off = load.index('REX::INFO("step=off')
+        folder = load.index("create_directories(g_sidecars, ec)")
+        listen = load.index("RegisterListener(&OnMessage)")
+        self.assertTrue(guard < off < folder < listen)
+        self.assertEqual(load.count("return true;"), 5)                                   # loaded either way, the log tells
+        for step in ('Refuse("version"', 'Refuse("folder"', 'Refuse("listen"'):
+            self.assertIn(step, load)
+            self.assertIn("refuse step=" + step.split('"')[1], self.readme)
+        self.assertIn('REX::ERROR("refuse step={} {}", a_step, a_what);', self.main)
+
+    def test_no_game_address_no_windows_header_and_sfses_message_numbers(self):
+        code = "\n".join(re.sub(r"//.*", "", l) for l in self.main.splitlines())   # comments cite the old build
+        for banned in ("<windows.h>", "PluginAPI.h", "REL::ID", "REL::Relocation", "GetSingleton", "DeleteFile"):
+            self.assertNotIn(banned, code, banned)
+        for name, value in (("kPreSaveGame", 4), ("kPostSaveGame", 5), ("kPreLoadGame", 6), ("kPostLoadGame", 7)):
+            self.assertIn(f"constexpr std::uint32_t {name} = {value};", self.main)
+        self.assertIn("PreSaveGame 4, PostSaveGame 5, PreLoadGame 6, PostLoadGame 7", self.readme)
+
+    def test_the_log_events_the_p1_judge_reads(self):
+        for event in ('\\"event\\": \\"pre_save\\", ', '\\"event\\": \\"post_save\\", ', '\\"event\\": \\"pre_load\\", ',
+                      '\\"event\\": \\"post_load\\", ', '\\"event\\": \\"load\\", ', '\\"event\\": \\"sfse_post_load\\"'):
+            self.assertIn(event, self.main, event)
+        for field in ('\\"written\\": ', '\\"found\\": ', '\\"valid\\": ', '\\"counter\\": ', '\\"file\\": '):
+            self.assertIn(field, self.main, field)
+        self.assertIn('"{{\\"seq\\": {}, \\"time\\": {}, {}}}"', self.main)
+        self.assertIn('out << line << "\\r\\n";', self.main)
+        self.assertIn("focc::encode_sidecar(a_save, k)", self.main)
+        self.assertIn("focc::decode_sidecar(text, a_save)", self.main)
 
 
 if __name__ == "__main__":
