@@ -480,7 +480,10 @@ RIGID_SKIN_TOLERANCE = 1e-3   # weight a rigid vertex may put on other bones: ha
 # (Codex on #354: 0.995 / 0.005 across two bones was accepted and drifted 5 cm from real skinning at 10 m of travel)
 
 
-def rigid_skinned_parts(src, shape, bones):
+CROSS_BONE_SHARE = 0.25   # most triangles (share of the shape) that may join two bones and still be cut (VltGearDoor01 walkway: 13%)
+
+
+def rigid_skinned_parts(src, shape, bones, cross_bone_share: float = 0.0):
     """A skinned door shape whose every drawn vertex follows one bone fully, cut into one piece per bone and re-expressed
     in that bone's space so the rig carries each piece as an ordinary attachment: [(bone index, shape), ...] or None.
     Weight 1 on one bone makes skinning bone_world * skin_to_bone, so bone-local positions are skin_to_bone(stored) and a
@@ -488,7 +491,10 @@ def rigid_skinned_parts(src, shape, bones):
     Door:7 has 363 vertices on b_Door and 118 on b_Handle, none blended). A vertex putting more than
     RIGID_SKIN_TOLERANCE of its weight on other bones (a blend), two slots of one bone with different skin_to_bone (the
     weighted result is then not either bind; Codex on #354), a triangle across two bones or a bone outside the rig
-    give None."""
+    give None.
+    cross_bone_share > 0: a triangle across bones (thin hanger rods in VltGearDoor01's WalkWay01:7, 288 of 2238 triangles,
+    no blended vertex) goes whole to the bone most of its vertices follow, so the rod is off by at most its own length
+    on the other bone; more than that share of the shape's triangles across bones still gives None."""
     from . import fo4skin
     try:
         skin = fo4skin.read_skin(src, shape.block)
@@ -514,12 +520,15 @@ def rigid_skinned_parts(src, shape, bones):
         if total - per_bone[bone][0] > RIGID_SKIN_TOLERANCE * total:     # a real blend, however small: refuse
             return None
         slot_of[v] = per_bone[bone][1]
-    by_slot = {}
+    by_slot, crossing = {}, 0
     for t in shape.triangles:
-        slots = {slot_of[i] for i in t}
-        if len(slots) != 1:
-            return None
-        by_slot.setdefault(slots.pop(), []).append(t)
+        votes = [slot_of[i] for i in t]
+        if len(set(votes)) != 1:
+            crossing += 1
+            if crossing > cross_bone_share * len(shape.triangles):
+                return None
+        slot = max(dict.fromkeys(votes), key=votes.count)          # majority; a tie goes to the first vertex's bone
+        by_slot.setdefault(slot, []).append(t)
     index = {b.get("node"): i for i, b in enumerate(bones) if b.get("node") is not None}
     if any(skin.bones[k] not in index for k in by_slot):
         return None
@@ -553,7 +562,7 @@ def rigid_skinned_parts(src, shape, bones):
 def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, clip_files, unit_scale: float = UNIT_SCALE,
                            collision_template: bytes = None, leaf_physics_donor: bytes = None,
                            rest_pose_check: bool = False, aliases: dict = None,
-                           drop_skinned: bool = False) -> Tuple[Dict[str, bytes], dict]:
+                           drop_skinned: bool = False, cross_bone_share: float = 0.0) -> Tuple[Dict[str, bytes], dict]:
     """FO4 door whose "Open" sequence moves geometry under more than one node (frozen_door_parts: double doors,
     shutters, sliding panel sets) -> Starfield door with its OWN rig and clips, as vanilla double doors have
     (IndIntRmSmWallMid_DoorA01: one rig bone and one clip track per leaf, one keyframed body per leaf).
@@ -571,7 +580,8 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
     (door_rig.rest_pose_issue; the sliding / lifting route, which takes every NOT_HINGED_RE door).
     aliases: door_rig.plan's sequence aliases (an animated activator converted as a door, pipeline.OWN_RIG_ALIASES).
     drop_skinned: leave skinned shapes out instead of refusing the door (a rig cannot carry them); the door entry lists
-    them under "dropped_skinned_shapes"."""
+    them under "dropped_skinned_shapes".
+    cross_bone_share: rigid_skinned_parts' allowance for triangles across two bones (0 = refuse them)."""
     from . import door_model, door_rig, native_door
     if collision_template is None or leaf_physics_donor is None:
         raise ValueError("multi-part door needs the box template and a keyframed donor body")
@@ -592,7 +602,7 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
     shape_name = lambda b, s: (s.name or f"Shape{b}".encode()).decode("latin-1")    # noqa: E731
     rebound = {}                         # piece key -> rig bone it rides rigidly (rigid_skinned_parts); one piece per bone
     for b, (s, m) in list(kept.items()):
-        if s.skinned and (parts := rigid_skinned_parts(src, s, plan["bones"])) is not None:
+        if s.skinned and (parts := rigid_skinned_parts(src, s, plan["bones"], cross_bone_share)) is not None:
             del kept[b]
             for k, (bone, piece) in enumerate(parts):
                 key = b if len(parts) == 1 else f"{b}.{k}"

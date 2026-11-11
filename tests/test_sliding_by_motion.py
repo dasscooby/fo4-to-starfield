@@ -144,6 +144,29 @@ class SkinnedPanelTests(unittest.TestCase):
         self.assertEqual(door["rebound_skinned_pieces"], 2)
         self.assertEqual(door["moving_bodies"], 2)                       # a piece on each panel
 
+    def test_a_few_triangles_across_two_bones_are_cut_not_dropped_when_allowed(self):
+        """VltGearDoor01's WalkWay01:7 (PC dump 2026-11-11): no blended vertex, but 288 of 2238 triangles (hanger rods)
+        join two bones, so the whole shape was dropped and the walkway never drew. With an allowance each such triangle
+        goes whole to one bone; past the allowance the shape is still refused."""
+        f = door_nif(sliding_panels())
+        names = node_names(f)
+        _, shapes, read_skin = self.skinned(f, names["PanelA"], second=names["PanelB"])
+        panel = min(s.block for s in nif.fo4_trishapes(f) if s.positions)
+        with patch.object(fo4skin, "read_skin", side_effect=read_skin):
+            plan = door_rig.plan(f, placed=True)
+            shape = next(s for s in shapes(f) if s.block == panel)
+            crossing = sum(1 for t in shape.triangles if 3 in t)
+            share = crossing / len(shape.triangles)
+            self.assertGreater(crossing, 0)
+            self.assertIsNone(convert_static.rigid_skinned_parts(f, shape, plan["bones"]))
+            self.assertIsNone(convert_static.rigid_skinned_parts(f, shape, plan["bones"], share / 2))
+            parts = convert_static.rigid_skinned_parts(f, shape, plan["bones"], share)
+        self.assertEqual(sum(len(p.triangles) for _, p in parts), len(shape.triangles))   # every triangle kept
+        self.assertTrue(all(not p.skinned for _, p in parts))
+        _, door = self.convert(f, shapes, read_skin, cross_bone_share=share)
+        self.assertNotIn("dropped_skinned_shapes", door)
+        self.assertEqual(door["rig"], "native")
+
     def test_weights_split_over_slots_of_one_bone_still_count_as_rigid(self):
         f = door_nif(sliding_panels())
         panel_a = node_names(f)["PanelA"]
