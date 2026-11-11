@@ -125,3 +125,25 @@ bridge is accepted, a hold on any other plugin, or an unreadable hold file, stil
 installer are unchanged. Sequence for the owner's set: `plugin_toggle.py off --plugins FO4SFMission.esm`, then this install, run
 the session, uninstall (same relaxed check), `plugin_toggle.py on`. Option (b) (a small world of its own) would not test the
 core's persistent cell and was not taken.
+
+**Run 4: the ladder at c394bce3 (PC, 11 Nov 03:07 to 03:25 UTC; the owner's reading, three game runs) and what it changed.**
+
+| variant | in the plugin | arrival | result |
+|---|---|---|---|
+| `temp-only` | WRLD + CELL 000DAF + one temporary reference | cell ..001340, (50, 50, 12.61) | 0xC0000005 at SF+0x41efd6, 28 s after arrival |
+| `cell-only` | WRLD + CELL 000DAF, no reference | cell ..001340, (50, 50, 12.61) | the same address, rdi = 0, 28 s after arrival |
+| `world-only` | WRLD only | cell ..000DAF at the real spawn | survived 80 s |
+| `full` (run 3) | WRLD + CELL + both groups | cell ..001340, (50, 50, 12.61) | the same crash |
+
+The earlier explanation here (the persistent group under the exterior cell) is **wrong**: the exterior CELL override alone is
+enough, with no reference at all. With it, `coc FO4Core_RedRocketSpawn` arrives in the world's origin cell 001340 (XCLC 12 27)
+instead of 000DAF (XCLC -10 11); the owner's reading, not proven, is that the override stops the console from finding the place
+in the cell. Open, and not answered by these runs: whether the crash comes from the override itself or from standing at the origin
+cell (a no-kit control that goes to cell 001340 would say).
+
+Consequences in the kit: the default variant is now **`toponly`**: the world override plus an override of the world's persistent
+cell holding CS_P, **no exterior cell record**, no temporary reference (the layout the mission uses and the one that survives
+here). CS_T therefore reads "not found" by design, and the probe's result line will not say PASS; the reading is the arrival
+cell (it must be 000DAF), 80 s alive, and CS_P `with player`. `topcell` (which still overrides the spawn cell for CS_T) is kept
+and is expected to crash the same way; run it only as a control. The installer's conflict with the mission and the combined probe
+applies to both, because both override the world's persistent cell.

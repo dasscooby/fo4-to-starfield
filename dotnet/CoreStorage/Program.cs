@@ -16,7 +16,11 @@
 //
 // --variant (FAL-273, the crash of #707: the game died 32 s after the trip with the full plugin, not without it): which part of the
 // override is written, so one game run per variant names the ingredient that kills the game:
-//   topcell       (the default since FAL-273) the world override with an override of the world's PERSISTENT cell holding CS_P, and the
+//   toponly       (the default since the PC ladder of 11 Nov) the world override with an override of the world's PERSISTENT cell holding
+//                 CS_P and NO exterior cell record, no temporary reference: the layout the mission uses. The PC ladder (c394bce3) showed
+//                 that the exterior CELL override alone kills the game 28 s after arrival (and moves `coc` to the world's origin cell
+//                 001340), with or without references; world-only survived. CS_T reads "not found" here by design.
+//   topcell       the world override with an override of the world's PERSISTENT cell holding CS_P, and the
 //                 spawn cell override holding CS_T in its Temporary group: the layout of every Starfield world
 //   full          the layout of run 3, which crashed: CS_P in a Persistent group UNDER THE EXTERIOR CELL, CS_T in its Temporary group
 //   persist-only  the world and cell overrides and CS_P only
@@ -67,11 +71,11 @@ static class CoreStorage
     static string P(P3Float p) => $"({F(p.X)}, {F(p.Y)}, {F(p.Z)})";
     static bool Finite(P3Float p) => float.IsFinite(p.X) && float.IsFinite(p.Y) && float.IsFinite(p.Z);
 
-    static readonly string[] Variants = { "topcell", "full", "persist-only", "temp-only", "cell-only", "world-only" };
+    static readonly string[] Variants = { "toponly", "topcell", "full", "persist-only", "temp-only", "cell-only", "world-only" };
 
     static string Variant(string[] a)
     {
-        var v = Arg(a, "--variant", "topcell");
+        var v = Arg(a, "--variant", "toponly");
         if (!Variants.Contains(v)) throw new Refusal($"--variant {v} is not one of {string.Join(", ", Variants)}");
         return v;
     }
@@ -164,7 +168,7 @@ static class CoreStorage
             SubCells = new WorldspaceBlock.TranslationMask(defaultOn: false, onOverall: false),
             TopCell = new Cell.TranslationMask(defaultOn: false, onOverall: false),
         });
-        if (variant == "topcell")
+        if (variant is "topcell" or "toponly")
         {
             // the persistent cell of the core's world, overridden record only, holding CS_P: where Starfield keeps persistent references
             // (PC scan, FAL-273: 0 of 18,300 exterior cells of Starfield.esm have a persistent group, 431 groups sit here)
@@ -176,12 +180,12 @@ static class CoreStorage
         var ct = Probe(modKey, TemporaryId, TemporaryEdid, At(s.Marker, TemporaryDx), false);
         if (variant is "full" or "persist-only") cell.Persistent.Add(cp);
         if (variant is "topcell" or "full" or "temp-only") cell.Temporary.Add(ct);
-        if (variant == "topcell") w.TopCell!.Persistent.Add(cp);
+        if (variant is "topcell" or "toponly") w.TopCell!.Persistent.Add(cp);
         var blk = new WorldspaceBlock { BlockNumberX = s.Block.BlockNumberX, BlockNumberY = s.Block.BlockNumberY, GroupType = s.Block.GroupType };
         var sub = new WorldspaceSubBlock { BlockNumberX = s.Sub.BlockNumberX, BlockNumberY = s.Sub.BlockNumberY, GroupType = s.Sub.GroupType };
         sub.Items.Add(cell);
         blk.Items.Add(sub);
-        if (variant != "world-only") w.SubCells.Add(blk);
+        if (variant is not ("world-only" or "toponly")) w.SubCells.Add(blk);
         mod.Worldspaces.Add(w);
 
         // the quest (dotnet/PlanetProbe's proven shape), no properties
@@ -236,7 +240,7 @@ static class CoreStorage
         var s = FindSpawn(core);
         using var mod = Open(a[1]);
         Console.WriteLine($"variant {variant}");
-        bool withCell = variant != "world-only", withTop = variant == "topcell", withP = variant is "full" or "persist-only", withT = variant is "topcell" or "full" or "temp-only";
+        bool withCell = variant is not ("world-only" or "toponly"), withTop = variant is "topcell" or "toponly", withP = variant is "full" or "persist-only", withT = variant is "topcell" or "full" or "temp-only";
         var problems = new List<string>();
         void Need(bool ok, string msg) { if (!ok) problems.Add(msg); }
         var masters = mod.ModHeader.MasterReferences.Select(m => m.Master.FileName.String).ToList();
@@ -274,7 +278,7 @@ static class CoreStorage
                 }
             }
             var cells = w.SubCells.SelectMany(b => b.Items).SelectMany(x => x.Items).ToList();
-            Need(cells.Count == (withCell ? 1 : 0), $"the WRLD override carries {cells.Count} exterior cells (want {(withCell ? "exactly the spawn cell" : "none: world-only")})");
+            Need(cells.Count == (withCell ? 1 : 0), $"the WRLD override carries {cells.Count} exterior cells (want {(withCell ? "exactly the spawn cell" : "none: world-only / toponly")})");
             var c = cells.FirstOrDefault();
             if (c != null)
             {

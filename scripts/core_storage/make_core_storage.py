@@ -3,7 +3,7 @@
 usage:
   python scripts/core_storage/make_core_storage.py stage --core <installed FO4TerrainCore.esm> --out <NEW folder>
         [--starfield <game dir>] [--sf <Starfield.esm>] [--compiler <PapyrusCompiler.exe>] [--content-resources <zip>]
-        [--variant topcell|full|persist-only|temp-only|cell-only|world-only]
+        [--variant toponly|topcell|full|persist-only|temp-only|cell-only|world-only]
       1. dotnet/CoreStorage build: the plugin (a persistent XMarker in an override of the core world's persistent cell and a
          temporary one in the core's FO4Core_RedRocketSpawn; --variant full is run 3's layout, persistent group under the cell,
          a quest with no properties);
@@ -34,7 +34,7 @@ SPAWN_CELL = "FO4Core_RedRocketSpawn"
 IDS = {"cs_p": 0x800, "cs_t": 0x801, "quest": 0x802}
 IMPORTS = ("Actor", "Cell", "Debug", "Form", "Game", "ObjectReference", "Quest", "ScriptObject", "Utility", "WorldSpace")
 TOOL = os.path.join(REPO, "dotnet", "CoreStorage")
-VARIANTS = ("topcell", "full", "persist-only", "temp-only", "cell-only", "world-only")     # dotnet/CoreStorage --variant (FAL-273, #707)
+VARIANTS = ("toponly", "topcell", "full", "persist-only", "temp-only", "cell-only", "world-only")     # dotnet/CoreStorage --variant (FAL-273, #707)
 
 
 def sha256(path):
@@ -96,7 +96,7 @@ def stage(a):
         json.dump(plan, f, indent=1)
     with open(os.path.join(out, "README.txt"), "w", encoding="utf-8") as f:
         f.write(f"""Core storage probe (FAL-208), variant {a.variant}. {PLUGIN} (build {plugin_sha[:8]}), masters Starfield.esm + FO4TerrainCore.esm.
-FO4SF_CS_P (0x800, persistent; variant {a.variant}: world persistent cell for topcell) and FO4SF_CS_T (0x801, temporary, in {SPAWN_CELL}): XMarkers at its COC marker + 4 / 8 m east.
+FO4SF_CS_P (0x800, persistent; variant {a.variant}: world persistent cell for toponly / topcell) and FO4SF_CS_T (0x801, temporary, in {SPAWN_CELL}): XMarkers at its COC marker + 4 / 8 m east.
 Install (game closed), after the core: python scripts\\core_storage\\core_storage_install.py install --dir "{out}" --starfield <game>
 In game: coc {SPAWN_CELL} with the roofs on screen; stay 75 s; the user log {LOG} holds FO4SFCS lines 2, 10, 30 and 60 s
 after the arrival. CS_T not found: cell not loaded (not a failure). CS_T found and CS_P with the player: PASS.
@@ -145,7 +145,7 @@ def core_pin_problems(plan, data_dir):
 # plugins that override the core world's PERSISTENT cell: two plugins never override it together (FAL-273, FAL-314 finding)
 PERSISTENT_CELL_OVERRIDERS = ("FO4SFMission.esm", "FO4SFCombinedProbe.esm")
 # variants that write that override (a stage without a variant key is run 3's, "full": no override)
-PERSISTENT_CELL_VARIANTS = ("topcell",)
+PERSISTENT_CELL_VARIANTS = ("toponly", "topcell")
 
 
 def active_plugins(plugins_txt_path):
@@ -178,7 +178,7 @@ def main(argv=None):
     s.add_argument("--sf", default="", help="Starfield.esm (default <starfield>\\Data\\Starfield.esm)")
     s.add_argument("--compiler", default="", help="default <starfield>\\Tools\\Papyrus Compiler\\PapyrusCompiler.exe")
     s.add_argument("--content-resources", default="", help="default <starfield>\\Tools\\ContentResources.zip")
-    s.add_argument("--variant", default="topcell", choices=VARIANTS,
+    s.add_argument("--variant", default="toponly", choices=VARIANTS,
                    help="which part of the override is written (the crash of #707: one game run per variant)")
     a = ap.parse_args(argv)
     stage(a)
