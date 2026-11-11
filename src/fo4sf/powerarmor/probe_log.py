@@ -170,11 +170,35 @@ def step_result(stage, step, states, start):
     return ("restored", ch) if orig is not None and race == orig else ("not restored", ch)
 
 
-def summarize(lines, run=-1):
+OURS = re.compile(r"FO4SF_PA|FO4SFPowerArmorProbe|FO4SFPAProbe", re.IGNORECASE)
+REFUSAL = re.compile(r"SwitchToPowerArmor|power armor furniture", re.IGNORECASE)
+
+
+def papyrus_errors(lines):
+    """The error and warning lines of the game's own Papyrus log (Logs\\Script\\Papyrus.0.log) that name our forms, in
+    order, without repeats, the game's time stamp cut. The probe's user log cannot see a refusal: the PC run of 11 Nov
+    read "no logged change" while the game wrote "FO4SF_PAProbeSuitRef (09000804): is not valid power armor furniture."
+    from Actor.SwitchToPowerArmor()."""
+    out = []
+    for line in lines:
+        t = line.strip()
+        m = re.search(r"\b(error|warning)\b", t, re.IGNORECASE)
+        if not m or not OURS.search(t):
+            continue
+        t = t[m.start():]
+        if t not in out:
+            out.append(t)
+    return out
+
+
+def summarize(lines, run=-1, papyrus=None):
     """{"runs", "run", "cut", "init", "start", "control": (ok, why), "steps": {stage: {"call", "result", "changed",
-    "states": {when: line}}}, "unavailable": [reading names logged na], "problems", "verdict"} of one run (the latest)."""
+    "states": {when: line}}}, "unavailable": [reading names logged na], "papyrus": [errors naming our forms],
+    "problems", "verdict"} of one run (the latest). papyrus is the lines of the game's Papyrus log (or None, not read):
+    a stage-10 refusal in it overrides the probe log's "no logged change"."""
     rs, cut = runs(lines)
-    out = {"runs": len(rs), "cut": cut, "init": None, "start": None, "control": (False, "no log"), "steps": {},
+    errs = papyrus_errors(papyrus) if papyrus is not None else []
+    out = {"runs": len(rs), "cut": cut, "papyrus": errs, "papyrus_read": papyrus is not None, "init": None, "start": None, "control": (False, "no log"), "steps": {},
            "states": [], "unavailable": [], "problems": [], "verdict": "INCONCLUSIVE: no log lines"}
     if not rs:
         return out
@@ -194,6 +218,9 @@ def summarize(lines, run=-1):
         step = next((e for e in r if e["event"] == "step" and e.get("stage") == stage), None)
         by = {s["when"]: s for s in states if s.get("stage") == stage and isinstance(s.get("when"), str)}
         result, ch = step_result(stage, step, by, start)
+        refusal = next((e for e in errs if REFUSAL.search(e)), None) if stage == 10 and step else None
+        if refusal:                 # the call ran and the game refused it: not "no logged change"
+            result = "refused by the game: " + refusal
         out["steps"][stage] = {"call": step.get("call") if step else None, "result": result, "changed": ch, "states": by}
         if step and "settled" not in by and by:
             out["problems"].append(f"stage {stage}: no settled reading (the 4 s timer never ran); judged on the reading right after the call")
@@ -253,6 +280,10 @@ def report(summary):
         lines.append(f"stage {stage} {s['call'] or '-'}: {shown}")
     if summary.get("unavailable"):
         lines.append("readings the game gave as na: " + ", ".join(summary["unavailable"]))
+    if summary.get("papyrus"):
+        lines += ["game Papyrus log: " + e for e in summary["papyrus"]]
+    elif not summary.get("papyrus_read"):
+        lines.append("note: the game's Papyrus log was not read (--papyrus): a refusal by the game is not visible in the probe log")
     lines += ["note: " + p for p in summary.get("problems", [])]
     lines.append(summary["verdict"])
     return lines

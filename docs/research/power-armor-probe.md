@@ -127,12 +127,23 @@ Kits built at 5133e77c (the delta to 67521dd8 is the doc only), run by the owner
 | `race` | race, sit state, cell, position unchanged before / now / settled | set, restored | sit state 3 at 0.12 |
 | `race,furniture,keyword` | unchanged, same lines | set, restored | sit state 3 at 0.12 |
 
-`race,furniture` alone was not run (the full set already shows nothing). So the three default objects are not the gate, or not
-the only one: the lead from the default-object diff is **not confirmed**. The game still gives `na` for camera state, worn
-count, `IsInPowerArmor` and the player's furniture. Next (owner PC, offline): read the native in Starfield.exe against
-Fallout4.exe (stub, or live code gated on something nameable: a keyword on the furniture, the frame armor default object, the
-battery, a furniture entry type). Until that says "live, gated on X", no more kit variants for this call; the fallback (race
-swap plus our own armor and camera, by script) stays available and `SetRace` works both ways.
+**Correction (owner PC, 11 Nov 03:55 UTC): the call is not dead, the game refuses our suit and says so.** Both sessions'
+`Papyrus.0.log` hold `error: FO4SF_PAProbeSuitRef (09000804): is not valid power armor furniture.` from
+`Actor.SwitchToPowerArmor() - "<native>"`. The probe's own user log cannot see that, so "no logged change" hid a refusal;
+the reader now also reads the game's Papyrus log (below). Offline read of Starfield.exe 1.16.244.0 beside Fallout4.exe
+(names and offsets only, owner PC): the Actor registrar binds `SwitchToPowerArmor` to live code (rva 0x1fcb100, 0x1F6
+bytes) with the same branches and error strings as Fallout 4's; on success it calls a large function (rva 0x12d4b20) that
+creates the actor's power armor extra data and reads `PowerArmorRace_DO`; the default objects are read by code
+(`PowerArmorKeyword_DO` 38 reads, `PowerArmorRace_DO` 16, `PowerArmorArmorKeyword_DO` 11, ...). There is no
+`IsInPowerArmor` native in either game. The first reading of the validity check ("a FURN carrying `PowerArmorKeyword_DO`'s
+keyword") is not enough: our suit carried `FurnitureTypePowerArmor` (and, in the `all` kit, `isPowerArmorFrame`) and was
+refused in both; what else it reads is being re-read (which object each test applies to, whether a linked reference with
+`LinkPowerArmor` or loaded 3D is required). **Unresolved:** the exact condition list; the next kit change follows it.
+
+`race,furniture` alone was not run (the full set already shows nothing on the log's side). The three default objects are
+therefore not the only gate (the success path reads the race slot, so they stay worth having), and the gate in front is the
+furniture validity check. The game still gives `na` for camera state, worn
+count, `IsInPowerArmor` and the player's furniture. The fallback (race swap plus our own armor and camera, by script) stays available and `SetRace` works both ways.
 
 ## Session card
 
@@ -170,7 +181,11 @@ error text that appears.
 4. Console: `setstage <Q> 20`. Wait 5 s. Third-person screenshot `20-after-setrace`. Note any visible change,
    T-pose, missing head or hands, animation stall.
 5. Console: `setstage <Q> 30`. Wait 5 s. Screenshot `30-after-restore`.
-6. Quit to the desktop **without saving**. Run the reader command above and paste its output with the screenshots.
+6. Quit to the desktop **without saving**. Run the reader command above and paste its output with the screenshots. The reader
+   also reads the game's own `Logs\Script\Papyrus.0.log` (`--papyrus <file>` for another path) and prints every error or
+   warning that names our forms: **a refusal by the game is only there** (11 Nov: `FO4SF_PAProbeSuitRef (09000804): is not
+   valid power armor furniture.`), and the reader then says `refused by the game` for stage 10 instead of `no logged
+   change`. By hand: search that file for `FO4SF_PA` and keep the lines.
 **The quick way the PC used** (walking is not needed): `coc FO4SF_PAProbeCell` (the game closes the console by itself on the
 `coc`; open it again); `prid <load index>000805` then `activate player` seats the player on the control; W stands up;
 `player.setpos x -2`, `player.setpos y -2.5`, `player.setangle z 90` puts the player 2 units from the suit, facing it. The

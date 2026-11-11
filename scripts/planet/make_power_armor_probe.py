@@ -16,8 +16,8 @@ usage:
          ("optional") and logs "na"; then the script itself;
       3. plan.json (SHA-256 of every file, of Starfield.esm, the optional readings' fate) and README.txt. Built in a new
          <out>.partial-<time>-<pid> and renamed to <out> only when every step passed; an existing <out> is refused.
-  python make_power_armor_probe.py log [--file <FO4SFPAProbe.0.log>]
-      the run's user log as one table and a verdict (src/fo4sf/powerarmor/probe_log.py); exit 0 when the control held,
+  python make_power_armor_probe.py log [--file <FO4SFPAProbe.0.log>] [--papyrus <Papyrus.0.log>]
+      the run's user log (and the game's Papyrus log: errors naming our forms, a refused stage 10) as one table and a verdict (src/fo4sf/powerarmor/probe_log.py); exit 0 when the control held,
       1 when the session is inconclusive.
 Nothing here installs anything: scripts/planet/power_armor_probe_install.py does, on the owner's word, game closed.
 """
@@ -47,6 +47,7 @@ PSC = os.path.join(HERE, SCRIPT + ".psc")
 DEFAULT_CONTROL = "NPCChairTech03_Free_270"
 VARIANTS = ("race", "furniture", "keyword")
 STARFIELD = r"D:\SteamLibrary\steamapps\common\Starfield"
+PAPYRUS_LOG = os.path.join(os.path.expanduser("~"), "Documents", "My Games", "Starfield", "Logs", "Script", "Papyrus.0.log")
 LOG = os.path.join(os.path.expanduser("~"), "Documents", "My Games", "Starfield", "Logs", "Script", "User", "FO4SFPAProbe.0.log")
 # what the script cannot run without (the optional readings are the .psc's ";OPT" lines)
 REQUIRED = {
@@ -251,8 +252,12 @@ def log(a):
     if not os.path.isfile(a.file):
         print(f"no log at {a.file}")
         return 2
+    papyrus = None
+    if a.papyrus and os.path.isfile(a.papyrus):      # the game's own log: a refusal of SwitchToPowerArmor is only there
+        with open(a.papyrus, encoding="utf-8", errors="replace") as f:
+            papyrus = f.read().splitlines()
     with open(a.file, encoding="utf-8", errors="replace") as f:
-        s = probe_log.summarize(f)
+        s = probe_log.summarize(f, papyrus=papyrus)
     print("\n".join(probe_log.report(s)))
     return 0 if s["control"][0] else 1
 
@@ -273,6 +278,7 @@ def main(argv=None):
     s.add_argument("--variant", default="", help="comma list of default objects to override: race, furniture, keyword")
     g = sub.add_parser("log")
     g.add_argument("--file", default=LOG)
+    g.add_argument("--papyrus", default=PAPYRUS_LOG, help="the game's Papyrus.0.log (errors naming our forms are shown)")
     a = p.parse_args(argv)
     return {"precheck": precheck, "stage": stage, "log": log}[a.cmd](a)
 

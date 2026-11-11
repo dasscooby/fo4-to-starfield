@@ -199,6 +199,47 @@ class PcRunTests(unittest.TestCase):
         self.assertEqual((s["steps"][20]["result"], s["steps"][30]["result"]), ("race set", "restored"))
 
 
+REFUSED = ("[11/10/2026 - 08:42:09PM] error: FO4SF_PAProbeSuitRef (09000804): is not valid power armor furniture.\n"
+           "stack:\n\t[Actor (00000014)].Actor.SwitchToPowerArmor() - \"<native>\" Line ?")
+
+
+class PapyrusTests(unittest.TestCase):
+    """The PC run of 11 Nov: the probe log said no change, the game's Papyrus log said it refused (FAL-212)."""
+    def test_a_refusal_naming_our_suit_is_shown_and_overrides_no_logged_change(self):
+        lines = head() + sat() + steps()
+        plain = pl.summarize(lines)
+        self.assertEqual(plain["steps"][10]["result"], "no logged change")
+        self.assertFalse(plain["papyrus_read"])
+        s = pl.summarize(lines, papyrus=["noise line", *REFUSED.splitlines()])
+        self.assertEqual(s["papyrus"], ["error: FO4SF_PAProbeSuitRef (09000804): is not valid power armor furniture."])
+        self.assertEqual(s["steps"][10]["result"],
+                         "refused by the game: error: FO4SF_PAProbeSuitRef (09000804): is not valid power armor furniture.")
+        self.assertIn("SwitchToPowerArmor: refused by the game", s["verdict"])
+        out = pl.report(s)
+        self.assertIn("game Papyrus log: error: FO4SF_PAProbeSuitRef (09000804): is not valid power armor furniture.", out)
+        self.assertEqual(s["steps"][20]["result"], "race set")                       # the other steps are untouched
+
+    def test_other_scripts_errors_and_repeats_are_left_out(self):
+        errs = pl.papyrus_errors(["error: Quest XYZ: bad", "warning: FO4SF_PAProbeQuest: something", "x error: FO4SF_PAProbeQuest: something",
+                                  "warning: FO4SF_PAProbeQuest: something", "info FO4SF_PAProbeQuest fine"])
+        self.assertEqual(errs, ["warning: FO4SF_PAProbeQuest: something", "error: FO4SF_PAProbeQuest: something"])
+
+    def test_a_papyrus_log_with_no_errors_of_ours_changes_nothing_and_says_it_was_read(self):
+        s = pl.summarize(head() + sat() + steps(), papyrus=["error: Other thing"])
+        self.assertEqual(s["steps"][10]["result"], "no logged change")
+        self.assertTrue(s["papyrus_read"])
+        self.assertFalse(any("was not read" in l for l in pl.report(s)))
+
+    def test_without_the_papyrus_log_the_report_says_a_refusal_would_be_invisible(self):
+        self.assertTrue(any("Papyrus log was not read" in l for l in pl.report(pl.summarize(head() + sat() + steps()))))
+
+    def test_a_failed_control_still_says_not_judged_with_a_refusal(self):
+        s = pl.summarize(head() + steps(), papyrus=REFUSED.splitlines())
+        out = "\n".join(pl.report(s))
+        self.assertIn("stage 10 SwitchToPowerArmor: not judged", out)
+        self.assertTrue(s["verdict"].startswith("INCONCLUSIVE"))
+
+
 class TableTests(unittest.TestCase):
     def test_the_quests_form_id_is_printed_for_setstage(self):
         out = pl.report(pl.summarize(head() + sat() + steps()))
