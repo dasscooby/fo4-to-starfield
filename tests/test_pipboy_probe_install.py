@@ -141,7 +141,7 @@ class PipboyProbeInstallTests(unittest.TestCase):
     def test_an_extra_data_file_is_refused(self):
         write(os.path.join(self.staged, "Data", "Interface", "Other.swf"), b"FWS")
         code, _ = self.run_main("install", "--dir", self.staged)
-        self.assertIn("Data holds", str(code))
+        self.assertIn("the twin Interface/Other.swf is not the movie byte for byte", str(code))  # FAL-250: twins only
         self.assert_untouched()
 
     def test_a_broken_movie_is_refused(self):
@@ -161,6 +161,31 @@ class PipboyProbeInstallTests(unittest.TestCase):
     def test_install_needs_a_dir(self):
         code, _ = self.run_main("install")
         self.assertIn("install needs --dir", str(code))
+
+    def test_a_twin_is_packed_with_the_movie(self):
+        # FAL-250: make_pipboy_probe.py twin, our movie again at a vanilla movie's path, rides in the probe archive
+        make_pipboy_probe.twin(self.staged, "Interface/testmenus_dynamictexturedgeo.swf")
+        code, out = self.run_main("install", "--dir", self.staged)
+        self.assertEqual(code, 0, out)
+        self.assertTrue(os.path.isfile(os.path.join(self.data, ARCHIVE)))
+        self.assertFalse(os.path.exists(os.path.join(self.data, "Interface")))  # packed, not loose
+        self.assertEqual(self.run_main("uninstall")[0], 0)
+        self.assertFalse(os.path.exists(os.path.join(self.data, ARCHIVE)))
+        self.assertEqual(self.exp_record(), EXP_RECORD)
+
+    def test_a_twin_that_is_not_the_movie_is_refused(self):
+        twin = make_pipboy_probe.twin(self.staged, "Interface/terminalmenu.swf")
+        write(twin, open(twin, "rb").read() + b"\0")
+        code, _ = self.run_main("install", "--dir", self.staged)
+        self.assertIn("is not the movie byte for byte", str(code))
+        self.assert_untouched()
+
+    def test_a_copy_outside_interface_is_refused(self):
+        movie = os.path.join(self.staged, "Data", *make_pipboy_probe.MOVIE.split("/"))
+        write(os.path.join(self.staged, "Data", "Textures", "x.swf"), open(movie, "rb").read())
+        code, _ = self.run_main("install", "--dir", self.staged)
+        self.assertIn("Data holds", str(code))
+        self.assert_untouched()
 
 
 if __name__ == "__main__":

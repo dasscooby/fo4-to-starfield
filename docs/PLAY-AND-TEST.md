@@ -268,7 +268,8 @@ project). The filter means it only catches that one exception, not crashes in ge
   writes small dumps by default (`--set crash_watch.dump=full` for full ones), and logs every exit code to
   `crashwatch.log` in the dump folder, so a crash without a dump still leaves its code.
   The launcher writes Plugins.txt only before the game starts: when bridge is on or off, and by default to put our
-  plugins in the one target order (load_order=fix; it keeps a Plugins.txt.bak copy and writes nothing when the order
+  plugins after their masters while keeping any already-valid order, including kits after markers or the bridge
+  (load_order=fix; it keeps a Plugins.txt.bak copy and writes nothing when the order
   is already right; `--set load_order=check` refuses instead, `off` leaves the file alone). The order is in
   `scripts/game/load_order.py`. On the owner's first launcher run (2026-10-22) Plugins.txt was rewritten about 25 s after the game
   started, with FO4Port moved after FO4SFMission and every line still ticked. Nothing in the launcher runs then (it
