@@ -131,7 +131,7 @@ namespace
 	constexpr std::size_t   kContextsAt = 0x2A8;             // libxse RE::ControlMap::activeInputContexts (16-byte items)
 	constexpr std::size_t   kPositionAt = 0x80 + 0x0C;       // libxse RE::TESObjectREFR::data (0x80), OBJ_REFR::location
 	constexpr std::size_t   kMaxListed = 16;                 // contexts listed per snapshot
-	constexpr std::size_t   kMaxFlagSets = 4;
+	constexpr std::size_t   kMaxFlagSets = 16;   // FAL-414: a flag sweep (one set per open) needs more than four
 	constexpr std::size_t   kGameVmImplAt = 0xE0;            // libxse RE::GameVM::impl (BSTSmartPointer<IVirtualMachine>)
 	constexpr std::size_t   kDispatchStaticCallSlot = 0x2F;  // libxse IVirtualMachine::DispatchStaticCall
 	constexpr std::size_t   kMaxName = 64;                   // ClickCall: each of the script's and function's names
@@ -3133,7 +3133,7 @@ namespace
 	// (k - 1) mod count
 	void ReadFlagSets(const std::filesystem::path& a_ini, const wchar_t* a_key, const wchar_t* a_default)
 	{
-		std::array<wchar_t, 128> text{};
+		std::array<wchar_t, 256> text{};
 		REX::W32::GetPrivateProfileStringW(L"FO4SFPipboyMenu", a_key, a_default, text.data(),
 			static_cast<std::uint32_t>(text.size()), a_ini.c_str());
 		const wchar_t* at = text.data();

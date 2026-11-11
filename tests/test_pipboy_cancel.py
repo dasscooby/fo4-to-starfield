@@ -41,6 +41,10 @@ class PipboyCancelTest(unittest.TestCase):
             definition = re.search(r"^\t(?:void|bool) " + name + r"\(", self.src, re.M).start()
             self.assertEqual(first_call, definition + len("\tvoid "), name)
 
+    def test_flag_sweep_room(self):
+        self.assertIn("kMaxFlagSets = 16", self.src)
+        self.assertIn("PageFlagSets=0x9,0xB,", self.ini)
+
 
 if __name__ == "__main__":
     unittest.main()
