@@ -87,9 +87,10 @@ def parse_line(line):
 
 
 def runs(lines):
-    """([[parsed whole line]], cut) split at each init line (each a new script instance), an init with no version
-    (an empty one) never splits; lines before the first init form a run of their own. cut counts the lines that lack
-    end=true (dropped)."""
+    """([[parsed whole line]], cut) split at each init line that follows a step (a new script instance after a run that
+    got as far as a step), an init with no version (an empty one) never splits; the game logs init and start twice at
+    load (PC run of 11 Nov), so an init before any step stays in its run; lines before the first init form a run of their
+    own. cut counts the lines that lack end=true (dropped)."""
     out, cur, cut = [], [], 0
     for line in lines:
         p = parse_line(line)
@@ -98,7 +99,7 @@ def runs(lines):
         if not p["end"]:
             cut += 1
             continue
-        if p["event"] == "init" and cur and p.get("version") is not None:
+        if p["event"] == "init" and p.get("version") is not None and any(e["event"] == "step" for e in cur):
             out.append(cur)
             cur = []
         cur.append(p)
@@ -116,21 +117,22 @@ def control_read(start, events):
     ctrl = start.get("controlref") if start else None
     if start is None:
         return False, "no start line: the script never ran"
-    if ctrl is None:
-        return False, "the script did not find the control furniture reference (controlref none)"
+    # controlref is none when the start line is logged at load, before the probe cell is loaded (a temporary reference
+    # does not resolve then: PC run of 11 Nov); the furniture-id match is then impossible, the sit-state one still reads
     unreadable = True
     for e in events:
         if e["event"] not in ("sit", "state"):
             continue
         if e.get("furn") not in (None, "na"):
             unreadable = False
-            if e["furn"] == ctrl:
+            if ctrl is not None and e["furn"] == ctrl:
                 return True, f"furniture {hexid(ctrl)} at rt {e['rt']:g}"
         if e.get("sitstate") == SITTING and isinstance(e.get("distc"), (int, float)) and e["distc"] <= CONTROL_M:
             return True, f"sit state {SITTING} {e['distc']:g} from the control at rt {e['rt']:g}"
     if unreadable and not any(e.get("sitstate") not in (None, "na") for e in events):
         return False, "the game gave neither the player's furniture nor a sit state (both na): the control cannot be read"
-    return False, "the player was never read sitting on the control furniture"
+    return False, "the player was never read sitting on the control furniture" + (
+        " (controlref none in the start line: only a sit state 3 near it counts)" if ctrl is None else "")
 
 
 def changes(a, b):
@@ -179,7 +181,7 @@ def summarize(lines, run=-1):
     r = rs[run]
     out["run"] = run if run >= 0 else len(rs) + run
     out["init"] = next((e for e in r if e["event"] == "init"), None)
-    start = next((e for e in r if e["event"] == "start"), None)
+    start = next((e for e in reversed(r) if e["event"] == "start"), None)       # the last: the first is logged at load
     out["start"] = start
     states = [e for e in r if e["event"] == "state"]
     out["states"] = states
