@@ -39,8 +39,9 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(ids["QuestId"], 0x800)
         self.assertEqual(int(re.search(r"^int ShellBase = (0x[0-9A-Fa-f]+)", PSC, re.M).group(1), 16), ids["ShellBase"])
         self.assertEqual(int(re.search(r"^int RecipeBase = (0x[0-9A-Fa-f]+)", PSC, re.M).group(1), 16), ids["RecipeBase"])
-        self.assertEqual((ids["ShellBase"], ids["RecipeBase"], ids["CategoryId"]), (0x802, 0x806, 0x801))
-        self.assertGreaterEqual(ids["RecipeBase"] - ids["ShellBase"], 4)           # room for four shells
+        self.assertEqual((ids["ShellBase"], ids["RecipeBase"], ids["CategoryId"]), (0x802, 0x82A, 0x801))
+        self.assertEqual(ids["RecipeBase"] - ids["ShellBase"], 40)                 # room for MaxPieces shells
+        self.assertIn("MaxPieces = 40", TOOL_SRC)
         self.assertIn(f'string BpPlugin = "{PLUGIN}"', PSC)
         self.assertTrue(PSC.startswith("Scriptname FO4SF_BPQuest extends Quest"))
         self.assertIn('Script = "FO4SF_BPQuest"', TOOL_SRC)
@@ -65,15 +66,18 @@ class ScriptTests(unittest.TestCase):
         params = [p for m in re.findall(r"Function\s+\w+\(([^)]*)\)", PSC) for p in re.findall(r"\s(\w+)\s*(?:,|$)", " " + m)]
         self.assertEqual([n for n in decl + params if n.lower() in TYPES], [])
 
-    def test_the_core_id_lines_are_zero_as_committed_and_the_stager_puts_the_ids_in(self):
-        self.assertEqual(len(mbp.CORE_LINE.findall(PSC)), 4)
+    def test_the_core_id_line_is_empty_as_committed_and_the_stager_puts_the_ids_in(self):
+        self.assertEqual(len(mbp.CORE_LINE.findall(PSC)), 1)
         pieces = [{"core_id": 0x0A2002}, {"core_id": 0x0A2003}, {"core_id": 0x0A2005}]
         out = mbp.set_core_ids(PSC, pieces)
-        self.assertIn("int CoreId1 = 0x0A2002  ;CORE1", out)
-        self.assertIn("int CoreId3 = 0x0A2005  ;CORE3", out)
-        self.assertRegex(out, r"(?m)^int CoreId4 = 0 +;CORE4$")                  # three pieces: no fourth
+        self.assertIn("    CoreIds = new int[3]\n    CoreIds[0] = 0x0A2002\n    CoreIds[1] = 0x0A2003\n    CoreIds[2] = 0x0A2005", out)
+        self.assertNotIn("\n    ;COREIDS\n", out)
+        many = mbp.set_core_ids(PSC, [{"core_id": 0x0A2000 + i} for i in range(40)])
+        self.assertIn("CoreIds[39] = 0x0A2027", many)
         with self.assertRaises(SystemExit):
-            mbp.set_core_ids("int CoreId1 = 0 ;CORE1\n", pieces)
+            mbp.set_core_ids(PSC, [{"core_id": 1}] * 41)
+        with self.assertRaises(SystemExit):
+            mbp.set_core_ids("int x\n", pieces)
 
     def test_the_script_only_reads_it_places_and_changes_nothing(self):
         code = "\n".join(l for l in PSC.splitlines() if not l.strip().startswith(";"))
@@ -187,7 +191,7 @@ class ToolTests(unittest.TestCase):
                      "recipe filters [000E02 OutpostFilterCraftingStations, 000E03 OutpostFilterCraftingAll]",
                      "build limit (max build count global) 000E10 OutpostStationLimit", "component 000B12 ResOre_Aluminum x4",
                      "component 000B11 ResOre_Iron x3", "recipes under the same workbench keyword (OutpostCategoryCrafting)",
-                     "outpost category / filter keywords: 3"):
+                     "outpost category / filter keywords: 9"):
             self.assertIn(want, r.stdout)
 
     def test_menu_refuses_a_recipe_that_is_not_there_by_name(self):
@@ -198,7 +202,7 @@ class ToolTests(unittest.TestCase):
     def test_core_lists_the_statics_and_the_default_choice_skips_collision_and_a_repeated_model(self):
         r = self.run_tool("core", self.core)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn("core: 7 STAT with a model", r.stdout)
+        self.assertIn("core: 12 STAT with a model", r.stdout)
         picks = re.findall(r"^piece (\d): core (\w+) (\S+)", r.stdout, re.M)
         self.assertEqual([(n, i) for n, i, _ in picks], [("1", "0A2002"), ("2", "0A2003"), ("3", "0A2005"), ("4", "0A2006")])
         self.assertNotIn("000a01", r.stdout.split("piece 1")[1])                    # the collision block is not a piece
@@ -206,18 +210,67 @@ class ToolTests(unittest.TestCase):
         self.assertEqual([p["core_id"] for p in pj], [0x0A2002, 0x0A2003, 0x0A2005, 0x0A2006])
         self.assertTrue(all(p["name"].startswith("FO4 ") for p in pj))
 
-    def test_pieces_by_editor_id_three_or_four_and_nothing_else(self):
+    def test_pieces_by_editor_id_from_three_up_and_nothing_else(self):
         three = self.run_tool("pieces", self.core, "--pieces", "FO4Core_stat_000a07_fallout4,FO4Core_stat_000a02_fallout4,FO4Core_stat_000a06_fallout4")
         self.assertEqual(three.returncode, 0, three.stderr)
         self.assertEqual([p["core_id"] for p in json.loads(three.stdout.strip().splitlines()[-1])], [0x0A2007, 0x0A2002, 0x0A2006])
         two = self.run_tool("pieces", self.core, "--pieces", "FO4Core_stat_000a07_fallout4,FO4Core_stat_000a02_fallout4")
         self.assertEqual(two.returncode, 1)
-        self.assertIn("2 piece(s) chosen: three or four are needed", two.stderr)
+        self.assertIn("2 piece(s) chosen: between 3 and 40 are needed", two.stderr)
         five = self.run_tool("pieces", self.core, "--pieces", ",".join(f"FO4Core_stat_000a0{i}_fallout4" for i in (2, 3, 5, 6, 7)))
-        self.assertEqual(five.returncode, 1)
+        self.assertEqual(five.returncode, 0, five.stderr)                           # the four-piece limit is gone
+        self.assertEqual(len(json.loads(five.stdout.strip().splitlines()[-1])), 5)
         nope = self.run_tool("pieces", self.core, "--pieces", "FO4Core_stat_000a07_fallout4,FO4Core_stat_000aFF_fallout4,FO4Core_stat_000a02_fallout4")
         self.assertEqual(nope.returncode, 1)
         self.assertIn("0 STAT with a model named FO4Core_stat_000aFF_fallout4", nope.stderr)
+
+    def test_the_named_set_and_wildcards(self):
+        r = self.run_tool("pieces", self.core, "--set", "fo4")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        got = [p["edid"] for p in json.loads(r.stdout.strip().splitlines()[-1])]
+        self.assertEqual(got, ["FO4Core_junkwall01", "FO4Core_junkwall02", "FO4Core_piershackwall01", "FO4Core_piershackwall02", "FO4Core_woodcrate"])
+        self.assertIn("junkwall03 (or FO4Core_junkwall03) in the core, skipped", r.stderr)    # names the core lacks are reported, not fatal
+        star = self.run_tool("pieces", self.core, "--pieces", "FO4Core_junkwall*,FO4Core_stat_000a02_fallout4")
+        self.assertEqual([p["edid"] for p in json.loads(star.stdout.strip().splitlines()[-1])], ["FO4Core_junkwall01", "FO4Core_junkwall02", "FO4Core_stat_000a02_fallout4"])
+        self.assertEqual(self.run_tool("pieces", self.core, "--set", "nope").returncode, 1)
+
+    def test_a_big_set_builds_checks_and_costs_cycle(self):
+        out = self.build("b-set", "--set", "fo4", "--shell", "plain")
+        check = self.run_tool("check", out / PLUGIN, self.sf, self.core, "--set", "fo4", "--shell", "plain")
+        self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
+        self.assertIn("records: Activator 5, Quest 1, ConstructibleObject 5", check.stdout)
+        self.assertIn("COBJ 00082E:FO4SFBuildPieces.esm makes 000806", check.stdout)       # recipe 5 = RecipeBase + 4, shell 5 = ShellBase + 4
+        self.assertIn("cost 000B11 x1, sort 15", check.stdout)                             # piece 5: the cost cycle starts again
+
+    def test_tab_files_the_recipes_under_a_vanilla_category_keyword(self):
+        for tab, kid in (("structures", "000E20"), ("furniture", "000E21"), ("OutpostCategoryDefenses", "000E25")):
+            rep_ = self.build(f"b-tab-rep-{tab}", "--category", "replace", "--tab", tab)
+            c = self.run_tool("check", rep_ / PLUGIN, self.sf, self.core, "--category", "replace", "--tab", tab)
+            self.assertEqual(c.returncode, 0, c.stdout + c.stderr)
+            self.assertIn(f"workbench {kid}, filters [{kid}]", c.stdout)                  # workbench keyword AND filter both the tab's
+            self.assertIn("records: Furniture 4, Quest 1, ConstructibleObject 4", c.stdout)    # no keyword of our own
+            add = self.build(f"b-tab-add-{tab}", "--category", "add", "--tab", tab)
+            c = self.run_tool("check", add / PLUGIN, self.sf, self.core, "--category", "add", "--tab", tab)
+            self.assertEqual(c.returncode, 0, c.stdout + c.stderr)
+            self.assertIn(f"workbench 000E01, filters [000E02, 000E03, {kid}]", c.stdout)     # template's workbench keyword, tab appended
+        bad = self.run_tool("build", self.sf, self.core, str(self.root / "b-tab-bad"), "--tab", "structures")
+        self.assertEqual(bad.returncode, 1)
+        self.assertIn("--tab needs --category add or replace", bad.stderr)
+        nope = self.run_tool("build", self.sf, self.core, str(self.root / "b-tab-nope"), "--category", "add", "--tab", "OutpostCategoryNothing")
+        self.assertEqual(nope.returncode, 1)
+        self.assertIn("0 KYWD named OutpostCategoryNothing", nope.stderr)
+        wrong = self.run_tool("check", rep_ / PLUGIN, self.sf, self.core, "--category", "replace", "--tab", "furniture")
+        self.assertEqual(wrong.returncode, 1)
+
+    def test_menu_prints_the_art_fields_and_the_tabs(self):
+        r = self.run_tool("menu", self.sf)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("fields of created object (Furniture):", r.stdout)
+        self.assertIn("Model", r.stdout)
+        self.assertIn("fields of COBJ (ConstructibleObject):", r.stdout)
+        self.assertIn("tabs (OutpostCategory keywords)", r.stdout)
+        self.assertRegex(r.stdout, r"000E20 OutpostCategoryStructures: 0 / 0")
+        self.assertRegex(r.stdout, r"000E01 OutpostCategoryCrafting: 1 / 0")
 
     def test_every_variant_builds_and_checks(self):
         for shell in ("clone", "plain"):
@@ -234,8 +287,8 @@ class ToolTests(unittest.TestCase):
     def test_the_recipes_are_the_templates_with_a_small_cost_and_the_shells_carry_the_cores_models(self):
         out = self.build("b-detail")
         check = self.run_tool("check", out / PLUGIN, self.sf, self.core).stdout.replace("\\", "/")       # Windows prints the model path with backslashes
-        self.assertIn("COBJ 000806:FO4SFBuildPieces.esm makes 000802, workbench 000E01, filters [000E02, 000E03], cost 000B11 x1, sort 11", check)
-        self.assertIn("COBJ 000809:FO4SFBuildPieces.esm makes 000805, workbench 000E01, filters [000E02, 000E03], cost 000B11 x2, sort 14", check)
+        self.assertIn("COBJ 00082A:FO4SFBuildPieces.esm makes 000802, workbench 000E01, filters [000E02, 000E03], cost 000B11 x1, sort 11", check)
+        self.assertIn("COBJ 00082D:FO4SFBuildPieces.esm makes 000805, workbench 000E01, filters [000E02, 000E03], cost 000B11 x2, sort 14", check)
         self.assertIn('"FO4 Crate01" model Meshes/Props/Crate01.nif (core 0A2002 FO4Core_stat_000a02_fallout4)', check)
         self.assertIn('"FO4 Locker03" model Meshes/Props/Locker03.nif (core 0A2006', check)
 
@@ -267,7 +320,7 @@ class ToolTests(unittest.TestCase):
             pos += 24 + size
         self.assertTrue(ids)
         self.assertEqual({i >> 24 for i in ids}, {1})                              # every record is ours (load index 1)
-        self.assertEqual(sorted(i & 0xFFFFFF for i in ids), [0x800, 0x801, 0x802, 0x803, 0x804, 0x805, 0x806, 0x807, 0x808, 0x809])
+        self.assertEqual(sorted(i & 0xFFFFFF for i in ids), [0x800, 0x801, 0x802, 0x803, 0x804, 0x805, 0x82A, 0x82B, 0x82C, 0x82D])
 
     def test_check_refuses_another_variant_another_choice_and_a_changed_core(self):
         out = self.build("b-refuse")
@@ -329,13 +382,13 @@ class StageTests(unittest.TestCase):
         self.assertEqual(plan["kind"], "build-pieces")
         self.assertEqual(plan["plugins"], [PLUGIN])
         self.assertEqual(sorted(plan["outputs"]), sorted([PLUGIN, "Data/Scripts/FO4SF_BPQuest.pex"]))
-        self.assertEqual(plan["variant"], {"shell": "clone", "category": "add", "cobj": "co_Outpost_Crafting_WorkbenchIndustrialStation"})
+        self.assertEqual(plan["variant"], {"shell": "clone", "category": "add", "tab": None, "set": None, "cobj": "co_Outpost_Crafting_WorkbenchIndustrialStation"})
         self.assertEqual([p["core_id"] for p in plan["pieces"]], [0x0A2002, 0x0A2003, 0x0A2005, 0x0A2006])
         self.assertEqual(plan["inputs"]["Starfield.esm"]["sha256"], mbp.wp.sha256(str(self.sf)))
         self.assertEqual(plan["inputs"]["core"]["sha256"], mbp.wp.sha256(str(self.core)))
         kept = (final / "FO4SF_BPQuest.psc").read_text()
-        self.assertIn("int CoreId1 = 0x0A2002  ;CORE1", kept)
-        self.assertIn("int CoreId4 = 0x0A2006  ;CORE4", kept)
+        self.assertIn("    CoreIds[0] = 0x0A2002", kept)
+        self.assertIn("    CoreIds[3] = 0x0A2006", kept)
         self.assertTrue((final / "offline_check.txt").read_text().rstrip().endswith("all checks pass"))
         self.assertIn("COBJ 2E2F2C", (final / "menu.txt").read_text())
         self.assertFalse((final / "work").exists())

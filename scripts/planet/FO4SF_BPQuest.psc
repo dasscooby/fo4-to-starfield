@@ -2,12 +2,12 @@ Scriptname FO4SF_BPQuest extends Quest
 {Fallout 4 build pieces in the outpost build menu (fo4-to-starfield, docs/research/build-pieces.md). Attached to QUST
  FO4SF_BPQuest (0x800 of FO4SFBuildPieces.esm): start game enabled, NO properties (every form is found with
  Game.GetFormFromFile, as FO4SF_WSHandQuest finds the bench). The pieces themselves are records of the plugin (shells
- 0x802.., recipes 0x806..): this script only READS and says what it finds, so a missing piece is visible without the menu.
+ 0x802.., recipes 0x82A..; up to 40 of each): this script only READS and says what it finds, so a missing piece is visible without the menu.
    init        what is installed: the plugin, the core (FO4TerrainCore.esm, else the _Mars core), and for each piece the
                shell and the recipe of the plugin and the core static the shell's model was taken from
    ready       20 s later: the same counts, on screen (Debug.Notification) and in the log
  Log: My Games\Starfield\Logs\Script\User\FO4SFBP.0.log, lines "FO4SFBP rt=<real time s> <event> key=value ... end=true".
- The three core ids are the stager's (make_build_pieces.py stage puts them in; the ;COREn lines): as committed they are 0
+ The core ids are the stager's (make_build_pieces.py stage puts them in at the ;COREIDS line of LoadIds): as committed there are none
  and the log says so.}
 
 ; ---------------------------------------------------------------- the layout (dotnet/BuildPieces/Program.cs)
@@ -17,17 +17,15 @@ string BpPlugin = "FO4SFBuildPieces.esm"
 string CorePlugin = "FO4TerrainCore.esm"
 string CorePlugin2 = "FO4TerrainCore_Mars.esm"
 int ShellBase = 0x802
-int RecipeBase = 0x806
-int CoreId1 = 0 ;CORE1
-int CoreId2 = 0 ;CORE2
-int CoreId3 = 0 ;CORE3
-int CoreId4 = 0 ;CORE4
+int RecipeBase = 0x82A
+int[] CoreIds ;the stager's ids, filled in LoadIds
 
 int TIMER_READY = 1
 float ReadyS = 20.0
 
 Event OnInit()
     Debug.OpenUserLog(LogName)
+    LoadIds()
     Trace("init quest=" + GetFormID() + " installed=" + Game.IsPluginInstalled(BpPlugin) + " core=" + CoreName())
     Report("init")
     StartTimer(ReadyS, TIMER_READY)
@@ -63,15 +61,10 @@ string Function CoreName()
     return CorePlugin2
 EndFunction
 
-int Function CoreIdOf(int N)
-    if N == 1
-        return CoreId1
-    elseif N == 2
-        return CoreId2
-    elseif N == 3
-        return CoreId3
-    endif
-    return CoreId4
+Function LoadIds()
+    {The core ids of the pieces, one array line each; the stager replaces the next line with them (none as committed).}
+    CoreIds = new int[0]
+    ;COREIDS
 EndFunction
 
 int Function Report(string When)
@@ -80,8 +73,8 @@ int Function Report(string When)
     int Found = 0
     int Named = 0
     int N = 1
-    while N <= 4
-        int Cid = CoreIdOf(N)
+    while N <= CoreIds.Length
+        int Cid = CoreIds[N - 1]
         if Cid != 0
             Named += 1
             Form ShellF = Game.GetFormFromFile(ShellBase + N - 1, BpPlugin)

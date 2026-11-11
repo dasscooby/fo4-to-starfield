@@ -64,7 +64,7 @@ get into that menu, and can Fallout 4 pieces made from statics the installed cor
   that plugin is absent) and says in the log whether each is there, as the workshop kit finds the bench;
 * default choice of the pieces (`core`): the first four statics by form id with a model of their own, skipping editor ids or paths that say
   collision, marker, lod, trigger, invisible, navcut, blocker, dummy, helper, portal, sound, light, and a model already used.
-  `--pieces a,b,c[,d]` names three or four by editor id instead. **Whether these look like furniture or like walls is the PC's reading of the
+  `--pieces a,b,c,...` names 3 to 40 by editor id instead (or `--set fo4`). **Whether these look like furniture or like walls is the PC's reading of the
   `core` list**; the fixture's choice (crate, barrel, wall, locker) is made up;
 * QUST `FO4SF_BPQuest` (start game enabled, one stage, no properties): 20 s after the game starts it writes, per piece, what it found
   (shell, recipe, core static) to `FO4SFBP.0.log` and says how many on screen.
@@ -75,6 +75,14 @@ get into that menu, and can Fallout 4 pieces made from statics the installed cor
 |---|---|---|
 | `--shell` | `clone` (default), `plain` | `clone`: each shell is a copy of the template's created object with the script, model and name replaced (what the real file makes buildable stays); `plain`: a bare Activator with a model and a name. `clone` is refused by name when the created object is not a Furniture, Activator or Static |
 | `--category` | `vanilla` (default), `add`, `replace` | `vanilla`: the template's filters (the pieces go to the CRAFTING tab); `add`: the template's filters plus a keyword of our own (`FO4SF_BPCategory`, a renamed copy of the template's first filter keyword, shown as "FO4 pieces"); `replace`: the first filter swapped for it |
+| `--tab` | `structures`, `furniture`, `decorations`, `miscellaneous`, `storage`, `defenses`, or a KYWD editor id | (second pass, FAL-433) files the recipes under a vanilla `OutpostCategory*` keyword instead of our own; needs `--category add\|replace`, adds no KYWD record. `replace`: workbench keyword AND filter list become the tab keyword (what the template has twice as `OutpostCategoryCrafting`); `add`: the template's workbench keyword and filters stay and the tab keyword is appended to the filters. The PC reports per rung which tab lists them and whether a tab that was empty before appears at all |
+| `--set` | `fo4` | a named list of core statics (`FO4Core_junkwall01..07`, `junkwallcorner01`, `junkwalldoor01`, `junkwallgate01`, `piershackwall*`, `piershackroof*`, `sandbagsingle01`, `bedmetal01`, `cafetable01`, `woodcrate`, `cratelarge01`, `metalbarrel01`; each tried as `FO4Core_<name>`, then as written). A name the core lacks is printed on stderr and skipped. `--pieces` now takes 3 to 40 editor ids, `*` allowed; the default stays four. Layout: shells `0x802..0x829`, recipes `0x82A..0x851`; cost 1,1,2,2 repeating |
+
+**The icon (rung 2 of FAL-433):** the template has `menu art none`, so the picture of a station is on the created object or elsewhere.
+`menu` now prints every set field of the created object and of the COBJ (`fields of created object`, `fields of COBJ`, art-like names marked
+`<- art-like`) and the fields of the records that art-like links point to. Run `make_build_pieces.py menu` on the real file and read it; nothing
+offline says which field it is. `menu` also prints a `tabs` table: for each `OutpostCategory*` keyword how many recipes use it as workbench
+keyword / as filter, with up to three samples (menu-art ones first), so a better template than 2E2F2C can be named with `--cobj`.
 
 "A category of their own if the menu allows one": whether it does is rung 2 and 3 of the ladder. If the menu needs a tab keyword
 that is not just a renamed filter, `menu` shows it (the `OutpostCategory*`/`Filter*` keyword list) and the next commit changes the

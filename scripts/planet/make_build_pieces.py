@@ -6,13 +6,13 @@ usage:
       co_Outpost_Crafting_WorkbenchIndustrialStation 2E2F2C): its created object, workbench keyword, filters, build limit,
       components, the other recipes under the same workbench keyword, the outpost category keywords (dotnet/BuildPieces).
   python make_build_pieces.py core [--core <FO4TerrainCore.esm>] [--pieces a,b,c]
-      read only: the statics of the installed core and the three or four a build would use (editor id, local id, model).
+      read only: the statics of the installed core and the pieces a build would use (editor id, local id, model).
   python make_build_pieces.py precheck [--content-resources <zip>] [--out <precheck.json>]
       read only: every native the script needs, looked up in Starfield's base sources. Exit 1 when one is missing.
   python make_build_pieces.py stage --out <dir> [--starfield ..] [--core ..] [--compiler ..] [--content-resources ..]
                                      [--pieces a,b,c] [--shell clone|plain] [--category vanilla|add|replace] [--cobj ..]
       1. dotnet/BuildPieces build + check against the Starfield.esm and core given (offline_check.txt);
-      2. the Papyrus compile of FO4SF_BPQuest with the three or four core ids put in (the ;COREn lines);
+      2. the Papyrus compile of FO4SF_BPQuest with the core ids put in (the ;COREIDS line);
       3. plan.json (SHA-256 of every file and of both inputs, the variant, the pieces) and README.txt. Built in a new
          <out>.partial-<time>-<pid> and renamed to <out> only when every step passed; an existing <out> is refused.
   python make_build_pieces.py log [--file <FO4SFBP.0.log>]
@@ -54,18 +54,18 @@ REQUIRED = {
     "ScriptObject": ["StartTimer"],
     "Form": ["GetFormID"],
 }
-CORE_LINE = re.compile(r"^int CoreId(?P<n>[1-4]) = 0 +;CORE(?P=n)$", re.M)
+CORE_LINE = re.compile(r"^    ;COREIDS$", re.M)
+MAX_PIECES = 40
 
 
 def set_core_ids(text, pieces):
-    """The script's text with the pieces' core local ids put in (;COREn lines); n > len(pieces) stay 0 (no such piece)."""
-    def sub(m):
-        n = int(m.group("n"))
-        return f"int CoreId{n} = 0x{pieces[n - 1]['core_id']:06X}  ;CORE{n}" if n <= len(pieces) else m.group(0)
-    new = CORE_LINE.sub(sub, text)
-    if len(CORE_LINE.findall(text)) != 4:
-        sys.exit("the script has not four 'int CoreIdN = 0 ;COREN' lines to put the ids into")
-    return new
+    """The script's text with the pieces' core local ids put in at the ;COREIDS line (an array of len(pieces))."""
+    if len(CORE_LINE.findall(text)) != 1:
+        sys.exit("the script has not exactly one '    ;COREIDS' line to put the ids into")
+    if not 0 < len(pieces) <= MAX_PIECES:
+        sys.exit(f"{len(pieces)} pieces: 1 to {MAX_PIECES} are possible")
+    lines = [f"    CoreIds = new int[{len(pieces)}]"] + [f"    CoreIds[{i}] = 0x{p['core_id']:06X}" for i, p in enumerate(pieces)]
+    return CORE_LINE.sub(lambda m: "\n".join(lines), text)
 
 
 def tool(args, **kw):
@@ -76,6 +76,10 @@ def variant_opts(a):
     o = ["--shell", a.shell, "--category", a.category, "--cobj", a.cobj]
     if a.pieces:
         o += ["--pieces", a.pieces]
+    if a.set:
+        o += ["--set", a.set]
+    if a.tab:
+        o += ["--tab", a.tab]
     return o
 
 
@@ -85,7 +89,7 @@ def menu(a):
 
 
 def core(a):
-    tool(["core", a.core] + (["--pieces", a.pieces] if a.pieces else []))
+    tool(["core", a.core] + (["--pieces", a.pieces] if a.pieces else []) + (["--set", a.set] if a.set else []))
     return 0
 
 
@@ -152,7 +156,7 @@ def stage(a):
     work = os.path.join(out, "work")
     os.makedirs(work)
     opts = variant_opts(a)
-    pj = tool(["pieces", a.core] + (["--pieces", a.pieces] if a.pieces else []), check=True).stdout
+    pj = tool(["pieces", a.core] + (["--pieces", a.pieces] if a.pieces else []) + (["--set", a.set] if a.set else []), check=True).stdout
     pieces = json.loads([l for l in pj.splitlines() if l.startswith("[")][-1])
     wrote = tool(["build", a.starfield, a.core, out] + opts).stdout
     check = tool(["check", os.path.join(out, PLUGIN), a.starfield, a.core] + opts).stdout
@@ -180,7 +184,7 @@ def stage(a):
         sys.exit(f"Starfield.esm or the core changed during the build, nothing published; attempt kept in {out}")
     plan = {"kind": "build-pieces", "version": 1, "plugins": [PLUGIN], "outputs": stage_files(out),
             "inputs": {"Starfield.esm": {"sha256": sf_before}, "core": {"name": os.path.basename(a.core), "sha256": core_before}},
-            "variant": {"shell": a.shell, "category": a.category, "cobj": a.cobj}, "pieces": pieces,
+            "variant": {"shell": a.shell, "category": a.category, "tab": a.tab or None, "set": a.set or None, "cobj": a.cobj}, "pieces": pieces,
             "log": "<My Games>/Starfield/Logs/Script/User/FO4SFBP.0.log"}
     with open(os.path.join(out, "plan.json"), "w", encoding="utf-8") as f:
         json.dump(plan, f, indent=1)
@@ -188,7 +192,7 @@ def stage(a):
     with open(os.path.join(out, "README.txt"), "w", encoding="utf-8") as f:
         f.write(f"""Build pieces ({datetime.date.today().isoformat()}). docs/research/build-pieces.md
 {PLUGIN} (sha256 {plan['outputs'][PLUGIN]}): {len(pieces)} buildables for the outpost build menu, one recipe each (a copy of {a.cobj}),
-variant shell={a.shell} category={a.category}. Pieces: {names}.
+variant shell={a.shell} category={a.category} tab={a.tab or 'none'} set={a.set or 'none'}. Pieces: {names}.
 Master Starfield.esm only; adds records, overrides none; the installed core is not a master (its model paths were read at stage time).
 Checked against Starfield.esm {sf_before} and {os.path.basename(a.core)} {core_before}. Re-stage after a game or core update.
 Install (the owner's word, game closed; loose scripts are not read, the installer packs them into a ba2):
@@ -220,7 +224,9 @@ def main(argv=None):
     corep = os.path.join(STARFIELD, "Data", CORE_NAME)
 
     def variant(sp):
-        sp.add_argument("--pieces", default="", help="comma separated editor ids of three or four core statics (default: the tool's choice)")
+        sp.add_argument("--pieces", default="", help="comma separated editor ids (* allowed) of core statics, 3 to 40 (default: the tool's four)")
+        sp.add_argument("--set", default="", choices=("", "fo4"), help="a named set of core statics (fo4: junk walls, pier shack walls and roofs, sandbags, bed, table, crates, barrel)")
+        sp.add_argument("--tab", default="", help="file the recipes under a vanilla outpost category keyword (structures, furniture, decorations, miscellaneous, storage, defenses or an editor id); needs --category add|replace")
         sp.add_argument("--shell", choices=("clone", "plain"), default="clone")
         sp.add_argument("--category", choices=("vanilla", "add", "replace"), default="vanilla")
         sp.add_argument("--cobj", default=DEFAULT_COBJ)
@@ -230,6 +236,7 @@ def main(argv=None):
     c = sub.add_parser("core")
     c.add_argument("--core", default=corep)
     c.add_argument("--pieces", default="")
+    c.add_argument("--set", default="", choices=("", "fo4"))
     pc = sub.add_parser("precheck")
     pc.add_argument("--content-resources", default=cr)
     pc.add_argument("--out", default=None)
