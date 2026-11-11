@@ -45,6 +45,16 @@ class PipboyCancelTest(unittest.TestCase):
         self.assertIn("kMaxFlagSets = 16", self.src)
         self.assertIn("PageFlagSets=0x9,0xB,", self.ini)
 
+    def test_default_flag_set_has_bit4_and_not_pause_or_blank(self):
+        self.assertIn('L"PageFlagSets", L"0x19"', self.src)
+        self.assertIn("PageFlagSets=0x19\n", self.ini)
+        self.assertEqual(0x19 & 0x2, 0)    # bit 1 pauses the game
+        self.assertEqual(0x19 & 0x100, 0)  # bit 8 blanks the world
+        self.assertTrue(0x19 & 0x10)
+
+    def test_cancel_gate_cleared_on_open_and_close(self):
+        self.assertEqual(self.src.count("g_cancelHeld = false;   // FAL-414"), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

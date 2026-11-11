@@ -52,7 +52,7 @@ of `docs/spikes/pipboy-channel-bridge-session.md`, sections 1 to 3, with these c
    neither packed nor installed).
 3. **Install** (game closed, receipts first): the dll and the Address Library file, as in section 3 of that card; no
    FOCCPing or FOCCSidecar. The ini goes too, from this checkout, with `Stage=5` (`-replace '^Stage=0','Stage=5'`).
-   Its pages are the ones the movie was staged from. Expect `Stage=5`, `PageFlagSets=0x9`, `SnapshotKey=0x7A` and
+   Its pages are the ones the movie was staged from. Expect `Stage=5`, `PageFlagSets=0x19`, `SnapshotKey=0x7A` and
    `KitUp=0x26,0x57`. Then run `pipboy_probe_install.py install --dir $exp --starfield $sf`.
 4. **Session:** launch through `sfse_loader.exe`, load a throwaway save, and hand over to the owner. No save is made.
    After the owner's step 8, press F11 once with the Pip-Boy open, then close it. Open the console for the controls

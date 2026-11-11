@@ -2910,6 +2910,7 @@ namespace
 			return;
 		}
 		const bool open = ui->IsMenuOpen(MenuName());
+		g_cancelHeld = false;   // FAL-414: a release heard while the page was closed must not keep the gate shut
 		if (g_stage == 4 && !open) {
 			PageCollect();   // the page's text before the show
 		}
@@ -2931,6 +2932,7 @@ namespace
 			return;
 		}
 		const bool open = ui->IsMenuOpen(MenuName());
+		g_cancelHeld = false;   // FAL-414: every close clears the cancel gate
 		g_expectOpen = 0;
 		if (open) {
 			queue->AddMessage(MenuName(), RE::UI_MESSAGE_TYPE::kHide);
@@ -3185,7 +3187,7 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	if (g_stage >= 3) {
 		g_snapshotKey = ReadNumber(ini, L"SnapshotKey", 0x7A);
 		if (g_stage >= 4) {   // (d) and (e)
-			ReadFlagSets(ini, L"PageFlagSets", L"0x9");
+			ReadFlagSets(ini, L"PageFlagSets", L"0x19");   // FAL-414: bit 4 (0x10) puts StopContextProcessing (78) on the control map stack, so Tab arrives as Cancel
 		} else {
 			ReadFlagSets(ini, L"FlagSets", L"0x0,0x8,0x9");
 			clickCall = ReadText(ini, L"ClickCall");
