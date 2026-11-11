@@ -114,16 +114,32 @@ class Ba2:
                         raise Ba2Error(f"{self.path}: DX10 entry {e.name} chunk is outside the file")
 
     def summary(self) -> dict:
-        """Return a short summary of the archive contents."""
-        gnrl = sum(1 for e in self.entries if e.kind == "GNRL")
-        dx10 = sum(1 for e in self.entries if e.kind == "DX10")
+        """Return a short summary of the archive contents, including total packed and unpacked sizes.
+
+        Totals help conversion planning: how much data will be read or written. Packed is the on-disk size
+        (zlib or raw); unpacked is the expanded size. DX10 unpacked excludes the reconstructed DDS header.
+        """
+        gnrl = [e for e in self.entries if e.kind == "GNRL"]
+        dx10 = [e for e in self.entries if e.kind == "DX10"]
+        def packed_of(e):
+            if e.kind == "GNRL":
+                return e.packed or e.unpacked
+            return sum((c[1] or c[2]) for c in (e.chunks or []))
+        def unpacked_of(e):
+            if e.kind == "GNRL":
+                return e.unpacked
+            return sum(c[2] for c in (e.chunks or []))
+        total_packed = sum(packed_of(e) for e in self.entries)
+        total_unpacked = sum(unpacked_of(e) for e in self.entries)
         return {
             "path": self.path,
             "version": self.version,
             "kind": self.kind,
             "entries": len(self.entries),
-            "general": gnrl,
-            "textures": dx10,
+            "general": len(gnrl),
+            "textures": len(dx10),
+            "total_packed": total_packed,
+            "total_unpacked": total_unpacked,
         }
 
     def size_estimates(self) -> dict:

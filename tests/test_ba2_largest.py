@@ -1,4 +1,4 @@
-"""Synthetic tests for Ba2.largest_entries."""
+"""Synthetic tests for Ba2.largest_entries and summary totals."""
 import os
 import tempfile
 import unittest
@@ -37,6 +37,25 @@ class LargestEntriesTests(unittest.TestCase):
             a = Ba2(path)
             self.assertEqual(len(a.largest_entries(5)), 1)
             self.assertEqual(a.largest_entries(0), [])
+
+    def test_summary_includes_totals(self):
+        entries = {
+            "a.txt": b"hello",
+            "b.bin": b"x" * 100,
+        }
+        data = general_archive(entries, compressed=True)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "sum.ba2")
+            with open(path, "wb") as f:
+                f.write(data)
+            a = Ba2(path)
+            s = a.summary()
+            self.assertEqual(s["entries"], 2)
+            self.assertEqual(s["general"], 2)
+            self.assertEqual(s["textures"], 0)
+            self.assertEqual(s["total_unpacked"], 5 + 100)
+            self.assertGreater(s["total_packed"], 0)
+            self.assertLess(s["total_packed"], s["total_unpacked"])
 
 
 if __name__ == "__main__":
