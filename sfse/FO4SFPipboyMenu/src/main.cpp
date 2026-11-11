@@ -632,20 +632,6 @@ namespace
 		return out + "]";
 	}
 
-	// pause state and who holds input, on whichever thread calls it (a_main: the main thread, where menus= is read)
-	void Snapshot(std::string_view a_tag, bool a_main = false)
-	{
-		const auto n = ++g_snapshots;
-		const auto paused = ReadPaused();
-		const auto menus = a_main ? ReadMenus() : "-";
-		const auto contexts = ReadContexts();
-		REX::INFO("step=snapshot n={} tag={} paused={} menus={} contexts={} expected_open={}", n, a_tag, paused, menus,
-			contexts, g_expectOpen.load());
-		if (a_main && a_tag == "key") {
-			LogOpenMenuDetails();
-		}
-	}
-
 	// FAL-414 diagnostic, main thread, on the snapshot key: each known menu the UI has open, with its flags and the four
 	// unnamed IMenu words at +0xC4..+0xD0 (read with Peek), so a run with our menu, the data menu and the pause menu open
 	// shows what a real menu asks the control map for
@@ -675,6 +661,20 @@ namespace
 			REX::INFO("step=menu_detail name={} menu={} {}", kKnownMenus[i], Hex(at),
 				ok ? std::format("flags={} c4={} c8={} cc={} d0={}", Hex(flags), Hex(words[0]), Hex(words[1]), Hex(words[2]), Hex(words[3])) :
 				     std::string("unreadable"));
+		}
+	}
+
+	// pause state and who holds input, on whichever thread calls it (a_main: the main thread, where menus= is read)
+	void Snapshot(std::string_view a_tag, bool a_main = false)
+	{
+		const auto n = ++g_snapshots;
+		const auto paused = ReadPaused();
+		const auto menus = a_main ? ReadMenus() : "-";
+		const auto contexts = ReadContexts();
+		REX::INFO("step=snapshot n={} tag={} paused={} menus={} contexts={} expected_open={}", n, a_tag, paused, menus,
+			contexts, g_expectOpen.load());
+		if (a_main && a_tag == "key") {
+			LogOpenMenuDetails();
 		}
 	}
 

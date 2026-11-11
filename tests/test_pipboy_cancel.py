@@ -34,6 +34,13 @@ class PipboyCancelTest(unittest.TestCase):
         self.assertIn("step=menu_detail", self.src)
         self.assertIn('a_tag == "key"', self.src)
 
+    def test_helpers_are_defined_before_first_use(self):
+        # MSVC C3861 at fa610324: LogOpenMenuDetails was called in Snapshot before its definition
+        for name in ("LogOpenMenuDetails", "a_eventValueIsRelease"):
+            first_call = self.src.index(name + "(")
+            definition = re.search(r"^\t(?:void|bool) " + name + r"\(", self.src, re.M).start()
+            self.assertEqual(first_call, definition + len("\tvoid "), name)
+
 
 if __name__ == "__main__":
     unittest.main()
