@@ -160,6 +160,7 @@ static class PowerArmorProbe
             armor.VirtualMachineAdapter = null;
             armor.FirstPersonFlags = slot;
             armor.Keywords = null;
+            armor.Race.SetTo(Own(RaceId));          // PC run of #733: 'armor cannot be equipped by the passed in actor's race' without it
             armor.Value = 0;
             armor.Weight = 0;
             mod.Armors.Add(armor);
@@ -216,12 +217,17 @@ static class PowerArmorProbe
             Data = new QuestData { Flags = WithHand ? Quest.Flag.StartGameEnabled : default, Priority = 30 },
         };
         handQuest.Stages.Add(new QuestStage { Index = 10 });
-        handQuest.VirtualMachineAdapter = new QuestAdapter
+        // the hand script is attached only with --with-hand: a quest script's OnInit runs although the quest is not start game enabled
+        // (PC run of #733: it moved the player and called SwitchToPowerArmor over the entry quest)
+        if (WithHand)
         {
-            Version = 6, ObjectFormat = 2, ExtraBindDataVersion = 3,
-            Script = new ScriptEntry { Name = "", Flags = ScriptEntry.Flag.Local },
-        };
-        handQuest.VirtualMachineAdapter.Scripts.Add(new ScriptEntry { Name = HandScript, Flags = ScriptEntry.Flag.Local });
+            handQuest.VirtualMachineAdapter = new QuestAdapter
+            {
+                Version = 6, ObjectFormat = 2, ExtraBindDataVersion = 3,
+                Script = new ScriptEntry { Name = "", Flags = ScriptEntry.Flag.Local },
+            };
+            handQuest.VirtualMachineAdapter.Scripts.Add(new ScriptEntry { Name = HandScript, Flags = ScriptEntry.Flag.Local });
+        }
         mod.Quests.Add(handQuest);
 
         // the entry quest (FAL-361): one stage, no properties, start game enabled
@@ -345,6 +351,7 @@ static class PowerArmorProbe
             Need(ar.FirstPersonFlags == slot, $"ARMO {edid} is not in slot {slot}");
             Need((ar.Armatures?.Count ?? 0) == (art?.Armatures?.Count ?? 0), $"ARMO {edid} armatures differ from {artEdid ?? "none"}");
             Need(ar.VirtualMachineAdapter == null, $"ARMO {edid} carries a script");
+            Need(ar.Race.FormKey == Own(RaceId), $"ARMO {edid} does not name the kit race (it could not be equipped)");
         }
 
         var cell = mod.Cells.Records.SelectMany(b => b.SubBlocks).SelectMany(s => s.Cells).SingleOrDefault();
@@ -388,7 +395,8 @@ static class PowerArmorProbe
             var hs = hand.VirtualMachineAdapter?.Scripts.ToList() ?? new();
             Console.WriteLine($"  QUST {hand.EditorID} flags {hand.Data?.Flags} scripts [{string.Join(", ", hs.Select(s => $"{s.Name} ({s.Properties.Count} properties)"))}]");
             Need(hand.Data?.Flags.HasFlag(Quest.Flag.StartGameEnabled) == WithHand, WithHand ? "the by-hand QUST is not start game enabled (--with-hand)" : "the by-hand QUST is start game enabled (only --with-hand does that)");
-            Need(hs.Count == 1 && hs[0].Name == HandScript && hs[0].Properties.Count == 0, $"the by-hand QUST script is not {HandScript} without properties");
+            Need(WithHand ? hs.Count == 1 && hs[0].Name == HandScript && hs[0].Properties.Count == 0 : hs.Count == 0,
+                 WithHand ? $"the by-hand QUST script is not {HandScript} without properties" : "the by-hand QUST carries a script (only --with-hand attaches it)");
         }
         var quest = mod.Quests.FirstOrDefault(q => q.FormKey == Own(QuestId));
         Need(quest?.FormKey == Own(QuestId) && quest.EditorID == QuestEdid, "not exactly our QUST");

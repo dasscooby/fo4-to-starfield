@@ -347,7 +347,7 @@ class StageTests(unittest.TestCase):
         self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
         self.assertIn("masters [Starfield.esm]", check.stdout)
         self.assertIn("QUST FO4SF_PAProbeQuest flags StartGameEnabled stages [10,20,30]", check.stdout)
-        self.assertIn("QUST FO4SF_PAHandQuest flags 0 scripts [FO4SF_PAHandQuest (0 properties)]", check.stdout)   # off unless --with-hand
+        self.assertIn("QUST FO4SF_PAHandQuest flags 0 scripts []", check.stdout)   # off, and no script, unless --with-hand
         self.assertIn("QUST FO4SF_PAEntryQuest flags StartGameEnabled scripts [FO4SF_PAEntryQuest (0 properties)]", check.stdout)
         self.assertIn("(0 properties)", check.stdout)
 
@@ -415,6 +415,19 @@ class StageTests(unittest.TestCase):
             self.assertRegex(check.stdout, rf"ARMO {edid} \S+ slot {slot} armatures 0 \(art: none\)")
         self.assertIn("REFR 00080B:FO4SFPowerArmorProbe.esm FO4SF_PAEntryFurnRef base 00080A:FO4SFPowerArmorProbe.esm at (3, 0, 0)", check.stdout)
 
+    def test_the_three_armor_name_the_kit_race_and_the_hand_script_is_off_the_record_without_with_hand(self):
+        """FAL-361 PC run of #733: 'armor cannot be equipped by the passed in actor's race'; the hand quest's OnInit ran unflagged."""
+        out = self.root / "e0"
+        self.assertEqual(self.run_tool("build", self.master, out).returncode, 0)
+        data = (out / PLUGIN).read_bytes()
+        self.assertEqual(data.count(b"FO4SF_PAHandQuest"), 1)                         # the quest's EDID only: no VMAD script name
+        check = self.run_tool("check", out / PLUGIN, self.master)
+        self.assertEqual(check.returncode, 0, check.stdout)
+        out2 = self.root / "e0b"
+        self.assertEqual(self.run_tool("build", self.master, out2, "--with-hand").returncode, 0)
+        self.assertGreater((out2 / PLUGIN).read_bytes().count(b"FO4SF_PAHandQuest"), 1)
+        self.assertIn("armor.Race.SetTo(Own(RaceId))", TOOL_SRC)
+
     def test_art_options_copy_a_vanilla_armo_and_check_needs_the_same_options(self):
         out = self.root / "e2"
         art = ["--frame-art", "SynthArmorArt", "--piece-art", "SynthArmorArt", "--with-hand"]
@@ -422,11 +435,12 @@ class StageTests(unittest.TestCase):
         ok = self.run_tool("check", out / PLUGIN, self.master, *art)
         self.assertEqual(ok.returncode, 0, ok.stdout)
         self.assertIn("armatures 1 (art: SynthArmorArt)", ok.stdout)
-        self.assertIn("QUST FO4SF_PAHandQuest flags StartGameEnabled", ok.stdout)
+        self.assertIn("QUST FO4SF_PAHandQuest flags StartGameEnabled scripts [FO4SF_PAHandQuest (0 properties)]", ok.stdout)
         bad = self.run_tool("check", out / PLUGIN, self.master)                       # without the options the plugin is not what is asked
         self.assertEqual(bad.returncode, 1, bad.stdout)
         self.assertIn("armatures differ from none", bad.stdout)
         self.assertIn("only --with-hand does that", bad.stdout)
+        self.assertIn("only --with-hand attaches it", bad.stdout)
         miss = self.run_tool("build", self.master, self.root / "e3", "--frame-art", "NoSuchArmor")
         self.assertEqual(miss.returncode, 1)
         self.assertIn("0 ARMO named NoSuchArmor", miss.stderr)

@@ -221,3 +221,15 @@ Names the script guesses are `;OPT` lines (the stager compiles each alone and ke
 6. Walk to the vanilla chair on your left and sit. Message "You sat on the exit chair ...", 2 s later "Suit OFF requested ...", "1 s after the exit ...", "4 s after the exit ..." and "Result: the suit is OFF" or "the exit did NOT undo everything. Still set: ...". Copy them.
 7. Stand up. Screenshots again, same three views, and the inventory: the **after**. Optionally enter and leave a second time (sit on the entry chair again).
 8. Quit to the desktop **without saving**. The entry's own log is `FO4SFPAEntry.0.log` in `My Games\Starfield\Logs\Script\User` (no reader for it yet: every line is plain text ending `end=true`); paste it with the screenshots and the eight copied lines. Tell: which of step 4's four held, whether step 6 undid them, what the screenshots show.
+
+### PC run of #733 at e9acb003 and the fixes (FAL-361)
+
+Verified by the PC (Claude, 11 Nov 09:37 to 09:43 UTC, test save, no save): the entry runs end to end; race became the kit race, 3 of 3
+in the bag, value 1.0; the exit restored race, bag and value. **The equip failed**: `armor cannot be equipped by the passed in actor's race`
+(Papyrus.0.log, three ARMO). Fixes, offline only, awaiting a second PC run: (1) the three ARMO now name the kit race (`FO4SF_PARace`) as
+their race, and `check` refuses otherwise; (2) a quest script's OnInit runs although the quest is not start game enabled (the hand
+quest moved the player and called `SwitchToPowerArmor` over the entry run), so the hand script is now **left off the record** unless
+`--with-hand` is given. Not changed: `init` logs `entryref=none controlref=none` because `Game.GetFormFromFile` cannot resolve a
+temporary reference of a cell that is not loaded (FAL-316); the entry quest looks the chairs up again once the player is in the room,
+where they resolve, so the log's init line is expected to say none. Third person and the inventory were not captured; with the race
+fix the equip should now put the (art-less) pieces on, still nothing visible without `--frame-art`.
