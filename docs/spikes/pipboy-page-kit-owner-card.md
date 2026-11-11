@@ -45,7 +45,7 @@ of `docs/spikes/pipboy-channel-bridge-session.md`, sections 1 to 3, with these c
    `python -m unittest tests.test_make_probe_swf tests.test_make_pipboy_probe tests.test_pipboy_probe_install
    tests.test_pipboy_menu_channel tests.test_pipboy_stat_page tests.test_pipboy_kit`, then `python scripts\guard.py`.
    Post the dll's sha256.
-2. **Stage** with `--kit`: `python scripts\ui\make_pipboy_probe.py stage $exp --kit`, then `check`.
+2. **Stage** with `--kit`: `python scripts\ui\make_pipboy_probe.py stage $exp --kit`, then `check` on the plugin file: `python scripts\ui\make_pipboy_probe.py check $exp\FO4SFPipboyProbe.esm`.
    `python scripts\ui\make_pipboy_kit.py --check` prints the seven pages, and `make_probe_swf.py --read` on the movie
    lists `fo4sfKitId`, `fo4sfTab0` to `fo4sfTab4`, `fo4sfRowName0` to `fo4sfRowName15` and `fo4sfClose`. The stage
    also holds `owner-card.txt` beside the plugin: these eight steps in the launcher's plain-text form (outside Data, so
@@ -66,7 +66,7 @@ of `docs/spikes/pipboy-channel-bridge-session.md`, sections 1 to 3, with these c
 | Page | Rows | Control |
 | --- | --- | --- |
 | STAT / STATUS | HEALTH, LEVEL, EXPERIENCE, CARRY WEIGHT MAX, RADS | `player.getav health`, `player.getlevel`, `player.getav experience`, `player.getav carryweight`, `player.getav FO4SF_Rads` (only with the rads probe) |
-| STAT / STATUS | CELL, WORLD, TIME | where the player stands; TIME's minutes move while the Pip-Boy is open |
+| STAT / STATUS | CELL, WORLD, TIME | where the player stands; TIME's minutes move while the Pip-Boy is open. No console control yet: `getglobalvalue gamehour` answers "not found for parameter Global", and the right form is open (not findable offline) |
 | STAT / SPECIAL | STRENGTH to LUCK | `player.getav strength`, `player.getav perception`, `player.getav endurance`, `player.getav charisma`, `player.getav intelligence`, `player.getav agility`, `player.getav luck` |
 | DATA / KIT TEST | ROW n OF 30, KEY MOVES, CLICK MOVES | none: no game value |
 

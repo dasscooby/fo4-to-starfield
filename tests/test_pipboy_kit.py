@@ -551,7 +551,43 @@ class KitPluginTests(unittest.TestCase):
         for reason in ('"globals_unread"', '"no_value_offset"', '"out_of_range"'):
             self.assertIn(reason, days, reason)
         self.assertNotIn("Peek(", days)
-        self.assertNotIn("kGlobalValueAt", self.main)
+
+    def test_global_slot_choice(self):
+        """FAL-384: the TESGlobal value is the float at +0x48; the form id slot (+0x28) is never accepted, though the
+        form ids 0x38 and 0x39 read as floats of about zero and passed at 6de5559a (`game_hour=0.0000`). The choice is
+        ChooseGlobalSlot: checked as text, and by a Python model of it with the constants read from the source."""
+        const = {m[0]: int(m[1], 16) for m in re.findall(r"constexpr std::size_t\s+(k\w+) = (0x[0-9A-Fa-f]+);", self.main)}
+        self.assertEqual((const["kFormIdAt"], const["kGlobalValueAt"], const["kGlobalObjectBytes"]), (0x28, 0x48, 0x50))
+        self.assertIn("constexpr std::size_t   kGlobalBytes = kGlobalObjectBytes - kGlobalBytesAt;", self.main)
+        self.assertEqual(const["kGlobalBytesAt"], 0x28)                       # the dump still starts at the form id
+        choose = function(self.main, "std::size_t ChooseGlobalSlot(")
+        self.assertIn("kGlobalValueAt != kFormIdAt && a_accepts(kGlobalValueAt)", choose)
+        self.assertIn("at != kFormIdAt", choose)
+        self.assertIn("at + sizeof(float) <= kGlobalObjectBytes", choose)
+        self.assertLess(choose.index("return kGlobalValueAt;"), choose.index("for ("))   # +0x48 first
+        find = function(self.main, "void FindGlobalValue()")
+        self.assertIn("ChooseGlobalSlot(", find)
+        self.assertIn('"step=page_globals from={} game_hour {} game_days_passed {}"', find)   # the full dump stays
+        self.assertIn("GlobalBytes(g_forms.gameHour), GlobalBytes(g_forms.gameDaysPassed)", find)
+        self.assertIn('"step=page_globals value_at={} game_hour={:.4f} game_days_passed={:.4f}"', find)
+        self.assertIn('"no_value_offset"', self.main)                          # nothing plausible: `?` as before
+
+        def choose_slot(accepts):
+            if const["kGlobalValueAt"] != const["kFormIdAt"] and accepts(const["kGlobalValueAt"]):
+                return const["kGlobalValueAt"]
+            for at in range(const["kGlobalSearchFrom"], const["kGlobalObjectBytes"] - 3, 4):
+                if at != const["kFormIdAt"] and at != const["kGlobalValueAt"] and accepts(at):
+                    return at
+            return 0
+
+        # the log of 6de5559a: slots +0x28 hold 0x38 / 0x39 (~0.0 as a float), everything else not plausible
+        form_id_only = lambda at: at == const["kFormIdAt"]
+        self.assertEqual(choose_slot(form_id_only), 0)                         # the form id slot rejected: `?`
+        self.assertEqual(choose_slot(lambda at: at in (0x28, 0x48)), 0x48)     # +0x48 accepted, form id ignored
+        self.assertEqual(choose_slot(lambda at: at in (0x40, 0x48)), 0x48)     # +0x48 preferred when it passes
+        self.assertEqual(choose_slot(lambda at: at == 0x40), 0x40)             # else the first slot that does
+        self.assertEqual(choose_slot(lambda at: False), 0)                     # nothing plausible: 0, `TIME ?`
+        self.assertEqual(choose_slot(lambda at: at >= 0x50), 0)                # past the object: never
 
     def test_clicks_reach_tabs_sub_tabs_and_rows(self):
         click = function(self.main, "std::string KitClick(")

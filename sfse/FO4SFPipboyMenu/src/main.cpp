@@ -151,8 +151,11 @@ namespace
 	constexpr std::size_t   kAvifType = 0x6D;                // FormType kAVIF, libxse and SFSE agree
 	constexpr std::size_t   kFormIdAt = 0x28;                // TESForm::formID, libxse and SFSE agree
 	constexpr std::size_t   kGlobalEditorIdAt = 0x30;        // libxse RE::TESGlobal::formEditorID (a BSFixedString first)
-	constexpr std::size_t   kGlobalBytesAt = 0x28;           // the TESGlobal bytes logged and searched for the
-	constexpr std::size_t   kGlobalBytes = 0x20;             //   value (libxse's +0x40 read -3.5924 at a156037c)
+	constexpr std::size_t   kGlobalBytesAt = 0x28;           // the TESGlobal bytes logged: from the form id to the end of
+	constexpr std::size_t   kGlobalObjectBytes = 0x50;      //   the object (the game's own size for a GLOB, form type 0x0A at +0x2E)
+	constexpr std::size_t   kGlobalBytes = kGlobalObjectBytes - kGlobalBytesAt;
+	constexpr std::size_t   kGlobalValueAt = 0x48;           // the float the game's GetValue reads (vmovss xmm0, [r8+0x48]); libxse's
+	constexpr std::size_t   kGlobalSearchFrom = 0x30;        //   +0x40 read -3.5924 at a156037c, and the slot at +0x28 is the form id
 	constexpr float         kGlobalMinutes = 3.0f;           // GameHour and GameDaysPassed's fraction agree this close
 	constexpr float         kMaxDays = 1000000.0f;           // GameDaysPassed below this
 	constexpr std::size_t   kAvifEditorIdAt = 0x40;          // libxse RE::ActorValueInfo::editorID
@@ -1294,7 +1297,7 @@ namespace
 		return std::min(apart, 24.0f - apart) * 60.0f <= kGlobalMinutes;
 	}
 
-	// the 32 bytes of a TESGlobal from kGlobalBytesAt, as hex and as eight floats
+	// the kGlobalBytes (40) bytes of a TESGlobal from kGlobalBytesAt, as hex and as ten floats
 	std::string GlobalBytes(std::uintptr_t a_form)
 	{
 		std::array<std::uint8_t, kGlobalBytes> bytes{};
@@ -1313,8 +1316,25 @@ namespace
 		return std::format("hex={} floats={}", hex, floats);
 	}
 
-	// the TESGlobal value's offset, not taken from a header: the first 4-byte slot of the logged bytes at which
-	// ReadTime accepts both globals. Tried at each collect until found; both globals' bytes are logged at the first try
+	// which slot of a TESGlobal holds the value, given a_accepts(offset) (ReadTime at that offset): kGlobalValueAt when it
+	// passes, else the first other slot from kGlobalSearchFrom to the end of the object that does; never kFormIdAt (the
+	// form ids 0x38 and 0x39 read as floats of about zero, and passed). 0 when none does
+	template <class Accepts>
+	std::size_t ChooseGlobalSlot(Accepts a_accepts)
+	{
+		if (kGlobalValueAt != kFormIdAt && a_accepts(kGlobalValueAt)) {
+			return kGlobalValueAt;
+		}
+		for (std::size_t at = kGlobalSearchFrom; at + sizeof(float) <= kGlobalObjectBytes; at += 4) {
+			if (at != kFormIdAt && at != kGlobalValueAt && a_accepts(at)) {
+				return at;
+			}
+		}
+		return 0;
+	}
+
+	// the TESGlobal value's offset, chosen by ChooseGlobalSlot over ReadTime on both globals. Tried at each collect until
+	// found; both globals' bytes are logged at the first try
 	void FindGlobalValue()
 	{
 		if (g_forms.globalValueAt || !g_forms.gameHour || !g_forms.gameDaysPassed) {
@@ -1325,15 +1345,13 @@ namespace
 			REX::INFO("step=page_globals from={} game_hour {} game_days_passed {}", Hex(kGlobalBytesAt),
 				GlobalBytes(g_forms.gameHour), GlobalBytes(g_forms.gameDaysPassed));
 		}
-		for (std::size_t at = kGlobalBytesAt; at < kGlobalBytesAt + kGlobalBytes; at += 4) {
-			float hour = 0.0f;
-			float days = 0.0f;
-			if (ReadTime(at, hour, days)) {
-				g_forms.globalValueAt = at;
-				REX::INFO("step=page_globals value_at={} game_hour={:.4f} game_days_passed={:.4f}", Hex(at), hour,
-					days);
-				return;
-			}
+		float hour = 0.0f;
+		float days = 0.0f;
+		const auto at = ChooseGlobalSlot([&](std::size_t a_at) { return ReadTime(a_at, hour, days); });
+		if (at) {
+			ReadTime(at, hour, days);   // the chosen slot's values, for the log (the search leaves the last try's)
+			g_forms.globalValueAt = at;
+			REX::INFO("step=page_globals value_at={} game_hour={:.4f} game_days_passed={:.4f}", Hex(at), hour, days);
 		}
 	}
 

@@ -366,23 +366,22 @@ class PagePluginTests(unittest.TestCase):
         self.assertIn(f"{16 + 16 + 2} `step=id` lines", self.readme)
 
     def test_the_time_only_at_a_checked_value_offset(self):
-        # libxse's TESGlobal::value at +0x40 read GameDaysPassed -3.5924 at a156037c (PC run, 11 Nov): no fixed offset
-        self.assertNotIn("kGlobalValueAt", self.main)
+        # libxse's TESGlobal::value at +0x40 read GameDaysPassed -3.5924 at a156037c (PC run, 11 Nov): no unchecked offset;
+        # FAL-384: kGlobalValueAt (+0x48, the game's own GetValue) is only the first slot ChooseGlobalSlot tries, checked
         read = function(self.main, "bool ReadTime(")
         for check in ("!a_at", "a_hour < 0.0f || a_hour >= 24.0f || a_days <= 0.0f || a_days >= kMaxDays",
                       "std::fmod(a_days, 1.0f) * 24.0f - a_hour", "std::min(apart, 24.0f - apart) * 60.0f <= kGlobalMinutes"):
             self.assertIn(check, read, check)
         find = function(self.main, "void FindGlobalValue()")
         self.assertLess(find.index("GlobalBytes(g_forms.gameHour), GlobalBytes(g_forms.gameDaysPassed)"),
-                        find.index("for (std::size_t at = kGlobalBytesAt;"))
-        self.assertIn("at < kGlobalBytesAt + kGlobalBytes; at += 4", find)
-        self.assertIn("if (ReadTime(at, hour, days)) {", find)
+                        find.index("ChooseGlobalSlot("))
+        self.assertIn("return ReadTime(a_at, hour, days);", find)
         self.assertIn("if (!ReadTime(g_forms.globalValueAt, hour, days)) {", function(self.main, "std::string TimeText()"))
         collect = function(self.main, "void PageCollect()")
         self.assertIn("const bool           haveDays = ReadTime(g_forms.globalValueAt, hour, days);", collect)
         self.assertLess(collect.index("PageScan();"), collect.index("FindGlobalValue();"))
         self.assertIn("constexpr std::size_t   kGlobalBytesAt = 0x28;", self.main)
-        self.assertIn("constexpr std::size_t   kGlobalBytes = 0x20;", self.main)
+        self.assertIn("constexpr std::size_t   kGlobalBytes = kGlobalObjectBytes - kGlobalBytesAt;", self.main)
         self.assertIn("`step=page_globals from=0x28", self.readme)
 
     def test_owner_card(self):
