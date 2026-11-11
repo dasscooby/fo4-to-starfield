@@ -69,6 +69,25 @@ class HandScriptTests(unittest.TestCase):
                                                         "Game.GetCameraState", "Actor.GetWornItem", "ObjectReference.MoveTo"])
         self.assertEqual(mpa.enable(HAND_PSC, []), HAND_PSC)
 
+    def test_no_local_variable_or_parameter_is_named_like_a_type(self):
+        """The PC's compile (FAL-273): 'variable race cannot have the same name as a known type or script'. Papyrus names are
+        case-blind, so a local called race, cell, form, actor... is refused. The fixture compile cannot see this."""
+        types = {"race", "cell", "form", "actor", "quest", "furniture", "keyword", "spell", "game", "debug", "utility", "int", "float", "string", "bool"}
+        for text in (HAND_PSC, PSC):
+            decl = re.findall(r"^\s*(?:[A-Za-z:]+(?:\[\])?)\s+(\w+)\s*(?:=|$)", text, re.M)
+            params = [p for m in re.findall(r"Function\s+\w+\(([^)]*)\)", text) for p in re.findall(r"\s(\w+)\s*(?:,|$)", " " + m)]
+            self.assertEqual([n for n in decl + params if n.lower() in types], [])
+
+    def test_a_compile_failure_prints_the_compilers_own_lines(self):
+        import subprocess
+        from unittest import mock
+        out = "FO4SF_PAHandQuest.psc(149,11): variable race cannot have the same name as a known type or script\nFO4SF_PAHandQuest.psc(158,190): race is not a variable\n"
+        with mock.patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 1, stdout=out, stderr="")):
+            ok, err = mpa.compile_text("x", "text", ".", self.__class__.__name__ and tempfile.gettempdir(), "FO4SF_PAHandQuest")
+        self.assertFalse(ok)
+        self.assertIn("(149,11): variable race cannot have the same name", err)
+        self.assertIn("(158,190): race is not a variable", err)
+
     def test_the_hand_log_lines_end(self):
         self.assertIn('"FO4SFPAHAND rt="', HAND_PSC)
         self.assertIn('" end=true"', HAND_PSC)

@@ -146,16 +146,16 @@ EndFunction
 string Function Wording(string suffix)
     {The state after the call: IsInPowerArmor, furniture and sit state, camera, race, worn armor.}
     Actor p = Game.GetPlayer()
-    string race = "race unchanged"
+    string raceText = "race unchanged"
     if p.GetRace() != StartRace
-        race = "race is now " + Id(p.GetRace())
+        raceText = "race is now " + Id(p.GetRace())
     endif
     string worn = "worn armor slots not readable"
     int n = WornCount(p)
     if n >= 0
         worn = "worn armor slots " + n
     endif
-    return "Suit " + suffix + ": " + Na(InPowerArmor(p), "in power armor") + "; " + Na(FurnId(p), "furniture") + "; " + Na(SitState(p), "sit state") + "; " + Na(Camera(), "camera") + "; " + race + "; " + worn
+    return "Suit " + suffix + ": " + Na(InPowerArmor(p), "in power armor") + "; " + Na(FurnId(p), "furniture") + "; " + Na(SitState(p), "sit state") + "; " + Na(Camera(), "camera") + "; " + raceText + "; " + worn
 EndFunction
 
 ; ---------------------------------------------------------------- poll

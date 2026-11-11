@@ -128,7 +128,9 @@ def compile_text(compiler, text, src_dir, out_dir, script=SCRIPT):
     ok = r.returncode == 0 and "Compilation succeeded" in r.stdout and os.path.exists(os.path.join(out_dir, script + ".pex"))
     if ok:
         return True, ""
-    err = next((l.strip() for l in (r.stdout + r.stderr).splitlines() if "error" in l.lower()), "no compiler output")
+    # the compiler's own lines: "X.psc(12,3): ..." (some carry no word "error", e.g. "variable race cannot have the same name ...")
+    lines = [l.strip() for l in (r.stdout + r.stderr).splitlines() if ".psc(" in l or "error" in l.lower()]
+    err = " | ".join(lines[:8]) if lines else "no compiler output"
     return False, err
 
 
