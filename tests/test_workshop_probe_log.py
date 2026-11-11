@@ -68,11 +68,27 @@ class ReaderTests(unittest.TestCase):
         self.assertIn("no logged change", text)
         self.assertIn("not in this game", text)
         self.assertIn("arrival bench: loaded=false", text)
-        self.assertIn("ok: bench and control pad placed", text)
+        self.assertIn("ok: bench placed (bench); control pad placed", text)
         self.assertIn("screenshot", text)
 
-    def test_without_both_spawns_it_is_inconclusive(self):
-        s = probe_log.summarize([l for l in GOOD if "what=pad" not in l or "read" in l])
+    def test_a_log_with_only_stage_13_and_a_pad_is_not_inconclusive_and_stage50_prints(self):
+        """PC 11 Nov (workshop4): stage 13 + 30 log said INCONCLUSIVE and the stage50 block printed nothing."""
+        lines = [l.replace("what=bench", "what=Bench_Still").replace("when=arrival", "when=Stage50") for l in GOOD]
+        s = probe_log.summarize(lines)
+        self.assertTrue(s["control"][0])
+        self.assertIn("bench_still", s["control"][1])
+        self.assertTrue(s["returns"])
+        self.assertIn("Stage50".lower() + " bench_still", "\n".join(probe_log.report(s)))
+
+    def test_a_pad_alone_is_inconclusive_and_a_missing_pad_is_only_said(self):
+        s = probe_log.summarize([l for l in GOOD if "what=bench" not in l])
+        self.assertFalse(s["control"][0])
+        s = probe_log.summarize([l for l in GOOD if "what=pad" not in l])
+        self.assertTrue(s["control"][0])
+        self.assertIn("no pad placed", s["control"][1])
+
+    def test_without_a_spawn_it_is_inconclusive(self):
+        s = probe_log.summarize([l for l in GOOD if "spawn" not in l])
         self.assertFalse(s["control"][0])
         self.assertIn("INCONCLUSIVE", "\n".join(probe_log.report(s)))
         self.assertFalse(probe_log.summarize([])["control"][0])

@@ -64,7 +64,7 @@ def parse_line(line):
             d["end"] = v.lower() == "true"
         elif k == "text":
             d[k] = v
-        elif k == "what":
+        elif k in ("what", "when"):
             d[k] = v.lower()                 # the game may print the word in another case (PC 11 Nov: what=Bench)
         else:
             d[k] = value(k, v)
@@ -105,9 +105,13 @@ def summarize(lines):
         if first and last and first is not last and first.get("ref") is not None:
             changed = [f for f in FIELDS if first.get(f) != last.get(f)]
         stages[key] = {"call": steps.get(key), "readings": len(rs), "changed": changed, "first": first, "last": last}
-    placed = spawned.get("bench") is not None and spawned.get("pad") is not None
-    control = (placed, "bench and control pad placed" if placed else
-               "no placed bench and pad in the log (the script did not run, the core's workshop base was not found, or stages 10 and 30 were not set)")
+    # the bench is any of the bench spawns (stage 10 bench, 12 bench_temp, 13 bench_still); the pad is a control the PC
+    # dropped (no model, no prompt to photograph), so its absence is said but does not make the session inconclusive
+    benches = {k: v for k, v in spawned.items() if str(k).startswith("bench") and v is not None}
+    placed = bool(benches)
+    pad = spawned.get("pad") is not None
+    control = (placed, ("bench placed (" + ", ".join(sorted(benches)) + ")" + ("; control pad placed" if pad else "; no pad placed") if placed else
+               "no placed bench in the log (the script did not run, the core's workshop base was not found, or stages 10, 12 and 13 were not set)"))
     return {"events": events, "cut": cut, "spawned": spawned, "stages": stages, "returns": returns, "control": control}
 
 

@@ -130,17 +130,27 @@ The beacon base is `OutpostBeaconActivator` 002C60E9 (PC survey): stage with `--
 * `GetWorkshop()` reads None on all of them, also on the working bench: it is not a test of "is a workshop".
 * Not answered: the pad (the beacon's build mode was still open: Esc first), a save and reload, no-persist placement, RENAME / REMOVE OUTPOST, map marker, power and cargo, the hand drop.
 
-## Owner card: settlement or C.A.M.P. by hand (written from the PC result; the drop step is untested)
+## Result of the PC runs at 1c455a3c (Claude, 11 Nov, sessions workshop4, 5, 6-hand; not re-run here)
 
-The kit item places a **bench** (a workshop: build a station and settle around it). A beacon variant is not in the hand quest yet.
+* **By-hand drop: PASS.** `player.drop 0A000802 1` (the kit item): the bench stands 2.5 m ahead with the dropped kit beside it, prompt WORKSHOP / BUILD [E], E opens build mode. Same in three logs.
+* **The MoveTo is what makes the bench a workshop, not persistence.** Stage 12 (not persistent, moved): a workshop. Stage 13 (persistent, not moved, standing at the player's feet): no prompt. This also explains the console `placeatme`. Not separated: the move itself against the bench first standing inside the player.
+* Stage 21 (Disable, Enable from the timer): fixed.
+* The pad (stage 30) is **dropped from the card**: it has no model and the crosshair cannot be put on it. The bench and the beacon answer the question. The stage stays in the plugin.
+* Reader: the verdict is ok on any bench spawn (10, 12 or 13); the pad is said, not required. Reading the case of `when=` also fixes the empty stage-50 block.
+* Notes for any card: east of the arrival point (x = 8 and 16 in the player's frame) the test character falls about 9 m, so place things north or west of where `cow 04000803 12 27` lands. Send Esc only when build mode is known to be open: in plain play it opens the pause menu on QUICKSAVE.
+* Open: a save and reload (the owner's own play), RENAME / REMOVE OUTPOST on the beacon, the map marker, power and cargo. A second kit item that gives the resources would take the console out of the card: not built (say if wanted).
 
-1. Install the kit (card above, game closed), start Starfield, load a throwaway save in open ground. Do not save.
+## Owner card: settlement or C.A.M.P. by hand (PASSED on the PC at 1c455a3c)
+
+The kit item places a **bench** (a workshop: build a station and settle around it). A beacon variant is not in the hand quest.
+
+1. Install the kit (card above, game closed), start Starfield, load a throwaway save in open ground, north or west of where you stand if the ground drops. Do not save.
 2. Wait 20 s: the screen says you have a "FO4SF workshop kit".
 3. Open the inventory and drop the kit.
-4. The bench stands 2.5 m in front of you within a second.
-5. Look at it: the prompt must read WORKSHOP / BUILD [E]. Press E: build mode opens.
-6. Press Esc to leave build mode whenever you want to photograph a prompt.
-7. To build: `player.additem 0000556E 40` and `player.additem 0000557D 40` (Iron, Aluminum; the other station resources are in `additem.txt` and are the tool's reading only), then E on the bench, pick a station, place it.
+4. The bench stands 2.5 m in front of you within a second; the dropped kit lies beside it.
+5. Look at the bench: the prompt must read WORKSHOP / BUILD [E]. Press E: build mode opens.
+6. Leave build mode with Esc **only while build mode is open** (in plain play Esc opens the pause menu).
+7. To build: `player.additem 0000556E 40` and `player.additem 0000557D 40` (Iron, Aluminum; the other station resources are in `additem.txt`, the tool's reading only), then E on the bench, pick a station, place it.
 8. Quit without saving, then uninstall the kit.
 
 ## Piece B (the power armor entry by script)
