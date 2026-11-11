@@ -22,9 +22,11 @@ PROBLEMS (exit 1; each rests on a rule with evidence):
                    has that layout and ran in game, but its cell never loaded): in Starfield.esm 0 of 18,300 exterior cells have one, all 431
                    persistent groups of its worlds sit under the world's own persistent cell, and FAL-208's plugin,
                    the one file with such a group, crashed the game at SF+0x41efd6 (FAL-273, PC scan 11 Nov; the
-                   link from the group to the crash is the PC's inference, not proven). Put a persistent
-                   reference in an override of the world's persistent cell instead.
-WARNINGS (listed, do not fail): rules without evidence that they matter (the same rule for QUST, WRLD, LCTN,
+                   link from the group to the crash was the PC's inference and the 11 Nov ladder showed it is NOT the group:
+                   see the WARNINGS below). Put a persistent reference in an override of the world's persistent cell instead.
+WARNINGS (listed, do not fail): an override CELL record of a master's exterior cell (PC ladder 11 Nov, FAL-273: the override
+alone, with no reference, killed the game 28 s after arrival and moved `coc` to the world's origin cell; one core world, so a
+warning and not a refusal); rules without evidence that they matter (the same rule for QUST, WRLD, LCTN,
 CELL, MISC, STAT: the planet probe loads in game without them; a world or cell child group whose WRLD or CELL
 record is not in the plugin; HEDR counts that differ from the real counts).
 
@@ -277,6 +279,11 @@ def _groups(rep, plugin, n_masters, by_offset):
                 gtypes = [g for _, g, _l in stack]
                 if rec is not None:
                     last_rec[depth] = rec
+                    if rec.sig == b"CELL" and rec.formid >> 24 < n_masters and any(
+                            g in (GROUP_EXTERIOR_BLOCK, GROUP_EXTERIOR_SUB_BLOCK) for g in gtypes):
+                        rep.warn(f"CELL {rec.formid:08X} is an override of a master's exterior cell: in game, FAL-273's plugin with only "
+                                 "this override (no reference) crashed 28 s after arrival and moved the arrival to the world's origin "
+                                 "cell; the mission's layout overrides the world's persistent cell only (one world seen: not proven general)")
                     in_p, in_t = GROUP_PERSISTENT in gtypes, GROUP_TEMPORARY in gtypes
                     if in_p and not rec.flags & esm.PERSISTENT:
                         rep.bad(f"{rec.sig.decode()} {rec.formid:08X} sits in a persistent group without flag 0x400")

@@ -186,6 +186,23 @@ class GroupTests(Base):
             f.write(w.to_bytes() + esm.group_bytes("WRLD", good))
         self.assertEqual(pv.verify(self.p("E2.esm")).problems, [])
 
+    def test_an_override_of_a_masters_exterior_cell_warns_even_without_a_reference(self):
+        """PC ladder 11 Nov (FAL-273): the cell override alone crashed; a warning (one world), the world's persistent cell does not warn."""
+        bad, world, pcell, ref_p, ref_t, cell, w = self.exterior_with_persistent("E4.esm", 0x00000803)
+        self.assertTrue(any("override of a master's exterior cell" in t and "00000803" in t for t in bad.warnings), bad.warnings)
+        good = pf.world_group(world, pcell, [ref_p], [(cell, [])])                                  # the cell override with no reference
+        with open(self.p("E5.esm"), "wb") as f:
+            f.write(w.to_bytes() + esm.group_bytes("WRLD", good))
+        rep = pv.verify(self.p("E5.esm"))
+        self.assertEqual(rep.problems, [])
+        self.assertTrue(any("override of a master's exterior cell" in t for t in rep.warnings), rep.warnings)
+        top_only = pf.world_group(world, pcell, [ref_p], [])                                         # toponly: no exterior cell at all
+        with open(self.p("E6.esm"), "wb") as f:
+            f.write(w.to_bytes() + esm.group_bytes("WRLD", top_only))
+        rep = pv.verify(self.p("E6.esm"))
+        self.assertEqual(rep.problems, [])
+        self.assertFalse(any("exterior cell" in t for t in rep.warnings), rep.warnings)
+
     def test_a_persistent_group_under_the_plugins_own_exterior_cell_only_warns(self):
         """The planet probe has this layout in a cell of its own and ran in game (its cell never loaded): a warning."""
         rep = self.exterior_with_persistent("E3.esm", 0x01000803)[0]
