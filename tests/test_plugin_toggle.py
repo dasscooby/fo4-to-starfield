@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "game"))
 import plugin_toggle as pt  # noqa: E402
 import exp_install as exp  # noqa: E402
 import bridge_install as bi  # noqa: E402
+import load_order  # noqa: E402
 
 
 def tes4(*masters):
@@ -56,6 +57,24 @@ class ToggleTests(unittest.TestCase):
 
     def lines(self):
         return self.txt.read_bytes().decode().split("\r\n")[:-1]
+
+    def test_hold_pair_with_an_unticked_bridge_and_two_foreign_kits_keeps_bytes(self):
+        # Foreign to the toggle's install records; the bridge was already unticked before this hold.
+        for p in ("FO4SFPipboyProbe.esm", "FO4SFRadsProbe.esm"):
+            (self.data / p).write_bytes(tes4("Core.esm"))
+        original = (self.original.replace("*FO4SFBridge.esm", "FO4SFBridge.esm")
+                    + "*FO4SFPipboyProbe.esm\r\n*FO4SFRadsProbe.esm\r\n").encode()
+        for with_order in (False, True):
+            with self.subTest(launcher_load_order=with_order):
+                self.txt.write_bytes(original)
+                self.run_cmd("off", "--plugins", "Mission.esm")
+                if with_order:
+                    self.assertEqual(load_order.run("fix", str(self.game), say=lambda _: None), 0)
+                self.run_cmd("on", "--plugins", "Mission.esm")
+                if with_order:
+                    self.assertEqual(load_order.run("fix", str(self.game), say=lambda _: None), 0)
+                self.assertEqual(self.txt.read_bytes(), original)
+                self.assertEqual(json.loads((self.data / exp.TOGGLE).read_text())["off"], [])
 
     def a(self):
         return SimpleNamespace(starfield=str(self.game))
