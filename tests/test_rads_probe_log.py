@@ -278,6 +278,18 @@ class VerdictTests(unittest.TestCase):
         self.assertIn("item count 1 to 1: NOT consumed", pl.summarize(with_items(1, 1))["radaway"])
         self.assertNotIn("item count", pl.summarize(base)["radaway"])
 
+    def test_the_script_route_is_reported_apart_from_the_items_own_effect(self):
+        base = good_log()
+        pre = base[0].split("init")[0]
+        out = list(base)
+        out.append(pre + "radaway stage=40 item_had=300 before=300 route=script applied=true delta=-200 now=100 end=true")
+        r = pl.summarize(out)["radaway"]
+        self.assertIn("the item's own effect did not move the value (still 300)", r)
+        self.assertIn("script route (ModValue -200) took it to 100", r)
+        self.assertNotIn(", not ", r)
+        out[-1] = out[-1].replace("now=100", "now=150")
+        self.assertIn(", not 100", pl.summarize(out)["radaway"])
+
     def test_extra_effect_ids_are_named(self):
         lines = [x.replace("rads=100.0 health=200.0 base=na max=190.0 applied=-10 fx=none", "rads=100.0 health=200.0 base=na max=190.0 applied=-10 fx=-1234") for x in good_log()]
         s = pl.summarize(lines)

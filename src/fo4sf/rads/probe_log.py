@@ -26,7 +26,7 @@ import re
 
 LINE = re.compile(r"FO4SFRADS rt=(?P<rt>[-+\d.eE]+) (?P<event>\w+)(?P<rest>.*)$", re.IGNORECASE)
 TOKEN = re.compile(r"(\w+)=(\S*)")
-EVENTS = ("init", "start", "step", "state", "control", "set", "fix", "route", "vcontrol", "item")
+EVENTS = ("init", "start", "step", "state", "control", "set", "fix", "route", "vcontrol", "item", "radaway")
 WRITE_TEST = 50.0         # the script's WriteTest: stage 10 writes this to our value and reads it
 ID_KEYS = {"quest", "rads_av", "health_av", "spell", "radaway", "av"}
 WHENS = ("start", "before", "now", "settled", "routed", "final")
@@ -176,6 +176,16 @@ def judge(events):
                 res = f"moved it to {fmt(have)}, not {fmt(want)}; the script forced it"
         if stage == 40:
             rad = res
+            ra = next((e for e in events if e["event"] == "radaway"), None)
+            if ra is not None and num(ra.get("item_had")) and num(ra.get("before")) and "before" in st:
+                ih, b0 = ra["item_had"], ra["before"]
+                item = ("did not move the value (still " + fmt(ih) + ")") if abs(ih - b0) <= EPS else f"moved it from {fmt(b0)} to {fmt(ih)}"
+                if ra.get("applied") is True:
+                    rad = f"the item's own effect {item}; the script route (ModValue {fmt(ra.get('delta'))}) took it to {fmt(ra.get('now'))}"
+                    if num(ra.get("now")) and abs(ra["now"] - EXPECT[40]) > EPS:
+                        rad += f", not {fmt(EXPECT[40])}"
+                else:
+                    rad = f"the item's own effect {item}; the script route was not applied"
         else:
             eff[stage] = res
     items = {e.get("when"): e.get("count") for e in events if e["event"] == "item" and e.get("stage") == 40}

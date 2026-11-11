@@ -262,8 +262,11 @@ Function Step30(Actor p)
     StartTimer(SETTLE_S, TIMER_SETTLE + 30)
 EndFunction
 
+float RadsBefore40 = 0.0
+
 Function Step40(Actor p)
     Trace("step stage=40 call=EquipItem expect=100")
+    RadsBefore40 = p.GetValue(RadsAV)
     Reading("before", 40)
     p.AddItem(RadAway, 1, true)
     ; Seventh session: RadAway moved nothing and the log could not say whether the item was used up. The count after AddItem and
@@ -284,6 +287,22 @@ Function Settle(int stage)
     endif
     float want = Expected(stage)
     float have = p.GetValue(RadsAV)
+    if stage == 40
+        ; Eighth session: the item is consumed and its effect is inert on our value. RadAway's route is therefore the script:
+        ; when the item's own effect left the value where it was, take 200 off with ModValue, clamped at 0 (the sign rule and the
+        ; call are proven by the force). item_had is the item's own result, before this; the reader judges the item on it.
+        float itemHad = have
+        float dRad = -200.0
+        if have + dRad < 0.0
+            dRad = 0.0 - have
+        endif
+        bool moved = false
+        if have == RadsBefore40
+            moved = ModRads(p, dRad)
+        endif
+        Trace("radaway stage=40 item_had=" + itemHad + " before=" + RadsBefore40 + " route=script applied=" + moved + " delta=" + dRad + " now=" + p.GetValue(RadsAV))
+        have = p.GetValue(RadsAV)
+    endif
     if have != want
         ; Sixth session: SetValue wrote the base while the cast's change sat apart from it (300 stored, SetValue 100 read 400). A
         ; correction by the difference reaches want whichever of the two the call moves; SetValue only when there is no ModValue.

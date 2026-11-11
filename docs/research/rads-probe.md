@@ -171,6 +171,18 @@ line, so "not consumed" and "consumed, effect inert" separate in one run. **Not 
 use (`ModValue(-200)`, remove one), which would make RadAway work whatever the effect does; and a RadAway spell cast from the
 script as a control beside the item. Both are named in Claude's note and left for the result of this run.
 
+## The eighth session (head 216667ed): RadAway is consumed and its effect is inert
+
+**Verified in the game log (owner PC):** `item` counts 1, 0, 0 (`EquipItem` uses the item up at once); rads stayed 300 through the
+3 s settle; the force (`how=ModValue`) then took it to 100. So the item is used and a non-Detrimental +200 effect from an ingestible
+changes nothing on our value, while `ModValue` and a Detrimental duration-0 spell do move it. **Unresolved:** whether the effect
+is inert on our value in general or only as delivered by an ingestible (needs the restore effect cast as a spell; **not built**,
+it needs a writer change).
+**Route taken (head after this one):** RadAway's use ends in the script. In stage 40, when the item's own effect left the value
+where it was, the script applies `ModValue` of -200 (clamped at 0). The `radaway` line logs `item_had` (the item's own result),
+`applied`, `delta` and `now`; the reader says "the item's own effect did not move the value (still 300); the script route (ModValue -200)
+took it to 100". This is **not the pure effect**: the item's effect stays a research line. Not run in the game.
+
 ## Second control: a vanilla instant effect (stage 50)
 
 Asked by the owner PC so one session separates "our effect is wrong" from "Cast on the player from a quest script applies no
