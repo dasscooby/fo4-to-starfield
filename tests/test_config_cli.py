@@ -99,6 +99,7 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(rc, 0)
         lines = {line.strip() for line in text.splitlines()}
         self.assertIn("Fallout 4 data dirs: 2 configured", lines)
+        self.assertTrue(any(l.startswith("Python:") for l in lines), text)
         self.assertTrue(any(l.startswith("[0]") and "fo4a" in l and l.endswith("(exists)") for l in lines), text)
         self.assertTrue(any(l.startswith("[1]") and "fo4b" in l and l.endswith("(MISSING)") for l in lines), text)
         self.assertTrue(any(l.startswith("Starfield data dir:") and l.endswith("(exists)") for l in lines), text)

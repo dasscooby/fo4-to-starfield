@@ -34,6 +34,9 @@ def cmd_status(args: argparse.Namespace) -> int:
 
     print("fo4-to-starfield status")
     print(f"  config: {Path(args.config or 'config.toml').resolve()}")
+    pyver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    meets = sys.version_info >= MIN_PYTHON
+    print(f"  Python: {pyver} ({'ok' if meets else 'needs ' + '.'.join(map(str, MIN_PYTHON)) + ' or newer'})")
     fo4 = cfg.get("fo4", {})
     data_dirs = fo4.get("data_dirs", [])
     print(f"  Fallout 4 data dirs: {len(data_dirs)} configured")
