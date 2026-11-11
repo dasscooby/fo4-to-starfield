@@ -102,5 +102,24 @@ class CollisionTests(unittest.TestCase):
         self.assertEqual(struct.unpack_from("<i", g.blocks[0], 8 + 4 + 8 + 52)[0], -1)
 
 
+
+class LeafClampTests(unittest.TestCase):
+    """Offline reproduction of the Red Rocket 0.02 clamp (issue #458 task 1)."""
+
+    def test_leaf_half_extent_floors_below_0_05(self):
+        # Half-extent below the leaf floor must be raised; the bit pattern of 0.02 (0x3ca3d70a)
+        # must never appear in the written box (the value every Red Rocket crash dump read as an index).
+        half = (0.02, 0.01, 0.03)
+        floored = tuple(max(sfcollision.MIN_LEAF_HALF, abs(v)) for v in half)
+        blob = sfcollision.box_blob(fake_template(), (0.0, 0.0, 0.0), floored)
+        bad = struct.pack("<f", 0.02)
+        self.assertNotIn(bad, blob)
+        c, h = sfcollision.read_box(blob)
+        self.assertAlmostEqual(h[0], sfcollision.MIN_LEAF_HALF, places=5)
+        self.assertAlmostEqual(h[1], sfcollision.MIN_LEAF_HALF, places=5)
+        self.assertAlmostEqual(h[2], sfcollision.MIN_LEAF_HALF, places=5)
+        # Confirm the constant itself is the post-fix value
+        self.assertEqual(sfcollision.MIN_LEAF_HALF, 0.05)
+
 if __name__ == "__main__":
     unittest.main()
