@@ -217,6 +217,22 @@ class PluginTests(unittest.TestCase):
         self.assertIn("player data", self.card)
         self.assertIn("player data", self.runbook)
 
+    def test_the_no_save_job_expects_the_lines_the_source_writes(self):
+        job = self.runbook[self.runbook.index("**Job focc-P1-2n"):self.runbook.index("**Job focc-P1-3")]
+        # the refusal text the card quotes, rebuilt from the source's format strings
+        self.assertIn('Refuse("runtime_dir", std::format("file={} reason={}", fo4sf_runtime::kIniName, error));', self.sidecar)
+        self.assertIn('a_error = "not found";', self.sidecar)
+        self.assertIn("refuse step=runtime_dir file=FO4SF-Runtime.ini reason=not found", job)
+        self.assertIn('Refuse("runtime_dir", std::format("dir={} reason=parent_missing", parsed.dir));', self.sidecar)
+        self.assertIn("reason=parent_missing", job)
+        self.assertIn('REX::INFO("step=runtime_dir dir={}", parsed.dir);', self.sidecar)
+        self.assertIn('REX::INFO("step=event {}{}"', self.sidecar)
+        self.assertIn('"event\\": \\"pre_load\\"', self.sidecar)
+        self.assertIn('", \\"mode\\": " + std::to_string(g_mode)', self.border)
+        for words in ("Mode=0','Mode=1'", "held_$date", "without saving", "sfse\\FO4SFBorder\\build.ps1", "player data"):
+            self.assertIn(words, job)
+        self.assertNotIn("save focc", job)                                   # this job makes no save
+
 
 if __name__ == "__main__":
     unittest.main()

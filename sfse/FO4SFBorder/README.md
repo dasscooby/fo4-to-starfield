@@ -16,6 +16,7 @@ Nothing of Bethesda's or of SFSE's is in this folder. `PluginAPI.h` is SFSE's MI
 | `scan.h` | header-only rules: find the name string, the 8-aligned pointers to it in writable memory, the newest token |
 | `FO4SFBorder.ini` | kill switch and settings; ships with `Mode=0` |
 | `build.sh` | mingw-w64 static cross-build (`build.sh OUT_DIR`), prints sha256s |
+| `build.ps1` | the PC's MSVC build (`build.ps1 -Out <new folder> [-Env <msvc_env.ps1>]`): static CRT, writes `build.json` with every input's sha256; run `..\FOCCSidecar\fetch_pluginapi.ps1 -Dest <this folder>` first |
 
 `tests/sfse_border_scan_test.cpp` (run by `tests/test_sfse_border.py` where g++ exists) checks `scan.h` on synthetic
 memory; `tests/test_sfse_border.py` also pins the contract with the script's log lines.

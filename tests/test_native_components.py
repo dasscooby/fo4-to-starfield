@@ -115,6 +115,15 @@ class DeclarationTests(unittest.TestCase):
             self.assertRegex(name, r"^[A-Za-z0-9_]+\.dll$")
             self.assertTrue((ROOT / plugin["source"]).is_file(), name)
             self.assertTrue(plugin["source"].startswith(plugin["folder"] + "/"), name)
+            self.assertTrue((ROOT / plugin["folder"] / "build.ps1").is_file(), name)   # the PC builds with MSVC
+
+    def test_the_border_msvc_build_takes_the_declared_inputs(self):
+        build = text("sfse/FO4SFBorder/build.ps1")
+        for word in ("'FO4SFBorder.cpp' = $cpp", "'scan.h'", "'PluginAPI.h' = $api", "'../FOCCSidecar/runtime_dir.h'",
+                     "/std:c++20", "/MT", "/LD", "shell32.lib ole32.lib uuid.lib", "fetch_pluginapi.ps1 -Dest",
+                     "-Out already exists", "build_script_sha256"):
+            self.assertIn(word, build)
+        self.assertNotIn("Copy-Item -LiteralPath $dll", build)                # builds only; installs nothing
 
     def test_the_fields_agree_with_each_other(self):
         self.assertEqual(TABLE["schema"], 1)
