@@ -171,6 +171,34 @@ class Ba2:
             for e in ranked
         ]
 
+    def summary(self) -> dict:
+        """Return a summary of the archive: counts and total sizes by kind.
+
+        Useful for conversion planning (how much general data vs texture data).
+        Each size is in bytes. Packed is 0 for uncompressed entries.
+        """
+        def unpacked_of(e: Entry) -> int:
+            if e.kind == "GNRL":
+                return e.unpacked
+            return sum(c[2] for c in (e.chunks or []))
+
+        def packed_of(e: Entry) -> int:
+            if e.kind == "GNRL":
+                return e.packed or e.unpacked
+            return sum((c[1] or c[2]) for c in (e.chunks or []))
+
+        gnrl = [e for e in self.entries if e.kind == "GNRL"]
+        dx10 = [e for e in self.entries if e.kind == "DX10"]
+        return {
+            "total_entries": len(self.entries),
+            "gnrl_count": len(gnrl),
+            "dx10_count": len(dx10),
+            "gnrl_unpacked": sum(unpacked_of(e) for e in gnrl),
+            "dx10_unpacked": sum(unpacked_of(e) for e in dx10),
+            "total_unpacked": sum(unpacked_of(e) for e in self.entries),
+            "total_packed": sum(packed_of(e) for e in self.entries),
+        }
+
     @staticmethod
     def _norm(n: str) -> str:
         return n.replace("/", "\\").lower().lstrip("\\")

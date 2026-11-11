@@ -41,3 +41,23 @@ class LargestEntriesTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SummaryTests(unittest.TestCase):
+    def test_summary_counts_and_sizes(self):
+        entries = {
+            "a.txt": b"hello",
+            "b.bin": b"x" * 50,
+        }
+        data = general_archive(entries, compressed=False)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "sum.ba2")
+            with open(path, "wb") as f:
+                f.write(data)
+            a = Ba2(path)
+            s = a.summary()
+            self.assertEqual(s["total_entries"], 2)
+            self.assertEqual(s["gnrl_count"], 2)
+            self.assertEqual(s["dx10_count"], 0)
+            self.assertEqual(s["total_unpacked"], 5 + 50)
+            self.assertEqual(s["total_packed"], 5 + 50)  # uncompressed
