@@ -183,6 +183,14 @@ where it was, the script applies `ModValue` of -200 (clamped at 0). The `radaway
 `applied`, `delta` and `now`; the reader says "the item's own effect did not move the value (still 300); the script route (ModValue -200)
 took it to 100". This is **not the pure effect**: the item's effect stays a research line. Not run in the game.
 
+## The ninth session (head a8c55bc5): PC PASS, no force anywhere
+
+**Verified in the game log (owner PC, `probe-rads5-20261111T055610Z`):** stages 10 to 50 with `forced=false` throughout. Stage 40: item
+count 1 to 0, the item's own effect left 300, `radaway ... route=script applied=true delta=-200 now=100`, health back to 195,
+`fix ... forced=false want=100 had=100`. So: rads is a value of ours, **gained by a Detrimental duration-0 spell** on a
+damage-is-positive value, **shown on health through the route**, and **lowered by RadAway through a script on use**.
+**Unresolved (research line, not a blocker):** why the item's own non-Detrimental effect is inert; the spell-cast control for it is not built.
+
 ## Second control: a vanilla instant effect (stage 50)
 
 Asked by the owner PC so one session separates "our effect is wrong" from "Cast on the player from a quest script applies no
