@@ -64,8 +64,13 @@ def owner_card(folder):
     path = os.path.join(folder, CARD)
     if os.path.islink(path):
         raise ValueError("Owner card must be a text file beside the kit, not a link")
-    with open(path, "rb") as stream:
-        raw = stream.read(16385)
+    try:
+        with open(path, "rb") as stream:
+            raw = stream.read(16385)
+    except FileNotFoundError:
+        raise ValueError("Owner card is missing; ask the PC helper for owner-card.txt beside this kit") from None
+    except OSError:
+        raise ValueError("Cannot read owner card; ask the PC helper to check the card file") from None
     if len(raw) > 16384:
         raise ValueError("Owner card is too long")
     try:
@@ -113,6 +118,22 @@ def _installed_problems(record, data):
     return problems
 
 
+def active_plugins(path):
+    """Read the selected profile, refusing undecodable/unreadable bytes without edits."""
+    if not path:
+        raise ValueError("Cannot find this profile's Plugins.txt")
+    try:
+        with open(path, encoding="utf-8-sig") as stream:
+            return {line.strip()[1:].strip().casefold() for line in stream
+                    if line.strip().startswith("*")}
+    except FileNotFoundError:
+        return set()
+    except UnicodeError:
+        raise ValueError("Cannot read this profile's Plugins.txt: it must be UTF-8. Nothing changed") from None
+    except OSError:
+        raise ValueError("Cannot read this profile's Plugins.txt; check read permissions. Nothing changed") from None
+
+
 def list_kits(starfield, registered, plugins_txt, repo):
     """Stable rows for staged or recorded kits, including broken/orphaned installs.
 
@@ -123,17 +144,10 @@ def list_kits(starfield, registered, plugins_txt, repo):
         raise ValueError("Unknown test kit in registry")
     data = os.path.join(starfield, "Data")
     active, plugin_error = set(), ""
-    if not plugins_txt:
-        plugin_error = "Cannot find this profile's Plugins.txt"
-    else:
-        try:
-            with open(plugins_txt, encoding="utf-8-sig") as stream:
-                active = {line.strip()[1:].strip().casefold() for line in stream
-                          if line.strip().startswith("*")}
-        except FileNotFoundError:
-            pass
-        except (OSError, UnicodeError):
-            plugin_error = "Cannot read this profile's Plugins.txt"
+    try:
+        active = active_plugins(plugins_txt)
+    except ValueError as error:
+        plugin_error = str(error)
     rows = []
     for kit in KITS:
         record, problems, installed = {}, [], False
@@ -241,6 +255,7 @@ def execute(key, action, settings_path, repo, *, expected_folder, running, run, 
     reason = recovery.play_reason(folder)
     if reason:
         raise ValueError(reason)
+    active_plugins(plugins)  # refuse unreadable/unknown encoding before even starting the installer
     records = recovery.inspect(folder)[0]
     registered = load_registry(registry_path(settings_path))
     rows = {row["key"]: row for row in list_kits(folder, registered, plugins, repo)}
@@ -271,6 +286,7 @@ def execute(key, action, settings_path, repo, *, expected_folder, running, run, 
     reason = recovery.play_reason(folder)
     if reason or recovery.inspect(folder)[0] != records:
         raise ValueError(reason or "Installation state changed; reload the Tests page")
+    active_plugins(plugins)  # a late encoding/readability change must refuse too
     result = run(argv, cwd=repo, env=env)
     if result.returncode:
         raise ValueError(f"Test {action} stopped (exit {result.returncode}); keep the installer's journal and read its report")

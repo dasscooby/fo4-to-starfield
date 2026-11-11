@@ -103,3 +103,39 @@ Synthetic checks: `python3 -m unittest tests.test_launcher_test_kits tests.test_
 Action/prepacked checks: `python -m unittest tests.test_launcher_kit_actions tests.test_pipboy_probe_install tests.test_planet_probe_install tests.test_questprobe_install`.
 Use the repository Python environment with requirements-ci.txt.
 Windows GUI and game checks: NOT_RUN on Ubuntu. See the [Windows helper card](../testing/launcher-tests-pc.md); execute only after independent exact-head review.
+
+## PC fixture receipt and follow-up (11 November 2026)
+
+The PC helper reports **PC PASS 40407e12** for the first, synthetic part of the card
+(FAL-274 comment `09ba26ab-e833-44c6-86b5-c1b89718b361`, PR comment
+[6784588956](https://github.com/fo4sf/fo4-to-starfield/pull/723#issuecomment-6784588956)).
+Windows 11 Home 10.0.26300, Python 3.14.6, Tk 8.6.15; 47 tests and guard passed.
+The hidden window's buttons were invoked on a disposable fixture with a space in its
+path. Success cases used the synthetic test-helper archive, not the qualified packaging
+route. No screenshots; no actual game/profile/settings/Documents touched, no Play.
+This establishes the reported fixture cases only, not real staged-kit acceptance.
+The source worker on Ubuntu did not execute those Windows checks independently.
+
+The follow-up source fixes the reported footer refusal (the CLI reason stays visible),
+missing-card path disclosure (a path-free card message), and bad Plugins.txt encoding
+(readability/UTF-8 refused before installer invocation, also at the late recheck).
+The prior fixture PASS stays pinned to 40407e12; these changes need their own review
+and bounded fixture recheck before claiming a PC result at a newer head.
+
+The other two observations remain explicit limits:
+
+- The process check covers Starfield, not every editor/tool or open file handle.
+  Close the Creation Kit and other tools holding the kit before real install/remove.
+  The existing installer retains its recovery ownership when removal is denied; the
+  synthetic locked-plugin cleanup test verifies retry after the lock is released.
+  Do not delete a journal or force an unlock to bypass that refusal.
+- GUI process/button state can lag its three-second poll. Buttons are an indication;
+  each CLI action loads current saved settings, compares the selected game folder,
+  checks game state and recovery again at execution. The restore boolean detector
+  and crashwatch CSV detector are still separate; this patch does not claim they
+  agree for all process-query outputs. Their consolidation is deferred beyond the
+  reported UI/error fixes; no fresh Windows detector result is claimed here.
+
+The actual staged-kit inventory, real running-game refusal, five real kit successes,
+qualified archive route and screenshots remain **NOT_RUN**, to be run by the PC helper
+after the owner's play session. No repeated request to interrupt that session.

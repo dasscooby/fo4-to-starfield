@@ -2860,3 +2860,14 @@ Synthetic round trips preserve owner sentinel/plugin bytes and cover orphan remo
 wrong/missing archives and action refusals. Windows helper card is source-only here.
 Radiation/power-armor wrapper flag coordination sent to their writer on FAL-273.
 No PC, game, actual install or game input on this Ubuntu source worker.
+
+## 2026-11-11 — Codex / Lone: FAL-274 PC fixture follow-up
+
+Owner-PC comment09ba26ab reports PC PASS at40407e12 for 47 tests/guard and the hidden
+Windows Tk fixture; real kit inventory/running-game/five-kit acceptance stay NOT_RUN.
+Fixed footer loss of a Tests CLI refusal, missing-card absolute-path disclosure, and
+unreadable/non-UTF-8 plugin-list preflight (initial and late). Added synthetic negative
+controls plus real Tk fixture assertions. Recorded editor/file-lock and detector/poll
+limits instead of claiming every tool lock is detected or changing broad process APIs.
+Existing locked-plugin cleanup/retry regression was replayed. Ubuntu source worker;
+no new Windows/game run, no real owner files or operational PC evidence accessed.

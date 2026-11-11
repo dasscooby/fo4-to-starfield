@@ -87,3 +87,24 @@ Report `PC PASS <head>` only for the checks actually observed, naming partial/NO
 subcases. Full Tests-page acceptance requires the intended five staged-kit successes,
 process refusal, recovery and preservation checks. STANDALONE-01 execution separately
 retains FAL-224's helper preparation and owner release; showing its card does not grant it.
+
+## Fixture-only recheck after the reported PC findings
+
+Prior PC PASS at 40407e12 covers the synthetic first part only (47 tests, guard,
+hidden Tk buttons; stand-in archive; no real profile/game). Keep that receipt pinned.
+After independent review of a newer head, reuse the disposable fixture to recheck:
+
+1. Install without its prepared archive: after exit 2 the footer still shows the
+   missing-archive reason; the Log also retains it.
+2. Missing/unreadable owner-card.txt: readable refusal without the fixture's absolute
+   path. No file association or external application opens.
+3. Helper-owned Plugins.txt with invalid UTF-8: Install and Remove refuse with the
+   encoding/readability reason before an installer starts; bytes and receipts stay.
+
+The updated test suite also includes the footer and card assertions in its real Tk
+window fixture when tkinter/display are available. This source delta does not
+establish a new Windows PASS on Ubuntu. Actual staged-kit checks remain scheduled
+by the PC helper after the owner has played; these fixture rechecks require no game.
+Close editors/tools holding kit files before the actual install/remove checks. A
+cached enabled button is not an execution authorization; the CLI rechecks game,
+saved target, profile, settings, stage registry and recovery at the action boundary.

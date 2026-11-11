@@ -94,6 +94,39 @@ class KitActions(unittest.TestCase):
             self.refuses('incomplete|unreadable')
             self.assertEqual(receipt.read_bytes(),payload)
 
+    def test_non_utf8_plugin_list_refuses_before_installer_or_journal_changes(self):
+        self.plugins.write_bytes(b"\xff\xfeunreadable")
+        before = sorted(self.data.iterdir())
+        self.refuses("Plugins.txt.*UTF-8")
+        self.assertEqual(sorted(self.data.iterdir()), before)
+        self.assertEqual(self.plugins.read_bytes(), b"\xff\xfeunreadable")
+
+    def test_unreadable_plugin_list_has_a_path_free_refusal(self):
+        original_open = open
+        def denied(path, *args, **kwargs):
+            if os.fspath(path) == str(self.plugins):
+                raise PermissionError(13, "denied", str(self.plugins))
+            return original_open(path, *args, **kwargs)
+        with mock.patch("builtins.open", side_effect=denied):
+            with self.assertRaisesRegex(ValueError, "Plugins.txt.*permissions") as refused:
+                self.execute()
+        self.assertNotIn(str(self.root), str(refused.exception))
+        self.run.assert_not_called()
+        self.assertEqual(self.plugins.read_bytes(), self.original)
+
+    def test_late_encoding_change_refuses_and_preserves_the_new_bytes(self):
+        def running():
+            if running.calls:
+                self.plugins.write_bytes(b"\xff")
+            running.calls += 1
+            return False
+        running.calls = 0
+        with self.assertRaisesRegex(ValueError, "Plugins.txt.*UTF-8"):
+            self.execute(running=running)
+        self.run.assert_not_called()
+        self.assertEqual(self.plugins.read_bytes(), b"\xff")
+        self.assertEqual(list(self.data.iterdir()), [])
+
     def test_missing_stage_plugin_and_prebuilt_archive_refuse_without_build(self):
         self.archive.unlink()
         self.refuses('prebuilt.*missing')

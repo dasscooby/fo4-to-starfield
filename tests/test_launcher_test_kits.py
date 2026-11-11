@@ -157,8 +157,20 @@ class TestKitCatalog(unittest.TestCase):
         with self.assertRaises(ValueError):
             kits.owner_card(str(self.root))
         card.unlink()
-        with self.assertRaises(FileNotFoundError):
+        with self.assertRaisesRegex(ValueError, "Owner card is missing"):
             kits.owner_card(str(self.root))
+
+    def test_missing_or_unreadable_card_errors_do_not_disclose_private_paths(self):
+        private = self.root / "private-person-name" / "staged kit"
+        private.mkdir(parents=True)
+        with self.assertRaisesRegex(ValueError, "Owner card is missing") as missing:
+            kits.owner_card(str(private))
+        self.assertNotIn(str(private), str(missing.exception))
+        failure = PermissionError(13, "denied", str(private / kits.CARD))
+        with mock.patch("builtins.open", side_effect=failure):
+            with self.assertRaisesRegex(ValueError, "Cannot read owner card") as unreadable:
+                kits.owner_card(str(private))
+        self.assertNotIn("private-person-name", str(unreadable.exception))
 
     def test_owner_card_link_is_not_followed(self):
         elsewhere = self.root / 'elsewhere.txt'

@@ -165,6 +165,22 @@ class SettingsModel:
 REPORT_ACTIONS = ("status", "detect", "update-check", "update", "recover-install")
 
 
+class CommandFeedback:
+    """Keep the Tests CLI's readable refusal visible after its process exits."""
+    def __init__(self, action):
+        self.action = action
+        self.refusal = ""
+
+    def observe(self, line):
+        if self.action.startswith("tests-") and line.startswith("tests: "):
+            self.refusal = line[len("tests: "):].strip()
+
+    def finished(self, code):
+        if self.action.startswith("tests-") and code:
+            return self.refusal or f"Test kit command stopped (exit {code}); open Log for details"
+        return f"{self.action} finished (exit {code})"
+
+
 def run_command(argv, on_line, *, popen=subprocess.Popen):
     """Stream a single existing CLI command; the UI calls this on a worker, never on the Tk thread."""
     repo = os.path.dirname(os.path.dirname(argv[3]))
@@ -406,7 +422,10 @@ def launch(launcher, path, *, recipe="", overrides=(), fo4_data=(), starfield=""
                 text = test_kits.owner_card(stage) if stage else ""
                 if not text:
                     raise ValueError("No owner-card folder was recorded; ask the PC helper for the kit's card")
-            except (OSError, ValueError) as error:
+            except OSError:
+                self.message.set("Cannot read owner card; ask the PC helper to check the card file")
+                return
+            except ValueError as error:
                 self.message.set(f"Cannot show owner card: {error}")
                 return
             dialog = tk.Toplevel(root)
@@ -679,6 +698,7 @@ def launch(launcher, path, *, recipe="", overrides=(), fo4_data=(), starfield=""
 
         def launch_command(self, action, argv, part="all"):
             self.busy, self.action, self.part = True, action, part
+            self.feedback = CommandFeedback(action)
             for widget, _state in self.widgets:
                 widget.configure(state="disabled")
             self.message.set(f"Running {action}…")
@@ -731,12 +751,13 @@ def launch(launcher, path, *, recipe="", overrides=(), fo4_data=(), starfield=""
                     if generation == self.kit_generation and not self.busy:
                         self.render_kits(rows, error)
                 elif kind == "line":
+                    self.feedback.observe(value)
                     self.append(self.log, value)
                     if self.action in REPORT_ACTIONS:
                         self.append(self.report, value)
                 else:
                     self.busy = False
-                    self.message.set(f"{self.action} finished (exit {value})" if kind == "done" else value)
+                    self.message.set(self.feedback.finished(value) if kind == "done" else value)
                     for widget, state in self.widgets:
                         widget.configure(state=state)
                     if kind == "done" and value == 0 and self.action == "update":
