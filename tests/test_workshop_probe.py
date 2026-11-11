@@ -92,7 +92,7 @@ class ScriptTests(unittest.TestCase):
     def test_the_committed_scripts_compile_alone_every_optional_line_is_a_comment(self):
         for text in (PSC, HAND_PSC):
             self.assertEqual(mws.enable(text, []), text)
-        self.assertEqual(mws.optional_names(PSC), ["ObjectReference.IsWorkshop", "ObjectReference.MoveTo", "ObjectReference.SetActorOwner",
+        self.assertEqual(mws.optional_names(PSC), ["ObjectReference.GetWorkshop", "ObjectReference.MoveTo", "ObjectReference.SetActorOwner",
                                                    "ObjectReference.StartWorkshop", "ObjectReference.Delete"])
         self.assertEqual(mws.optional_names(HAND_PSC), ["ObjectReference.MoveTo"])
 
@@ -112,6 +112,16 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(on.count("\n"), PSC.count("\n"))
         with self.assertRaises(SystemExit):
             mws.set_beacon(PSC, "zz")
+
+    def test_names_the_real_starfield_declares_and_the_keyword_comes_from_starfield_esm(self):
+        """PC offline pass on #732: Actor.GetActorBase does not exist (GetLeveledActorBase does), WorkshopKeyword 054BA7 is a
+        Starfield.esm record (the core only points at it)."""
+        for text in (PSC, HAND_PSC):
+            self.assertNotIn("GetActorBase", text)
+            self.assertNotIn("WorkshopKwId, CoreName()", text)
+            self.assertIn('GetFormFromFile(WorkshopKwId, "Starfield.esm")', text)
+        self.assertIn("p.GetLeveledActorBase()", PSC)
+        self.assertNotIn("GetActorBase", "".join(mws.REQUIRED["Actor"]))
 
     def test_the_hand_mode_places_the_bench_where_the_kit_vanishes(self):
         self.assertIn("p.GetItemCount(kit) < 1", HAND_PSC)
@@ -137,7 +147,7 @@ BASES = {
                        "Function Activate(ObjectReference a, bool d) native\nForm Function GetBaseObject() native\n"
                        "Function MoveTo(ObjectReference a, float x, float y, float z, bool m) native\nFunction StartWorkshop(bool b) native\n"
                        "Function Delete() native\nFunction SetOutpostFlag() native\n",
-    "Actor": "Scriptname Actor extends ObjectReference\nActorBase Function GetActorBase() native\n",
+    "Actor": "Scriptname Actor extends ObjectReference\nActorBase Function GetLeveledActorBase() native\n",
     "Game": "Scriptname Game\nActor Function GetPlayer() native global\nForm Function GetFormFromFile(int i, string p) native global\n"
             "bool Function IsPluginInstalled(string p) native global\n",
     "Debug": "Scriptname Debug\nFunction Notification(string s) native global\nbool Function OpenUserLog(string n) native global\nbool Function TraceUser(string n, string t) native global\n",
@@ -168,7 +178,7 @@ class PrecheckTests(unittest.TestCase):
         r = mws.precheck_sources(mws.read_sources(z), PSC, HAND_PSC)
         self.assertEqual(r["missing"], [])
         self.assertTrue(r["required"]["Actor.GetDistance"])                  # declared on ObjectReference
-        self.assertEqual(r["optional"], {"ObjectReference.IsWorkshop": False, "ObjectReference.MoveTo": True,
+        self.assertEqual(r["optional"], {"ObjectReference.GetWorkshop": False, "ObjectReference.MoveTo": True,
                                          "ObjectReference.SetActorOwner": False, "ObjectReference.StartWorkshop": True,
                                          "ObjectReference.Delete": True})
 
@@ -294,7 +304,9 @@ class StageTests(unittest.TestCase):
         proc = self.run_tool("resources", self.master)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("COBJ 000D01 co_Workbench_Industrial: makes 000C01 Workbench_Industrial", proc.stdout)
-        self.assertIn("000B02 Ore_Aluminum x4", proc.stdout)
+        self.assertIn("000B02 Ore_Aluminum x4 -> item", proc.stdout)
+        self.assertIn("000B11 ResOre_Iron x3 -> MISC 000B01 Ore_Iron (of 2 that link it)", proc.stdout)   # IRES -> the MISC named like it
+        self.assertNotIn("00000B11", proc.stdout)                              # never an additem for the resource record itself
         self.assertIn("player.additem 00000B01 6", proc.stdout)               # twice the count asked for
         self.assertIn("player.additem 00000B02 8", proc.stdout)
         none = self.run_tool("resources", self.master, "--match", "NoSuchStation")
@@ -322,7 +334,7 @@ class StageTests(unittest.TestCase):
         self.assertEqual(sorted(plan["outputs"]), sorted([PLUGIN, "Data/Scripts/FO4SF_WSProbeQuest.pex", "Data/Scripts/FO4SF_WSHandQuest.pex"]))
         self.assertEqual(plan["inputs"]["Starfield.esm"]["sha256"], mws.sha256(str(self.master)))
         self.assertEqual(plan["optional"]["ObjectReference.StartWorkshop"], "kept")
-        self.assertEqual(plan["optional"]["ObjectReference.IsWorkshop"], "not declared in the base scripts")
+        self.assertEqual(plan["optional"]["ObjectReference.GetWorkshop"], "not declared in the base scripts")
         self.assertEqual(plan["optional"]["ObjectReference.SetActorOwner"], "not declared in the base scripts")
         self.assertTrue(plan["optional"]["ObjectReference.Delete"].startswith("declared but did not compile"))
         self.assertEqual(plan["optional_hand"]["ObjectReference.MoveTo"], "kept")
@@ -330,7 +342,7 @@ class StageTests(unittest.TestCase):
         kept = (final / "FO4SF_WSProbeQuest.psc").read_text()
         self.assertIn("r.StartWorkshop(true)", kept)
         self.assertNotIn(";OPT ObjectReference.StartWorkshop", kept)
-        self.assertIn(";OPT ObjectReference.IsWorkshop", kept)                  # still a comment
+        self.assertIn(";OPT ObjectReference.GetWorkshop", kept)                  # still a comment
         self.assertRegex(kept, r"(?m)^int BeaconId = 0x00abcdef  ;BEACON")
         self.assertEqual(mws.verify_stage(str(final), plan, str(self.master.parent)), [])
         self.assertTrue((final / "offline_check.txt").read_text().rstrip().endswith("all checks pass"))

@@ -22,7 +22,7 @@ string CorePlugin = "FO4TerrainCore.esm"
 string CorePlugin2 = "FO4TerrainCore_Mars.esm"
 int KitId = 0x802           ; MISC FO4SF_WSKit
 int BenchBaseId = 0x0A2ECD  ; the core's workshop base
-int WorkshopKwId = 0x054BA7
+int WorkshopKwId = 0x054BA7   ; KYWD of Starfield.esm
 float AheadM = 2.5
 
 ; ---------------------------------------------------------------- state
@@ -71,7 +71,7 @@ string Function CoreName()
 EndFunction
 
 string Function HasWorkshopKw(ObjectReference r)
-    Keyword k = Game.GetFormFromFile(WorkshopKwId, CoreName()) as Keyword
+    Keyword k = Game.GetFormFromFile(WorkshopKwId, "Starfield.esm") as Keyword
     if k == None || r == None
         return "na"
     endif

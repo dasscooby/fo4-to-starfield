@@ -6,7 +6,7 @@ Task: FAL-359 (stage plan tracks 7 and 8, settlements and C.A.M.P.s). Status: **
 ## What the PC found on 11 Nov (test save, installed core; written by Claude, not re-run here)
 
 * A workshop **placed in the core's cell** works: Red Rocket garage bench (reference 0D271, base `FO4Core_wkshp_0c1aeb_fallout4`
-  local id 0A2ECD, model `workbenchgarage01.nif`, `WorkshopKeyword` 00054BA7 plus seven outpost keywords). Crosshair on it:
+  local id 0A2ECD, model `workbenchgarage01.nif`, `WorkshopKeyword` 00054BA7 (a Starfield.esm KYWD; the core only points at it) plus seven outpost keywords). Crosshair on it:
   "WORKSHOP / BUILD [E]"; E opens Starfield's build mode (CRAFTING tab with six stations, build limit bar). A second E:
   "Cannot build item: Missing resources" (Industrial Workbench: Aluminum 0/4, Iron 0/3).
 * The same base **spawned** (`player.placeatme <core index>0A2ECD 1`, open ground, far from every workshop) stands there, fully
@@ -30,8 +30,7 @@ what that does): QUST `FO4SF_WSProbeQuest` (start game enabled, stages below, no
 text:** the master list is `Starfield.esm` only; the installed core is **not** a master. Nothing in the plugin points at a
 core record: the scripts find the core's workshop base with `Game.GetFormFromFile(0x0A2ECD, "FO4TerrainCore.esm")` (the
 `_Mars` core is tried when that plugin is absent), so the kit loads wherever it sits and never wants a master that is not
-there. If the core's base or the workshop keyword 054BA7 is not at that local id, the log says `none`; the ids are the
-11 Nov PC run's, and 054BA7 is Fallout 4's id, **not verified in the core**.
+there. If the core's base is not at that local id the log says `none`; the id is the 11 Nov PC run's. The workshop keyword is read from Starfield.esm.
 
 ### The console quest (stages set with `setstage FO4SF_WSProbeQuest <n>`; polled once a second)
 
@@ -55,10 +54,9 @@ reference at once, +2 s and +10 s (`when=arrival...`); the trip itself is the PC
 
 ### Names that may not exist
 
-Every workshop or outpost native is a `;OPT` line (`ObjectReference.IsWorkshop`, `SetActorOwner`, `StartWorkshop`, plus
+Every workshop or outpost native is a `;OPT` line (`ObjectReference.GetWorkshop` (read in every `read` line as `ws=`), `SetActorOwner`, `StartWorkshop`, plus
 `MoveTo`, `Delete`): `precheck` looks each up in the base sources, `stage` compiles each declared one on its own, keeps the
-ones that compile, and `plan.json` records the fate (`optional`, `optional_hand`); a name the game lacks logs `na`. **These
-four workshop names are guesses from Fallout 4**; the real list is what Starfield declares. Read it first, offline, with
+ones that compile, and `plan.json` records the fate (`optional`, `optional_hand`); a name the game lacks logs `na`. The PC's offline pass (11 Nov, real ContentResources.zip) found `IsWorkshop` absent and `Actor.GetActorBase` absent (now `GetLeveledActorBase`); `StartWorkshop`, `SetActorOwner`, `MoveTo`, `Delete` compile. Starfield also declares `SetWorkshopState(int)`, `ShowWorkshopBuilderMenu()`, event `OnWorkshopMode(bool)`: not yet sub-stages here (the PC types them by hand first). The real list is what Starfield declares. Read it first, offline, with
 `make_workshop_probe.py scan` (every function of ObjectReference, Game, Location, Form, Actor, Quest and ScriptObject whose
 name says workshop, outpost or beacon, and every call line of each base script whose own name says so, i.e. what vanilla's
 beacon script calls); `stage` also writes it to `scan.txt`. If the scan shows the natives the guesses missed, the next commit
@@ -109,7 +107,7 @@ If a bench ever opens the build mode, the owner's card for building follows (bel
 
 `make_workshop_probe.py resources --starfield <Starfield.esm> [--out additem.txt]` (and `stage`, into `additem.txt`) reads
 Starfield.esm: every COBJ whose created object's editor id matches `Workbench|Lab|Station` (change it with `--match`), its
-components and counts, and `player.additem <id> <2 x the largest count>` lines. **No resource id is verified**: the lines are
+components and counts, and `player.additem <id> <2 x the largest count>` lines. The COBJ components are resource records (IRES), not items: the tool maps each to the MISC whose body links it (the one named like the IRES without `Res` when several do) and prints `player.additem` for the MISC only. PC-proven: `0000556E` Iron, `0000557D` Aluminum (IRES 0057C7, 0057D6) gave build-mode counts and a built station. The mapping is tested on a synthetic file only; the PC's offline pass on the real file is the check. The lines are
 the tool's reading of the real file at stage time; offline it ran on a synthetic Starfield.esm only (Aluminum 4 and Iron 3
 -> `additem 00000B02 8`, `00000B01 6`). Paste the lines from `additem.txt` into the console before step 2 of a build, then press
 E on the workshop and build; whichever station reads "Missing resources" is a COBJ the match did not catch: widen `--match`.
@@ -118,7 +116,7 @@ E on the workshop and build; whichever station reads "Missing resources" is a CO
 
 The Papyrus compile (the PC's compiler); the stage against the real Starfield.esm; ContentResources.zip (not on the build
 box: the `scan` output, the fate of every optional native and the beacon id are all still unread); the whole game session.
-The workshop keyword's local id in the core, the beacon base, and every guessed native are open until the PC reads them.
+The beacon base is `OutpostBeaconActivator` 002C60E9 (PC survey): stage with `--beacon 2C60E9`.
 
 ## Piece B (the power armor entry by script)
 

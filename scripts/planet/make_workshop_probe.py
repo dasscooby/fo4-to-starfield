@@ -53,7 +53,7 @@ STARFIELD = r"D:\SteamLibrary\steamapps\common\Starfield"
 LOG = os.path.join(os.path.expanduser("~"), "Documents", "My Games", "Starfield", "Logs", "Script", "User", "FO4SFWorkshop.0.log")
 # what the script cannot run without (the optional readings are the .psc's ";OPT" lines)
 REQUIRED = {
-    "Actor": ["GetActorBase", "GetItemCount", "AddItem", "PlaceAtMe", "GetPositionX", "GetPositionY", "GetPositionZ",
+    "Actor": ["GetItemCount", "AddItem", "PlaceAtMe", "GetPositionX", "GetPositionY", "GetPositionZ",
               "GetDistance", "GetParentCell", "GetAngleZ"],
     "ObjectReference": ["Is3DLoaded", "IsDisabled", "Disable", "Enable", "Activate", "GetBaseObject"],
     "Math": ["Sin", "Cos"],

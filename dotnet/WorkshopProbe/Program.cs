@@ -245,6 +245,21 @@ static class WorkshopProbe
         var names = sf.EnumerateMajorRecords().Where(r => !string.IsNullOrEmpty(r.EditorID)).GroupBy(r => r.FormKey).ToDictionary(g => g.Key, g => g.First().EditorID!);
         var total = new SortedDictionary<FormKey, uint>(Comparer<FormKey>.Create((a, b) => a.ID.CompareTo(b.ID)));
         int stations = 0;
+        // a COBJ component is often a resource record (IRES), not an item: the inventory item is the MISC whose body links the
+        // IRES (PC, 11 Nov: ResInorgCommonIron 0057C7 -> MISC InorgCommonIron 00556E). Map each IRES / non-item to such a MISC.
+        var miscLinks = new Dictionary<FormKey, List<IMiscItemGetter>>();
+        foreach (var m in sf.MiscItems)
+            foreach (var l in m.EnumerateFormLinks())
+                if (l.FormKey != m.FormKey) { if (!miscLinks.TryGetValue(l.FormKey, out var lst)) miscLinks[l.FormKey] = lst = new(); lst.Add(m); }
+        FormKey Item(FormKey comp, out string how)
+        {
+            if (sf.MiscItems.Any(m => m.FormKey == comp)) { how = "item"; return comp; }
+            if (!miscLinks.TryGetValue(comp, out var hits) || hits.Count == 0) { how = "no MISC links it"; return comp; }
+            var want = (names.GetValueOrDefault(comp, "")).Replace("Res", "", StringComparison.Ordinal);
+            var pick = hits.FirstOrDefault(m => string.Equals(m.EditorID, want, StringComparison.OrdinalIgnoreCase)) ?? hits.OrderBy(m => m.FormKey.ID).First();
+            how = $"MISC {Hex(pick.FormKey)} {pick.EditorID}" + (hits.Count > 1 ? $" (of {hits.Count} that link it)" : "");
+            return pick.FormKey;
+        }
         foreach (var c in sf.ConstructibleObjects.OrderBy(c => c.FormKey.ID))
         {
             if (c.CreatedObject.IsNull) continue;
@@ -255,8 +270,10 @@ static class WorkshopProbe
             Console.WriteLine($"COBJ {Hex(c.FormKey)} {c.EditorID}: makes {Hex(c.CreatedObject.FormKey)} {made}, workbench keyword {(c.WorkbenchKeyword.IsNull ? "none" : names.GetValueOrDefault(c.WorkbenchKeyword.FormKey, Hex(c.WorkbenchKeyword.FormKey)))}");
             foreach (var (k, count) in comps)
             {
-                Console.WriteLine($"    {Hex(k)} {names.GetValueOrDefault(k, "?")} x{count}");
-                total[k] = Math.Max(total.GetValueOrDefault(k), count);
+                var it = Item(k, out var how);
+                Console.WriteLine($"    {Hex(k)} {names.GetValueOrDefault(k, "?")} x{count} -> {how}");
+                if (how.StartsWith("no MISC")) continue;                       // never print an additem for something that is not an item
+                total[it] = Math.Max(total.GetValueOrDefault(it), count);
             }
         }
         Console.WriteLine($"resources: {stations} COBJ matching /{match}/");
@@ -272,9 +289,18 @@ static class WorkshopProbe
         mod.ModHeader.Flags |= StarfieldModHeader.HeaderFlag.Master;
         mod.MiscItems.Add(new MiscItem(Sf(0x000A01), Release) { EditorID = "Misc_Junk_Fork", Name = "Fork", Model = new Model { File = "Props\\Fork.nif" } });
         mod.MiscItems.Add(new MiscItem(Sf(0x000A02), Release) { EditorID = "Misc_Other", Name = "Other", Model = new Model { File = "Props\\Other.nif" } });
-        var iron = new MiscItem(Sf(0x000B01), Release) { EditorID = "Ore_Iron", Model = new Model { File = "Props\\Iron.nif" } };
+        // the real file: the COBJ components are resource records (IRES), the inventory item is a MISC that links the IRES.
+        // The fixture stands an Ingestible in for the IRES and links it from the MISC through a message field (a stand-in:
+        // only the FormKey is read). Aluminum is a plain item component (the direct case).
+        var ironRes = new Ingestible(Sf(0x000B11), Release) { EditorID = "ResOre_Iron" };
+        var ironMisc = new MiscItem(Sf(0x000B01), Release) { EditorID = "Ore_Iron", Model = new Model { File = "Props\\Iron.nif" } };
+        ironMisc.FeaturedItemMessage.SetTo(new FormKey(SfEsm, 0x000B11));
+        var decoy = new MiscItem(Sf(0x000B03), Release) { EditorID = "Zzz_Decoy_Iron", Model = new Model { File = "Props\\Iron.nif" } };
+        decoy.FeaturedItemMessage.SetTo(new FormKey(SfEsm, 0x000B11));
         var alum = new MiscItem(Sf(0x000B02), Release) { EditorID = "Ore_Aluminum", Model = new Model { File = "Props\\Alu.nif" } };
-        mod.MiscItems.Add(iron);
+        mod.Ingestibles.Add(ironRes);
+        mod.MiscItems.Add(ironMisc);
+        mod.MiscItems.Add(decoy);
         mod.MiscItems.Add(alum);
         var bench = new Furniture(Sf(0x000C01), Release) { EditorID = "Workbench_Industrial" };
         mod.Furniture.Add(bench);
@@ -283,7 +309,7 @@ static class WorkshopProbe
         cobj.CreatedObject.SetTo(bench.FormKey);
         cobj.ConstructableComponents = new ExtendedList<ConstructibleObjectComponent>();
         cobj.ConstructableComponents.Add(new ConstructibleObjectComponent { Component = new FormLink<IItemGetter>(alum.FormKey), RequiredCount = 4 });
-        cobj.ConstructableComponents.Add(new ConstructibleObjectComponent { Component = new FormLink<IItemGetter>(iron.FormKey), RequiredCount = 3 });
+        cobj.ConstructableComponents.Add(new ConstructibleObjectComponent { Component = new FormLink<IItemGetter>(ironRes.FormKey), RequiredCount = 3 });
         mod.ConstructibleObjects.Add(cobj);
         Directory.CreateDirectory(outDir);
         mod.BeginWrite.ToPath(Path.Combine(outDir, "Starfield.esm")).WithNoLoadOrder().Write();

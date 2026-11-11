@@ -33,7 +33,7 @@ string ProbePlugin = "FO4SFWorkshopProbe.esm"
 string CorePlugin = "FO4TerrainCore.esm"          ; the installed core; FO4TerrainCore_Mars.esm is tried when this one is absent
 string CorePlugin2 = "FO4TerrainCore_Mars.esm"
 int BenchBaseId = 0x0A2ECD  ; the core's workshop base FO4Core_wkshp_0c1aeb_fallout4 (local id, as the 11 Nov PC run read it)
-int WorkshopKwId = 0x054BA7 ; WorkshopKeyword (Fallout 4's id; carried into the core, to be read: the log says none when it is not there)
+int WorkshopKwId = 0x054BA7 ; WorkshopKeyword: a KYWD of Starfield.esm (read from the file by the PC, 11 Nov); the core only points at it
 int PadBaseId = 0x024DC7    ; Starfield.esm OutpostPlayerHouseActivator
 int BeaconId = 0            ;BEACON stager substitutes the vanilla outpost beacon base id (--beacon); 0 = none
 float AheadM = 2.5
@@ -75,7 +75,7 @@ Event OnInit()
     StageList[11] = 40
     StageList[12] = 50
     BenchBase = FindBase()
-    Trace("init version=" + Version + " quest=" + GetFormID() + " installed=" + Game.IsPluginInstalled(ProbePlugin) + " core=" + CoreName() + " benchbase=" + Id(BenchBase) + " workshopkw=" + Id(Game.GetFormFromFile(WorkshopKwId, CoreName())) + " padbase=" + Id(Game.GetFormFromFile(PadBaseId, "Starfield.esm")) + " beaconid=" + BeaconId)
+    Trace("init version=" + Version + " quest=" + GetFormID() + " installed=" + Game.IsPluginInstalled(ProbePlugin) + " core=" + CoreName() + " benchbase=" + Id(BenchBase) + " workshopkw=" + Id(Game.GetFormFromFile(WorkshopKwId, "Starfield.esm")) + " padbase=" + Id(Game.GetFormFromFile(PadBaseId, "Starfield.esm")) + " beaconid=" + BeaconId)
     LastCell = Game.GetPlayer().GetParentCell()
     StartTimer(POLL_S, TIMER_POLL)
 EndEvent
@@ -112,7 +112,7 @@ EndFunction
 ; ---------------------------------------------------------------- readings ("na" = the game has no such call)
 
 string Function HasWorkshopKw(ObjectReference r)
-    Form kw = Game.GetFormFromFile(WorkshopKwId, CoreName())
+    Form kw = Game.GetFormFromFile(WorkshopKwId, "Starfield.esm")
     Keyword k = kw as Keyword
     if k == None || r == None
         return "na"
@@ -122,7 +122,7 @@ EndFunction
 
 string Function WsReading(ObjectReference r)
     string s = "na"
-;OPT ObjectReference.IsWorkshop     s = "" + r.IsWorkshop()
+;OPT ObjectReference.GetWorkshop     s = Id(r.GetWorkshop())
     return s
 EndFunction
 
@@ -249,7 +249,7 @@ Function DoCall(int k, int stage, string what, ObjectReference r)
         r.Activate(p, false)
     elseif k == 3
 ;OPT ObjectReference.SetActorOwner         call = "SetActorOwner"
-;OPT ObjectReference.SetActorOwner         r.SetActorOwner(p.GetActorBase())
+;OPT ObjectReference.SetActorOwner         r.SetActorOwner(p.GetLeveledActorBase())
     elseif k == 4
 ;OPT ObjectReference.StartWorkshop         call = "StartWorkshop"
 ;OPT ObjectReference.StartWorkshop         r.StartWorkshop(true)
