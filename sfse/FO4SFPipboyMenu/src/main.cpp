@@ -49,11 +49,13 @@
 // make_probe_swf.py --page writes: a tab line and seven lines the plugin writes at kShow and every kUpdate, and two
 // buttons, NEXT TAB (the other set of lines) and CLOSE (the menu closes, as on F10). The values are collected on the
 // main thread (SFSE's task, before each kShow and kUpdate) and only written on the menu's thread. Every value is read,
-// not called for, except one call: the player's own GetActorValue. Its health, carry weight, experience and FO4SF_Rads
-// are actor values whose ActorValueInfo forms are found by editor ID in the data handler's list of them (one more id,
-// the data handler, equal to SFSE 0.2.21's own address); the game time is the GameHour and GameDaysPassed globals found
-// the same way; the level is the player's base TESNPC's TESActorBaseData; the place is the parent cell's and its
-// worldspace's names.
+// not called for, except two calls: the player's own GetActorValue, and the engine's lookup of a form by its form id
+// (TESForm::LookupByID, equal to SFSE 0.2.21's GetFormByNumericID). The health, carry weight, experience and FO4SF_Rads
+// are actor values whose ActorValueInfo forms are found by form id (Starfield.esm's 0x001 to 0xFFF; FO4SF_Rads at
+// local id 0x800 of any plugin) and named by their editor ID; the game time is the GameHour (0x38) and GameDaysPassed
+// (0x39) globals; the level is the player's base TESNPC's TESActorBaseData; the place is the parent cell's and its
+// worldspace's names. (The data handler's per-type form lists, read at 5a4e6016, were empty: their raw entries are
+// logged once, step=page_form_arrays, to settle the layout.)
 // Checked before use: each form's type by its RTTI name; each base class's offset (ActorValueOwner, TESActorBaseData,
 // TESFullName) from the RTTI class hierarchy, and that subobject's vtable naming the same complete type there; the
 // string reader on our own menu name first; and which ActorValueOwner slot is GetActorValue (libxse declares a virtual
@@ -103,11 +105,16 @@ namespace
 
 	// stage d (the STAT page)
 	constexpr std::uint32_t kDataHandlerRva = 0x5FD9B28;     // SFSE 0.2.21 sfse/GameData.h: TESDataHandler::GetSingleton
+	constexpr std::uint32_t kLookupByIdRva = 0x5DE3B0;       // SFSE 0.2.21 sfse/GameForms.cpp: TESForm::GetFormByNumericID
+	constexpr std::uint32_t kCoreFormIds = 0x1000;           // Starfield.esm form ids searched for the actor values
+	constexpr std::uint32_t kRadsLocalId = 0x800;            // FO4SF_Rads in FO4SFRadsProbe.esm (dotnet/RadsProbe AvifId)
+	constexpr std::uint32_t kGameHourId = 0x38;              // Starfield.esm GLOB GameHour (docs/ai/test-queue.md)
+	constexpr std::uint32_t kGameDaysPassedId = 0x39;        // Starfield.esm GLOB GameDaysPassed
+	constexpr std::size_t   kFormArrayEntries = 0xE0;        // form-list entries logged (SFSE: 0xDA before unk14E0)
 	constexpr std::size_t   kFormArraysAt = 0x70;            // TESDataHandler::formArrays, libxse and SFSE agree: 0x18
 	constexpr std::size_t   kFormArrayBytes = 0x18;          //   each, a lock, then a BSTArray of TESForm*
 	constexpr std::size_t   kGlobType = 0x0A;                // FormType kGLOB, libxse and SFSE agree
 	constexpr std::size_t   kAvifType = 0x6D;                // FormType kAVIF, libxse and SFSE agree
-	constexpr std::uint32_t kMaxForms = 0x40000;             // a form list longer than this is not read
 	constexpr std::size_t   kFormIdAt = 0x28;                // TESForm::formID, libxse and SFSE agree
 	constexpr std::size_t   kGlobalEditorIdAt = 0x30;        // libxse RE::TESGlobal::formEditorID (a BSFixedString first)
 	constexpr std::size_t   kGlobalValueAt = 0x40;           // libxse RE::TESGlobal::value
@@ -171,6 +178,7 @@ namespace
 		kValueInvoke,
 		kIdCountC,                       // stage c checks the ids above; stage d all of them
 		kDataHandlerSingleton = kIdCountC,
+		kLookupById,
 		kIdCount
 	};
 
@@ -207,6 +215,7 @@ namespace
 		{ "GFx.Value.SetMember", 169749, "libxse, equal to SFSE's" },
 		{ "GFx.Value.Invoke", 169750, "libxse, equal to SFSE's" },
 		{ "TESDataHandler.Singleton", 937572, "libxse, equal to SFSE's" },
+		{ "TESForm.LookupByID", 47401, "libxse, equal to SFSE's" },
 	} };
 
 	// stage c: each RTTI id's type name after its ".?AV" (class) or ".?AU" (struct) prefix, and SFSE 0.2.21's own
@@ -651,7 +660,8 @@ namespace
 
 	// ------------------------------------------------------------------------------------------- stage d: the page
 	// Up to PageCollect, everything runs on the main thread (SFSE's task, before each kShow and kUpdate): the reads,
-	// the one call into the game (GetActorValue) and the text. PageWrite and the two click handlers run on the menu's.
+	// the two calls into the game (LookupByID, GetActorValue) and the text. PageWrite and the click handlers run on the
+	// menu's.
 
 	bool SameText(std::string_view a_left, std::string_view a_right)   // ASCII, either case
 	{
@@ -827,8 +837,8 @@ namespace
 	{
 		bool           scanned = false;
 		bool           strings = false;    // ReadPoolString read our menu name back
-		bool           avifs = false;      // the ActorValueInfo list was read: a name missing from it is not installed
-		bool           globals = false;
+		bool           avifs = false;      // the actor values were looked up: a name not found is not installed
+		bool           globals = false;    // the globals were looked up
 		std::uintptr_t health = 0;         // ActorValueInfo forms
 		std::uintptr_t carryWeight = 0;
 		std::uintptr_t inventoryWeight = 0;
@@ -848,7 +858,8 @@ namespace
 		std::uintptr_t*  form;
 	};
 
-	// the data handler (its id is SFSE's own address, CheckPageIds), a TESDataHandler by its RTTI
+	// the data handler (its id is SFSE's own address, CheckPageIds), a TESDataHandler by its RTTI; only its form-list
+	// memory is logged
 	std::uintptr_t DataHandler()
 	{
 		const auto handler = Singleton(kDataHandlerSingleton);
@@ -862,67 +873,127 @@ namespace
 		return handler;
 	}
 
-	// one of the data handler's form lists (formArrays[a_formType]: the BSTArray after its lock), read through: each
-	// entry's type must be a_type by its RTTI name before its editor ID (a BSFixedString at a_editorIdAt) is read, and
-	// each Want gets the first form whose editor ID is its name. a_weights also logs the names that look like weights
-	template <std::size_t N>
-	bool ScanForms(std::string_view a_list, std::uintptr_t a_handler, std::size_t a_formType, std::string_view a_type,
-		std::size_t a_editorIdAt, std::array<Want, N>& a_want, bool a_weights)
+	// the data handler's form lists as raw memory, once: at 5a4e6016 the size read at +0x70 + type x 0x18 + 0x08 was 0
+	// for AVIF and GLOB, so the next run logs the three qwords of every entry that is not all zero (the first 48) and
+	// of those two types, to settle the layout. Reads only, guarded
+	void LogFormArrays(std::uintptr_t a_handler)
 	{
-		ArrayHead list{};
-		if (!Peek(a_handler + kFormArraysAt + a_formType * kFormArrayBytes + 0x08, list) || !list.data || !list.size ||
-			list.size > kMaxForms) {
-			return Refuse("page_forms", std::format("list={} reason=array size={}", a_list, list.size));
-		}
-		std::uint32_t typed = 0;
-		std::uint32_t named = 0;
-		std::string   other;
-		std::string   sample;
-		std::string   weights;
-		for (std::uint32_t i = 0; i < list.size; ++i) {
-			std::uintptr_t form = 0;
-			ObjectType     type;
-			if (!Peek(list.data + 8ull * i, form) || !form) {
-				continue;
+		std::array<std::uint64_t, 3> avif{};
+		std::array<std::uint64_t, 3> glob{};
+		std::string                  nonzero;
+		std::size_t                  count = 0;
+		for (std::size_t i = 0; i < kFormArrayEntries; ++i) {
+			std::array<std::uint64_t, 3> q{};
+			if (!Peek(a_handler + kFormArraysAt + i * kFormArrayBytes, q)) {
+				nonzero += std::format(" {:#x}:fault", i);
+				break;
 			}
-			if (!IsType(form, a_type, type)) {
-				if (other.empty()) {
-					other = type.name.empty() ? "unreadable" : type.name;
-				}
-				continue;
+			if (i == kAvifType) {
+				avif = q;
 			}
-			++typed;
-			std::uintptr_t entry = 0;
-			std::string    id;
-			if (!Peek(form + a_editorIdAt, entry) || !ReadPoolString(entry, id) || id.empty()) {
-				continue;
+			if (i == kGlobType) {
+				glob = q;
 			}
-			if (named++ < 4) {
-				sample += std::format("{}{}", sample.empty() ? "" : ",", id);
-			}
-			for (auto& want : a_want) {
-				if (!*want.form && SameText(id, want.editorId)) {
-					*want.form = form;
-				}
-			}
-			if (a_weights && weights.size() < 240 && (HasText(id, "weight") || HasText(id, "encumb") || HasText(id, "mass"))) {
-				weights += std::format("{}{}", weights.empty() ? "" : ",", id);
+			if ((q[0] || q[1] || q[2]) && count++ < 48) {
+				nonzero += std::format(" {:#x}:{:x}/{:x}/{:x}", i, q[0], q[1], q[2]);
 			}
 		}
+		REX::INFO("step=page_form_arrays avif={:x}/{:x}/{:x} glob={:x}/{:x}/{:x} nonzero_count={}{}", avif[0], avif[1],
+			avif[2], glob[0], glob[1], glob[2], count, nonzero);
+	}
+
+	using LookupById_t = void* (*)(std::uint32_t);
+
+	// a form by its form id, through the engine's own lookup (libxse TESForm::LookupByID and SFSE 0.2.21
+	// GetFormByNumericID: the same address, CheckPageIds, and the same TESForm* (u32) declaration); main thread only
+	std::uintptr_t FormById(std::uint32_t a_formId)
+	{
+		return reinterpret_cast<std::uintptr_t>(reinterpret_cast<LookupById_t>(Address(kLookupById))(a_formId));
+	}
+
+	// the editor ID of a form of type a_type by its RTTI (a BSFixedString at a_editorIdAt), or "" if the form is not
+	// that type or its name does not read
+	std::string EditorIdOf(std::uintptr_t a_form, std::string_view a_type, std::size_t a_editorIdAt)
+	{
+		ObjectType     type;
+		std::uintptr_t entry = 0;
+		std::string    id;
+		if (!IsType(a_form, a_type, type) || !Peek(a_form + a_editorIdAt, entry) || !ReadPoolString(entry, id)) {
+			return {};
+		}
+		return id;
+	}
+
+	// a Want gets the form if its editor ID is the Want's name and it has none yet
+	template <std::size_t N>
+	void Match(std::array<Want, N>& a_want, std::uintptr_t a_form, std::string_view a_editorId)
+	{
+		for (auto& want : a_want) {
+			if (!*want.form && SameText(a_editorId, want.editorId)) {
+				*want.form = a_form;
+			}
+		}
+	}
+
+	template <std::size_t N>
+	std::pair<std::string, std::string> FoundMissing(const std::array<Want, N>& a_want)
+	{
 		std::string found;
 		std::string missing;
 		for (const auto& want : a_want) {
 			auto& into = *want.form ? found : missing;
 			into += std::format("{}{}", into.empty() ? "" : ",", want.editorId);
 		}
-		REX::INFO("step=page_forms list={} count={} typed={} named={} found={} missing={} other_type={} sample={}{}", a_list,
-			list.size, typed, named, found.empty() ? "none" : found, missing.empty() ? "none" : missing,
-			other.empty() ? "none" : other, sample.empty() ? "none" : sample,
-			a_weights ? std::format(" weight_names={}", weights.empty() ? "none" : weights) : "");
-		if (!typed || !named) {
-			return Refuse("page_forms", std::format("list={} reason={}", a_list, typed ? "no_editor_ids" : "no_entry_of_its_type"));
+		return { found.empty() ? "none" : found, missing.empty() ? "none" : missing };
+	}
+
+	// the page's forms by form id, each typed by RTTI and named by its editor ID before it is used: the globals
+	// GameHour 0x38 and GameDaysPassed 0x39; the actor values among Starfield.esm's ids 0x001 to 0xFFF; FO4SF_Rads at
+	// local id 0x800 of each full plugin (01 to FD) and each light plugin (FE000 to FEFFF)
+	void FindForms()
+	{
+		std::array<Want, 2> globals{ { { "GameHour", &g_forms.gameHour }, { "GameDaysPassed", &g_forms.gameDaysPassed } } };
+		for (const auto id : { kGameHourId, kGameDaysPassedId }) {
+			const auto form = FormById(id);
+			Match(globals, form, EditorIdOf(form, "TESGlobal@@", kGlobalEditorIdAt));
 		}
-		return true;
+		g_forms.globals = true;
+		std::array<Want, 4> values{ { { "Health", &g_forms.health }, { "CarryWeight", &g_forms.carryWeight },
+			{ "InventoryWeight", &g_forms.inventoryWeight }, { "Experience", &g_forms.experience } } };
+		std::uint32_t typed = 0;
+		std::string   sample;
+		std::string   weights;
+		for (std::uint32_t id = 1; id < kCoreFormIds; ++id) {
+			const auto form = FormById(id);
+			const auto name = form ? EditorIdOf(form, "ActorValueInfo@@", kAvifEditorIdAt) : std::string();
+			if (name.empty()) {
+				continue;
+			}
+			if (typed++ < 4) {
+				sample += std::format("{}{:x}={}", sample.empty() ? "" : ",", id, name);
+			}
+			Match(values, form, name);
+			if (weights.size() < 240 && (HasText(name, "weight") || HasText(name, "encumb") || HasText(name, "mass"))) {
+				weights += std::format("{}{}", weights.empty() ? "" : ",", name);
+			}
+		}
+		std::array<Want, 1> rads{ { { "FO4SF_Rads", &g_forms.rads } } };
+		std::uint32_t       radsId = 0;
+		for (std::uint32_t i = 0; i < 0xFD + 0x1000 && !g_forms.rads; ++i) {
+			const auto id = i < 0xFD ? ((i + 1) << 24) | kRadsLocalId : 0xFE000000u | ((i - 0xFD) << 12) | kRadsLocalId;
+			const auto form = FormById(id);
+			if (form) {
+				Match(rads, form, EditorIdOf(form, "ActorValueInfo@@", kAvifEditorIdAt));
+				radsId = g_forms.rads ? id : 0;
+			}
+		}
+		g_forms.avifs = typed > 0;
+		const auto [globalsFound, globalsMissing] = FoundMissing(globals);
+		const auto [valuesFound, valuesMissing] = FoundMissing(values);
+		REX::INFO("step=page_forms lookup=by_form_id globals_found={} globals_missing={} avif_typed={} found={} "
+			"missing={} rads={} sample={} weight_names={}", globalsFound, globalsMissing, typed, valuesFound, valuesMissing,
+			g_forms.rads ? std::format("{:08X}", radsId) : "not_installed", sample.empty() ? "none" : sample,
+			weights.empty() ? "none" : weights);
 	}
 
 	// the player's ActorValueOwner and its GetActorValue slot: the base's offset from PlayerCharacter's RTTI
@@ -961,7 +1032,7 @@ namespace
 		return true;
 	}
 
-	// once a player exists: the string reader, the actor-value slot and the two form lists, each logged once
+	// once a player exists: the string reader, the actor-value slot, the form-list layout and the forms, each logged once
 	void PageScan()
 	{
 		if (g_forms.scanned || !Singleton(kPlayerSingleton)) {
@@ -970,16 +1041,12 @@ namespace
 		g_forms.scanned = true;
 		g_forms.strings = CheckStrings();
 		CheckActorValues();
-		const auto handler = DataHandler();
-		if (!g_forms.strings || !handler) {
-			return;
+		if (const auto handler = DataHandler()) {
+			LogFormArrays(handler);
 		}
-		std::array<Want, 5> values{ { { "Health", &g_forms.health }, { "CarryWeight", &g_forms.carryWeight },
-			{ "InventoryWeight", &g_forms.inventoryWeight }, { "Experience", &g_forms.experience },
-			{ "FO4SF_Rads", &g_forms.rads } } };
-		g_forms.avifs = ScanForms("AVIF", handler, kAvifType, "ActorValueInfo@@", kAvifEditorIdAt, values, true);
-		std::array<Want, 2> globals{ { { "GameHour", &g_forms.gameHour }, { "GameDaysPassed", &g_forms.gameDaysPassed } } };
-		g_forms.globals = ScanForms("GLOB", handler, kGlobType, "TESGlobal@@", kGlobalEditorIdAt, globals, false);
+		if (g_forms.strings) {
+			FindForms();
+		}
 	}
 
 	using GetActorValue_t = float (*)(void*, const void*);
@@ -1545,14 +1612,15 @@ namespace
 		return true;
 	}
 
-	// stage d: the data handler's id is SFSE 0.2.21's own address for it
+	// stage d: the data handler's id and the form lookup's id are SFSE 0.2.21's own addresses for them
 	bool CheckPageIds()
 	{
-		if (g_rva[kDataHandlerSingleton] != kDataHandlerRva) {
-			return Refuse("page_ids", std::format("name={} rva={} sfse_rva={}", kIds[kDataHandlerSingleton].name,
-				Hex(g_rva[kDataHandlerSingleton]), Hex(kDataHandlerRva)));
+		for (const auto& [id, rva] : { std::pair{ kDataHandlerSingleton, kDataHandlerRva }, std::pair{ kLookupById, kLookupByIdRva } }) {
+			if (g_rva[id] != rva) {
+				return Refuse("page_ids", std::format("name={} rva={} sfse_rva={}", kIds[id].name, Hex(g_rva[id]), Hex(rva)));
+			}
 		}
-		REX::INFO("step=page_ids data_handler=sfse_equal");
+		REX::INFO("step=page_ids data_handler=sfse_equal lookup_by_id=sfse_equal");
 		return true;
 	}
 
