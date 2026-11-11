@@ -68,6 +68,48 @@ class SlidingRoutingTests(unittest.TestCase):
         multi.assert_not_called()
 
 
+class CollisionRulesTests(unittest.TestCase):
+    """VltGearDoor01 (PC read 2026-11-11): rod-only bones must not get a fitted box (an invisible bar at head height) and
+    the deck bones need a thin floor box, not a box up to the rails."""
+
+    def build(self, rules):
+        f = door_nif(sliding_panels())
+        count = len([s for s in nif.fo4_trishapes(f) if s.positions and s.triangles])
+        boxes = []
+        real = convert_static.sfcollision.box_blob
+        with patch.object(convert_static.sfcollision, "box_blob",
+                          side_effect=lambda t, c, h: boxes.append((c, h)) or real(t, c, h)):
+            _, door = convert_static.convert_multipart_door(
+                nif.serialize(f), "fo4port/ped", ["x.mat"] * count, fake_clip_files, collision_template=fake_template(),
+                leaf_physics_donor=donor(), collision_rules=rules)
+        return door, boxes
+
+    def test_skip_and_floor_rules_by_bone_name(self):
+        door, boxes = self.build(None)
+        self.assertEqual(door["moving_bodies"], 2)
+        fitted = max(h[2] for _, h in boxes)
+        door, boxes = self.build({"skip": ["^PanelA$"]})
+        self.assertEqual(door["moving_bodies"], 1)
+        self.assertEqual(len(boxes), 1)
+        door, boxes = self.build({"floor": ["^PanelA$", "^PanelB$"]})
+        self.assertEqual(door["moving_bodies"], 2)
+        self.assertTrue(all(abs(h[2] - convert_static.FLOOR_THICKNESS / 2) < 1e-6 or h[2] == convert_static.sfcollision.MIN_LEAF_HALF
+                            for _, h in boxes), boxes)
+        self.assertLess(max(h[2] for _, h in boxes), fitted)
+
+    def test_the_vault_walkway_rules_pick_the_deck_and_the_rods(self):
+        from fo4sf import pipeline
+        rules = pipeline.OWN_RIG_COLLISION["vltgeardoor01.nif"]
+        floor = lambda n: convert_static._collision_rule(rules, n, "floor")   # noqa: E731
+        skip = lambda n: convert_static._collision_rule(rules, n, "skip")     # noqa: E731
+        for n in ("b_WalkWay01Base", "b_WalkWay03Base", "b_Ramp"):
+            self.assertTrue(floor(n) and not skip(n), n)
+        for n in ("b_WalkWay01Front01", "b_WalkWay03Rear03", "b_WalkWay01Rear01"):
+            self.assertTrue(skip(n) and not floor(n), n)
+        for n in ("b_WalkWay01", "b_Walkway02", "GearDoor"):
+            self.assertFalse(floor(n) or skip(n), n)
+
+
 class SkinnedPanelTests(unittest.TestCase):
     """RedRPedDoor.nif's two shapes are skinned to its animated bones (PC check 2026-10-18); a shape whose vertices all
     follow one rig bone rides that bone instead of failing the door."""

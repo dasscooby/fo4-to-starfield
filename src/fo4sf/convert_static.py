@@ -8,6 +8,7 @@ convention, Z-up in both. Collision, materials and skinning are not converted ye
 """
 import hashlib
 import math
+import re
 import struct
 from dataclasses import replace
 from typing import Dict, Tuple
@@ -480,6 +481,13 @@ RIGID_SKIN_TOLERANCE = 1e-3   # weight a rigid vertex may put on other bones: ha
 # (Codex on #354: 0.995 / 0.005 across two bones was accepted and drifted 5 cm from real skinning at 10 m of travel)
 
 
+FLOOR_THICKNESS = 0.1     # metres: a walkable deck box is this thick, from the lowest point of the bone's pieces up
+
+
+def _collision_rule(rules, name, kinds):
+    return bool(rules) and any(re.search(p, name, re.I) for p in rules.get(kinds, ()))
+
+
 CROSS_BONE_SHARE = 0.25   # most triangles (share of the shape) that may join two bones and still be cut (VltGearDoor01 walkway: 13%)
 
 
@@ -562,7 +570,8 @@ def rigid_skinned_parts(src, shape, bones, cross_bone_share: float = 0.0):
 def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, clip_files, unit_scale: float = UNIT_SCALE,
                            collision_template: bytes = None, leaf_physics_donor: bytes = None,
                            rest_pose_check: bool = False, aliases: dict = None,
-                           drop_skinned: bool = False, cross_bone_share: float = 0.0) -> Tuple[Dict[str, bytes], dict]:
+                           drop_skinned: bool = False, cross_bone_share: float = 0.0,
+                           collision_rules: dict = None) -> Tuple[Dict[str, bytes], dict]:
     """FO4 door whose "Open" sequence moves geometry under more than one node (frozen_door_parts: double doors,
     shutters, sliding panel sets) -> Starfield door with its OWN rig and clips, as vanilla double doors have
     (IndIntRmSmWallMid_DoorA01: one rig bone and one clip track per leaf, one keyframed body per leaf).
@@ -581,7 +590,10 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
     aliases: door_rig.plan's sequence aliases (an animated activator converted as a door, pipeline.OWN_RIG_ALIASES).
     drop_skinned: leave skinned shapes out instead of refusing the door (a rig cannot carry them); the door entry lists
     them under "dropped_skinned_shapes".
-    cross_bone_share: rigid_skinned_parts' allowance for triangles across two bones (0 = refuse them)."""
+    cross_bone_share: rigid_skinned_parts' allowance for triangles across two bones (0 = refuse them).
+    collision_rules: {"skip": [bone-name regex], "floor": [bone-name regex]}: a moving bone matching "skip" gets no body
+    (hanger rods would hang as an invisible bar at head height), one matching "floor" gets a thin FLOOR_THICKNESS box over
+    its pieces' footprint at their lowest point (a deck to stand on, not a fitted box up to the rails). Others are fitted."""
     from . import door_model, door_rig, native_door
     if collision_template is None or leaf_physics_donor is None:
         raise ValueError("multi-part door needs the box template and a keyframed donor body")
@@ -662,8 +674,12 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
             bone_pts.setdefault(a["bone"], []).extend(pts)
     collision = {}
     for i, pts in sorted(bone_pts.items()):
+        if _collision_rule(collision_rules, bones[i]["name"], "skip"):
+            continue
         lo = [min(p[k] for p in pts) for k in range(3)]
         hi = [max(p[k] for p in pts) for k in range(3)]
+        if _collision_rule(collision_rules, bones[i]["name"], "floor"):
+            hi[2] = lo[2] + FLOOR_THICKNESS
         blob = sfcollision.box_blob(collision_template, tuple((lo[k] + hi[k]) / 2 for k in range(3)),
                                     tuple(max(sfcollision.MIN_LEAF_HALF, (hi[k] - lo[k]) / 2) for k in range(3)))
         collision[bones[i]["node"]] = sfcollision.keyframed(blob, leaf_physics_donor)

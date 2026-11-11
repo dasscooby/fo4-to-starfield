@@ -160,6 +160,7 @@ class CogDoorRoutingTests(unittest.TestCase):
         self.assertEqual(multi.call_args.kwargs["aliases"], ALIASES)
         self.assertTrue(multi.call_args.kwargs["drop_skinned"])
         self.assertEqual(multi.call_args.kwargs["cross_bone_share"], convert_static.CROSS_BONE_SHARE)
+        self.assertIn("floor", multi.call_args.kwargs["collision_rules"])
         self.assertTrue(multi.call_args.kwargs["rest_pose_check"])
         self.assertEqual(result["door"]["rig"], "native")
 
