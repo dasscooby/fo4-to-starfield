@@ -283,7 +283,7 @@ def _groups(rep, plugin, n_masters, by_offset):
                             g in (GROUP_EXTERIOR_BLOCK, GROUP_EXTERIOR_SUB_BLOCK) for g in gtypes):
                         rep.warn(f"CELL {rec.formid:08X} is an override of a master's exterior cell: in game, FAL-273's plugin with only "
                                  "this override (no reference) crashed 28 s after arrival and moved the arrival to the world's origin "
-                                 "cell; the mission's layout overrides the world's persistent cell only (one world seen: not proven general)")
+                                 "cell, and the load died at 28 s (a no-kit trip to that cell survived 105 s: the override breaks the world load); the mission's layout overrides the world's persistent cell only (one world seen: not proven general)")
                     in_p, in_t = GROUP_PERSISTENT in gtypes, GROUP_TEMPORARY in gtypes
                     if in_p and not rec.flags & esm.PERSISTENT:
                         rep.bad(f"{rec.sig.decode()} {rec.formid:08X} sits in a persistent group without flag 0x400")
