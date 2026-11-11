@@ -208,6 +208,8 @@ namespace
 	constexpr std::size_t   kKitMaxFiles = 4096;             // a file list's entries, at most
 	constexpr std::size_t   kQuestFlagsAt = 0x10C;           // libxse RE::TESQuest QUEST_DATA flags, u16 (bits: the PC's log)
 	constexpr std::size_t   kQuestBytesAt = 0x100;           // the quest's bytes logged once (flags and stage among them)
+	constexpr std::size_t   kQuestDumpAt = 0x38;             // F11 at stage e (FAL-446): libxse RE::TESQuest's pad038 ...
+	constexpr std::size_t   kQuestDumpEnd = 0x338;           // ... to the end of its startEventData (+0x330), 64 to a line
 	constexpr std::string_view kKitChars = " !#%&'()*+,-./0123456789:;<=>?ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_";   // KIT_FONT
 	constexpr auto          kKitTitle = "fo4sfTitle";        // NAMES
 	constexpr auto          kKitHeader = "fo4sfHeaderInfo";
@@ -1687,6 +1689,7 @@ namespace
 	bool                                         g_kitCollected = false;   // under g_pageLock
 	std::vector<bool>                            g_kitPageLogged;   // main thread only
 	std::unordered_map<std::uint32_t, std::uintptr_t> g_kitActorValues;   // main thread only: av:<id>'s form, once
+	std::uintptr_t                               g_kitQuest = 0;    // main thread only: the mission KitQuestRows last accepted
 	std::unordered_map<std::string, std::string> g_kitTexts;        // menu's thread only: each field as last set and read
 	std::unordered_map<std::string, bool>        g_kitShown;        // menu's thread only: each object's visible, likewise
 	std::atomic<std::uint32_t>                   g_kitWrites{ 0 };
@@ -2267,8 +2270,10 @@ namespace
 				REX::INFO("step=kit_quest mission={}|{:X} found=no {}", g_kit.missionFile, g_kit.missionId, detail);
 			}
 			formId = 0;
+			g_kitQuest = 0;
 			return unread("mission_not_found", std::format("mission={}|{:X}", g_kit.missionFile, g_kit.missionId));
 		}
+		g_kitQuest = quest;
 		std::string    name;   // its TESFullName as the inventory reads one, else its form id
 		std::uintptr_t entry = 0;
 		const auto     at = BaseOffset(type, "TESFullName@@");
@@ -2288,6 +2293,25 @@ namespace
 		std::ranges::transform(file, file.begin(), [](unsigned char a_c) { return static_cast<char>(std::toupper(a_c)); });
 		return { { name, "", { { "FORM", std::format("{:08X}", formId) }, { "FILE", file },
 			{ "FLAGS", flagged ? std::format("{:04X}", flags) : "?" }, { "STAGE", "?" } } } };
+	}
+
+	// FAL-446, main thread, on the snapshot key at stage (e): the mission's bytes from +0x38 to +0x338, 64 to a line
+	// (step=kit_quest_bytes n=<snapshot> form= at=+<offset> bytes=), so two presses with the mission at two stages (the
+	// console's setstage between them) show where the current stage is. The quest is the one the quests page last
+	// accepted, checked again by its RTTI; no call into the game. Until the PC names the offset STAGE shows ?
+	void LogKitQuestBytes()
+	{
+		const auto n = g_snapshots.load();
+		ObjectType type;
+		if (!IsType(g_kitQuest, "TESQuest@@", type)) {
+			REX::INFO("step=kit_quest_bytes n={} reason={}", n, g_kitQuest ? "not_a_quest" : "quests_page_not_read");
+			return;
+		}
+		std::uint32_t formId = 0;
+		Peek(g_kitQuest + kFormIdAt, formId);
+		for (auto at = kQuestDumpAt; at < kQuestDumpEnd; at += 0x40) {
+			REX::INFO("step=kit_quest_bytes n={} form={:08X} at=+{:03X} bytes={}", n, formId, at, KitBytes(g_kitQuest + at, 0x40));
+		}
 	}
 
 	// a_text in lines of at most a_columns, each broken after its last space, '_', '-', '/' or '|' when the rest does
@@ -3334,7 +3358,12 @@ namespace
 			// stage c: the snapshot key (a main-thread snapshot, the control), and the refresh while open
 			const bool snap = g_snapshotKey && (W32_IMPL_GetAsyncKeyState(static_cast<std::int32_t>(g_snapshotKey)) & 0x8000) != 0;
 			if (snap && !snapDown && GameInFront()) {
-				g_task->AddTask([]() { Snapshot("key", true); });
+				g_task->AddTask([]() {
+					Snapshot("key", true);
+					if (g_stage == 5) {   // FAL-446: the mission's bytes, for the stage's offset
+						LogKitQuestBytes();
+					}
+				});
 			}
 			snapDown = snap;
 			if (g_open && ++ticks % 17 == 0) {   // 17 x 30 ms
