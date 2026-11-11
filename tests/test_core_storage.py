@@ -372,6 +372,39 @@ class PersistentCellConflictTests(unittest.TestCase):
             core_storage_install.install(args)
             inst.assert_called_once()
 
+    def test_a_hold_on_the_mission_or_the_bridge_is_tolerated_any_other_hold_still_refuses(self):
+        """Claude, FAL-273: topcell installed neither beside the mission nor with the mission held off (refuse_while_held)."""
+        import core_storage_install as csi
+        from unittest import mock
+        data = os.path.join(self.tmp.name, "Data")
+        os.makedirs(data)
+
+        def hold(*names):
+            return mock.patch.object(csi.exp_install, "held_off", return_value={n.casefold() for n in names})
+        with hold("FO4SFMission.esm", csi.exp_install.BRIDGE_PLUGIN):
+            csi.refuse_while_held_except_conflicts(data, "x")                              # no exit
+        with hold("FO4SFCombinedProbe.esm"):
+            csi.refuse_while_held_except_conflicts(data, "x")
+        with hold("FO4SFMission.esm", "FO4TerrainCore.esm"):
+            with self.assertRaises(SystemExit) as cm:
+                csi.refuse_while_held_except_conflicts(data, "core storage probe not installed")
+            self.assertIn("FO4terraincore.esm".casefold(), str(cm.exception).casefold())
+            self.assertNotIn("fo4sfmission.esm", str(cm.exception).casefold().split("(")[1])   # only the other one is named
+        with mock.patch.object(csi.exp_install, "held_off", side_effect=ValueError("unreadable")):
+            with self.assertRaises(SystemExit):
+                csi.refuse_while_held_except_conflicts(data, "x")
+
+    def test_the_relaxed_check_is_in_force_only_while_this_installers_main_runs(self):
+        import core_storage_install as csi
+        from unittest import mock
+        original = csi.exp_install.refuse_while_held
+        seen = []
+        with mock.patch.object(csi.exp_install, "main", side_effect=lambda argv: seen.append(csi.exp_install.refuse_while_held) or 0):
+            csi.installer(["status"])
+        self.assertIs(seen[0], csi.refuse_while_held_except_conflicts)
+        self.assertIs(csi.exp_install.refuse_while_held, original)                            # restored: other installers are unchanged
+        self.assertIsNot(original, csi.refuse_while_held_except_conflicts)
+
     def test_the_stage_records_its_variant_for_the_installer(self):
         self.assertIn('"variant": a.variant', (ROOT / "scripts" / "core_storage" / "make_core_storage.py").read_text(encoding="utf-8"))
 

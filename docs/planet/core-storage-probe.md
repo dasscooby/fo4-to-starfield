@@ -116,3 +116,12 @@ runs and with nothing installed, when either of them is ticked ("*Name") and the
 listed but unticked plugin does not count; the other variants (and a stage from before the variant key) do not override the
 persistent cell and are not refused. The reverse direction (installing the mission or the combined probe beside an active core
 storage probe) is those installers' check, not done here: untick `FO4SFCoreStorage.esm` first.
+
+**The hold deadlock (PC, 11 Nov 03:07 UTC).** On the owner's PC the mission is installed, so `topcell` is refused beside it, and
+holding the mission off with `plugin_toggle.py` made `exp_install.py` refuse every new install (`refuse_while_held`). Option (a)
+was taken: `core_storage_install.py` runs `exp_install.py` with that check relaxed for the duration of its own call only (the
+module's function is swapped and restored, as `RECORD` already is): a hold on `FO4SFMission.esm`, `FO4SFCombinedProbe.esm` or the
+bridge is accepted, a hold on any other plugin, or an unreadable hold file, still refuses; `exp_install.py` and every other
+installer are unchanged. Sequence for the owner's set: `plugin_toggle.py off --plugins FO4SFMission.esm`, then this install, run
+the session, uninstall (same relaxed check), `plugin_toggle.py on`. Option (b) (a small world of its own) would not test the
+core's persistent cell and was not taken.
