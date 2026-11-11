@@ -16,7 +16,9 @@
 //
 // --variant (FAL-273, the crash of #707: the game died 32 s after the trip with the full plugin, not without it): which part of the
 // override is written, so one game run per variant names the ingredient that kills the game:
-//   full          the world override, the cell override, CS_P in its Persistent group, CS_T in its Temporary group (the default)
+//   topcell       (the default since FAL-273) the world override with an override of the world's PERSISTENT cell holding CS_P, and the
+//                 spawn cell override holding CS_T in its Temporary group: the layout of every Starfield world
+//   full          the layout of run 3, which crashed: CS_P in a Persistent group UNDER THE EXTERIOR CELL, CS_T in its Temporary group
 //   persist-only  the world and cell overrides and CS_P only
 //   temp-only     the world and cell overrides and CS_T only
 //   cell-only     the world and cell overrides, no reference at all
@@ -65,11 +67,11 @@ static class CoreStorage
     static string P(P3Float p) => $"({F(p.X)}, {F(p.Y)}, {F(p.Z)})";
     static bool Finite(P3Float p) => float.IsFinite(p.X) && float.IsFinite(p.Y) && float.IsFinite(p.Z);
 
-    static readonly string[] Variants = { "full", "persist-only", "temp-only", "cell-only", "world-only" };
+    static readonly string[] Variants = { "topcell", "full", "persist-only", "temp-only", "cell-only", "world-only" };
 
     static string Variant(string[] a)
     {
-        var v = Arg(a, "--variant", "full");
+        var v = Arg(a, "--variant", "topcell");
         if (!Variants.Contains(v)) throw new Refusal($"--variant {v} is not one of {string.Join(", ", Variants)}");
         return v;
     }
@@ -162,11 +164,19 @@ static class CoreStorage
             SubCells = new WorldspaceBlock.TranslationMask(defaultOn: false, onOverall: false),
             TopCell = new Cell.TranslationMask(defaultOn: false, onOverall: false),
         });
+        if (variant == "topcell")
+        {
+            // the persistent cell of the core's world, overridden record only, holding CS_P: where Starfield keeps persistent references
+            // (PC scan, FAL-273: 0 of 18,300 exterior cells of Starfield.esm have a persistent group, 431 groups sit here)
+            if (s.World.TopCell == null) throw new Refusal($"{s.World.EditorID} has no persistent cell in {core.ModKey}");
+            w.TopCell = CellOnly(s.World.TopCell);
+        }
         var cell = CellOnly(s.Cell);
         var cp = Probe(modKey, PersistentId, PersistentEdid, At(s.Marker, PersistentDx), true);
         var ct = Probe(modKey, TemporaryId, TemporaryEdid, At(s.Marker, TemporaryDx), false);
         if (variant is "full" or "persist-only") cell.Persistent.Add(cp);
-        if (variant is "full" or "temp-only") cell.Temporary.Add(ct);
+        if (variant is "topcell" or "full" or "temp-only") cell.Temporary.Add(ct);
+        if (variant == "topcell") w.TopCell!.Persistent.Add(cp);
         var blk = new WorldspaceBlock { BlockNumberX = s.Block.BlockNumberX, BlockNumberY = s.Block.BlockNumberY, GroupType = s.Block.GroupType };
         var sub = new WorldspaceSubBlock { BlockNumberX = s.Sub.BlockNumberX, BlockNumberY = s.Sub.BlockNumberY, GroupType = s.Sub.GroupType };
         sub.Items.Add(cell);
@@ -226,7 +236,7 @@ static class CoreStorage
         var s = FindSpawn(core);
         using var mod = Open(a[1]);
         Console.WriteLine($"variant {variant}");
-        bool withCell = variant != "world-only", withP = variant is "full" or "persist-only", withT = variant is "full" or "temp-only";
+        bool withCell = variant != "world-only", withTop = variant == "topcell", withP = variant is "full" or "persist-only", withT = variant is "topcell" or "full" or "temp-only";
         var problems = new List<string>();
         void Need(bool ok, string msg) { if (!ok) problems.Add(msg); }
         var masters = mod.ModHeader.MasterReferences.Select(m => m.Master.FileName.String).ToList();
@@ -234,10 +244,35 @@ static class CoreStorage
         Need(masters.SequenceEqual(new[] { SfKey.FileName.String, CoreKey.FileName.String }), $"masters are not exactly [{SfKey.FileName}, {CoreKey.FileName}]");
         Need(mod.Worldspaces.Count == 1, "not exactly one WRLD");
         var w = mod.Worldspaces.FirstOrDefault();
+        void One(string where, IReadOnlyList<IPlacedGetter> group, string which, uint id, string edid, float dx, bool persistent, bool present)
+        {
+            var refs = group.OfType<IPlacedObjectGetter>().ToList();
+            if (!present) { Need(group.Count == 0, $"the {where}'s {which} group holds something in variant {variant}"); return; }
+            Need(group.Count == 1 && refs.Count == 1, $"the {where}'s {which} group does not hold exactly {edid}");
+            var r = refs.FirstOrDefault();
+            if (r == null) return;
+            Console.WriteLine($"  {r.FormKey} {r.EditorID} base {r.Base.FormKey} flags 0x{r.MajorRecordFlagsRaw:X} in {which} at {P(r.Position)}");
+            Need(r.FormKey.ModKey == mod.ModKey && r.FormKey.ID == id && r.EditorID == edid, $"the {which} reference is not {edid} 0x{id:X}");
+            Need(r.Base.FormKey == new FormKey(SfKey, XMarker), $"{edid}'s base is not XMarker 00003B");
+            Need((r.MajorRecordFlagsRaw & (Persistent | Disabled)) == (persistent ? Persistent : 0), $"{edid} is not {(persistent ? "persistent" : "temporary")} and enabled");
+            Need(Finite(r.Position) && r.Position == At(s.Marker, dx), $"{edid} is at {P(r.Position)}, not {P(At(s.Marker, dx))} (COC marker + ({F(dx)}, 0, 0))");
+        }
         if (w == null || w.FormKey != s.World.FormKey) Need(false, $"the WRLD is not an override of {s.World.FormKey}");
         else
         {
-            Need(w.TopCell == null, "the WRLD override carries a persistent cell");
+            if (!withTop) Need(w.TopCell == null, "the WRLD override carries a persistent cell");
+            else
+            {
+                // the layout of every Starfield world: the persistent reference sits in the world's own persistent cell (an override of the core's)
+                var tc = w.TopCell;
+                Need(tc != null && s.World.TopCell != null && tc.FormKey == s.World.TopCell.FormKey, "the WRLD override's persistent cell is not an override of the core's");
+                if (tc != null)
+                {
+                    Need(tc.Temporary.Count == 0 && tc.NavigationMeshes.Count == 0, "the persistent cell carries temporary references or navigation meshes");
+                    Need(s.World.TopCell != null && tc.MajorRecordFlagsRaw == s.World.TopCell.MajorRecordFlagsRaw, "the persistent cell's flags differ from the core's");
+                    One("persistent cell", tc.Persistent.ToList(), "Persistent", PersistentId, PersistentEdid, PersistentDx, true, true);
+                }
+            }
             var cells = w.SubCells.SelectMany(b => b.Items).SelectMany(x => x.Items).ToList();
             Need(cells.Count == (withCell ? 1 : 0), $"the WRLD override carries {cells.Count} exterior cells (want {(withCell ? "exactly the spawn cell" : "none: world-only")})");
             var c = cells.FirstOrDefault();
@@ -248,21 +283,8 @@ static class CoreStorage
                 Need(c.Grid?.Point == s.Cell.Grid?.Point, $"the cell's grid {c.Grid?.Point} differs from the core's {s.Cell.Grid?.Point}");
                 Need(c.MajorRecordFlagsRaw == s.Cell.MajorRecordFlagsRaw, $"the cell's flags 0x{c.MajorRecordFlagsRaw:X} differ from the core's 0x{s.Cell.MajorRecordFlagsRaw:X}");
                 Need(c.NavigationMeshes.Count == 0, "the cell carries navigation meshes");
-                void One(IReadOnlyList<IPlacedGetter> group, string which, uint id, string edid, float dx, bool persistent, bool present)
-                {
-                    var refs = group.OfType<IPlacedObjectGetter>().ToList();
-                    if (!present) { Need(group.Count == 0, $"the cell's {which} group holds something in variant {variant}"); return; }
-                    Need(group.Count == 1 && refs.Count == 1, $"the cell's {which} group does not hold exactly {edid}");
-                    var r = refs.FirstOrDefault();
-                    if (r == null) return;
-                    Console.WriteLine($"  {r.FormKey} {r.EditorID} base {r.Base.FormKey} flags 0x{r.MajorRecordFlagsRaw:X} in {which} at {P(r.Position)}");
-                    Need(r.FormKey.ModKey == mod.ModKey && r.FormKey.ID == id && r.EditorID == edid, $"the {which} reference is not {edid} 0x{id:X}");
-                    Need(r.Base.FormKey == new FormKey(SfKey, XMarker), $"{edid}'s base is not XMarker 00003B");
-                    Need((r.MajorRecordFlagsRaw & (Persistent | Disabled)) == (persistent ? Persistent : 0), $"{edid} is not {(persistent ? "persistent" : "temporary")} and enabled");
-                    Need(Finite(r.Position) && r.Position == At(s.Marker, dx), $"{edid} is at {P(r.Position)}, not {P(At(s.Marker, dx))} (COC marker + ({F(dx)}, 0, 0))");
-                }
-                One(c.Persistent.ToList(), "Persistent", PersistentId, PersistentEdid, PersistentDx, true, withP);
-                One(c.Temporary.ToList(), "Temporary", TemporaryId, TemporaryEdid, TemporaryDx, false, withT);
+                One("cell", c.Persistent.ToList(), "Persistent", PersistentId, PersistentEdid, PersistentDx, true, withP);
+                One("cell", c.Temporary.ToList(), "Temporary", TemporaryId, TemporaryEdid, TemporaryDx, false, withT);
             }
         }
         var q = mod.Quests.SingleOrDefault();

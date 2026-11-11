@@ -3,7 +3,7 @@
 usage:
   python scripts/core_storage/make_core_storage.py stage --core <installed FO4TerrainCore.esm> --out <NEW folder>
         [--starfield <game dir>] [--sf <Starfield.esm>] [--compiler <PapyrusCompiler.exe>] [--content-resources <zip>]
-        [--variant full|persist-only|temp-only|cell-only|world-only]
+        [--variant topcell|full|persist-only|temp-only|cell-only|world-only]
       1. dotnet/CoreStorage build: the plugin (a persistent and a temporary XMarker in the core's FO4Core_RedRocketSpawn,
          a quest with no properties);
       2. the Papyrus compile of FO4SF_CoreStorageQuest.psc (base sources from the Creation Kit's ContentResources.zip, as
@@ -33,7 +33,7 @@ SPAWN_CELL = "FO4Core_RedRocketSpawn"
 IDS = {"cs_p": 0x800, "cs_t": 0x801, "quest": 0x802}
 IMPORTS = ("Actor", "Cell", "Debug", "Form", "Game", "ObjectReference", "Quest", "ScriptObject", "Utility", "WorldSpace")
 TOOL = os.path.join(REPO, "dotnet", "CoreStorage")
-VARIANTS = ("full", "persist-only", "temp-only", "cell-only", "world-only")     # dotnet/CoreStorage --variant (FAL-273, #707)
+VARIANTS = ("topcell", "full", "persist-only", "temp-only", "cell-only", "world-only")     # dotnet/CoreStorage --variant (FAL-273, #707)
 
 
 def sha256(path):
@@ -151,7 +151,7 @@ def main(argv=None):
     s.add_argument("--sf", default="", help="Starfield.esm (default <starfield>\\Data\\Starfield.esm)")
     s.add_argument("--compiler", default="", help="default <starfield>\\Tools\\Papyrus Compiler\\PapyrusCompiler.exe")
     s.add_argument("--content-resources", default="", help="default <starfield>\\Tools\\ContentResources.zip")
-    s.add_argument("--variant", default="full", choices=VARIANTS,
+    s.add_argument("--variant", default="topcell", choices=VARIANTS,
                    help="which part of the override is written (the crash of #707: one game run per variant)")
     a = ap.parse_args(argv)
     stage(a)

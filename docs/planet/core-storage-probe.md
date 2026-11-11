@@ -74,7 +74,8 @@ twin has and the copy lacks); (3) the world override's copied fields.
    | `world-only` | the world override alone | the world override |
    | `temp-only` | cell + CS_T | CS_T, or the cell with a Temporary group |
    | `persist-only` | cell + CS_P | the Persistent group of an exterior cell |
-   | `full` | everything (run 3) | crashed |
+   | `topcell` | world override + persistent cell with CS_P + spawn cell with CS_T (default) | the corrected layout |
+   | `full` | the run 3 layout (CS_P under the exterior cell) | crashed |
 
    Order: `cell-only` first. No crash: the references are the cause, run `persist-only` (and `temp-only`). Crash: run
    `world-only`. Three runs at most name the part. Each run is the card of the probe: stage, install, `coc
@@ -83,3 +84,25 @@ twin has and the copy lacks); (3) the world override's copied fields.
 
 Not run here: the real core and the game (twin report, ladder). The variants were built and checked against the synthetic
 core; the `full` variant is byte-identical to the plugin of run 3's build on that core.
+
+### Run 3 diagnosis and the corrected layout (PC reading, 11 Nov 00:42 UTC)
+
+**Verified by the PC** (offline, on the real files): the twin dump of run 3's plugin beside the installed core shows the WRLD
+and CELL records **identical** to the core's (header and every subrecord); the only difference is the group layout: the
+core's spawn cell has temporary children (NAVM x13, REFR x983), the override adds a **persistent children group under the
+exterior cell**. A scan of group headers: Starfield.esm has 18,300 exterior cells, none with a persistent group (all 431
+persistent groups sit under the worlds' own persistent cells); FO4TerrainCore.esm 0 of 4,096; FO4SFCoreStorage.esm is the one
+file with a type 8 group under an exterior cell. The crash (0xC0000005, `SF+0x41efd6`, a read at `[rdi+0x1F0]` with rdi = 0,
+the function's first argument) is a null argument; **that a reference handled without its owning cell is that null is the
+PC's inference, not proven.**
+
+**Change (this head).** The default build, `--variant topcell`, writes the layout every Starfield world has: CS_P (flag
+0x400) in an **override of the core world's persistent cell** (the record only, no other children; nobody else overrides it
+in this test, the rule that two plugins never override it together is not at risk), CS_T in the spawn cell's temporary
+group. `--variant full` keeps the layout of run 3 (crash expected) for the control. The load check (plugin_verify, PR on
+#712's branch) now refuses a type 8 group under an override of a master's exterior cell and only warns for a plugin's own new
+cell (the planet probe has that layout and ran, but its cell never loaded).
+
+**The runs.** 1) `topcell` (default): expected to survive; the reader's verdict then answers the storage question (CS_P with
+the player). 2) If it crashes at the same address, `cell-only` / `world-only` as in the ladder above. 3) `persist-only` should
+reproduce the crash (the PC's prediction); `temp-only` should survive.
