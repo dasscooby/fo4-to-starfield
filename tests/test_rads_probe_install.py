@@ -53,6 +53,10 @@ def stage(d):
     return d
 
 
+PIPBOY_RECORD = "FO4SFPipboyProbe.install.json"                       # scripts/ui/pipboy_probe_install.py RECORD (branch fal301)
+PIPBOY_RECORD_BODY = b'{"complete": true, "plugins": ["FO4SFPipboyProbe.esm"], "files": {"FO4SFPipboyProbe.esm": "x"}}'
+
+
 class RadsProbeInstallTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -63,6 +67,7 @@ class RadsProbeInstallTests(unittest.TestCase):
         write(os.path.join(self.data, "Starfield.esm"), STARFIELD)
         write(os.path.join(self.data, exp_install.RECORD), EXP_RECORD)
         write(os.path.join(self.data, planet_probe_install.RECORD), PLANET_RECORD)
+        write(os.path.join(self.data, PIPBOY_RECORD), PIPBOY_RECORD_BODY)        # the Pip-Boy page kit installed beside (FAL-273)
         self.staged = stage(os.path.join(root, "rads_probe"))
         local = os.path.join(root, "local")
         self.plugins = os.path.join(local, "Starfield", "Plugins.txt")
@@ -97,7 +102,7 @@ class RadsProbeInstallTests(unittest.TestCase):
             return f.read()
 
     def test_the_record_is_its_own(self):
-        self.assertNotIn(pai.RECORD, (exp_install.RECORD, planet_probe_install.RECORD))
+        self.assertNotIn(pai.RECORD, (exp_install.RECORD, planet_probe_install.RECORD, PIPBOY_RECORD))
         self.assertEqual(pai.RECORD, "FO4SFRadsProbe.install.json")
 
     def test_install_rides_along_and_uninstall_restores(self):
@@ -111,6 +116,7 @@ class RadsProbeInstallTests(unittest.TestCase):
         self.assertTrue(json.loads(self.read(pai.RECORD))["complete"])
         self.assertEqual(self.read(exp_install.RECORD), EXP_RECORD)               # the core's record, untouched
         self.assertEqual(self.read(planet_probe_install.RECORD), PLANET_RECORD)   # the planet probe's, untouched
+        self.assertEqual(self.read(PIPBOY_RECORD), PIPBOY_RECORD_BODY)           # the Pip-Boy page kit's, untouched
 
         code, out = self.run_main("status")
         self.assertEqual(code, 0)
@@ -126,6 +132,7 @@ class RadsProbeInstallTests(unittest.TestCase):
         self.assertEqual(self.lines(), ["# header", "*FO4Port.esm", "*FO4TerrainCore.esm"])
         self.assertEqual(self.read(exp_install.RECORD), EXP_RECORD)
         self.assertEqual(self.read(planet_probe_install.RECORD), PLANET_RECORD)
+        self.assertEqual(self.read(PIPBOY_RECORD), PIPBOY_RECORD_BODY)           # the Pip-Boy page kit's, untouched
 
     def test_a_changed_stage_is_refused(self):
         with open(os.path.join(self.staged, PLUGIN), "ab") as f:
@@ -163,6 +170,33 @@ class RadsProbeInstallTests(unittest.TestCase):
         code, _ = self.run_main("install", "--dir", self.staged)
         self.assertIn("refusing to overwrite", str(code))
         self.assertEqual(self.read(PLUGIN), b"someone else's")
+
+    def test_prepacked_is_forwarded_unchanged_and_only_when_given(self):
+        """FAL-274: the launcher passes an existing archive; the wrapper hands it to exp_install.py and never builds."""
+        from unittest import mock
+        with mock.patch.object(pai, "installer", return_value=0) as inst, \
+                mock.patch.object(pai, "prepacked_supported", return_value=True):
+            self.run_main("install", "--dir", self.staged)
+            plain = inst.call_args[0][0]
+            self.run_main("install", "--dir", self.staged, "--prepacked", "C:/cache/kit.ba2")
+            packed = inst.call_args[0][0]
+        self.assertNotIn("--prepacked", plain)
+        self.assertEqual(packed[-2:], ["--prepacked", "C:/cache/kit.ba2"])
+        self.assertEqual(packed[:-2], plain)                                      # nothing else changes
+        self.assertIn("--pack", packed)
+
+    def test_prepacked_is_refused_before_anything_runs_when_exp_install_cannot_honor_it(self):
+        """FAL-286: an exp_install.py without --prepacked would reject the flag (exit 2) or build its own archive."""
+        from unittest import mock
+        with mock.patch.object(pai, "installer", return_value=0) as inst, \
+                mock.patch.object(pai, "prepacked_supported", return_value=False):
+            code, _ = self.run_main("install", "--dir", self.staged, "--prepacked", "C:/cache/kit.ba2")
+        self.assertIn("--prepacked is not supported", str(code))
+        inst.assert_not_called()
+        self.assertFalse(os.path.exists(os.path.join(self.data, PLUGIN)))
+
+    def test_the_support_check_reads_the_real_exp_install(self):
+        self.assertEqual(pai.prepacked_supported(), "--prepacked" in Path(pai.exp_install.__file__).read_text(encoding="utf-8"))
 
     def test_the_stage_needs_its_dir(self):
         code, _ = self.run_main("install")
