@@ -19,7 +19,8 @@ fill them); adding or changing a page is an edit of that file and a re-stage, no
     Hint=<text>               the key hints on this page instead of [Kit]'s
 
 Values (VALUE_PROVIDERS): health, level, xp, carry_max, rads, cell, world, time, days, position, and av:<hex>, any
-actor value by its form id (Starfield.esm's are 00 + the id: av:2C2 is Strength). Lists (LIST_PROVIDERS): kit_test.
+actor value by its form id (Starfield.esm's are 00 + the id: av:2C2 is Strength). Lists (LIST_PROVIDERS): kit_test,
+inventory (the player's items, FAL-426).
 Every label is upper case in KIT_FONT's characters and fits its field; the plugin refuses the whole file otherwise
 (`refuse step=pages line=<n> reason=<r>`), as --check does here.
 
@@ -105,7 +106,7 @@ NAMES = {
 }
 
 VALUE_PROVIDERS = ("health", "level", "xp", "carry_max", "rads", "cell", "world", "time", "days", "position")
-LIST_PROVIDERS = ("kit_test",)
+LIST_PROVIDERS = ("kit_test", "inventory")
 AV_PREFIX = "av:"
 PIPBOY_GREEN = swf.PIPBOY_GREEN
 

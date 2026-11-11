@@ -74,9 +74,11 @@ class KitPagesTests(unittest.TestCase):
                                    ("CHARISMA", "av:2C5"), ("INTELLIGENCE", "av:2C6"), ("AGILITY", "av:2C7"),
                                    ("LUCK", "av:2C8")])
         self.assertEqual(pages[("DATA", "KIT TEST")]["list"], "kit_test")
-        for placeholder in (("INV", "ITEMS"), ("DATA", "QUESTS"), ("MAP", "WORLD"), ("RADIO", "STATIONS")):
+        self.assertEqual(pages[("INV", "ITEMS")]["list"], "inventory")   # FAL-426: the first real list
+        self.assertEqual([value for _, value in pages[("MAP", "WORLD")]["rows"]],   # the map's first content, no picture
+                         ["world", "cell", "position", "time", "days"])
+        for placeholder in (("DATA", "QUESTS"), ("RADIO", "STATIONS")):
             self.assertTrue(pages[placeholder]["notice"], placeholder)   # named, and saying what it waits for
-        self.assertIn("MAP TRACK", " ".join(pages[("MAP", "WORLD")]["notice"]))
         self.assertEqual(self.k["header"], "time")
         self.assertEqual(kit.signature(self.k), "FO4SF KIT 1 16 STAT,INV,DATA,MAP,RADIO")
 
@@ -129,7 +131,7 @@ class KitPagesTests(unittest.TestCase):
             "row label too long": "[Page T/S]\nRow=" + "A" * 34 + "|health\n",
             "row character": "[Page T/S]\nRow=A\"B|health\n",
             "unknown value": "[Page T/S]\nRow=A|inventory\n",
-            "unknown list": "[Page T/S]\nList=inventory\n",
+            "unknown list": "[Page T/S]\nList=quests\n",
             "two lists": "[Page T/S]\nList=kit_test\nList=kit_test\n",
             "two kinds": PAGE + "Notice=X\n",
             "no kind": "[Page T/S]\nFooter=HP|health\n",
@@ -638,7 +640,8 @@ class KitPluginTests(unittest.TestCase):
 
     def test_every_literal_on_the_kit_is_in_its_font(self):
         bodies = "".join(function(self.main, f) for f in ("void KitCollect()", "std::string KitValueRead(",
-                                                          "std::vector<KitRow> KitTestRows("))
+                                                          "std::vector<KitRow> KitTestRows(",
+                                                          "std::vector<KitRow> KitInventoryRows("))
         texts = [t for t in re.findall(r'"([^"]*)"', bodies) if t and t == t.upper()]
         self.assertGreaterEqual(len(texts), 8)
         for text in texts:

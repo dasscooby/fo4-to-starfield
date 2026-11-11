@@ -285,9 +285,11 @@ row value is longer than 8 characters shows that value after its label, in the l
 | --- | --- |
 | STAT / STATUS | rows: health, level, experience, carry weight max, rads, cell, world, time; footer HP, LEVEL, XP |
 | STAT / SPECIAL | rows: Strength to Luck, `av:2C2` to `av:2C8` (Starfield.esm keeps Fallout 4's ids); the same footer |
-| INV / ITEMS, DATA / QUESTS | notices: the inventory list and the quest list (our mission first) come in the next pull request |
+| INV / ITEMS | `List=inventory`: the player's items, name and count, sorted by name (FAL-426) |
+| DATA / QUESTS | notice: the quest list (our mission first) comes next |
 | DATA / KIT TEST | `List=kit_test`: thirty rows to scroll, select and click |
-| MAP / WORLD, RADIO / STATIONS | notices: each waits for its own track (the map track, the radio) |
+| MAP / WORLD | rows: world, cell, position, time, days passed (FAL-426: the map's first content; the drawn map waits for the map track) |
+| RADIO / STATIONS | notice: waits for its own track (the radio) |
 
 **Value providers.** Every value is read on the main thread, with stage (d)'s reads and two calls only. When one
 cannot be read it prints `?`, and its reason is logged once as `step=page_unknown what=<value> reason=<r>`.
@@ -303,8 +305,11 @@ cannot be read it prints `?`, and its reason is logged once as `step=page_unknow
 | `position` | the player's position, whole units | `what=position reason=no_player` |
 | `av:<hex>` | the player's `GetActorValue` with the `ActorValueInfo` form of that form id. The form is looked up once by its id and accepted by its RTTI type, with stage (d)'s `AcceptById`, logged as `step=kit_av av:<id>:form=<0 or 1>:type=<rtti>:...:<used or refused>` | `what=av:<hex> reason=no_such_actor_value` |
 
-Lists: `kit_test` (thirty rows, no read of the game). The inventory and the quests come next, as `inventory` and
-`quests`.
+Lists: `kit_test` (thirty rows, no read of the game) and `inventory` (FAL-426). The quests come next, as `quests`.
+
+| List | Reads (libxse 9d090c4's layouts, each to be confirmed by the PC's log) | When it cannot |
+| --- | --- | --- |
+| `inventory` | the player's `TESObjectREFR::inventoryList` at `+0xA0`, accepted by its RTTI type `BGSInventoryList`; its `data` array at `+0x28` (at most 512 items); each `BGSInventoryItem` (`0x28` bytes): the object at `+0x00` (an RTTI `TESBoundObject`, its `TESFullName`, else its form id), the stacks at `+0x10` (each `0x10` bytes, the count read at `+0x08`: libxse's comment says `+0x10`, which its own size contradicts), the equip flags at `+0x20`. Rows sorted by name; the value rows: FORM, TYPE, STACKS, EQUIPPED. The first read logs `step=kit_inventory list=<addr> type=<rtti> size=<n> capacity=<n> first_item=<40 bytes> first_stack=<16 bytes>` once, which settles the count's offset | one row `INVENTORY NOT READ` and `what=inventory reason=no_player`, `list_type list=<addr> type=<rtti>` or `items size=<n> capacity=<n> data=<addr>`; an item whose object is not a bound object shows `?` |
 
 **How it runs.** The pattern is stage (d)'s:
 
