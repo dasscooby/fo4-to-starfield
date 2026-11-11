@@ -10,14 +10,15 @@ Reader (`src/fo4sf/planet/probe_log.py`): T7 not loaded while T5 is also not loa
 the reader takes the complete init line (every form present), not the empty one (run 2's false "init" PROBLEM).
 
 Plugin `FO4SFCoreStorage.esm` (`dotnet/CoreStorage`, masters `Starfield.esm` + the installed `FO4TerrainCore.esm`):
-an override of the core world holding the override of CELL `FO4Core_RedRocketSpawn` (the world's SubCells are not
-cleared) and, in the default build (`--variant topcell`, FAL-273), an override of the world's persistent cell; `--variant full` is
-run 3's layout (no persistent cell, CS_P under the spawn cell), which crashed the game. With
+an override of the core world and, in the default build (`--variant toponly`, FAL-273, since the PC ladder of 11 Nov), an override
+of the world's persistent cell holding CS_P and **no exterior cell record**. The variants that also override CELL
+`FO4Core_RedRocketSpawn` (`topcell`, `full`, `temp-only`, `cell-only`, `persist-only`) crashed the game on the PC and are controls
+only; see "Run 4". The tables and the PC session below describe the first design and carry the current reading in brackets. With
 
 | Local id | Record | Where | Position |
 |---|---|---|---|
-| `0x800` | REFR `FO4SF_CS_P`, XMarker `00003B`, flag `0x400` | the world's persistent cell, its Persistent group (`topcell`, default); the spawn cell's Persistent group (`full`, run 3, crashed) | COC marker + (4, 0, 0) |
-| `0x801` | REFR `FO4SF_CS_T`, XMarker `00003B` | the spawn cell's Temporary group | COC marker + (8, 0, 0) |
+| `0x800` | REFR `FO4SF_CS_P`, XMarker `00003B`, flag `0x400` | the world's persistent cell, its Persistent group (`toponly`, default, and `topcell`); the spawn cell's Persistent group (`full`, run 3, crashed) | COC marker + (4, 0, 0) |
+| `0x801` | REFR `FO4SF_CS_T`, XMarker `00003B` | the spawn cell's Temporary group (not written in `toponly`: CS_T reads not found by design) | COC marker + (8, 0, 0) |
 | `0x802` | QUST `FO4SF_CoreStorageProbe`, start game enabled, no stages, script `FO4SF_CoreStorageQuest`, no properties | | |
 
 The script finds both references with `Game.GetFormFromFile` (a property would make CS_T persistent) and logs
@@ -28,10 +29,12 @@ builds, compiles the script, runs `CoreStorage check` (CS_P in the world's persi
 FormKey the core's own, masters exact) and writes plan.json. Install: `scripts/core_storage/core_storage_install.py`.
 No plugin bytes enter Git. `tests/test_core_storage.py` runs the tool on a synthetic core.
 
-PC session (Claude): `coc FO4Core_RedRocketSpawn` with roofs on screen.
-* CS_T not found: `cell not loaded` (not a failure).
-* PASS: CS_T found and CS_P with the player (runtime world, core merge offset about -1200, -2700).
-* FAIL: CS_T found and CS_P left behind or not loaded.
+PC session (Claude), default `toponly`: `coc FO4Core_RedRocketSpawn`, 40 s dark, stay 80 s (the roofs on screen are not needed).
+* PASS: the arrival line (`arrive n=2`) names cell ..000DAF at about (-2189, -1553), the game is still running after 80 s, and
+  CS_P reads found=True, with the player. CS_T reads not found by design (nothing writes it): not a failure.
+* FAIL: arrival in cell ..001340, or a crash (0xC0000005 at `SF+0x41efd6`), or CS_P not found / left behind.
+(The first design's verdict, "CS_T found and CS_P with the player = PASS", applies only to `topcell` / `full`, which are controls.)
+The staged README.txt carries the text for its own variant (`run_instructions`).
 
 Reader: `probe_log.core_storage_result(lines)` reads the FO4SFCS log (control first: CS_T not loaded = cell not loaded).
 
@@ -75,7 +78,8 @@ twin has and the copy lacks); (3) the world override's copied fields.
    | `world-only` | the world override alone | the world override |
    | `temp-only` | cell + CS_T | CS_T, or the cell with a Temporary group |
    | `persist-only` | cell + CS_P | the Persistent group of an exterior cell |
-   | `topcell` | world override + persistent cell with CS_P + spawn cell with CS_T (default) | the corrected layout |
+   | `topcell` | world override + persistent cell with CS_P + spawn cell with CS_T (was the default; see Run 4: it carries the cell override, so it crashes) | a control |
+   | `toponly` | world override + persistent cell with CS_P, no exterior cell (default since Run 4) | the layout that survives |
    | `full` | the run 3 layout (CS_P under the exterior cell) | crashed |
 
    Order: `cell-only` first. No crash: the references are the cause, run `persist-only` (and `temp-only`). Crash: run
@@ -97,14 +101,14 @@ file with a type 8 group under an exterior cell. The crash (0xC0000005, `SF+0x41
 the function's first argument) is a null argument; **that a reference handled without its owning cell is that null is the
 PC's inference, not proven.**
 
-**Change (this head).** The default build, `--variant topcell`, writes the layout every Starfield world has: CS_P (flag
+**Change (superseded by Run 4: the default is now `toponly`).** The build `--variant topcell` wrote the layout every Starfield world has: CS_P (flag
 0x400) in an **override of the core world's persistent cell** (the record only, no other children; nobody else overrides it
 in this test, the rule that two plugins never override it together is not at risk), CS_T in the spawn cell's temporary
 group. `--variant full` keeps the layout of run 3 (crash expected) for the control. The load check (plugin_verify, PR on
 #712's branch) now refuses a type 8 group under an override of a master's exterior cell and only warns for a plugin's own new
 cell (the planet probe has that layout and ran, but its cell never loaded).
 
-**The runs.** 1) `topcell` (default): expected to survive; the reader's verdict then answers the storage question (CS_P with
+**The runs (superseded by Run 4).** 1) `topcell` (default at that head): expected to survive; the reader's verdict then answers the storage question (CS_P with
 the player). 2) If it crashes at the same address, `cell-only` / `world-only` as in the ladder above. 3) `persist-only` should
 reproduce the crash (the PC's prediction); `temp-only` should survive.
 
