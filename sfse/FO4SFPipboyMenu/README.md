@@ -213,8 +213,10 @@ How it runs, the channel's way:
   button=close n=<k>`). The key thread then sends an update at once (NEXT TAB), or closes the menu on the main thread
   as F10 does (CLOSE: `step=close n=<k> by=button was_open=1 sent=hide`, then `step=state n=<k> open=0 expected=0
   match=yes`; a close counts as a press in the `n` of these lines).
-- **Flags:** `PageFlagSets` (default `0x19` since FAL-414: `0x9`, the set at which test C's clicks reached our menu, plus bit 4 (`0x10`), which puts StopContextProcessing (78) on the control map's stack so Tab arrives as Cancel; PC sweep at 14176a5e: bit 1 `0x2` pauses the game, bit 8 `0x100` blanks the world, bits 6, 9, 10, 18, 25, 27 showed nothing; the game does not pause at `0x19`, whether it should is the owner's call) cycles per open like
-  `FlagSets`. DATA's `GAME PAUSED` is the pause byte, live: at `e7925e00` no set paused the game.
+- **Flags:** `PageFlagSets` (default `0x19` since FAL-414: `0x9`, the set at which test C's clicks reached our menu, plus bit 4 (`0x10`), which puts StopContextProcessing (78) on the control map's stack so Tab arrives as Cancel; PC sweep at 14176a5e: bit 1 `0x2` pauses the game, bit 8 `0x100` blanks the world, bits 6, 9, 10, 18, 25, 27 showed nothing; the game does not pause at `0x19`) cycles per open like
+  `FlagSets`. **Pause** (FAL-446, the owner's call: a setting with both modes): `Pause=0` (shipped) leaves the sets as
+  they are, the game runs behind the Pip-Boy; `Pause=1` adds bit 1 (`0x2`) to every set, which paused the game in that
+  sweep; `step=load_d` / `load_e` logs `pause=<0 or 1>` with the resulting `flag_sets=`. DATA's `GAME PAUSED` is the pause byte, live: at `e7925e00` no set paused the game.
 
 Where each value comes from, and what is checked before it is used:
 

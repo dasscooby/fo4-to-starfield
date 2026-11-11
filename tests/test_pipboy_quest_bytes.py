@@ -56,6 +56,19 @@ class PluginTests(unittest.TestCase):
         self.assertRegex(self.main, r"\n\tstd::uintptr_t +g_kitQuest = 0; +// main thread only")
         self.assertLess(self.main.index("g_kitQuest = 0;"), self.main.index("std::vector<KitRow> KitQuestRows("))
 
+    def test_pause_is_a_setting(self):
+        """FAL-446: the owner chose both modes; Pause=1 adds bit 1 (0x2, the PC sweep's pausing bit) to every page set."""
+        self.assertIn("kPauseFlag = 0x2;", self.main)
+        load = self.main[self.main.index('ReadFlagSets(ini, L"PageFlagSets", L"0x19");'):]
+        load = load[:load.index("} else {")]
+        self.assertIn('pause = ReadNumber(ini, L"Pause", 0) != 0;', load)
+        self.assertIn("for (std::size_t i = 0; pause && i < g_flagSetCount; ++i) {", load)
+        self.assertIn("g_flagSets[i] |= kPauseFlag;", load)
+        self.assertIn("pause={}", self.main)
+        ini = (PLUGIN / "FO4SFPipboyMenu.ini").read_text(encoding="utf-8")
+        self.assertRegex(ini, r"\nPause=0\n")                                    # ships not pausing
+        self.assertIn("`Pause=1`", self.readme)
+
     def test_the_readme_names_the_dump_and_the_helper(self):
         self.assertIn("step=kit_quest_bytes", self.readme)
         self.assertIn("scripts/ui/pipboy_quest_bytes.py", self.readme)

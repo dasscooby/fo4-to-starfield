@@ -208,7 +208,8 @@ namespace
 	constexpr std::size_t   kKitMaxFiles = 4096;             // a file list's entries, at most
 	constexpr std::size_t   kQuestFlagsAt = 0x10C;           // libxse RE::TESQuest QUEST_DATA flags, u16 (bits: the PC's log)
 	constexpr std::size_t   kQuestBytesAt = 0x100;           // the quest's bytes logged once (flags and stage among them)
-	constexpr std::size_t   kQuestDumpAt = 0x38;             // F11 at stage e (FAL-446): libxse RE::TESQuest's pad038 ...
+	constexpr std::uint32_t kPauseFlag = 0x2;                // Pause=1 at stages d and e (FAL-446): the PC's sweep at 14176a5e
+	constexpr std::size_t   kQuestDumpAt = 0x38;            // F11 at stage e (FAL-446): libxse RE::TESQuest's pad038 ...
 	constexpr std::size_t   kQuestDumpEnd = 0x338;           // ... to the end of its startEventData (+0x330), 64 to a line
 	constexpr std::string_view kKitChars = " !#%&'()*+,-./0123456789:;<=>?ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_";   // KIT_FONT
 	constexpr auto          kKitTitle = "fo4sfTitle";        // NAMES
@@ -3519,10 +3520,15 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	}
 	std::string clickCall;
 	bool        clickCallOk = true;
+	bool        pause = false;
 	if (g_stage >= 3) {
 		g_snapshotKey = ReadNumber(ini, L"SnapshotKey", 0x7A);
 		if (g_stage >= 4) {   // (d) and (e)
 			ReadFlagSets(ini, L"PageFlagSets", L"0x19");   // FAL-414: bit 4 (0x10) puts StopContextProcessing (78) on the control map stack, so Tab arrives as Cancel
+			pause = ReadNumber(ini, L"Pause", 0) != 0;     // FAL-446, the owner's setting: 1 adds bit 1 (0x2), which paused the game in the PC's sweep
+			for (std::size_t i = 0; pause && i < g_flagSetCount; ++i) {
+				g_flagSets[i] |= kPauseFlag;
+			}
 		} else {
 			ReadFlagSets(ini, L"FlagSets", L"0x0,0x8,0x9");
 			clickCall = ReadText(ini, L"ClickCall");
@@ -3532,8 +3538,8 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 		for (std::size_t i = 0; i < g_flagSetCount; ++i) {
 			sets += std::format("{}{}", i ? "," : "", Hex(g_flagSets[i]));
 		}
-		REX::INFO("step=load_{} flag_sets={} snapshot_key={} click_call={}", g_stage == 5 ? "e" : g_stage == 4 ? "d" : "c",
-			sets.empty() ? "none" : sets, Hex(g_snapshotKey), clickCall.empty() ? "none" : clickCall);
+		REX::INFO("step=load_{} flag_sets={} pause={} snapshot_key={} click_call={}", g_stage == 5 ? "e" : g_stage == 4 ? "d" : "c",
+			sets.empty() ? "none" : sets, pause ? 1 : 0, Hex(g_snapshotKey), clickCall.empty() ? "none" : clickCall);
 	}
 	if (runtime != kRuntime) {
 		Refuse("version", std::format("runtime={} expected={}", runtime.string(), kRuntime.string()));
