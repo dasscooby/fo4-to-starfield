@@ -27,7 +27,7 @@ and logs every step. The stage is picked by `Stage` in `FO4SFPipboyMenu.ini`:
 | --- | --- |
 | `src/main.cpp` | the plugin: version guard, checks before use, the menu object, the key thread |
 | `src/pch.h` | precompiled header (libxse's game headers and SFSE layer) |
-| `FO4SFPipboyMenu.ini` | `Stage`, `Key` (default `0x79`, F10), `Flags` (0), `KeepAlive` (1); stage (c): `FlagSets` (`0x0,0x8,0x9`), `SnapshotKey` (`0x7A`, F11), `ClickCall` (empty: off); stages (d) and (e): `PageFlagSets` (`0x9`); stage (e): `KitUp` to `KitNextTab`, and the pages (`[Kit]`, `[Page <TAB>/<SUB>]`) |
+| `FO4SFPipboyMenu.ini` | `Stage`, `Key` (default `0x79`, F10), `Flags` (0), `KeepAlive` (1); stage (c): `FlagSets` (`0x0,0x8,0x9`), `SnapshotKey` (`0x7A`, F11), `ClickCall` (empty: off); stages (d) and (e): `PageFlagSets` (`0x19`); stages (d), (e): `CancelCode1` to `CancelCode4` (`0x1B`, `0x09`: Esc and Tab as Windows virtual-key codes, as the PC's game run logged them); stage (e): `KitUp` to `KitNextTab`, and the pages (`[Kit]`, `[Page <TAB>/<SUB>]`) |
 | `xmake.lua`, `build.ps1` | the PC build: FOCCPing's build path (`docs/spikes/combined-core-probes.md`, B0-2) |
 | `scripts/ui/make_probe_swf.py` | writes the stage (b) movie, with `--channel` the stage (c) one and with `--page` the stage (d) one (pure Python; tests `tests/test_make_probe_swf.py`, `tests/test_pipboy_stat_page.py`) |
 | `scripts/ui/make_pipboy_kit.py` | the page kit (stage (e)): reads and checks the pages of the ini (`--check`) and writes the kit's movie for them (pure Python, on `make_probe_swf.py`; tests `tests/test_pipboy_kit.py`) |
@@ -212,7 +212,7 @@ How it runs, the channel's way:
   button=close n=<k>`). The key thread then sends an update at once (NEXT TAB), or closes the menu on the main thread
   as F10 does (CLOSE: `step=close n=<k> by=button was_open=1 sent=hide`, then `step=state n=<k> open=0 expected=0
   match=yes`; a close counts as a press in the `n` of these lines).
-- **Flags:** `PageFlagSets` (default `0x9`, the set at which test C's clicks reached our menu) cycles per open like
+- **Flags:** `PageFlagSets` (default `0x19` since FAL-414: `0x9`, the set at which test C's clicks reached our menu, plus bit 4 (`0x10`), which puts StopContextProcessing (78) on the control map's stack so Tab arrives as Cancel; PC sweep at 14176a5e: bit 1 `0x2` pauses the game, bit 8 `0x100` blanks the world, bits 6, 9, 10, 18, 25, 27 showed nothing; the game does not pause at `0x19`, whether it should is the owner's call) cycles per open like
   `FlagSets`. DATA's `GAME PAUSED` is the pause byte, live: at `e7925e00` no set paused the game.
 
 Where each value comes from, and what is checked before it is used:
@@ -606,7 +606,28 @@ Take a screenshot while the menu is open after the fifth press, and one after th
    moved=1`, and `name=fo4sfTab3` or `fo4sfTabHit3` `action=tab` for MAP.
 6. **CLOSE:** `step=click button=close`, `step=close ... sent=hide` and `step=state ... match=yes`. F10 then opens the
    page where it was left.
-7. The owner's report of what Tab and Esc did is a finding, not a pass or a fail.
+7. **Tab and Esc (FAL-414, the menu's own cancel handling):** with the page open, each of Tab and Esc logs
+   `step=input id=<hex> user_event="<name>" value=1 held=0 status=0 cancel=1`, then `step=close n=<k> by=cancel
+   was_open=1 sent=hide` and `step=state n=<k> open=0 expected=0 match=yes`; the game's pause menu does not appear.
+   `step=input_vtable replaced=0x01,0x08 ...` follows `step=ready`. F10 and CLOSE still close it (`by=button`). With
+   the page closed, Tab and Esc are the unmodded game's. If the pause menu still comes up, post the `step=input`
+   lines (the ids and user events the game sends; `cancel=0` on a Tab or Esc press means `CancelCode1` to
+   `CancelCode4` in the ini do not match: put the logged `id=` there) and what you saw.
+
+### Tab and Esc close the page (FAL-414)
+
+At stages (d) and (e) the menu copies the ten-slot BSInputEventUser vtable (subobject 0x10 of IMenu, RVA 0x4d7e950 in
+1.16.244, checked by `CheckVtable`) and replaces [01] ShouldHandleEvent and [08] OnButtonEvent (both called with
+`this = menu + 0x10`). While the page is open, a keyboard button whose id is in `CancelCode1..4` or whose user event is
+`Cancel` is ours: [01] says so, [08] sets the event's `status = kStop` (the other menus' [01] refuses a stopped event)
+and, on the press (`value > 0`, `heldDownSecs == 0`), the key thread closes the menu as CLOSE does (`by=cancel`).
+Everything else goes to the engine's own slots. One press arrives as several events (`held=0`, `0.009`, `0.017`): only
+the first closes the menu, and the next close waits for a release (the gate is cleared at every open and close, since a release can be heard while the page is closed). PC game run of c1d1d899: Esc (`id=0x1b
+user_event="Cancel"`) is taken and the pause menu does not open; Tab (`id=0x9 user_event="DataMenu"`) closed the page but
+the game's data menu still opened at flag set `0x9`, since `kStop` does not stop its opener; at `0x19` Tab arrives as `Cancel`, the stack is `contexts=[0,1,78,13]` and no data menu opens (PC run, #738). Diagnostic for that: the snapshot key (F11) also
+logs `step=menu_detail name=<menu> menu=<addr> flags=... c4=... c8=... cc=... d0=...` for every known menu that is open,
+and every snapshot already logs the ControlMap's active input context ids (`contexts=`); run it with our page, the data
+menu and the pause menu open.
 
 ### What each failure line means
 

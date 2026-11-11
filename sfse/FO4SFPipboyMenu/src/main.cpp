@@ -131,7 +131,7 @@ namespace
 	constexpr std::size_t   kContextsAt = 0x2A8;             // libxse RE::ControlMap::activeInputContexts (16-byte items)
 	constexpr std::size_t   kPositionAt = 0x80 + 0x0C;       // libxse RE::TESObjectREFR::data (0x80), OBJ_REFR::location
 	constexpr std::size_t   kMaxListed = 16;                 // contexts listed per snapshot
-	constexpr std::size_t   kMaxFlagSets = 4;
+	constexpr std::size_t   kMaxFlagSets = 16;   // FAL-414: a flag sweep (one set per open) needs more than four
 	constexpr std::size_t   kGameVmImplAt = 0xE0;            // libxse RE::GameVM::impl (BSTSmartPointer<IVirtualMachine>)
 	constexpr std::size_t   kDispatchStaticCallSlot = 0x2F;  // libxse IVirtualMachine::DispatchStaticCall
 	constexpr std::size_t   kMaxName = 64;                   // ClickCall: each of the script's and function's names
@@ -348,6 +348,15 @@ namespace
 	};
 	static_assert(sizeof(PrimaryVtable) == (1 + kSlots) * sizeof(std::uintptr_t));   // no padding: locator is slots[-1]
 
+	// FAL-414: the BSInputEventUser vtable copy (subobject 0x10, ten slots; the locator again one slot before it)
+	constexpr std::size_t kInputSlots = 10;
+	struct InputVtable
+	{
+		std::uintptr_t                          locator;
+		std::array<std::uintptr_t, kInputSlots> slots;
+	};
+	static_assert(sizeof(InputVtable) == (1 + kInputSlots) * sizeof(std::uintptr_t));
+
 	// INI (FO4SFPipboyMenu.ini next to the dll)
 	int           g_stage = 0;      // 0 off, 1 = (a), 2 = (b), 3 = (c), 4 = (d), 5 = (e)
 	std::uint32_t g_key = 0x79;     // F10
@@ -358,6 +367,14 @@ namespace
 	std::size_t                              g_imageSize = 0;
 	std::array<std::uint32_t, kIdCount>      g_rva{};
 	PrimaryVtable                            g_vtbl{};
+	InputVtable                              g_inputVtbl{};
+	bool (*g_engineShouldHandle)(void*, const void*) = nullptr;   // input vtable [01], called with this = menu + 0x10
+	void (*g_engineOnButton)(void*, const void*) = nullptr;       // input vtable [08]
+	std::array<std::uint32_t, 4>             g_cancelCodes{ 0x1B, 0x09, 0, 0 };   // INI CancelCodes: Esc, Tab (Windows virtual-key codes: the PC's game run, #738)
+	std::size_t                              g_cancelCount = 2;
+	std::atomic<bool>                        g_cancelHeld{ false };    // a Tab or Esc press already closed the menu, not yet released
+	std::atomic<bool>                        g_cancelNow{ false };     // Tab or Esc heard while open: the key thread closes the menu
+	std::atomic<std::uint32_t>               g_cancelLogged{ 0 };
 	Ctor_t                                   g_ctor = nullptr;
 	Dtor_t                                   g_engineDtor = nullptr;
 	LoadMovie_t                              g_engineLoadMovie = nullptr;
@@ -615,6 +632,38 @@ namespace
 		return out + "]";
 	}
 
+	// FAL-414 diagnostic, main thread, on the snapshot key: each known menu the UI has open, with its flags and the four
+	// unnamed IMenu words at +0xC4..+0xD0 (read with Peek), so a run with our menu, the data menu and the pause menu open
+	// shows what a real menu asks the control map for
+	void LogOpenMenuDetails()
+	{
+		auto* ui = RE::UI::GetSingleton();
+		if (!ui) {
+			return;
+		}
+		static const auto* const names = [] {
+			auto* list = new std::vector<RE::BSFixedString>();
+			for (const auto* name : kKnownMenus) {
+				list->emplace_back(name);
+			}
+			return list;
+		}();
+		for (std::size_t i = 0; i < names->size(); ++i) {
+			const auto& name = (*names)[i];
+			if (!ui->IsMenuRegistered(name) || !ui->IsMenuOpen(name)) {
+				continue;
+			}
+			const auto menu = ui->GetMenu(name);
+			const auto at = reinterpret_cast<std::uintptr_t>(menu.get());
+			std::uint32_t flags = 0;
+			std::array<std::uint32_t, 4> words{};
+			const bool ok = at && Peek(at + 0xC0, flags) && Peek(at + 0xC4, words);
+			REX::INFO("step=menu_detail name={} menu={} {}", kKnownMenus[i], Hex(at),
+				ok ? std::format("flags={} c4={} c8={} cc={} d0={}", Hex(flags), Hex(words[0]), Hex(words[1]), Hex(words[2]), Hex(words[3])) :
+				     std::string("unreadable"));
+		}
+	}
+
 	// pause state and who holds input, on whichever thread calls it (a_main: the main thread, where menus= is read)
 	void Snapshot(std::string_view a_tag, bool a_main = false)
 	{
@@ -624,6 +673,9 @@ namespace
 		const auto contexts = ReadContexts();
 		REX::INFO("step=snapshot n={} tag={} paused={} menus={} contexts={} expected_open={}", n, a_tag, paused, menus,
 			contexts, g_expectOpen.load());
+		if (a_main && a_tag == "key") {
+			LogOpenMenuDetails();
+		}
 	}
 
 	bool ReadPosition(std::array<float, 3>& a_xyz)
@@ -2493,6 +2545,75 @@ namespace
 
 	// the creator UI calls on kShow. The engine passes uninitialised storage for a Scaleform::Ptr<IMenu> (MSVC's hidden
 	// return slot); the menu pointer is written there owning the constructor's reference, as the engine's own creators do
+	// FAL-414: the menu's own cancel handling. Both input slots are called with this = menu + 0x10 (BSInputEventUser).
+	// A keyboard button whose id is in CancelCodes (or whose user event is "Cancel"), while the menu is open, is ours:
+	// [01] says we handle it, [08] marks it kStop (the pause menu's ShouldHandleEvent refuses a stopped event) and, on the
+	// press (value > 0, heldDownSecs == 0), asks the key thread to close the menu. Everything else goes to the engine's.
+	struct CancelLook
+	{
+		bool          mine = false;
+		bool          press = false;
+		std::uint32_t code = 0;
+	};
+
+	CancelLook LookAtEvent(const void* a_event, bool a_log)
+	{
+		CancelLook look;
+		if (!a_event || !g_open) {
+			return look;
+		}
+		const auto* base = static_cast<const RE::InputEvent*>(a_event);
+		if (base->eventType != RE::InputEvent::EventType::kButton || base->deviceType != RE::InputEvent::DeviceType::kKeyboard) {
+			return look;
+		}
+		const auto* button = static_cast<const RE::ButtonEvent*>(a_event);
+		look.code = static_cast<std::uint32_t>(button->idCode);
+		const std::string_view user = button->strUserEvent.c_str() ? std::string_view(button->strUserEvent.c_str()) : std::string_view{};
+		bool cancel = user == "Cancel";
+		for (std::size_t i = 0; i < g_cancelCount; ++i) {
+			cancel = cancel || look.code == g_cancelCodes[i];
+		}
+		look.mine = cancel;
+		look.press = button->value > 0.0f && button->heldDownSecs == 0.0f;
+		if (a_log && g_cancelLogged.load() < 40 && (cancel || look.press)) {   // the first presses: which id and user event the game sends
+			++g_cancelLogged;
+			REX::INFO("step=input id={} user_event=\"{}\" value={} held={} status={} cancel={}", Hex(look.code), user, button->value,
+				button->heldDownSecs, static_cast<std::uint32_t>(base->status), cancel ? 1 : 0);
+		}
+		return look;
+	}
+
+	bool a_eventValueIsRelease(const void* a_event)
+	{
+		return static_cast<const RE::ButtonEvent*>(a_event)->value == 0.0f;
+	}
+
+	bool MenuShouldHandleEvent(void* a_input, const void* a_event)
+	{
+		const auto look = LookAtEvent(a_event, false);
+		if (look.mine && static_cast<const RE::InputEvent*>(a_event)->status != RE::InputEvent::Status::kStop) {
+			return true;
+		}
+		return g_engineShouldHandle(a_input, a_event);
+	}
+
+	void MenuOnButtonEvent(void* a_input, const void* a_event)
+	{
+		const auto look = LookAtEvent(a_event, true);
+		if (!look.mine) {
+			g_engineOnButton(a_input, a_event);
+			return;
+		}
+		const_cast<RE::InputEvent*>(static_cast<const RE::InputEvent*>(a_event))->status = RE::InputEvent::Status::kStop;
+		// the game sends one press as several events (held=0, 0.009, 0.017, ...): close on the first only, and
+		// not again until a release (value == 0) has been seen
+		if (look.press && !g_cancelHeld.exchange(true)) {
+			g_cancelNow = true;
+		} else if (a_eventValueIsRelease(a_event)) {
+			g_cancelHeld = false;
+		}
+	}
+
 	RE::Scaleform::Ptr<RE::IMenu>* Create(RE::Scaleform::Ptr<RE::IMenu>* a_out)
 	{
 		const auto n = ++g_created;
@@ -2510,6 +2631,9 @@ namespace
 		auto*      refs = reinterpret_cast<volatile std::uint32_t*>(base + 0x08);   // Scaleform RefCountImplCore
 		const auto ctorRefs = *refs;
 		*reinterpret_cast<std::uintptr_t*>(base) = reinterpret_cast<std::uintptr_t>(g_vtbl.slots.data());
+		if (g_stage >= 4) {
+			*reinterpret_cast<std::uintptr_t*>(base + 0x10) = reinterpret_cast<std::uintptr_t>(g_inputVtbl.slots.data());
+		}
 		// what the engine's dynamic_cast reads on our object: the locator one slot before its primary vtable
 		const auto rtti = *reinterpret_cast<const std::uintptr_t*>(*reinterpret_cast<const std::uintptr_t*>(base) - 8) ==
 		                  *reinterpret_cast<const std::uintptr_t*>(Address(kVtblPrimary) - 8);
@@ -2753,6 +2877,20 @@ namespace
 		g_vtbl.slots[0x05] = reinterpret_cast<std::uintptr_t>(&MenuGetViewScaleMode);
 		g_vtbl.slots[0x06] = reinterpret_cast<std::uintptr_t>(&MenuLoadMovie);
 		g_vtbl.slots[0x08] = reinterpret_cast<std::uintptr_t>(&MenuProcessMessage);
+		if (g_stage >= 4) {   // FAL-414: copy the input vtable, replace [01] ShouldHandleEvent and [08] OnButtonEvent
+			const auto* input = reinterpret_cast<const std::uintptr_t*>(Address(kVtblInput));
+			g_inputVtbl.locator = *reinterpret_cast<const std::uintptr_t*>(Address(kVtblInput) - 8);   // checked by CheckVtable
+			std::copy_n(input, kInputSlots, g_inputVtbl.slots.begin());
+			if (!InImage(input[1], 1) || !InImage(input[8], 1)) {
+				return Refuse("slots", "what=input_vtable reason=slot_outside_image");
+			}
+			g_engineShouldHandle = reinterpret_cast<decltype(g_engineShouldHandle)>(input[1]);
+			g_engineOnButton = reinterpret_cast<decltype(g_engineOnButton)>(input[8]);
+			g_inputVtbl.slots[1] = reinterpret_cast<std::uintptr_t>(&MenuShouldHandleEvent);
+			g_inputVtbl.slots[8] = reinterpret_cast<std::uintptr_t>(&MenuOnButtonEvent);
+			REX::INFO("step=input_vtable replaced=0x01,0x08 should_handle={} on_button={} cancel_codes={}", Hex(input[1] - g_base),
+				Hex(input[8] - g_base), g_cancelCount);
+		}
 		if (g_stage == 1) {
 			g_vtbl.slots[0x0A] = reinterpret_cast<std::uintptr_t>(&MenuIsMovieLoaded);
 		}
@@ -2772,6 +2910,7 @@ namespace
 			return;
 		}
 		const bool open = ui->IsMenuOpen(MenuName());
+		g_cancelHeld = false;   // FAL-414: a release heard while the page was closed must not keep the gate shut
 		if (g_stage == 4 && !open) {
 			PageCollect();   // the page's text before the show
 		}
@@ -2784,7 +2923,7 @@ namespace
 	}
 
 	// stage d: the CLOSE button, heard on the menu's thread, closes the menu here, on the main thread, as F10 does
-	void Close(std::uint32_t a_n)
+	void Close(std::uint32_t a_n, const char* a_by = "button")
 	{
 		auto* ui = RE::UI::GetSingleton();
 		auto* queue = RE::UIMessageQueue::GetSingleton();
@@ -2793,11 +2932,12 @@ namespace
 			return;
 		}
 		const bool open = ui->IsMenuOpen(MenuName());
+		g_cancelHeld = false;   // FAL-414: every close clears the cancel gate
 		g_expectOpen = 0;
 		if (open) {
 			queue->AddMessage(MenuName(), RE::UI_MESSAGE_TYPE::kHide);
 		}
-		REX::INFO("step=close n={} by=button was_open={} sent={}", a_n, open ? 1 : 0, open ? "hide" : "none");
+		REX::INFO("step=close n={} by={} was_open={} sent={}", a_n, a_by, open ? 1 : 0, open ? "hide" : "none");
 	}
 
 	void CheckState(std::uint32_t a_n)
@@ -2875,6 +3015,12 @@ namespace
 				if (g_closeNow.exchange(false)) {
 					const auto n = ++presses;
 					g_task->AddTask([n]() { Close(n); });
+					REX::W32::Sleep(750);
+					g_task->AddTask([n]() { CheckState(n); });
+				}
+				if (g_cancelNow.exchange(false)) {   // Tab or Esc heard by our input handler (FAL-414)
+					const auto n = ++presses;
+					g_task->AddTask([n]() { Close(n, "cancel"); });
 					REX::W32::Sleep(750);
 					g_task->AddTask([n]() { CheckState(n); });
 				}
@@ -2989,7 +3135,7 @@ namespace
 	// (k - 1) mod count
 	void ReadFlagSets(const std::filesystem::path& a_ini, const wchar_t* a_key, const wchar_t* a_default)
 	{
-		std::array<wchar_t, 128> text{};
+		std::array<wchar_t, 256> text{};
 		REX::W32::GetPrivateProfileStringW(L"FO4SFPipboyMenu", a_key, a_default, text.data(),
 			static_cast<std::uint32_t>(text.size()), a_ini.c_str());
 		const wchar_t* at = text.data();
@@ -3020,6 +3166,13 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	g_key = ReadNumber(ini, L"Key", 0x79);
 	g_flags = ReadNumber(ini, L"Flags", 0);
 	g_keepAlive = ReadNumber(ini, L"KeepAlive", 1) != 0;
+	// FAL-414: up to four keyboard ids that close the menu while it is open (0 = unused)
+	g_cancelCodes = { ReadNumber(ini, L"CancelCode1", 0x1B), ReadNumber(ini, L"CancelCode2", 0x09), ReadNumber(ini, L"CancelCode3", 0),
+		ReadNumber(ini, L"CancelCode4", 0) };
+	g_cancelCount = 4;
+	while (g_cancelCount && g_cancelCodes[g_cancelCount - 1] == 0) {
+		--g_cancelCount;
+	}
 	const auto runtime = a_sfse->RuntimeVersion();
 	REX::INFO("step=load runtime={} stage={} key={} flags={} keep_alive={}", runtime.string(), g_stage, Hex(g_key),
 		Hex(g_flags), g_keepAlive ? 1 : 0);
@@ -3034,7 +3187,7 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	if (g_stage >= 3) {
 		g_snapshotKey = ReadNumber(ini, L"SnapshotKey", 0x7A);
 		if (g_stage >= 4) {   // (d) and (e)
-			ReadFlagSets(ini, L"PageFlagSets", L"0x9");
+			ReadFlagSets(ini, L"PageFlagSets", L"0x19");   // FAL-414: bit 4 (0x10) puts StopContextProcessing (78) on the control map stack, so Tab arrives as Cancel
 		} else {
 			ReadFlagSets(ini, L"FlagSets", L"0x0,0x8,0x9");
 			clickCall = ReadText(ini, L"ClickCall");
