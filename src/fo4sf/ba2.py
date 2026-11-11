@@ -114,9 +114,26 @@ class Ba2:
                         raise Ba2Error(f"{self.path}: DX10 entry {e.name} chunk is outside the file")
 
     def summary(self) -> dict:
-        """Return a short summary of the archive contents."""
+        """Return a short summary of the archive contents, including size totals and extension counts.
+
+        Useful for conversion planning: total unpacked bytes to process, and which file types dominate.
+        """
         gnrl = sum(1 for e in self.entries if e.kind == "GNRL")
         dx10 = sum(1 for e in self.entries if e.kind == "DX10")
+        total_unpacked = 0
+        total_packed = 0
+        by_ext: dict[str, int] = {}
+        for e in self.entries:
+            if e.kind == "GNRL":
+                u = e.unpacked
+                p = e.packed or e.unpacked
+            else:
+                u = sum(c[2] for c in (e.chunks or []))
+                p = sum((c[1] or c[2]) for c in (e.chunks or []))
+            total_unpacked += u
+            total_packed += p
+            ext = e.name.rsplit(".", 1)[-1].lower() if "." in e.name else ""
+            by_ext[ext] = by_ext.get(ext, 0) + 1
         return {
             "path": self.path,
             "version": self.version,
@@ -124,6 +141,9 @@ class Ba2:
             "entries": len(self.entries),
             "general": gnrl,
             "textures": dx10,
+            "total_unpacked": total_unpacked,
+            "total_packed": total_packed,
+            "by_extension": dict(sorted(by_ext.items(), key=lambda x: -x[1])),
         }
 
     def size_estimates(self) -> dict:

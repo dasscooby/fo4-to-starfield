@@ -41,3 +41,24 @@ class LargestEntriesTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class SummaryTotalsTests(unittest.TestCase):
+    def test_summary_includes_totals_and_extensions(self):
+        entries = {
+            "a.txt": b"x" * 100,
+            "b.nif": b"y" * 200,
+            "c.dds": b"z" * 50,  # will be treated as general in fixture
+        }
+        data = general_archive(entries, compressed=True)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "mix.ba2")
+            with open(path, "wb") as f:
+                f.write(data)
+            a = Ba2(path)
+            s = a.summary()
+            self.assertEqual(s["entries"], 3)
+            self.assertEqual(s["total_unpacked"], 350)
+            self.assertGreater(s["total_packed"], 0)
+            self.assertIn("txt", s["by_extension"])
+            self.assertEqual(s["by_extension"]["txt"], 1)
+            self.assertEqual(s["by_extension"]["nif"], 1)
