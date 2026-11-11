@@ -1500,3 +1500,15 @@ package/recipe policy is wired; do not claim all packages are managed yet.
 Alternative rejected: infer a release or save provenance from an installer's zero
 exit. Packaging policy, native runtime/order acceptance and new-save publication
 remain later parts of the same draft.
+
+
+### 2026-11-11 — Codex / Lone: one pending release across a managed recipe (FAL-247 part 7)
+
+Share begin/finish with the managed component runner, but bracket the complete
+recipe rather than each component. Why: an early component cannot satisfy a
+whole release declaration, and a later failure must keep Play blocked. Explicit
+settings/declaration inputs enter every fingerprint; validate commands up front
+and recheck metadata between steps. Reused steps still require final installed
+validation. Alternative rejected: finalize independently after each component or
+trust cached exit codes as installed release acceptance. Generic staging remains
+available; this template does not authenticate a package or prove save provenance.

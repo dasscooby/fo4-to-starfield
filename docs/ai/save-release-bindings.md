@@ -169,3 +169,33 @@ newly enabled here. Native runtime/implicit-order acceptance and provenance-safe
 new-save publication remain mandatory. Keep #716 draft; Windows/native/Tk/game
 NOT_RUN. No cross-process installation lock or arbitrary command authenticity is
 claimed by this wrapper; it retains the existing command/target contract.
+
+
+Part 7 adds an explicit `managed_release` recipe block with absolute `settings`
+and `declaration` paths. See
+`scripts/launcher_recipes/managed_instance_install.example.json`. Run it through
+the existing launcher `build` command, supplying every `?` variable with `--set`.
+The declaration describes the complete resulting release, including all component
+masters. Each command must satisfy the existing confirmed instance target rules.
+The driver validates all targets before writing pending ownership, then starts
+one release transaction around the whole recipe. Every component receives the
+instance LOCALAPPDATA; earlier components do not prematurely finalize a release
+that later components have not installed yet.
+
+Settings and declaration bytes enter every step fingerprint and are rechecked
+before each step and final publication. Changed metadata or instance ownership
+refuses further execution. A failed, interrupted or partial (`--until`) run stays
+pending; restore the original inputs and repeat the same recipe to resume.
+Successful cached steps remain reusable, but installed-state validation still runs
+when every step is reused. Wrong masters, CCC configuration or incomplete component
+journals prevent completion even after zero exits. The report names release
+completion/refusal and only publishes a build manifest after release completion.
+Dry-run validates the explicit inputs and targets without writing ownership or
+starting installers. Malformed managed blocks refuse rather than selecting the
+generic build path. Generic staging recipes keep their existing behavior.
+
+This provides an explicit managed recipe template, not an authenticated package
+channel or a migration of every existing staging recipe. No accepted release
+package is newly enabled. Native runtime/implicit-order acceptance and proven
+new-save binding publication remain required before completing item 7. Keep #716
+draft; Windows/native/Tk/game NOT_RUN. No saves, state or bindings are written.

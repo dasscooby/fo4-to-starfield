@@ -109,6 +109,15 @@ def load_recipe(path, overrides=(), repo=None):
     out = {"name": r.get("name", os.path.splitext(os.path.basename(path))[0]), "steps": steps,
            "state_dir": substitute(r.get("state_dir", "{repo}/.launcher"), env),
            "manifest": {k: substitute(v, env) for k, v in (r.get("manifest") or {}).items()}}
+    if "managed_release" in r:
+        from . import save_release
+        config = r["managed_release"]
+        save_release._keys(config, ("settings", "declaration"), "managed release recipe")
+        if any(not isinstance(p, str) or not p.strip() for p in config.values()):
+            raise RecipeError("managed release recipe needs settings and declaration paths")
+        out["managed_release"] = {k: substitute(v, env) for k, v in config.items()}
+        for step in steps:
+            step["inputs"] += list(out["managed_release"].values())
     return out, env
 
 
@@ -293,7 +302,8 @@ def run_step(step, log_path, idle=False):
         else:
             kw = {"start_new_session": True}
         try:
-            proc = subprocess.Popen(step["argv"], cwd=step["cwd"], stdout=log, stderr=subprocess.STDOUT, **kw)
+            proc = subprocess.Popen(step["argv"], cwd=step["cwd"], stdout=log, stderr=subprocess.STDOUT,
+                                    env=step.get("environment"), **kw)
         except OSError as e:
             log.write(f"\n# could not start: {e}\n")
             return "failed", None, time.monotonic() - t0
@@ -370,6 +380,10 @@ def build(recipe, repo, *, dry_run=False, force=(), until=None, min_free_gb=0.0,
     state_dir = recipe["state_dir"]
     state_path = os.path.join(state_dir, "state.json")
     state = files.load_json(state_path) if os.path.isfile(state_path) else {"recipe": recipe["name"], "steps": {}}
+    managed = None
+    if "managed_release" in recipe:
+        from . import release_recipe
+        managed = release_recipe.Transaction(recipe["managed_release"], recipe["steps"])
     if dry_run:
         steps_plan = plan(recipe, state, repo, force)
         for s, would, why in steps_plan:
@@ -377,6 +391,8 @@ def build(recipe, repo, *, dry_run=False, force=(), until=None, min_free_gb=0.0,
         return {"dry_run": True, "plan": [(s["id"], w, why) for s, w, why in steps_plan], "complete": False}
     report = {"recipe": recipe["name"], "started": now(), "steps": []}
     with Lock(state_dir, break_lock):
+        if managed is not None:
+            managed.begin()
         # a step left "running" by an interrupted run is not a result
         for sid, rec in (state.get("steps") or {}).items():
             if rec.get("status") == "running":
@@ -387,6 +403,8 @@ def build(recipe, repo, *, dry_run=False, force=(), until=None, min_free_gb=0.0,
             sid = s["id"]
             rec = state["steps"].setdefault(sid, {})
             # the fingerprint is taken at the step's turn, after the steps before it have written its inputs
+            if managed is not None and not stop:
+                managed.verify()
             fp = fingerprint(s, repo) if not stop else None
             would, why = decide(s, rec, fp, force) if not stop else ("run", "")
             if stop:
@@ -411,7 +429,7 @@ def build(recipe, repo, *, dry_run=False, force=(), until=None, min_free_gb=0.0,
                 files.save_json(state_path, state)
                 for attempt in range(1 + s["retries"]):
                     log = os.path.join(state_dir, "logs", f"{sid}.{rec.get('runs', 0) + 1}.log")
-                    status, rc, dt = run_step(s, log, idle)
+                    status, rc, dt = run_step(dict(s, environment=managed.environment) if managed else s, log, idle)
                     rec["runs"] = rec.get("runs", 0) + 1
                     rec.update(returncode=rc, seconds=round(dt, 1), log=log, attempt=attempt + 1)
                     if status == "done":
@@ -438,6 +456,16 @@ def build(recipe, repo, *, dry_run=False, force=(), until=None, min_free_gb=0.0,
             counts[r["status"]] = counts.get(r["status"], 0) + 1
         report["counts"] = counts
         report["complete"] = all(r["status"] in OK for r in report["steps"])
+        if managed is not None:
+            report["release"] = {"status": "pending"}
+            if report["complete"]:
+                try:
+                    managed.finish(echo)
+                    report["release"]["status"] = "complete"
+                except (OSError, ValueError) as error:
+                    report["complete"] = False
+                    report["release"] = {"status": "refused", "detail": str(error)}
+                    echo("  release refused: " + str(error))
         if report["complete"] and recipe["manifest"]:
             m = recipe["manifest"]
             man = build_manifest.build_manifest(repo=repo, fo4_data=m.get("fo4_data") or (),

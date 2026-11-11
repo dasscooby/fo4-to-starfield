@@ -170,15 +170,8 @@ def publish(values, candidate_path, *, apply=False, running=restore.game_running
     say("Release declaration published; Play still checks every save binding")
 
 
-def run(values, candidate_path, command, *, running=restore.game_running, cwd=None, call=None, say=print):
-    """Run a managed component command with a durable pending release, then finalize.
-
-    No save binding is created. Any interruption retains the intended declaration
-    pin, so subsequent Play cannot fall back to a legacy/unmanaged instance.
-    """
-    import subprocess
-    folder = values.get("instance", "")
-    instance.check_run(folder, command, running=running, cwd=cwd)
+def begin(values, candidate_path, *, running=restore.game_running):
+    """Record an intended release before one command or an entire recipe."""
     (root, receipt_path, receipt_raw, receipt, target, release, raw,
      old_raw, old, previous) = _input(values, candidate_path)
     my_games = values.get("my_games")
@@ -192,14 +185,28 @@ def run(values, candidate_path, command, *, running=restore.game_running, cwd=No
     _write(receipt_path, pending_raw, receipt_raw)
     if running() or read(receipt_path) != pending_raw:
         raise sr.BindingError("game or instance changed; managed installation remains pending")
+    return {"declaration": raw, "receipt": pending_raw}
+
+
+def finish(values, candidate_path, expected, *, running=restore.game_running, say=print):
+    """Only finalize the same normalized input and the still-owned pending receipt."""
+    current = read(candidate_path)
+    if current is None or encode(sr.declaration(decode(current))) != expected["declaration"]:
+        raise sr.BindingError("release input changed during installation; original release remains pending")
+    if read(Path(values["instance"]) / instance.RECORD) != expected["receipt"]:
+        raise sr.BindingError("instance receipt changed during installation; preserve it and the release input")
+    publish(values, candidate_path, apply=True, running=running, say=say)
+
+
+def run(values, candidate_path, command, *, running=restore.game_running, cwd=None, call=None, say=print):
+    """Run one managed command; recipes share begin/finish over their whole plan."""
+    import subprocess
+    folder = values.get("instance", "")
+    instance.check_run(folder, command, running=running, cwd=cwd)
+    expected = begin(values, candidate_path, running=running)
     result = (call or subprocess.call)(command, cwd=cwd, env=instance.env_for(folder))
     if result != 0:
         say(f"Installer exited {result}; release remains pending. Repeat the same managed command to resume")
         return result
-    current = read(candidate_path)
-    if current is None or encode(sr.declaration(decode(current))) != raw:
-        raise sr.BindingError("release input changed during installation; original release remains pending")
-    if read(receipt_path) != pending_raw:
-        raise sr.BindingError("instance receipt changed during installation; preserve it and the release input")
-    publish(values, candidate_path, apply=True, running=running, say=say)
+    finish(values, candidate_path, expected, running=running, say=say)
     return 0

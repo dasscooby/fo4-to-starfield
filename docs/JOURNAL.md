@@ -2844,3 +2844,17 @@ routing. No real installer, game assets, saves or state touched. Exact-head rece
 and independent review are on FAL-247 / draft #716. Package/recipe policy, native
 runtime/order acceptance and new-save provenance/publication remain; Windows/native/
 Tk/game NOT_RUN.
+
+
+### 2026-11-11 — Codex / Lone: managed recipe transaction (item 7 part 7)
+
+Following Scribe CLEAR9cd0ecaa on FAL-277, managed_release recipes now record one
+pending release before their component commands and validate/finalize after all
+steps succeed, including cached runs. Each command targets the confirmed instance
+and receives its LOCALAPPDATA. Metadata changes, failed/partial installs and
+changed loader inputs cannot complete the release. Synthetic subprocess controls
+cover interruption/resume, dry-run, input mutation, target refusal and final checks
+after cache reuse. An explicit install recipe template is included. Exact-head
+receipt/review on FAL-247 and draft #716. Native acceptance and proven new-save
+publication remain unfinished; Windows/native/Tk/game NOT_RUN. No game assets,
+saves, state or bindings touched.
