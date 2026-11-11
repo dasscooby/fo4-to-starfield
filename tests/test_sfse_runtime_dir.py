@@ -105,6 +105,12 @@ class VectorTests(unittest.TestCase):
             with self.subTest(case["name"]):
                 self.check(case, *parse_runtime_ini(case["text"].encode("utf-8")))
 
+    def test_a_file_over_the_limit_is_refused(self):
+        # too big for the vectors file: built here, at the limit and one byte over
+        line = b"[Runtime]\nDir=C:\\R\n"
+        self.assertTrue(parse_runtime_ini(line + b";" * (MAX_FILE - len(line)))[0])
+        self.assertEqual(parse_runtime_ini(line + b";" * (MAX_FILE - len(line) + 1))[2], "file too large")
+
     def test_the_port_follows_the_header(self):
         # the port mirrors these rules; a change to one of them in the header must reach the port
         header = HEADER.read_text(encoding="utf-8")
@@ -153,6 +159,14 @@ class CompiledHeaderTests(unittest.TestCase):
                 kind, _, rest = line.partition("\t")
                 ok = kind == "ok"
                 VectorTests.check(self, case, ok, bytes.fromhex(rest).decode("utf-8") if ok else "", "" if ok else rest)
+
+    def test_the_header_refuses_a_file_over_the_limit(self):
+        line = b"[Runtime]\nDir=C:\\R\n"
+        texts = [line + b";" * (MAX_FILE - len(line)), line + b";" * (MAX_FILE - len(line) + 1)]
+        result = subprocess.run([str(self.binary)], input="".join(t.hex() + "\n" for t in texts).encode("ascii"),
+                                capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", "replace"))
+        self.assertEqual(result.stdout.decode("utf-8").splitlines(), ["ok\t" + b"C:\\R".hex(), "err\tfile too large"])
 
 
 class PluginTests(unittest.TestCase):
