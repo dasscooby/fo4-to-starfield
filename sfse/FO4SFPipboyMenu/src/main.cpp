@@ -73,14 +73,31 @@
 // destructor before it, SFSE 0.2.21 does not): slot 0 must be the adjustor thunk to the player's destructor. A value
 // that fails its check prints "?" and its reason is logged once. PageFlagSets (default 0x9, the flag set at which the
 // FAL-216 clicks reached our menu) cycles per open like FlagSets.
+//
+// Stage=5 (e), FAL-301: the page kit. One movie for every page (make_pipboy_kit.py, staged with --kit: a title bar,
+// main tabs with a bracket, sub-tabs, a list of 16 rows with a selection bar and scrolling, 16 two-column value rows, a
+// footer and key hints) and the pages as data: the [Kit] and [Page <TAB>/<SUB>] sections of this plugin's ini, read
+// once at load with the grammar and checks of make_pipboy_kit.py's parse_kit (a wrong line: refuse step=pages, the kit
+// stays off). A page is rows (Row=<label>|<value>), a list from a list provider or a notice. The values come from
+// named value providers, stage d's reads (health, level, xp, carry_max, rads, cell, world, time, days, position) and
+// av:<form id>, any actor value accepted by its RTTI type. The screen is built on the main thread and written on the
+// menu's through `text` and `visible` only, each change read back. Keys (polled while the page is open and the game in
+// front) and clicks (one listener on the movie's root, which reads the click's target name) move the selection, the
+// sub-tab and the main tab; CLOSE keeps stage d's handler. Stage (d)'s checks and ids; nothing new is called.
 
 #include "pch.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
+#include <fstream>
+#include <iterator>
 #include <mutex>
 #include <optional>
 #include <set>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 // Win32 calls that libxse's REX::W32 does not wrap, imported the way REX/W32.cpp imports its own (REX/W32/BASE.h):
@@ -136,8 +153,11 @@ namespace
 	constexpr std::size_t   kAvifType = 0x6D;                // FormType kAVIF, libxse and SFSE agree
 	constexpr std::size_t   kFormIdAt = 0x28;                // TESForm::formID, libxse and SFSE agree
 	constexpr std::size_t   kGlobalEditorIdAt = 0x30;        // libxse RE::TESGlobal::formEditorID (a BSFixedString first)
-	constexpr std::size_t   kGlobalBytesAt = 0x28;           // the TESGlobal bytes logged and searched for the
-	constexpr std::size_t   kGlobalBytes = 0x20;             //   value (libxse's +0x40 read -3.5924 at a156037c)
+	constexpr std::size_t   kGlobalBytesAt = 0x28;           // the TESGlobal bytes logged: from the form id to the end of
+	constexpr std::size_t   kGlobalObjectBytes = 0x50;      //   the object (the game's own size for a GLOB, form type 0x0A at +0x2E)
+	constexpr std::size_t   kGlobalBytes = kGlobalObjectBytes - kGlobalBytesAt;
+	constexpr std::size_t   kGlobalValueAt = 0x48;           // the float the game's GetValue reads (vmovss xmm0, [r8+0x48]); libxse's
+	constexpr std::size_t   kGlobalSearchFrom = 0x30;        //   +0x40 read -3.5924 at a156037c, and the slot at +0x28 is the form id
 	constexpr float         kGlobalMinutes = 3.0f;           // GameHour and GameDaysPassed's fraction agree this close
 	constexpr float         kMaxDays = 1000000.0f;           // GameDaysPassed below this
 	constexpr std::size_t   kAvifEditorIdAt = 0x40;          // libxse RE::ActorValueInfo::editorID
@@ -153,6 +173,53 @@ namespace
 	constexpr auto          kLineFieldName = "fo4sfLine";    // make_probe_swf.py LINE_FIELD, then 0 to 6
 	constexpr auto          kTabButtonName = "fo4sfTabButton";       // make_probe_swf.py TAB_BUTTON
 	constexpr auto          kCloseButtonName = "fo4sfCloseButton";   // make_probe_swf.py CLOSE_BUTTON
+
+	// stage e (the kit): make_pipboy_kit.py's sizes, columns, font and names
+	constexpr std::size_t   kKitTabs = 5;                    // TABS: main tabs
+	constexpr std::size_t   kKitSubs = 5;                    // SUBS: sub-tab slots
+	constexpr std::size_t   kKitRows = 16;                   // ROWS: list rows on screen, and value rows
+	constexpr std::size_t   kKitFooter = 3;                  // FOOTER: footer cells
+	constexpr std::size_t   kKitMaxPageRows = 64;            // MAX_PAGE_ROWS: Row= lines per page
+	constexpr std::size_t   kKitTitleColumns = 42;           // TITLE_COLUMNS (the header's too)
+	constexpr std::size_t   kKitTabColumns = 9;              // TAB_COLUMNS
+	constexpr std::size_t   kKitSubColumns = 13;             // SUB_COLUMNS
+	constexpr std::size_t   kKitNameColumns = 33;            // NAME_COLUMNS
+	constexpr std::size_t   kKitValueColumns = 8;            // VALUE_COLUMNS
+	constexpr std::size_t   kKitInfoLabelColumns = 16;       // INFO_LABEL_COLUMNS
+	constexpr std::size_t   kKitInfoValueColumns = 12;       // INFO_VALUE_COLUMNS
+	constexpr std::size_t   kKitFooterColumns = 23;          // FOOTER_COLUMNS
+	constexpr std::size_t   kKitFooterLabelColumns = 10;     // FOOTER_LABEL_COLUMNS
+	constexpr std::size_t   kKitHintColumns = 72;            // HINT_COLUMNS
+	constexpr std::uint32_t kKitVersion = 1;                 // KIT_VERSION
+	constexpr std::size_t   kKitTestRows = 30;               // the kit_test list
+	constexpr std::string_view kKitChars = " !#%&'()*+,-./0123456789:;<=>?ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_";   // KIT_FONT
+	constexpr auto          kKitTitle = "fo4sfTitle";        // NAMES
+	constexpr auto          kKitHeader = "fo4sfHeaderInfo";
+	constexpr auto          kKitTab = "fo4sfTab";            // then 0 to 4, as each name below with a number
+	constexpr auto          kKitTabMark = "fo4sfTabMark";
+	constexpr auto          kKitTabHit = "fo4sfTabHit";
+	constexpr auto          kKitSub = "fo4sfSub";
+	constexpr auto          kKitSubDim = "fo4sfSubDim";
+	constexpr auto          kKitSubHit = "fo4sfSubHit";
+	constexpr auto          kKitRowName = "fo4sfRowName";
+	constexpr auto          kKitRowValue = "fo4sfRowValue";
+	constexpr auto          kKitRowNameSel = "fo4sfRowNameSel";
+	constexpr auto          kKitRowValueSel = "fo4sfRowValueSel";
+	constexpr auto          kKitBar = "fo4sfBar";
+	constexpr auto          kKitRowHit = "fo4sfRowHit";
+	constexpr auto          kKitMoreUp = "fo4sfMoreUp";
+	constexpr auto          kKitMoreDown = "fo4sfMoreDown";
+	constexpr auto          kKitInfoLabel = "fo4sfInfoLabel";
+	constexpr auto          kKitInfoValue = "fo4sfInfoValue";
+	constexpr auto          kKitFoot = "fo4sfFoot";
+	constexpr auto          kKitHints = "fo4sfHints";
+	constexpr auto          kKitClose = "fo4sfClose";
+	constexpr auto          kKitId = "fo4sfKitId";
+	// VALUE_PROVIDERS and LIST_PROVIDERS; av:<hex> is the actor value of that form id
+	constexpr std::array<std::string_view, 10> kKitValues{ "health", "level", "xp", "carry_max", "rads", "cell", "world",
+		"time", "days", "position" };
+	constexpr std::array<std::string_view, 1> kKitLists{ "kit_test" };
+	constexpr std::string_view kKitActorValue = "av:";
 	// the menus a main-thread snapshot asks the engine about (IsMenuRegistered, IsMenuOpen); only Console is named by
 	// libxse, the rest are guesses, and the first snapshot logs which of them are registered
 	constexpr std::array<const char*, 14> kKnownMenus{ "FO4SF_PipboyMenu", "HUDMenu", "CursorMenu", "PauseMenu",
@@ -282,7 +349,7 @@ namespace
 	static_assert(sizeof(PrimaryVtable) == (1 + kSlots) * sizeof(std::uintptr_t));   // no padding: locator is slots[-1]
 
 	// INI (FO4SFPipboyMenu.ini next to the dll)
-	int           g_stage = 0;      // 0 off, 1 = (a), 2 = (b), 3 = (c), 4 = (d)
+	int           g_stage = 0;      // 0 off, 1 = (a), 2 = (b), 3 = (c), 4 = (d), 5 = (e)
 	std::uint32_t g_key = 0x79;     // F10
 	std::uint32_t g_flags = 0;      // OR'ed into the flags the constructor set
 	bool          g_keepAlive = true;
@@ -337,7 +404,7 @@ namespace
 
 	std::uintptr_t Address(std::size_t a_id) { return g_base + g_rva[a_id]; }
 
-	std::size_t IdCount() { return g_stage == 4 ? kIdCount : g_stage == 3 ? kIdCountC : kIdCountB; }
+	std::size_t IdCount() { return g_stage >= 4 ? kIdCount : g_stage == 3 ? kIdCountC : kIdCountB; }   // (e): (d)'s ids
 
 	bool InImage(std::uintptr_t a_addr, std::size_t a_len)
 	{
@@ -1232,7 +1299,7 @@ namespace
 		return std::min(apart, 24.0f - apart) * 60.0f <= kGlobalMinutes;
 	}
 
-	// the 32 bytes of a TESGlobal from kGlobalBytesAt, as hex and as eight floats
+	// the kGlobalBytes (40) bytes of a TESGlobal from kGlobalBytesAt, as hex and as ten floats
 	std::string GlobalBytes(std::uintptr_t a_form)
 	{
 		std::array<std::uint8_t, kGlobalBytes> bytes{};
@@ -1251,8 +1318,25 @@ namespace
 		return std::format("hex={} floats={}", hex, floats);
 	}
 
-	// the TESGlobal value's offset, not taken from a header: the first 4-byte slot of the logged bytes at which
-	// ReadTime accepts both globals. Tried at each collect until found; both globals' bytes are logged at the first try
+	// which slot of a TESGlobal holds the value, given a_accepts(offset) (ReadTime at that offset): kGlobalValueAt when it
+	// passes, else the first other slot from kGlobalSearchFrom to the end of the object that does; never kFormIdAt (the
+	// form ids 0x38 and 0x39 read as floats of about zero, and passed). 0 when none does
+	template <class Accepts>
+	std::size_t ChooseGlobalSlot(Accepts a_accepts)
+	{
+		if (kGlobalValueAt != kFormIdAt && a_accepts(kGlobalValueAt)) {
+			return kGlobalValueAt;
+		}
+		for (std::size_t at = kGlobalSearchFrom; at + sizeof(float) <= kGlobalObjectBytes; at += 4) {
+			if (at != kFormIdAt && at != kGlobalValueAt && a_accepts(at)) {
+				return at;
+			}
+		}
+		return 0;
+	}
+
+	// the TESGlobal value's offset, chosen by ChooseGlobalSlot over ReadTime on both globals. Tried at each collect until
+	// found; both globals' bytes are logged at the first try
 	void FindGlobalValue()
 	{
 		if (g_forms.globalValueAt || !g_forms.gameHour || !g_forms.gameDaysPassed) {
@@ -1263,15 +1347,13 @@ namespace
 			REX::INFO("step=page_globals from={} game_hour {} game_days_passed {}", Hex(kGlobalBytesAt),
 				GlobalBytes(g_forms.gameHour), GlobalBytes(g_forms.gameDaysPassed));
 		}
-		for (std::size_t at = kGlobalBytesAt; at < kGlobalBytesAt + kGlobalBytes; at += 4) {
-			float hour = 0.0f;
-			float days = 0.0f;
-			if (ReadTime(at, hour, days)) {
-				g_forms.globalValueAt = at;
-				REX::INFO("step=page_globals value_at={} game_hour={:.4f} game_days_passed={:.4f}", Hex(at), hour,
-					days);
-				return;
-			}
+		float hour = 0.0f;
+		float days = 0.0f;
+		const auto at = ChooseGlobalSlot([&](std::size_t a_at) { return ReadTime(a_at, hour, days); });
+		if (at) {
+			ReadTime(at, hour, days);   // the chosen slot's values, for the log (the search leaves the last try's)
+			g_forms.globalValueAt = at;
+			REX::INFO("step=page_globals value_at={} game_hour={:.4f} game_days_passed={:.4f}", Hex(at), hour, days);
 		}
 	}
 
@@ -1433,6 +1515,880 @@ namespace
 		}
 	}
 
+	// ------------------------------------------------------------------------------------------- stage e: the kit
+	// FAL-301. The pages are read once at load (ReadKit) and never change after. KitCollect builds the shown page's
+	// screen on the main thread (stage d's reads and its two calls, nothing else); KitWrite writes it on the menu's
+	// thread. The state (main tab, each tab's sub-tab, each page's selection and first row on screen) moves on keys (the
+	// key thread) and clicks (the menu's thread), always under g_pageLock, and each move asks for an update at once.
+
+	struct KitCell   // a Row= or Footer= line
+	{
+		std::string label;
+		std::string value;   // a value provider: one of kKitValues, or av:<hex>
+	};
+
+	struct KitPage
+	{
+		std::string              tab;
+		std::string              sub;
+		std::vector<KitCell>     rows;
+		std::string              list;     // a list provider, or ""
+		std::vector<std::string> notice;
+		std::vector<KitCell>     footer;
+		std::string              hint;
+		std::size_t              line = 0;
+	};
+
+	struct KitConfig
+	{
+		std::string                                    title = "FO4SF PIP-BOY";
+		std::string                                    header;   // a value provider, or ""
+		std::string                                    hints;
+		std::vector<KitPage>                           pages;
+		std::vector<std::string>                       tabs;     // in the order of their first page
+		std::array<std::vector<std::size_t>, kKitTabs> subs;     // each tab's pages, in order
+	};
+	KitConfig g_kit;   // ReadKit, at load; read only after
+
+	struct KitState
+	{
+		std::size_t                       tab = 0;
+		std::array<std::size_t, kKitTabs> sub{};      // the sub-tab each main tab shows, kept while another tab is shown
+		std::vector<std::size_t>          selected;   // per page: the selected row
+		std::vector<std::size_t>          top;        // per page: the first row on screen
+		std::vector<std::size_t>          count;      // per page: its selectable rows, as last collected
+		std::uint32_t                     keys = 0;   // moves by key and by click (the kit_test list shows them)
+		std::uint32_t                     clicks = 0;
+	};
+
+	struct KitScreen
+	{
+		std::size_t                          page = 0;
+		std::string                          title;
+		std::string                          header;
+		std::string                          hints;
+		std::array<std::string, kKitTabs>    tabs;
+		std::size_t                          tab = 0;
+		std::array<std::string, kKitSubs>    subs;
+		std::size_t                          sub = 0;
+		std::array<std::string, kKitRows>    names;
+		std::array<std::string, kKitRows>    values;
+		std::optional<std::size_t>           bar;      // the selected row's place on screen, none on a notice
+		std::array<std::string, kKitRows>    infoLabels;
+		std::array<std::string, kKitRows>    infoValues;
+		std::array<std::string, kKitFooter>  footer;
+		bool                                 moreUp = false;
+		bool                                 moreDown = false;
+	};
+
+	struct KitRow
+	{
+		std::string                                      name;
+		std::string                                      value;
+		std::vector<std::pair<std::string, std::string>> info;   // the value rows beside the list while it is selected
+	};
+
+	enum class KitMove : std::size_t { kUp, kDown, kPrevSub, kNextSub, kPrevTab, kNextTab, kTab, kSub, kRow };
+	constexpr std::array<std::string_view, 9> kKitMoveNames{ "up", "down", "prev_sub", "next_sub", "prev_tab", "next_tab",
+		"tab", "sub", "row" };
+
+	struct KitKey   // INI KitUp ... KitNextTab
+	{
+		KitMove                      move;
+		const wchar_t*               ini;
+		const wchar_t*               keys;   // the default
+		std::array<std::uint32_t, 3> vk{};
+		std::size_t                  count = 0;
+	};
+	std::array<KitKey, 6> g_kitKeys{ { { KitMove::kUp, L"KitUp", L"0x26,0x57" }, { KitMove::kDown, L"KitDown", L"0x28,0x53" },
+		{ KitMove::kPrevSub, L"KitPrevSub", L"0x25,0x41" }, { KitMove::kNextSub, L"KitNextSub", L"0x27,0x44" },
+		{ KitMove::kPrevTab, L"KitPrevTab", L"0x51" }, { KitMove::kNextTab, L"KitNextTab", L"0x45" } } };
+
+	KitState                                     g_kitState;        // under g_pageLock
+	KitScreen                                    g_kitScreen;       // under g_pageLock: built on the main thread
+	bool                                         g_kitCollected = false;   // under g_pageLock
+	std::vector<bool>                            g_kitPageLogged;   // main thread only
+	std::unordered_map<std::uint32_t, std::uintptr_t> g_kitActorValues;   // main thread only: av:<id>'s form, once
+	std::unordered_map<std::string, std::string> g_kitTexts;        // menu's thread only: each field as last set and read
+	std::unordered_map<std::string, bool>        g_kitShown;        // menu's thread only: each object's visible, likewise
+	std::atomic<std::uint32_t>                   g_kitWrites{ 0 };
+	std::atomic<std::uint32_t>                   g_kitClicks{ 0 };
+
+	std::string_view KitTrim(std::string_view a_text)
+	{
+		const auto first = a_text.find_first_not_of(" \t\r");
+		if (first == std::string_view::npos) {
+			return {};
+		}
+		return a_text.substr(first, a_text.find_last_not_of(" \t\r") - first + 1);
+	}
+
+	// ReadKit's label check, parse_kit's _fits: 1 to a_columns characters, each in the kit's font (upper case)
+	bool KitLabel(std::string_view a_text, std::size_t a_columns)
+	{
+		return !a_text.empty() && a_text.size() <= a_columns &&
+		       std::ranges::all_of(a_text, [](char a_c) { return kKitChars.find(a_c) != std::string_view::npos; });
+	}
+
+	// parse_kit's check_value: a name of kKitValues, or av:<1 to 8 hex digits, not zero>
+	bool KitValueName(std::string_view a_spec)
+	{
+		if (std::ranges::find(kKitValues, a_spec) != kKitValues.end()) {
+			return true;
+		}
+		if (!a_spec.starts_with(kKitActorValue)) {
+			return false;
+		}
+		const auto hex = a_spec.substr(kKitActorValue.size());
+		return !hex.empty() && hex.size() <= 8 &&
+		       std::ranges::all_of(hex, [](char a_c) { return std::isxdigit(static_cast<unsigned char>(a_c)) != 0; }) &&
+		       std::strtoul(std::string(hex).c_str(), nullptr, 16) != 0;
+	}
+
+	// <label>|<value>, parse_kit's _cell: exactly one '|', the label in a_columns, the value a value provider
+	bool KitCellOf(std::string_view a_text, std::size_t a_columns, KitCell& a_out)
+	{
+		const auto bar = a_text.find('|');
+		if (bar == std::string_view::npos || a_text.find('|', bar + 1) != std::string_view::npos) {
+			return false;
+		}
+		const auto label = KitTrim(a_text.substr(0, bar));
+		const auto value = KitTrim(a_text.substr(bar + 1));
+		if (!KitLabel(label, a_columns) || !KitValueName(value)) {
+			return false;
+		}
+		a_out = { std::string(label), std::string(value) };
+		return true;
+	}
+
+	std::string KitSignature()   // make_pipboy_kit.py signature(): the movie's fo4sfKitId
+	{
+		std::string tabs;
+		for (const auto& tab : g_kit.tabs) {
+			tabs += std::format("{}{}", tabs.empty() ? "" : ",", tab);
+		}
+		return std::format("FO4SF KIT {} {} {}", kKitVersion, kKitRows, tabs);
+	}
+
+	bool KitRefuse(std::size_t a_line, std::string_view a_why)
+	{
+		return Refuse("pages", std::format("line={} reason={} (the kit stays off)", a_line, a_why));
+	}
+
+	// the [Kit] and [Page <TAB>/<SUB>] sections of the ini, with parse_kit's grammar and checks; other sections are
+	// skipped. Any wrong line refuses the whole kit, at load
+	bool ReadKit(const std::filesystem::path& a_ini)
+	{
+		std::ifstream in(a_ini, std::ios::binary);
+		if (!in) {
+			return KitRefuse(0, "no_ini");
+		}
+		enum class Section { kOther, kKit, kPage };
+		auto        section = Section::kOther;
+		std::string raw;
+		std::size_t n = 0;
+		while (std::getline(in, raw)) {
+			++n;
+			const auto line = KitTrim(raw);
+			if (line.empty() || line[0] == ';' || line[0] == '#') {
+				continue;
+			}
+			if (line[0] == '[') {
+				if (line.back() != ']') {
+					return KitRefuse(n, "section");
+				}
+				const auto name = KitTrim(line.substr(1, line.size() - 2));
+				section = Section::kOther;
+				if (name == "Kit") {
+					section = Section::kKit;
+				} else if (name.starts_with("Page ")) {
+					const auto path = KitTrim(name.substr(5));
+					const auto slash = path.find('/');
+					if (slash == std::string_view::npos || path.find('/', slash + 1) != std::string_view::npos) {
+						return KitRefuse(n, "page_name");
+					}
+					KitPage page;
+					page.tab = KitTrim(path.substr(0, slash));
+					page.sub = KitTrim(path.substr(slash + 1));
+					page.line = n;
+					if (!KitLabel(page.tab, kKitTabColumns) || !KitLabel(page.sub, kKitSubColumns)) {
+						return KitRefuse(n, "tab_or_sub_label");
+					}
+					for (const auto& other : g_kit.pages) {
+						if (other.tab == page.tab && other.sub == page.sub) {
+							return KitRefuse(n, "page_twice");
+						}
+					}
+					g_kit.pages.push_back(std::move(page));
+					section = Section::kPage;
+				}
+				continue;
+			}
+			if (section == Section::kOther) {
+				continue;
+			}
+			const auto eq = line.find('=');
+			if (eq == std::string_view::npos) {
+				return KitRefuse(n, "no_equals");
+			}
+			const auto key = KitTrim(line.substr(0, eq));
+			const auto value = KitTrim(line.substr(eq + 1));
+			if (section == Section::kKit) {
+				if (key == "Title" && KitLabel(value, kKitTitleColumns)) {
+					g_kit.title = value;
+				} else if (key == "Header" && KitValueName(value)) {
+					g_kit.header = value;
+				} else if (key == "Hints" && KitLabel(value, kKitHintColumns)) {
+					g_kit.hints = value;
+				} else {
+					return KitRefuse(n, std::format("kit_key key={}", key));
+				}
+				continue;
+			}
+			auto&   page = g_kit.pages.back();
+			KitCell cell;
+			if (key == "Row" && page.rows.size() < kKitMaxPageRows && KitCellOf(value, kKitNameColumns, cell)) {
+				page.rows.push_back(std::move(cell));
+			} else if (key == "List" && page.list.empty() && std::ranges::find(kKitLists, value) != kKitLists.end()) {
+				page.list = value;
+			} else if (key == "Notice" && page.notice.size() < kKitRows && KitLabel(value, kKitNameColumns)) {
+				page.notice.emplace_back(value);
+			} else if (key == "Footer" && page.footer.size() < kKitFooter && KitCellOf(value, kKitFooterLabelColumns, cell)) {
+				page.footer.push_back(std::move(cell));
+			} else if (key == "Hint" && KitLabel(value, kKitHintColumns)) {
+				page.hint = value;
+			} else {
+				return KitRefuse(n, std::format("page_key key={}", key));
+			}
+		}
+		if (g_kit.pages.empty()) {
+			return KitRefuse(n, "no_pages");
+		}
+		for (std::size_t i = 0; i < g_kit.pages.size(); ++i) {
+			const auto& page = g_kit.pages[i];
+			const auto  kinds = (page.rows.empty() ? 0 : 1) + (page.list.empty() ? 0 : 1) + (page.notice.empty() ? 0 : 1);
+			if (kinds != 1) {
+				return KitRefuse(page.line, "page_kind (exactly one of Row, List and Notice)");
+			}
+			auto tab = std::ranges::find(g_kit.tabs, page.tab);
+			if (tab == g_kit.tabs.end()) {
+				if (g_kit.tabs.size() == kKitTabs) {
+					return KitRefuse(page.line, "tabs");
+				}
+				g_kit.tabs.push_back(page.tab);
+				tab = std::prev(g_kit.tabs.end());
+			}
+			auto& subs = g_kit.subs[static_cast<std::size_t>(std::distance(g_kit.tabs.begin(), tab))];
+			if (subs.size() == kKitSubs) {
+				return KitRefuse(page.line, "subs");
+			}
+			subs.push_back(i);
+			REX::INFO("step=page_def n={} page={}/{} kind={} rows={} footer={}", i, page.tab, page.sub,
+				!page.rows.empty() ? "rows" : !page.list.empty() ? page.list : "notice",
+				page.rows.empty() ? page.notice.size() : page.rows.size(), page.footer.size());
+		}
+		g_kitState.selected.assign(g_kit.pages.size(), 0);
+		g_kitState.top.assign(g_kit.pages.size(), 0);
+		g_kitState.count.assign(g_kit.pages.size(), 0);
+		g_kitPageLogged.assign(g_kit.pages.size(), false);
+		REX::INFO("step=pages pages={} tabs={} signature=\"{}\"", g_kit.pages.size(), g_kit.tabs.size(), KitSignature());
+		return true;
+	}
+
+	// the kit's keys (INI KitUp ... KitNextTab): up to three virtual-key codes each, none 0, above 0xFE, Key or
+	// SnapshotKey
+	bool ReadKitKeys(const std::filesystem::path& a_ini)
+	{
+		for (auto& binding : g_kitKeys) {
+			std::array<wchar_t, 64> text{};
+			REX::W32::GetPrivateProfileStringW(L"FO4SFPipboyMenu", binding.ini, binding.keys, text.data(),
+				static_cast<std::uint32_t>(text.size()), a_ini.c_str());
+			const wchar_t* at = text.data();
+			binding.count = 0;
+			while (*at && binding.count < binding.vk.size()) {
+				wchar_t*   end = nullptr;
+				const auto vk = static_cast<std::uint32_t>(std::wcstoul(at, &end, 0));
+				if (end == at || vk == 0 || vk > 0xFE || vk == g_key || vk == g_snapshotKey) {
+					return Refuse("ini", std::format("kit_key={} (1 to 0xFE, not Key or SnapshotKey)",
+						kKitMoveNames[static_cast<std::size_t>(binding.move)]));
+				}
+				binding.vk[binding.count++] = vk;
+				at = end;
+				while (*at == L',' || *at == L' ') {
+					++at;
+				}
+			}
+			std::string keys;
+			for (std::size_t i = 0; i < binding.count; ++i) {
+				keys += std::format("{}{}", i ? "," : "", Hex(binding.vk[i]));
+			}
+			REX::INFO("step=kit_keys action={} keys={}", kKitMoveNames[static_cast<std::size_t>(binding.move)],
+				keys.empty() ? "none" : keys);
+		}
+		return true;
+	}
+
+	// a kit field's text, as the kit's font draws it: upper case, a character the font lacks as "?", at most a_columns
+	std::string KitText(std::string_view a_text, std::size_t a_columns)
+	{
+		std::string out;
+		for (const char c : a_text.substr(0, a_columns)) {
+			const auto up = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+			out += kKitChars.find(up) != std::string_view::npos ? up : '?';
+		}
+		return out;
+	}
+
+	std::string KitRight(std::string_view a_text, std::size_t a_columns)   // right-aligned: the font is monospaced
+	{
+		const auto text = KitText(a_text, a_columns);
+		return std::string(a_columns - text.size(), ' ') + text;
+	}
+
+	std::string KitCentre(std::string_view a_text, std::size_t a_columns)
+	{
+		const auto text = KitText(a_text, a_columns);
+		return std::string((a_columns - text.size()) / 2, ' ') + text;
+	}
+
+	std::size_t KitPageIndex(const KitState& a_state) { return g_kit.subs[a_state.tab][a_state.sub[a_state.tab]]; }
+
+	// the first row on screen that keeps the selected row on screen
+	std::size_t KitTop(std::size_t a_top, std::size_t a_selected, std::size_t a_count)
+	{
+		if (a_count <= kKitRows) {
+			return 0;
+		}
+		if (a_selected < a_top) {
+			a_top = a_selected;
+		}
+		if (a_selected >= a_top + kKitRows) {
+			a_top = a_selected + 1 - kKitRows;
+		}
+		return std::min(a_top, a_count - kKitRows);
+	}
+
+	// av:<id>'s ActorValueInfo form, looked up once by form id and accepted by its RTTI type (stage d's AcceptById,
+	// logged whole as step=kit_av); main thread only
+	std::uintptr_t KitActorValue(std::uint32_t a_id)
+	{
+		if (const auto known = g_kitActorValues.find(a_id); known != g_kitActorValues.end()) {
+			return known->second;
+		}
+		std::uintptr_t form = 0;
+		REX::INFO("step=kit_av {}", AcceptById(a_id, "av", "ActorValueInfo@@", kAvifEditorIdAt, form));
+		g_kitActorValues.emplace(a_id, form);
+		return form;
+	}
+
+	// one value provider's text (README, "Stage (e)": what each reads, and its step=page_unknown line when it cannot);
+	// main thread only
+	std::string KitValueRead(std::string_view a_spec)
+	{
+		if (a_spec == "health") {
+			return ActorValueText("health", g_forms.health);
+		}
+		if (a_spec == "xp") {
+			return ActorValueText("experience", g_forms.experience);
+		}
+		if (a_spec == "carry_max") {
+			return ActorValueText("carry_weight", g_forms.carryWeight);
+		}
+		if (a_spec == "rads") {
+			return g_forms.rads ? ActorValueText("rads", g_forms.rads) :
+			       g_forms.avifs ? std::string("NOT INSTALLED") :
+			                       Unknown("rads", "reason=actor_values_unread");
+		}
+		if (a_spec == "level") {
+			return LevelText();
+		}
+		if (a_spec == "cell") {
+			return PlaceText().first;
+		}
+		if (a_spec == "world") {
+			return PlaceText().second;
+		}
+		if (a_spec == "time") {
+			return TimeText();
+		}
+		if (a_spec == "days") {   // checked as the time is: both globals in range at the offset FindGlobalValue found
+			float hour = 0.0f;
+			float days = 0.0f;
+			if (!ReadTime(g_forms.globalValueAt, hour, days)) {
+				const auto reason = !g_forms.globals        ? "globals_unread" :
+				                    !g_forms.globalValueAt ? "no_value_offset" :
+				                                             "out_of_range";
+				return Unknown("days", std::format("reason={}", reason));
+			}
+			return std::format("{:.2f}", days);
+		}
+		if (a_spec == "position") {
+			std::array<float, 3> xyz{};
+			return ReadPosition(xyz) && std::isfinite(xyz[0]) && std::isfinite(xyz[1]) && std::isfinite(xyz[2]) ?
+			           std::format("{:.0f} {:.0f} {:.0f}", xyz[0], xyz[1], xyz[2]) :
+			           Unknown("position", "reason=no_player");
+		}
+		if (a_spec.starts_with(kKitActorValue)) {   // ReadKit checked the hex
+			const auto id = static_cast<std::uint32_t>(std::strtoul(std::string(a_spec.substr(kKitActorValue.size())).c_str(), nullptr, 16));
+			return ActorValueText(a_spec, KitActorValue(id));
+		}
+		return Unknown(a_spec, "reason=no_such_value");
+	}
+
+	// each value once per screen (a footer cell that repeats a row's value reads it once)
+	std::string KitValue(std::string_view a_spec, std::unordered_map<std::string, std::string>& a_memo)
+	{
+		std::string key(a_spec);
+		if (const auto known = a_memo.find(key); known != a_memo.end()) {
+			return known->second;
+		}
+		auto value = KitValueRead(a_spec);
+		a_memo.emplace(std::move(key), value);
+		return value;
+	}
+
+	// the kit_test list: thirty rows to scroll, select and click, with the kit's move counts beside the selected one
+	std::vector<KitRow> KitTestRows(const KitState& a_state)
+	{
+		std::vector<KitRow> rows;
+		for (std::size_t i = 1; i <= kKitTestRows; ++i) {
+			rows.push_back({ std::format("TEST ROW {:02}", i), std::to_string(i * 7),
+				{ { "ROW", std::format("{} OF {}", i, kKitTestRows) }, { "KEY MOVES", std::to_string(a_state.keys) },
+					{ "CLICK MOVES", std::to_string(a_state.clicks) }, { "UPDATES", std::to_string(g_updates.load()) } } });
+		}
+		return rows;
+	}
+
+	// the selected row's value rows: a label and its value right-aligned, or, for a value longer than its column,
+	// the label alone and the value on the lines below across both columns
+	void KitInfoLines(const std::vector<std::pair<std::string, std::string>>& a_info, KitScreen& a_screen)
+	{
+		constexpr auto width = kKitInfoLabelColumns + kKitInfoValueColumns;
+		std::size_t    line = 0;
+		for (const auto& [label, value] : a_info) {
+			if (line == kKitRows) {
+				break;
+			}
+			const auto text = KitText(value, width * 3);
+			a_screen.infoLabels[line] = KitText(label, kKitInfoLabelColumns);
+			if (text.size() <= kKitInfoValueColumns) {
+				a_screen.infoValues[line++] = KitRight(text, kKitInfoValueColumns);
+				continue;
+			}
+			++line;
+			for (std::size_t at = 0; at < text.size() && line < kKitRows; at += width, ++line) {
+				const auto part = std::string_view(text).substr(at, width);
+				a_screen.infoLabels[line] = std::string(part.substr(0, kKitInfoLabelColumns));
+				a_screen.infoValues[line] = part.size() > kKitInfoLabelColumns ? std::string(part.substr(kKitInfoLabelColumns)) : "";
+			}
+		}
+	}
+
+	// the shown page's screen, on the main thread before each kShow and kUpdate (Toggle, SendUpdate)
+	void KitCollect()
+	{
+		PageScan();
+		FindGlobalValue();
+		KitState state;
+		{
+			std::scoped_lock lock(g_pageLock);
+			state = g_kitState;
+		}
+		const auto                                   index = KitPageIndex(state);
+		const auto&                                  page = g_kit.pages[index];
+		std::unordered_map<std::string, std::string> memo;
+		std::vector<KitRow>                          rows;
+		if (!page.rows.empty()) {
+			for (const auto& cell : page.rows) {
+				auto value = KitValue(cell.value, memo);
+				rows.push_back({ cell.label, value, { { "VALUE", value }, { "FROM", cell.value } } });
+			}
+		} else if (page.list == "kit_test") {
+			rows = KitTestRows(state);
+		} else {
+			for (const auto& line : page.notice) {
+				rows.push_back({ line, "", {} });
+			}
+		}
+		const auto count = page.notice.empty() ? rows.size() : std::size_t{ 0 };   // a notice has no selection
+		const auto selected = count ? std::min(state.selected[index], count - 1) : std::size_t{ 0 };
+		const auto top = KitTop(state.top[index], selected, count);
+		KitScreen  screen;
+		screen.page = index;
+		screen.title = KitText(g_kit.title, kKitTitleColumns);
+		screen.header = g_kit.header.empty() ? "" : KitRight(KitValue(g_kit.header, memo), kKitTitleColumns);
+		screen.hints = KitText(page.hint.empty() ? g_kit.hints : page.hint, kKitHintColumns);
+		for (std::size_t i = 0; i < g_kit.tabs.size(); ++i) {
+			screen.tabs[i] = KitText(g_kit.tabs[i], kKitTabColumns);
+		}
+		screen.tab = state.tab;
+		const auto& subs = g_kit.subs[state.tab];
+		for (std::size_t i = 0; i < subs.size(); ++i) {
+			screen.subs[i] = KitText(g_kit.pages[subs[i]].sub, kKitSubColumns);
+		}
+		screen.sub = state.sub[state.tab];
+		for (std::size_t i = 0; i < kKitRows && top + i < rows.size(); ++i) {
+			const auto& row = rows[top + i];
+			if (row.value.size() <= kKitValueColumns) {
+				screen.names[i] = KitText(row.name, kKitNameColumns);
+				screen.values[i] = row.value.empty() ? "" : KitRight(row.value, kKitValueColumns);
+			} else {   // a long value follows its label in the name's column
+				screen.names[i] = KitText(std::format("{} {}", row.name, row.value), kKitNameColumns);
+			}
+		}
+		if (count) {
+			screen.bar = selected - top;
+			KitInfoLines(rows[selected].info, screen);
+		}
+		screen.moreUp = top > 0;
+		screen.moreDown = top + kKitRows < rows.size();
+		for (std::size_t i = 0; i < page.footer.size(); ++i) {
+			screen.footer[i] = KitCentre(std::format("{} {}", page.footer[i].label, KitValue(page.footer[i].value, memo)),
+				kKitFooterColumns);
+		}
+		if (!g_kitPageLogged[index]) {
+			g_kitPageLogged[index] = true;
+			REX::INFO("step=kit_page page={}/{} rows={} selectable={} first=\"{}\"", page.tab, page.sub, rows.size(), count,
+				rows.empty() ? "" : KitText(std::format("{} {}", rows[0].name, rows[0].value), kKitNameColumns));
+		}
+		std::scoped_lock lock(g_pageLock);
+		if (KitPageIndex(g_kitState) == index) {   // keep a move made since the copy; only bound it
+			auto& s = g_kitState;
+			s.count[index] = count;
+			s.selected[index] = count ? std::min(s.selected[index], count - 1) : std::size_t{ 0 };
+			s.top[index] = KitTop(s.top[index], s.selected[index], count);
+		}
+		g_kitScreen = std::move(screen);
+		g_kitCollected = true;
+	}
+
+	// one move of the state, from a key (the key thread) or a click (the menu's thread), then an update at once.
+	// Returns what it did, for the log line of its caller
+	std::string KitAct(KitMove a_move, std::size_t a_index, bool a_key)
+	{
+		std::scoped_lock lock(g_pageLock);
+		auto&      s = g_kitState;
+		const auto page = KitPageIndex(s);
+		const auto tabs = g_kit.tabs.size();
+		const auto subs = g_kit.subs[s.tab].size();
+		const auto count = s.count[page];
+		auto&      selected = s.selected[page];
+		auto&      sub = s.sub[s.tab];
+		bool       moved = false;
+		switch (a_move) {   // a move past either end changes nothing (no wrap)
+		case KitMove::kUp:
+			moved = selected > 0;
+			if (moved) {
+				--selected;
+			}
+			break;
+		case KitMove::kDown:
+			moved = selected + 1 < count;
+			if (moved) {
+				++selected;
+			}
+			break;
+		case KitMove::kPrevSub:
+			moved = sub > 0;
+			if (moved) {
+				--sub;
+			}
+			break;
+		case KitMove::kNextSub:
+			moved = sub + 1 < subs;
+			if (moved) {
+				++sub;
+			}
+			break;
+		case KitMove::kPrevTab:
+			moved = s.tab > 0;
+			if (moved) {
+				--s.tab;
+			}
+			break;
+		case KitMove::kNextTab:
+			moved = s.tab + 1 < tabs;
+			if (moved) {
+				++s.tab;
+			}
+			break;
+		case KitMove::kTab:
+			moved = a_index < tabs && a_index != s.tab;
+			if (moved) {
+				s.tab = a_index;
+			}
+			break;
+		case KitMove::kSub:
+			moved = a_index < subs && a_index != sub;
+			if (moved) {
+				sub = a_index;
+			}
+			break;
+		case KitMove::kRow:
+			moved = s.top[page] + a_index < count && s.top[page] + a_index != selected;
+			if (moved) {
+				selected = s.top[page] + a_index;
+			}
+			break;
+		}
+		s.top[page] = KitTop(s.top[page], s.selected[page], count);
+		if (moved) {
+			++(a_key ? s.keys : s.clicks);
+			g_refreshNow = true;   // the key thread sends an update at once
+		}
+		const auto& shown = g_kit.pages[KitPageIndex(s)];
+		return std::format("action={} index={} moved={} page={}/{} selected={}", kKitMoveNames[static_cast<std::size_t>(a_move)],
+			a_index, moved ? 1 : 0, shown.tab, shown.sub, s.selected[KitPageIndex(s)]);
+	}
+
+	// a click's target, by its instance name: a main tab, a sub-tab or a row (its hit area, its bar or its text).
+	// CLOSE has its own listener; any other name (the screen, a value row) changes nothing
+	std::string KitClick(std::string_view a_name)
+	{
+		const auto indexAfter = [&](std::string_view a_prefix) -> std::optional<std::size_t> {
+			if (!a_name.starts_with(a_prefix)) {
+				return std::nullopt;
+			}
+			const auto digits = a_name.substr(a_prefix.size());
+			if (digits.empty() || digits.size() > 2 ||
+				!std::ranges::all_of(digits, [](char a_c) { return a_c >= '0' && a_c <= '9'; })) {
+				return std::nullopt;
+			}
+			return static_cast<std::size_t>(std::strtoul(std::string(digits).c_str(), nullptr, 10));
+		};
+		for (const auto* prefix : { kKitTab, kKitTabMark, kKitTabHit }) {
+			if (const auto i = indexAfter(prefix)) {
+				return KitAct(KitMove::kTab, *i, false);
+			}
+		}
+		for (const auto* prefix : { kKitSub, kKitSubDim, kKitSubHit }) {
+			if (const auto i = indexAfter(prefix)) {
+				return KitAct(KitMove::kSub, *i, false);
+			}
+		}
+		for (const auto* prefix : { kKitRowName, kKitRowValue, kKitRowNameSel, kKitRowValueSel, kKitBar, kKitRowHit }) {
+			if (const auto i = indexAfter(prefix)) {
+				return KitAct(KitMove::kRow, *i, false);
+			}
+		}
+		return a_name == kKitClose ? "action=close (its own listener)" : "action=none";
+	}
+
+	// every click in the kit's movie reaches this listener on the root (Scaleform calls it on the menu's thread, the
+	// event as the only argument): the event's target, then its instance name
+	class KitClickHandler final : public RE::Scaleform::GFx::FunctionHandler
+	{
+	public:
+		void Call(const Params& a_params) override
+		{
+			const auto                n = ++g_kitClicks;
+			RE::Scaleform::GFx::Value target;
+			RE::Scaleform::GFx::Value name;
+			const bool                gotTarget = a_params.argCount >= 1 && a_params.args && a_params.args[0].IsObject() &&
+			                                      a_params.args[0].GetMember("target", &target) && target.IsObject();
+			const bool                gotName = gotTarget && target.GetMember("name", &name) && name.IsString();
+			const std::string         what = gotName ? name.GetString() : "";
+			const auto                action = gotName ? KitClick(what) : std::string("action=none");
+			REX::INFO("step=kit_click n={} args={} target={} name={} {}", n, a_params.argCount, gotTarget ? 1 : 0,
+				what.empty() ? "-" : what, action);
+		}
+	};
+	KitClickHandler g_kitClickHandler;
+
+	// our function as a_target's "click" listener (CreateFunction, addEventListener), as stage d adds its buttons'
+	bool KitAddListener(RE::Scaleform::GFx::ASMovieRootBase* a_root, RE::Scaleform::GFx::Value& a_target,
+		RE::Scaleform::GFx::FunctionHandler* a_handler, RE::Scaleform::GFx::Value& a_function)
+	{
+		a_root->CreateFunction(&a_function, a_handler);
+		if (a_function.IsUndefined()) {
+			return false;
+		}
+		std::array<RE::Scaleform::GFx::Value, 2> args;
+		args[0] = "click";
+		args[1] = a_function;
+		return a_target.Invoke("addEventListener", nullptr, args.data(), args.size());
+	}
+
+	// once per movie, at kShow: the movie's signature against ours, our listener on the root, and stage d's CLOSE
+	// handler on the CLOSE button
+	void KitListen(const void* a_menu)
+	{
+		auto* const root = RootOf(a_menu);
+		const auto  movie = MovieOf(a_menu);
+		if (!root || g_listenedMovie == movie) {
+			return;
+		}
+		g_listenedMovie = movie;
+		RE::Scaleform::GFx::Value top;
+		const bool                gotRoot = root->GetVariable(&top, "root") && top.IsObject();
+		RE::Scaleform::GFx::Value idField;
+		RE::Scaleform::GFx::Value id;
+		const bool        gotId = gotRoot && ChildOf(top, kKitId, idField) && idField.GetMember("text", &id) && id.IsString();
+		const std::string read = gotId ? id.GetString() : "";
+		REX::INFO("step=kit_movie id=\"{}\" expected=\"{}\" match={}", read, KitSignature(), read == KitSignature() ? "yes" : "no");
+		RE::Scaleform::GFx::Value rootFunction;
+		const bool                rootAdded = gotRoot && KitAddListener(root, top, &g_kitClickHandler, rootFunction);
+		REX::INFO("step=listen name=root root={} function_type={} added={} event=click", gotRoot ? 1 : 0,
+			TypeCode(rootFunction), rootAdded ? 1 : 0);
+		RE::Scaleform::GFx::Value close;
+		RE::Scaleform::GFx::Value closeFunction;
+		const bool                gotClose = gotRoot && ChildOf(top, kKitClose, close);
+		const bool                closeAdded = gotClose && KitAddListener(root, close, &g_closeHandler, closeFunction);
+		REX::INFO("step=listen name={} root={} button={} function_type={} added={} event=click", kKitClose, gotRoot ? 1 : 0,
+			gotClose ? 1 : 0, TypeCode(closeFunction), closeAdded ? 1 : 0);
+	}
+
+	struct KitCount
+	{
+		std::size_t found = 0;     // children found for a change
+		std::size_t set = 0;       // SetMember returned true
+		std::size_t match = 0;     // and the value read back
+		std::size_t missing = 0;   // no child of that name
+	};
+
+	// a field's text, set only if it changed since the last read-back on this movie
+	void KitSetText(RE::Scaleform::GFx::Value& a_root, const std::string& a_name, const std::string& a_text, KitCount& a_count)
+	{
+		if (const auto known = g_kitTexts.find(a_name); known != g_kitTexts.end() && known->second == a_text) {
+			return;
+		}
+		RE::Scaleform::GFx::Value field;
+		RE::Scaleform::GFx::Value back;
+		if (!ChildOf(a_root, a_name.c_str(), field)) {
+			++a_count.missing;
+			return;
+		}
+		++a_count.found;
+		a_count.set += field.SetMember("text", RE::Scaleform::GFx::Value(a_text.c_str())) ? 1 : 0;
+		if (field.GetMember("text", &back) && back.IsString() && a_text == back.GetString()) {
+			++a_count.match;
+			g_kitTexts[a_name] = a_text;   // one that did not read back is set again on the next write
+		}
+	}
+
+	// an object's `visible`, likewise
+	void KitSetShown(RE::Scaleform::GFx::Value& a_root, const std::string& a_name, bool a_shown, KitCount& a_count)
+	{
+		if (const auto known = g_kitShown.find(a_name); known != g_kitShown.end() && known->second == a_shown) {
+			return;
+		}
+		RE::Scaleform::GFx::Value object;
+		RE::Scaleform::GFx::Value back;
+		if (!ChildOf(a_root, a_name.c_str(), object)) {
+			++a_count.missing;
+			return;
+		}
+		++a_count.found;
+		a_count.set += object.SetMember("visible", RE::Scaleform::GFx::Value(a_shown)) ? 1 : 0;
+		if (object.GetMember("visible", &back) && back.IsBoolean() && back.GetBoolean() == a_shown) {
+			++a_count.match;
+			g_kitShown[a_name] = a_shown;
+		}
+	}
+
+	// at kShow (everything, a_show) and every kUpdate (what changed), on the menu's thread: the screen KitCollect built.
+	// Logged for n = 1 to 20, then every 20th, and on the first 20 with a child missing or a value not read back
+	void KitWrite(const void* a_menu, std::uint32_t a_update, bool a_show)
+	{
+		auto* const root = RootOf(a_menu);
+		if (!root) {
+			return;
+		}
+		static std::atomic<std::uint32_t> problems{ 0 };
+		KitScreen                         screen;
+		bool                              collected = false;
+		{
+			std::scoped_lock lock(g_pageLock);
+			screen = g_kitScreen;
+			collected = g_kitCollected;
+		}
+		if (a_show) {   // a new movie, or the same one shown again: set everything once
+			g_kitTexts.clear();
+			g_kitShown.clear();
+		}
+		RE::Scaleform::GFx::Value top;
+		const bool                gotRoot = root->GetVariable(&top, "root") && top.IsObject();
+		KitCount                  count;
+		if (gotRoot && collected) {
+			const auto named = [](const char* a_name, std::size_t a_i) { return std::format("{}{}", a_name, a_i); };
+			KitSetText(top, kKitTitle, screen.title, count);
+			KitSetText(top, kKitHeader, screen.header, count);
+			KitSetText(top, kKitHints, screen.hints, count);
+			for (std::size_t i = 0; i < g_kit.tabs.size(); ++i) {
+				KitSetText(top, named(kKitTab, i), screen.tabs[i], count);
+				KitSetShown(top, named(kKitTabMark, i), i == screen.tab, count);
+			}
+			for (std::size_t i = 0; i < kKitSubs; ++i) {
+				KitSetText(top, named(kKitSub, i), screen.subs[i], count);
+				KitSetText(top, named(kKitSubDim, i), screen.subs[i], count);
+				KitSetShown(top, named(kKitSub, i), i == screen.sub, count);
+				KitSetShown(top, named(kKitSubDim, i), i != screen.sub, count);
+			}
+			for (std::size_t i = 0; i < kKitRows; ++i) {
+				const bool selected = screen.bar && *screen.bar == i;
+				KitSetText(top, named(kKitRowName, i), screen.names[i], count);
+				KitSetText(top, named(kKitRowValue, i), screen.values[i], count);
+				KitSetText(top, named(kKitRowNameSel, i), screen.names[i], count);
+				KitSetText(top, named(kKitRowValueSel, i), screen.values[i], count);
+				KitSetShown(top, named(kKitRowName, i), !selected, count);
+				KitSetShown(top, named(kKitRowValue, i), !selected, count);
+				KitSetShown(top, named(kKitRowNameSel, i), selected, count);
+				KitSetShown(top, named(kKitRowValueSel, i), selected, count);
+				KitSetShown(top, named(kKitBar, i), selected, count);
+				KitSetText(top, named(kKitInfoLabel, i), screen.infoLabels[i], count);
+				KitSetText(top, named(kKitInfoValue, i), screen.infoValues[i], count);
+			}
+			KitSetShown(top, kKitMoreUp, screen.moreUp, count);
+			KitSetShown(top, kKitMoreDown, screen.moreDown, count);
+			for (std::size_t i = 0; i < kKitFooter; ++i) {
+				KitSetText(top, named(kKitFoot, i), screen.footer[i], count);
+			}
+		}
+		const auto n = ++g_kitWrites;
+		const bool problem = count.missing || count.match != count.found;
+		if (n <= 20 || n % 20 == 0 || (problem && problems++ < 20)) {
+			std::string rows;
+			for (std::size_t i = 0; i < kKitRows && rows.size() < 900; ++i) {
+				if (!screen.names[i].empty()) {
+					rows += std::format("{}{}{}{}", rows.empty() ? "" : " | ", screen.bar && *screen.bar == i ? ">" : "",
+						screen.names[i], screen.values[i]);
+				}
+			}
+			const auto& page = g_kit.pages[screen.page];
+			REX::INFO("step=kit n={} update={} show={} page={}/{} root={} collected={} changed={} set={} match={} missing={} "
+					  "bar={} footer=\"{}|{}|{}\" rows=\"{}\"",
+				n, a_update, a_show ? 1 : 0, page.tab, page.sub, gotRoot ? 1 : 0, collected ? 1 : 0, count.found, count.set,
+				count.match, count.missing, screen.bar ? std::to_string(*screen.bar) : "-", screen.footer[0], screen.footer[1],
+				screen.footer[2], rows);
+		}
+	}
+
+	// the kit's keys, every 30 ms on the key thread while the page is open and the game in front: a press moves once; a
+	// held Up or Down repeats after 420 ms, every 90 ms. Each press is logged with what it did
+	void KitKeys(std::array<std::uint32_t, 6>& a_held)
+	{
+		for (std::size_t i = 0; i < g_kitKeys.size(); ++i) {
+			const auto&   binding = g_kitKeys[i];
+			std::uint32_t vk = 0;
+			for (std::size_t k = 0; k < binding.count && !vk; ++k) {
+				if (W32_IMPL_GetAsyncKeyState(static_cast<std::int32_t>(binding.vk[k])) & 0x8000) {
+					vk = binding.vk[k];
+				}
+			}
+			if (!vk) {
+				a_held[i] = 0;
+				continue;
+			}
+			const auto ticks = ++a_held[i];
+			const bool repeats = binding.move == KitMove::kUp || binding.move == KitMove::kDown;
+			if (ticks == 1) {
+				REX::INFO("step=kit_key vk={} {}", Hex(vk), KitAct(binding.move, 0, true));
+			} else if (repeats && ticks > 14 && (ticks - 14) % 3 == 0) {
+				KitAct(binding.move, 0, true);
+			}
+		}
+	}
+
 	// ------------------------------------------------------------------------------------------- the menu's slots
 	void* MenuDestroy(void* a_self, std::uint32_t a_flags)
 	{
@@ -1500,9 +2456,12 @@ namespace
 			REX::INFO("step=message menu={} type={} raw={} result={}", Hex(reinterpret_cast<std::uintptr_t>(a_self)), name,
 				static_cast<std::uint32_t>(type), static_cast<std::int64_t>(result));
 		}
-		if (g_stage >= 3) {   // stages c and d: after the engine's own handling, on its thread for this menu
+		if (g_stage >= 3) {   // stages c, d and e: after the engine's own handling, on its thread for this menu
 			if (type == RE::UI_MESSAGE_TYPE::kShow) {
-				if (g_stage == 4) {   // the page opens on its first tab
+				if (g_stage == 5) {   // the kit opens on the page it showed last
+					KitListen(a_self);
+					KitWrite(a_self, 0, true);
+				} else if (g_stage == 4) {   // the page opens on its first tab
 					g_tab = 0;
 					PageListen(a_self);
 					PageWrite(a_self, 0);
@@ -1513,7 +2472,9 @@ namespace
 				Snapshot("show");
 			} else if (type == RE::UI_MESSAGE_TYPE::kUpdate) {
 				const auto n = ++g_updates;
-				if (g_stage == 4) {
+				if (g_stage == 5) {
+					KitWrite(a_self, n, false);
+				} else if (g_stage == 4) {
 					PageWrite(a_self, n);
 				} else {
 					ChannelWrite(a_self, n);
@@ -1555,7 +2516,7 @@ namespace
 		auto* imenu = static_cast<RE::IMenu*>(menu);
 		imenu->menuName = MenuName();
 		const auto ctorFlags = imenu->flags;
-		const auto extra = g_flags | (g_stage >= 3 ? FlagSet(n) : 0);   // stages c and d: this open's flag set
+		const auto extra = g_flags | (g_stage >= 3 ? FlagSet(n) : 0);   // stages c to e: this open's flag set
 		g_ctorFlags = ctorFlags;
 		if (extra) {
 			imenu->flags |= extra;
@@ -1776,7 +2737,7 @@ namespace
 		if (!CheckImage() || !ReadAddressLibrary(a_dir / "versionlib-1-16-244-0.bin") ||
 			!CheckVtable(kVtblPrimary, 0x00, "primary") || !CheckVtable(kVtblInput, 0x10, "BSInputEventUser") ||
 			!CheckVtable(kVtblSink, 0x50, "BSTEventSink") || !CheckSlots() || !CheckCtor() ||
-			(g_stage >= 3 && !CheckChannelIds()) || (g_stage == 4 && !CheckPageIds())) {
+			(g_stage >= 3 && !CheckChannelIds()) || (g_stage >= 4 && !CheckPageIds())) {
 			return false;
 		}
 		const auto* engine = reinterpret_cast<const std::uintptr_t*>(Address(kVtblPrimary));
@@ -1796,7 +2757,7 @@ namespace
 			g_vtbl.slots[0x0A] = reinterpret_cast<std::uintptr_t>(&MenuIsMovieLoaded);
 		}
 		REX::INFO("step=ready stage={} replaced=0x00,0x03,0x04,0x05,0x06,0x08{} locator={}",
-			g_stage == 1 ? "a" : g_stage == 2 ? "b" : g_stage == 3 ? "c" : "d", g_stage == 1 ? ",0x0A" : "",
+			g_stage == 1 ? "a" : g_stage == 2 ? "b" : g_stage == 3 ? "c" : g_stage == 4 ? "d" : "e", g_stage == 1 ? ",0x0A" : "",
 			Hex(g_vtbl.locator - g_base));
 		return true;
 	}
@@ -1813,6 +2774,9 @@ namespace
 		const bool open = ui->IsMenuOpen(MenuName());
 		if (g_stage == 4 && !open) {
 			PageCollect();   // the page's text before the show
+		}
+		if (g_stage == 5 && !open) {
+			KitCollect();    // the kit's screen before the show
 		}
 		g_expectOpen = open ? 0 : 1;
 		queue->AddMessage(MenuName(), open ? RE::UI_MESSAGE_TYPE::kHide : RE::UI_MESSAGE_TYPE::kShow);
@@ -1851,8 +2815,8 @@ namespace
 		}
 	}
 
-	// stages c and d, every 500 ms while the menu is open (and at once after NEXT TAB): one kUpdate, on which our
-	// ProcessMessage refreshes the field or the page; the page's text is collected here first
+	// stages c, d and e, every 500 ms while the menu is open (and at once after NEXT TAB or a kit move): one kUpdate, on
+	// which our ProcessMessage refreshes the field, the page or the kit; their text is collected here first
 	void SendUpdate()
 	{
 		auto* ui = RE::UI::GetSingleton();
@@ -1863,6 +2827,9 @@ namespace
 		}
 		if (g_stage == 4) {
 			PageCollect();
+		}
+		if (g_stage == 5) {
+			KitCollect();
 		}
 		queue->AddMessage(MenuName(), RE::UI_MESSAGE_TYPE::kUpdate);
 	}
@@ -1880,6 +2847,7 @@ namespace
 		std::uint32_t ticks = 0;
 		bool          down = false;
 		bool          snapDown = false;
+		std::array<std::uint32_t, 6> kitHeld{};   // stage e: how many 30 ms ticks each kit key has been held
 		for (;;) {
 			REX::W32::Sleep(30);
 			const bool now = (W32_IMPL_GetAsyncKeyState(static_cast<std::int32_t>(g_key)) & 0x8000) != 0;
@@ -1893,7 +2861,14 @@ namespace
 			if (g_stage < 3) {
 				continue;
 			}
-			if (g_stage == 4) {   // the page's buttons, heard on the menu's thread; a close counts as a press
+			if (g_stage == 5) {   // the kit's keys, only while the page is open and the game in front
+				if (g_open && GameInFront()) {
+					KitKeys(kitHeld);
+				} else {
+					kitHeld.fill(0);
+				}
+			}
+			if (g_stage >= 4) {   // the buttons (and the kit's moves), heard on the menu's thread; a close counts as a press
 				if (g_refreshNow.exchange(false)) {   // SendUpdate sends nothing once the menu is closed
 					g_task->AddTask([]() { SendUpdate(); });
 				}
@@ -2010,7 +2985,7 @@ namespace
 		return true;
 	}
 
-	// stage c: FlagSets=<n>,<n>,..., stage d: PageFlagSets (up to four, 0x.. or decimal); open k uses entry
+	// stage c: FlagSets=<n>,<n>,..., stages d and e: PageFlagSets (up to four, 0x.. or decimal); open k uses entry
 	// (k - 1) mod count
 	void ReadFlagSets(const std::filesystem::path& a_ini, const wchar_t* a_key, const wchar_t* a_default)
 	{
@@ -2050,15 +3025,15 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 		Hex(g_flags), g_keepAlive ? 1 : 0);
 
 	// true in every case: a plugin that stays loaded and idle leaves its refusal line, the finding the job card reads
-	if (g_stage < 1 || g_stage > 4) {
-		REX::INFO("step=off (Stage=1, 2, 3 or 4 in FO4SFPipboyMenu.ini to probe)");
+	if (g_stage < 1 || g_stage > 5) {
+		REX::INFO("step=off (Stage=1, 2, 3, 4 or 5 in FO4SFPipboyMenu.ini to probe)");
 		return true;
 	}
 	std::string clickCall;
 	bool        clickCallOk = true;
 	if (g_stage >= 3) {
 		g_snapshotKey = ReadNumber(ini, L"SnapshotKey", 0x7A);
-		if (g_stage == 4) {
+		if (g_stage >= 4) {   // (d) and (e)
 			ReadFlagSets(ini, L"PageFlagSets", L"0x9");
 		} else {
 			ReadFlagSets(ini, L"FlagSets", L"0x0,0x8,0x9");
@@ -2069,7 +3044,7 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 		for (std::size_t i = 0; i < g_flagSetCount; ++i) {
 			sets += std::format("{}{}", i ? "," : "", Hex(g_flagSets[i]));
 		}
-		REX::INFO("step=load_{} flag_sets={} snapshot_key={} click_call={}", g_stage == 4 ? "d" : "c",
+		REX::INFO("step=load_{} flag_sets={} snapshot_key={} click_call={}", g_stage == 5 ? "e" : g_stage == 4 ? "d" : "c",
 			sets.empty() ? "none" : sets, Hex(g_snapshotKey), clickCall.empty() ? "none" : clickCall);
 	}
 	if (runtime != kRuntime) {
@@ -2086,6 +3061,9 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	}
 	if (!clickCallOk) {
 		Refuse("ini", std::format("click_call={} (<script>.<function>: two Papyrus names, or empty)", clickCall));
+		return true;
+	}
+	if (g_stage == 5 && (!ReadKitKeys(ini) || !ReadKit(ini))) {   // the kit's keys and pages, before any check of the game
 		return true;
 	}
 	if (!CheckEverything(dir)) {
