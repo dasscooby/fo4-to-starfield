@@ -69,7 +69,9 @@ class ParseTests(unittest.TestCase):
     def test_an_empty_init_does_not_split_a_run(self):
         rs, _ = pl.runs(head() + ["FO4SFPA rt=2 init end=true"] + sat())
         self.assertEqual(len(rs), 1)
-        rs, _ = pl.runs(head() + head())
+        rs, _ = pl.runs(head() + head())                    # init and start are logged twice at load: one run
+        self.assertEqual(len(rs), 1)
+        rs, _ = pl.runs(head() + steps() + head())          # a new script instance after a step: a second run
         self.assertEqual(len(rs), 2)
 
 
@@ -88,9 +90,20 @@ class VerdictTests(unittest.TestCase):
         self.assertIn("stage 10 SwitchToPowerArmor: not judged (control failed", out)
         self.assertNotIn("SwitchToPowerArmor: entered", out)
 
-    def test_a_control_furniture_ref_of_none_is_inconclusive(self):
-        s = pl.summarize(head(controlref=None) + sat() + steps())
-        self.assertIn("did not find the control furniture reference", s["verdict"])
+    def test_a_start_line_logged_at_load_has_no_control_ref_and_the_sit_state_still_reads(self):
+        # PC run of 11 Nov: controlref=none (the cell is not loaded at load), sit lines furn=na sitstate=3 distc 0.12
+        lines = head(controlref=None) + [line(5.0, "sit", furn="na", sitstate=3, distc=0.12)] + steps()
+        s = pl.summarize(lines)
+        self.assertTrue(s["control"][0], s["control"])
+        self.assertTrue(s["verdict"].startswith("CONTROL OK"), s["verdict"])
+
+    def test_a_control_furniture_ref_of_none_and_never_seated_is_inconclusive(self):
+        s = pl.summarize(head(controlref=None) + [line(5.0, "sit", furn="na", sitstate=2, distc=1.0)] + steps())
+        self.assertIn("controlref none", s["verdict"])
+        self.assertTrue(s["verdict"].startswith("INCONCLUSIVE"))
+        # a furniture id cannot match a none reference
+        s = pl.summarize(head(controlref=None) + [line(5.0, "sit", furn=s32(CTRLREF), sitstate=0, distc=9.0)] + steps())
+        self.assertFalse(s["control"][0])
 
     def test_furniture_and_sit_state_both_na_cannot_read_the_control(self):
         na = lambda ls: [l.replace("sitstate=0", "sitstate=na").replace("furn=none", "furn=na") for l in ls]  # noqa: E731
@@ -170,6 +183,20 @@ class VerdictTests(unittest.TestCase):
         s = pl.summarize([])
         self.assertTrue(s["verdict"].startswith("INCONCLUSIVE"))
         self.assertEqual(pl.table(s), ["no readings"])
+
+
+class PcRunTests(unittest.TestCase):
+    def test_the_log_of_the_pc_run_of_11_nov_reads_as_control_ok_in_one_run(self):
+        """init and start twice at load with controlref none, sit lines with furn=na, no change at stage 10."""
+        lines = head(controlref=None) + head(controlref=None) + [
+            line(5.0, "sit", furn="na", sitstate=2, distc=1.049007), line(6.0, "sit", furn="na", sitstate=3, distc=0.12),
+            line(7.0, "sit", furn="na", sitstate=4, distc=0.12), line(8.0, "sit", furn="na", sitstate=0, distc=1.032809)] + steps()
+        s = pl.summarize(lines)
+        self.assertEqual(s["runs"], 1)
+        self.assertEqual(s["problems"], [])
+        self.assertTrue(s["verdict"].startswith("CONTROL OK"), s["verdict"])
+        self.assertEqual(s["steps"][10]["result"], "no logged change")
+        self.assertEqual((s["steps"][20]["result"], s["steps"][30]["result"]), ("race set", "restored"))
 
 
 class TableTests(unittest.TestCase):

@@ -60,6 +60,26 @@ The installer runs `exp_install.py`'s code on a record of its own, so the instal
 record are never read or changed (the name `planet_probe_install.py` is already the planet probe's own installer and
 record, so this one has its own file name). The log is `My Games\Starfield\Logs\Script\User\FO4SFPAProbe.0.log`.
 
+## Result of the PC run (11 Nov, 01:24 to 01:29 UTC, test save, no save made; owner's set restored)
+
+Head 9e252a4a, run by the owner PC (Claude), evidence `probe-pa-20261111T012358Z` on the PC. **Verified:**
+
+* Control: seated on the vanilla chair (sit state 3 at 0.12 units), stood up again.
+* Stage 10, `SwitchToPowerArmor` on the keyword-only furniture (player 2 units away, facing it): **no field changed**
+  (race, camera na, worn na, inpa na, furniture na, sit state 0); screenshots before, right after and 5 s later identical
+  (first person: no animation, camera or HUD change). Not tried: third person, a furniture that is more than a chair plus
+  the keyword.
+* Stage 20 `SetRace` to `FO4SF_PARace`: the race id changes at once and stays; stage 30 restores it. Nothing visible in
+  first person (the copy has HumanRace's skeleton). Whether a save survives the swap is untested.
+* Reading: the Fallout 4 entry call is not a ready path on a keyword-only furniture (a climb-in needs more than the
+  keyword: a real power armor furniture record if Starfield has one to copy, or a body swap); a power armor race can be
+  set on the player at run time and taken back in the same session.
+
+Reader findings from that run, fixed after it: the start line is logged at load, before the probe cell is loaded, so its
+`controlref` is none and the reader called the control failed although the `sit` lines (state 3 within 1.5 units) met its
+own rule: a none `controlref` no longer fails the control, only a sit state 3 near the control counts then; init and start
+are logged twice at load, which made "2 runs": an init is a new run only after a step.
+
 ## Session card
 
 **Throwaway state only. Do not save at any point.** The race swap (step 20) can break a save; do not autosave, quicksave
@@ -92,6 +112,11 @@ error text that appears.
    T-pose, missing head or hands, animation stall.
 5. Console: `setstage <Q> 30`. Wait 5 s. Screenshot `30-after-restore`.
 6. Quit to the desktop **without saving**. Run the reader command above and paste its output with the screenshots.
+**The quick way the PC used** (walking is not needed): `coc FO4SF_PAProbeCell` (the game closes the console by itself on the
+`coc`; open it again); `prid <load index>000805` then `activate player` seats the player on the control; W stands up;
+`player.setpos x -2`, `player.setpos y -2.5`, `player.setangle z 90` puts the player 2 units from the suit, facing it. The
+HUD is dimmer in this bright room, so `hud_visible.py` can read "no HUD" and `console_open.ps1` may not confirm. The load
+index depends on the load order (09 on the PC on 11 Nov: `setstage 09000803 10`).
 7. A retry needs a new game start: each step runs once per script instance.
 
 ## What the reader says
