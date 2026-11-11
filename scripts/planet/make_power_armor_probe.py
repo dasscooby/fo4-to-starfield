@@ -126,7 +126,9 @@ def compile_text(compiler, text, src_dir, out_dir):
         with open(os.path.join(work, SCRIPT + ".psc"), "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
         os.makedirs(out_dir, exist_ok=True)
-        r = subprocess.run([compiler, SCRIPT + ".psc", "-f=Starfield_Papyrus_Flags.flg", f"-i={work};{src_dir}", f"-o={out_dir}"],
+        # a .cmd/.bat stand-in is not a Win32 image: start it through the command interpreter
+        shell = ["cmd.exe", "/c"] if os.name == "nt" and str(compiler).lower().endswith((".cmd", ".bat")) else []
+        r = subprocess.run([*shell, compiler, SCRIPT + ".psc", "-f=Starfield_Papyrus_Flags.flg", f"-i={work};{src_dir}", f"-o={out_dir}"],
                            cwd=work, capture_output=True, text=True)
     ok = r.returncode == 0 and "Compilation succeeded" in r.stdout and os.path.exists(os.path.join(out_dir, SCRIPT + ".pex"))
     if ok:
