@@ -75,10 +75,11 @@ class KitPagesTests(unittest.TestCase):
                                    ("LUCK", "av:2C8")])
         self.assertEqual(pages[("DATA", "KIT TEST")]["list"], "kit_test")
         self.assertEqual(pages[("INV", "ITEMS")]["list"], "inventory")   # FAL-426: the first real list
+        self.assertEqual(pages[("DATA", "QUESTS")]["list"], "quests")    # FAL-431: our mission first
+        self.assertEqual(self.k["mission"], {"file": "FO4SFMission.esm", "local_id": 0x800})   # FO4SF_Min00
         self.assertEqual([value for _, value in pages[("MAP", "WORLD")]["rows"]],   # the map's first content, no picture
                          ["world", "cell", "position", "time", "days"])
-        for placeholder in (("DATA", "QUESTS"), ("RADIO", "STATIONS")):
-            self.assertTrue(pages[placeholder]["notice"], placeholder)   # named, and saying what it waits for
+        self.assertTrue(pages[("RADIO", "STATIONS")]["notice"])   # named, and saying what it waits for
         self.assertEqual(self.k["header"], "time")
         self.assertEqual(kit.signature(self.k), "FO4SF KIT 1 16 STAT,INV,DATA,MAP,RADIO")
 
@@ -131,7 +132,14 @@ class KitPagesTests(unittest.TestCase):
             "row label too long": "[Page T/S]\nRow=" + "A" * 34 + "|health\n",
             "row character": "[Page T/S]\nRow=A\"B|health\n",
             "unknown value": "[Page T/S]\nRow=A|inventory\n",
-            "unknown list": "[Page T/S]\nList=quests\n",
+            "unknown list": "[Page T/S]\nList=radio\n",
+            "mission without bar": "[Kit]\nMission=FO4SFMission.esm 800\n" + PAGE,
+            "mission twice": "[Kit]\nMission=A.esm|800\nMission=A.esm|800\n" + PAGE,
+            "mission not a plugin": "[Kit]\nMission=FO4SFMission.txt|800\n" + PAGE,
+            "mission id zero": "[Kit]\nMission=A.esm|0\n" + PAGE,
+            "mission id too long": "[Kit]\nMission=A.esm|1234567\n" + PAGE,
+            "mission id not hex": "[Kit]\nMission=A.esm|80G\n" + PAGE,
+            "mission file character": "[Kit]\nMission=A|B.esm|800\n" + PAGE,
             "two lists": "[Page T/S]\nList=kit_test\nList=kit_test\n",
             "two kinds": PAGE + "Notice=X\n",
             "no kind": "[Page T/S]\nFooter=HP|health\n",
@@ -147,6 +155,14 @@ class KitPagesTests(unittest.TestCase):
         for why, text in bad.items():
             with self.assertRaises(kit.KitError, msg=why):
                 kit.parse_kit(text)
+
+    def test_mission(self):
+        for good, out in (("FO4SFMission.esm|800", ("FO4SFMission.esm", 0x800)), ("a b_c-d.ESL|fffFFF", ("a b_c-d.ESL", 0xFFFFFF)),
+                          (" X.esp | 1 ", ("X.esp", 1)), ("A" * 60 + ".esm|800", ("A" * 60 + ".esm", 0x800))):
+            self.assertEqual(kit.check_mission(good, 1), {"file": out[0], "local_id": out[1]}, good)
+        for bad in ("A" * 61 + ".esm|800", ".esm|800", "A.esm|", "|800", "A/B.esm|800", "A.esm|-1"):
+            with self.assertRaises(kit.KitError, msg=bad):
+                kit.check_mission(bad, 1)
 
     def test_limits_are_inclusive(self):
         text = "[Kit]\nTitle=" + "T" * 42 + "\nHints=" + "H" * 72 + "\n"
@@ -352,6 +368,42 @@ class KitMovieTests(unittest.TestCase):
         with self.assertRaises(kit.KitError):
             kit.palette(0x1000000)
 
+    def test_fallout_4_look(self):
+        """FAL-431's first cut: the screen's frame with cut corners, scan lines (inside each hit area too, so a click on
+        one still names the area), a frame round the value rows; shapes only, every colour from the one setting."""
+        c = kit.palette(kit.PIPBOY_GREEN)
+        self.assertEqual((c["frame"], c["scan"]), (kit.packed(kit.scale(0x1AFF80, 0.60)), kit.packed(kit.scale(0x1AFF80, 0.11))))
+        screen = self.lay["screen"]
+        fields = [box_of(t["bounds"]) for t in self.named.values() if t["name"] == "DefineEditText"]
+        for key in ("frame", "scan", "info_frame"):
+            boxes = self.lay[key]
+            for i, a in enumerate(boxes):
+                self.assertTrue(inside(a, screen), (key, a))
+                for b in boxes[i + 1:]:
+                    self.assertFalse(overlap(a, b), (key, a, b))                # one shape: no box over another
+        for a in self.lay["frame"] + self.lay["info_frame"]:
+            for f in fields:
+                self.assertFalse(overlap(a, f), a)                              # no frame over any text
+        self.assertEqual(len(self.lay["frame"]), 4 + 4 * (kit.CORNER // kit.LINE))
+        pitch = kit.SCAN_PITCH * TWIPS
+        self.assertTrue(all((y - screen[1]) % pitch == 0 for _, y, _, _ in self.lay["scan"]))
+        drawn = {}
+        for t in self.movie["tags"]:
+            if t["name"] == "DefineShape3":
+                drawn.setdefault((t["fills"][0][0] << 16) | (t["fills"][0][1] << 8) | t["fills"][0][2], []).append(t)
+        self.assertEqual(len(drawn[c["frame"]]), 2)                             # the screen's frame and the info box's
+        n = kit.NAMES
+        hits = [f"{n['tab_hit']}{i}" for i in range(len(kit.tabs_of(self.k)))] + \
+               [f"{n['sub_hit']}{i}" for i in range(kit.SUBS)] + [f"{n['row_hit']}{i}" for i in range(kit.ROWS)]
+        for name in hits:
+            inner = [x for x in self.named[name]["tags"] if x["name"] == "PlaceObject2"]
+            self.assertEqual(len(inner), 2, name)                               # the screen's colour, then its lines
+            lines = self.by_id[inner[1]["character"]]
+            self.assertEqual((lines["fills"][0][0] << 16) | (lines["fills"][0][1] << 8) | lines["fills"][0][2], c["scan"])
+        for i in range(kit.ROWS):                                               # the selection bar: filled, in the ink
+            bar = self.named[f"{n['bar']}{i}"]
+            self.assertEqual(len([x for x in bar["tags"] if x["name"] == "PlaceObject2"]), 1)
+
     def test_another_ini_draws_its_own_tabs(self):
         k = kit.parse_kit("[Page ONE/A]\nRow=X|health\n[Page TWO/B]\nNotice=WAIT\n[Page ONE/C]\nList=kit_test\n")
         _, _, _, places, named = built(k)
@@ -486,6 +538,11 @@ class KitPluginTests(unittest.TestCase):
                       "if (g_kit.tabs.size() == kKitTabs) {", "if (subs.size() == kKitSubs) {",
                       'return KitRefuse(n, "no_pages");'):
             self.assertIn(check, read, check)
+        self.assertIn('key == "Mission" && g_kit.missionFile.empty() && KitMission(value)', read)
+        mission = function(self.main, "bool KitMission(")
+        for check in ('ext != ".esm" && ext != ".esp" && ext != ".esl"', "file.size() > 64", "hex.size() > 6",
+                      'std::string_view(" _-.")', "if (!id) {"):
+            self.assertIn(check, mission, check)
         cell = function(self.main, "bool KitCellOf(")
         self.assertIn("a_text.find('|', bar + 1) != std::string_view::npos", cell)
         value = function(self.main, "bool KitValueName(")
@@ -536,8 +593,13 @@ class KitPluginTests(unittest.TestCase):
         self.assertNotIn("REL::Relocation", self.section)
         self.assertNotIn("REL::ID", self.section)
         self.assertNotIn("reinterpret_cast<", self.section)
-        self.assertNotIn("FormById(", self.section)
-        self.assertEqual(self.main.count("FormById("), 4)                     # stage d's: the definition and three
+        self.assertEqual(self.main.count("FormById("), 6)                     # stage d's four and the quest list's two
+        files = function(self.main, "std::uint32_t KitFileForm(")              # FAL-431: our mission, by its file
+        quests = function(self.main, "std::vector<KitRow> KitQuestRows(")
+        self.assertEqual((files.count("FormById("), quests.count("FormById(")), (1, 1))
+        self.assertEqual(self.section.count("FormById("), 2)
+        self.assertIn("if (IsType(form, a_type, formType)) {", files)        # only a form of the asked RTTI type
+        self.assertIn('if (!IsType(quest, "TESQuest@@", type)) {', quests)
         self.assertEqual(self.main.count("reinterpret_cast<GetActorValue_t>"), 1)
         actor = function(self.main, "std::uintptr_t KitActorValue(")
         self.assertIn('AcceptById(a_id, "av", "ActorValueInfo@@", kAvifEditorIdAt, form)', actor)
@@ -641,7 +703,8 @@ class KitPluginTests(unittest.TestCase):
     def test_every_literal_on_the_kit_is_in_its_font(self):
         bodies = "".join(function(self.main, f) for f in ("void KitCollect()", "std::string KitValueRead(",
                                                           "std::vector<KitRow> KitTestRows(",
-                                                          "std::vector<KitRow> KitInventoryRows("))
+                                                          "std::vector<KitRow> KitInventoryRows(",
+                                                          "std::vector<KitRow> KitQuestRows("))
         texts = [t for t in re.findall(r'"([^"]*)"', bodies) if t and t == t.upper()]
         self.assertGreaterEqual(len(texts), 8)
         for text in texts:
