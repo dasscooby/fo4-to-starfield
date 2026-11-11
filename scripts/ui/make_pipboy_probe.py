@@ -3,6 +3,7 @@
 usage: python scripts/ui/make_pipboy_probe.py stage <dir> [--no-label] [--channel]
                                                                          FO4SFPipboyProbe.esm + Data/Interface/<movie>
        python scripts/ui/make_pipboy_probe.py check <FO4SFPipboyProbe.esm>
+       python scripts/ui/make_pipboy_probe.py twin <dir> <Interface/file.swf>   the same movie again at that path
 
 The plugin has no records. Its only job is to be active, so the game loads the archive named after it
 ("FO4SFPipboyProbe - Main.ba2"), which holds the stage (b) movie; this PC reads no loose files. It is written by
@@ -58,6 +59,45 @@ def check(path):
         return {"plugin": os.path.basename(path), "flags": p.flags, "masters": p.masters, "groups": 0}
 
 
+class TwinError(ValueError):
+    pass
+
+
+TWIN_SUFFIXES = (".swf", ".gfx")
+
+
+def twin_problem(rel):
+    """Why `rel` (relative to Data, "/" separated) cannot name a twin, or None. A twin is a vanilla movie's path under
+    Interface/, served by the probe archive only; never our own movie's path."""
+    parts = rel.split("/")
+    if len(parts) < 2 or parts[0].lower() != "interface":
+        return f"{rel!r}: a twin lives under Interface/"
+    if any(p in ("", ".", "..") for p in parts) or not all(c.isascii() and (c.isalnum() or c in "_.-") for p in parts for c in p):
+        return f"{rel!r}: letters, digits, _ . - and / only, no empty, . or .. part"
+    if not rel.lower().endswith(TWIN_SUFFIXES):
+        return f"{rel!r}: a twin ends in .swf or .gfx"
+    if rel.lower() == MOVIE.lower():
+        return f"{rel!r}: that is the overlay control's own movie"
+    return None
+
+
+def twin(out, rel):
+    """The world candidate's movie (FAL-250; README "World surface"): the bytes of the movie `stage` wrote, label
+    included, written again at <out>/Data/<rel>, so a vanilla menu that loads <rel> gets ours from the probe archive.
+    Starfield's own Interface archive is not touched. Stage first; returns the twin's path."""
+    problem = twin_problem(rel)
+    if problem:
+        raise TwinError(problem)
+    with open(os.path.join(out, "Data", *MOVIE.split("/")), "rb") as f:
+        data = f.read()
+    make_probe_swf.read_movie(data)
+    path = os.path.join(out, "Data", *rel.split("/"))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+    return path
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -67,15 +107,20 @@ def main(argv=None):
     s.add_argument("--channel", action="store_true", help="the data channel's movie (FAL-216, Stage=3)")
     c = sub.add_parser("check")
     c.add_argument("plugin")
+    t = sub.add_parser("twin")
+    t.add_argument("out")
+    t.add_argument("path", help="relative to Data, e.g. Interface/<vanilla movie>.swf (FAL-250)")
     a = ap.parse_args(argv)
     try:
         if a.cmd == "stage":
             esm, movie = stage(a.out, label=not a.no_label, channel=a.channel)
             check(esm)
             print(f"staged {esm} and {movie}; pack into {ARCHIVE}")
+        elif a.cmd == "twin":
+            print(f"staged twin {twin(a.out, a.path)}; set WorldMovie={a.path} in the ini")
         else:
             print(f"ok: {check(a.plugin)}")
-    except (EsmError, make_probe_swf.SwfError, OSError) as e:
+    except (EsmError, make_probe_swf.SwfError, TwinError, OSError) as e:
         print(f"make_pipboy_probe: {e}", file=sys.stderr)
         return 1
     return 0

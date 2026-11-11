@@ -64,6 +64,8 @@ REX_W32_IMPORT(void*, GetForegroundWindow);
 REX_W32_IMPORT(std::uint32_t, GetWindowThreadProcessId, void*, std::uint32_t*);
 REX_W32_IMPORT(std::uint32_t, GetCurrentProcessId);
 
+#include "world.h"   // FAL-250: the world-surface census and candidate (World=1; README.md, "World surface")
+
 namespace
 {
 	using namespace std::string_view_literals;
@@ -1103,6 +1105,7 @@ namespace
 		g_registered = true;
 		const auto hooked = *reinterpret_cast<const std::uint8_t*>(Address(kLoadMovie)) == 0xE9;   // SFSE's branch
 		REX::INFO("step=register result=ok name={} load_movie_hooked_by_sfse={}", kMenuName, hooked ? "yes" : "no");
+		World::Start(g_task);
 		const auto thread = REX::W32::CreateThread(nullptr, 0, &KeyThread, nullptr, 0, nullptr);
 		if (!thread) {
 			Refuse("key_thread", "reason=create_failed");
@@ -1114,6 +1117,7 @@ namespace
 
 	void OnMovieCreated(RE::IMenu* a_menu)
 	{
+		World::OnMovieCreated(a_menu);
 		if (IsOurs(a_menu)) {
 			REX::INFO("step=sfse_movie_created menu={} movie={}", Hex(reinterpret_cast<std::uintptr_t>(a_menu)),
 				Hex(reinterpret_cast<std::uintptr_t>(MovieOf(a_menu))));
@@ -1252,6 +1256,7 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	if (!CheckEverything(dir)) {
 		return true;
 	}
+	World::Configure(ini, g_stage, g_key, g_base, g_imageSize);
 	const auto messaging = SFSE::GetMessagingInterface();
 	g_task = SFSE::GetTaskInterface();
 	if (!messaging || !g_task || !messaging->RegisterListener(&OnMessage)) {
