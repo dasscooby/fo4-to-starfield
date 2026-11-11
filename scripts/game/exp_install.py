@@ -529,7 +529,8 @@ def has_textures(a):
 
 def build_ba2(a, root, out, textures=None):
     """Build a fresh BA2, preserving the previous archive if validation fails: the General archive of every folder but Textures,
-    or (textures=True) the DX10 archive of the Textures folder."""
+    or (textures=True) the texture archive of the Textures folder (Archive2 -format=DDS; its values are General, DDS, XBoxDDS, and it
+    writes the DX10 BA2 itself)."""
     if any(os.path.isfile(os.path.join(root, name)) for name in os.listdir(root)):
         sys.exit("cannot pack root-level Data files; place resources in supported subfolders")
     folders = sorted(d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d)))
@@ -538,7 +539,7 @@ def build_ba2(a, root, out, textures=None):
     if not folders:
         sys.exit(f"nothing to pack under {root}" + ("" if not textures else f" (no {TEXTURES} folder)"))
     # Vanilla terrain BTDs/masks use stored General entries. Do not apply the ordinary mesh archive compression.
-    deployment.build_archive(argparse.Namespace(starfield=a.starfield, staging=root), out, folders, "DX10" if textures else "General",
+    deployment.build_archive(argparse.Namespace(starfield=a.starfield, staging=root), out, folders, "DDS" if textures else "General",
                              compression="None")
     return out
 
