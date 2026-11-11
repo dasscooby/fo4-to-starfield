@@ -606,6 +606,75 @@ class KitPluginTests(unittest.TestCase):
         self.assertIn("g_kitActorValues.emplace(a_id, form);", actor)        # once per id
         self.assertIn("return ActorValueText(a_spec, KitActorValue(id));", function(self.main, "std::string KitValueRead("))
 
+    def test_a_packed_file_is_a_file(self):
+        """FAL-437: the game's file lists hold TESPackedFile (vtable RVA 0x4b29b80; RTTI bases TESPackedFile and TESFile,
+        both at +0), so `IsType(file, "TESFile@@")` refused every file and b385808d logged `found=no
+        reason=file_not_loaded`. IsFileType accepts TESFile, or a type with TESFile as its base at +0 (BaseOffset); a file
+        skipped for its type is counted and logged once. Checked as text, and by a Python model of IsFileType."""
+        is_file = function(self.main, "bool IsFileType(")
+        self.assertIn('return a_type.offset == 0 && (NameIs(a_type.name, "TESFile@@") || BaseOffset(a_type, "TESFile@@") == 0u);',
+                      is_file)
+        files = function(self.main, "std::uint32_t KitFileForm(")
+        self.assertNotIn('"TESFile@@"', files)
+        self.assertIn("if (!TypeOf(file, fileType) || !IsFileType(fileType)) {", files)
+        skip = files[files.index("if (!TypeOf(file, fileType) || !IsFileType(fileType)) {"):files.index("kFileNameAt")]
+        self.assertIn("if (!skipped++) {", skip)                                # the count, and the first type skipped
+        self.assertIn("continue;", skip)
+        self.assertIn('REX::INFO("step=kit_file file={} skipped={} type={} (not a TESFile at +0)"', files)
+        self.assertIn("if (skipped && !skipLogged) {", files)                   # once
+        self.assertEqual(files.count("logSkipped();"), 3)                       # found, file list unread, not loaded
+        self.assertIn('a_detail = std::format("reason=file_not_loaded skipped={}", skipped);', files)
+        self.assertIn("file_type={}", files)
+        hierarchy = function(self.main, "std::optional<std::uint32_t> BaseOffset(")
+        self.assertIn("return matches == 1 ? found : std::nullopt;", hierarchy)
+
+        def base_offset(bases, tail):   # BaseOffset: one non-virtual base of that name, else none
+            found = [mdisp for name, mdisp, pdisp in bases if name == tail]
+            if len(found) != 1 or any(p != -1 for n, _, p in bases if n == tail):
+                return None
+            return found[0]
+
+        def is_file_type(name, offset, bases):
+            return offset == 0 and (name == "TESFile" or base_offset(bases, "TESFile") == 0)
+
+        packed = [("TESPackedFile", 0, -1), ("TESFile", 0, -1)]                 # as the PC read it
+        self.assertTrue(is_file_type("TESPackedFile", 0, packed))
+        self.assertTrue(is_file_type("TESFile", 0, [("TESFile", 0, -1)]))
+        self.assertFalse(is_file_type("TESPackedFile", 0x10, packed))           # not the complete object
+        self.assertFalse(is_file_type("Other", 0, [("Other", 0, -1), ("TESFile", 0x10, -1)]))
+        self.assertFalse(is_file_type("Other", 0, [("Other", 0, -1), ("TESFile", 0, 8)]))   # virtual
+        self.assertFalse(is_file_type("TESForm", 0, [("TESForm", 0, -1)]))
+
+    def test_a_long_info_value_wraps_after_a_word(self):
+        """FAL-437: MISSION_NOT_FOUND showed as MISSION_NOT_FOUN / D, its last letter in the right-aligned value
+        column. A long value now takes the lines below its label, in the label column, broken after a word (KitWrap)."""
+        wrap = function(self.main, "std::vector<std::string> KitWrap(")
+        self.assertIn('find_last_of(" _-/|")', wrap)
+        self.assertIn("cut = at + 1;", wrap)
+        info = function(self.main, "void KitInfoLines(")
+        self.assertIn("for (const auto& part : KitWrap(text, kKitInfoLabelColumns)) {", info)
+        self.assertIn('a_screen.infoValues[line++] = "";', info)
+        self.assertNotIn("part.substr(kKitInfoLabelColumns)", info)
+
+        def kit_wrap(text, columns):   # KitWrap, line for line
+            lines = []
+            while text:
+                cut = min(len(text), columns)
+                if cut < len(text):
+                    at = max(text[:cut].rfind(c) for c in " _-/|")
+                    if at > 0:
+                        cut = at + 1
+                lines.append(text[:cut].rstrip(" "))
+                text = text[cut:].lstrip(" ")
+            return lines
+
+        columns = kit.INFO_LABEL_COLUMNS
+        self.assertEqual(kit_wrap("MISSION_NOT_FOUND", columns), ["MISSION_NOT_", "FOUND"])
+        self.assertEqual(kit_wrap("FO4SFMISSION.ESM", columns), ["FO4SFMISSION.ESM"])   # exactly one line
+        self.assertEqual(kit_wrap("A" * 20, columns), ["A" * 16, "A" * 4])
+        self.assertEqual(kit_wrap("QUESTS NOT READ AT ALL", columns), ["QUESTS NOT READ", "AT ALL"])
+        self.assertTrue(all(len(line) <= columns for line in kit_wrap("X" * 30 + " Y_Z", columns)))
+
     def test_time_and_days_only_at_the_checked_value_offset(self):
         # stage d's ReadTime at the offset FindGlobalValue found (libxse's +0x40 read -3.5924 at a156037c)
         read = function(self.main, "std::string KitValueRead(")

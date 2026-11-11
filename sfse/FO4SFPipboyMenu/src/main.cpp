@@ -1015,6 +1015,14 @@ namespace
 		return matches == 1 ? found : std::nullopt;
 	}
 
+	// a plugin file's complete type: TESFile, or a type with TESFile as its base at +0. The data handler's file lists
+	// hold TESPackedFile objects (FAL-437: the PC read every loaded file's vtable at RVA 0x4b29b80, RTTI
+	// TESPackedFile, its bases itself and TESFile, both at +0), which a plain IsType(file, "TESFile@@") refuses
+	bool IsFileType(const ObjectType& a_type)
+	{
+		return a_type.offset == 0 && (NameIs(a_type.name, "TESFile@@") || BaseOffset(a_type, "TESFile@@") == 0u);
+	}
+
 	// the subobject at a_offset is a base of the object's complete type: its vtable's locator names that same
 	// complete type at that offset
 	bool CheckSubobject(std::uintptr_t a_object, const ObjectType& a_type, std::uint32_t a_offset)
@@ -2152,12 +2160,22 @@ namespace
 	}
 
 	// a plugin file's form: its TESFile by name in the data handler's compiled file collection (libxse 9d090c4: files,
-	// smallFiles, mediumFiles at +0x00, +0x10, +0x20, each a BSTArray<TESFile*>; a file accepted by its RTTI), then
-	// the form id that file gives a_localId (full: the compile index, then fileIndex's full byte; small FE + 12 bits;
-	// medium FD + 16 bits), accepted only if the engine's lookup gives a form of RTTI type a_type. a_detail logs the
-	// file and every id tried
+	// smallFiles, mediumFiles at +0x00, +0x10, +0x20, each a BSTArray<TESFile*>; a file accepted by its RTTI as
+	// IsFileType), then the form id that file gives a_localId (full: the compile index, then fileIndex's full byte;
+	// small FE + 12 bits; medium FD + 16 bits), accepted only if the engine's lookup gives a form of RTTI type a_type.
+	// a_detail logs the file and every id tried; files skipped for their type are counted, and logged once
+	// (step=kit_file), so a miss is never silent
 	std::uint32_t KitFileForm(std::string_view a_file, std::uint32_t a_localId, std::string_view a_type, std::string& a_detail)
 	{
+		static bool skipLogged = false;
+		std::size_t skipped = 0;
+		std::string skippedType;
+		const auto  logSkipped = [&] {
+			if (skipped && !skipLogged) {
+				skipLogged = true;
+				REX::INFO("step=kit_file file={} skipped={} type={} (not a TESFile at +0)", a_file, skipped, skippedType);
+			}
+		};
 		const auto handler = Singleton(kDataHandlerSingleton);
 		ObjectType type;
 		if (!IsType(handler, "TESDataHandler@@", type)) {
@@ -2169,14 +2187,23 @@ namespace
 			if (!Peek(handler + kFileCollectionAt + kind * 0x10, files) || files.size > files.capacity ||
 				files.size > kKitMaxFiles || (files.size && !files.data)) {
 				a_detail = std::format("reason=files kind={} size={} capacity={}", kind, files.size, files.capacity);
+				logSkipped();
 				return 0;
 			}
 			for (std::uint32_t i = 0; i < files.size; ++i) {
 				std::uintptr_t                  file = 0;
 				ObjectType                      fileType;
 				std::array<char, kFileNameSize> name{};
-				if (!Peek(files.data + i * sizeof(std::uintptr_t), file) || !IsType(file, "TESFile@@", fileType) ||
-					!Peek(file + kFileNameAt, name.data(), name.size()) ||
+				if (!Peek(files.data + i * sizeof(std::uintptr_t), file) || !file) {
+					continue;
+				}
+				if (!TypeOf(file, fileType) || !IsFileType(fileType)) {
+					if (!skipped++) {
+						skippedType = fileType.name.empty() ? "unread" : ShortName(fileType.name);
+					}
+					continue;
+				}
+				if (!Peek(file + kFileNameAt, name.data(), name.size()) ||
 					!SameText(std::string_view(name.data(), strnlen(name.data(), name.size())), a_file)) {
 					continue;
 				}
@@ -2193,8 +2220,9 @@ namespace
 				} else {
 					ids = { 0xFD000000u | (std::uint32_t{ index[1] } << 16) | (a_localId & 0xFFFF) };
 				}
-				a_detail = std::format("file_kind={} file={} compile_index={:02x} file_index={}", kind, Hex(file), compile,
-					KitBytes(file + kFileIndexAt, 4));
+				a_detail = std::format("file_kind={} file={} file_type={} compile_index={:02x} file_index={}", kind, Hex(file),
+					ShortName(fileType.name), compile, KitBytes(file + kFileIndexAt, 4));
+				logSkipped();
 				for (const auto id : ids) {
 					ObjectType formType;
 					const auto form = FormById(id);
@@ -2206,7 +2234,8 @@ namespace
 				return 0;
 			}
 		}
-		a_detail = "reason=file_not_loaded";
+		a_detail = std::format("reason=file_not_loaded skipped={}", skipped);
+		logSkipped();
 		return 0;
 	}
 
@@ -2261,8 +2290,29 @@ namespace
 			{ "FLAGS", flagged ? std::format("{:04X}", flags) : "?" }, { "STAGE", "?" } } } };
 	}
 
+	// a_text in lines of at most a_columns, each broken after its last space, '_', '-', '/' or '|' when the rest does
+	// not fit, else cut at a_columns (FAL-437: MISSION_NOT_FOUND read MISSION_NOT_FOUN / D)
+	std::vector<std::string> KitWrap(std::string_view a_text, std::size_t a_columns)
+	{
+		std::vector<std::string> lines;
+		while (!a_text.empty()) {
+			auto cut = std::min(a_text.size(), a_columns);
+			if (cut < a_text.size()) {
+				const auto at = a_text.substr(0, cut).find_last_of(" _-/|");
+				if (at != std::string_view::npos && at > 0) {
+					cut = at + 1;
+				}
+			}
+			const auto line = a_text.substr(0, cut);
+			lines.emplace_back(line.substr(0, line.find_last_not_of(' ') + 1));
+			a_text.remove_prefix(cut);
+			a_text.remove_prefix(std::min(a_text.find_first_not_of(' '), a_text.size()));
+		}
+		return lines;
+	}
+
 	// the selected row's value rows: a label and its value right-aligned, or, for a value longer than its column,
-	// the label alone and the value on the lines below across both columns
+	// the label alone and the value on the lines below, left-aligned in the label column (KitWrap)
 	void KitInfoLines(const std::vector<std::pair<std::string, std::string>>& a_info, KitScreen& a_screen)
 	{
 		constexpr auto width = kKitInfoLabelColumns + kKitInfoValueColumns;
@@ -2278,10 +2328,12 @@ namespace
 				continue;
 			}
 			++line;
-			for (std::size_t at = 0; at < text.size() && line < kKitRows; at += width, ++line) {
-				const auto part = std::string_view(text).substr(at, width);
-				a_screen.infoLabels[line] = std::string(part.substr(0, kKitInfoLabelColumns));
-				a_screen.infoValues[line] = part.size() > kKitInfoLabelColumns ? std::string(part.substr(kKitInfoLabelColumns)) : "";
+			for (const auto& part : KitWrap(text, kKitInfoLabelColumns)) {
+				if (line == kKitRows) {
+					break;
+				}
+				a_screen.infoLabels[line] = part;
+				a_screen.infoValues[line++] = "";
 			}
 		}
 	}
