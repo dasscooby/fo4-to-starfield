@@ -33,7 +33,9 @@ Your own log card goes beside this one. This part only names what this head need
    `python -m unittest tests.test_make_probe_swf tests.test_make_pipboy_probe tests.test_pipboy_probe_install
    tests.test_pipboy_menu_channel tests.test_pipboy_stat_page`, then `python scripts\guard.py`. Post the dll's sha256.
 2. **Stage** with `--page`: `python scripts\ui\make_pipboy_probe.py stage $exp --page`, then `check`. `make_probe_swf.py
-   --read` on the movie lists `fo4sfTab`, `fo4sfLine0` to `fo4sfLine6`, `fo4sfTabButton` and `fo4sfCloseButton`.
+   --read` on the movie lists `fo4sfTab`, `fo4sfLine0` to `fo4sfLine6`, `fo4sfTabButton` and `fo4sfCloseButton`. The
+   stage also holds `owner-card.txt` beside the plugin: these eight steps in the launcher's plain-text form (outside
+   Data, so neither packed nor installed).
 3. **Install** (game closed, receipts first): the dll, its ini with `Stage=4` (`-replace '^Stage=0','Stage=4'`), and
    the Address Library file, as in section 3 of that card; no FOCCPing or FOCCSidecar. Expect `Stage=4`,
    `PageFlagSets=0x9`, `SnapshotKey=0x7A`. Then `pipboy_probe_install.py install --dir $exp --starfield $sf`.
@@ -46,11 +48,13 @@ Your own log card goes beside this one. This part only names what this head need
 
 **What the log must show** (`sfse/FO4SFPipboyMenu/README.md`, "PASS at (d)"): `step=ready stage=d` after
 `step=page_ids data_handler=sfse_equal lookup_by_id=sfse_equal`; at the first open `step=page_strings self_test=ok`,
-`step=page_actor_values ... get_actor_value_slot=0x01`, `step=page_form_arrays` and `step=page_forms` with `found=`; two
+`step=page_actor_values ... get_actor_value_slot=0x01`, `step=page_form_arrays`, `step=page_forms` with `known=`, and
+`step=page_globals from=0x28 ...` then `step=page_globals value_at=...`; two
 `step=listen name=... added=1`; `step=page ... fields=8/8 set=8 match=8` lines whose `text=` changes; `step=click
 button=tab` per NEXT TAB and `step=click button=close`, `step=close ... sent=hide`, `step=state ... match=yes` for
 CLOSE. Any `refuse` or `step=page_unknown` line is a finding: post it whole. Also post `step=page_forms` and
-`step=page_form_arrays` whole: `known=` shows, for each fixed form id, what the lookup gave.
+`step=page_form_arrays` and both `step=page_globals` lines whole: `known=` shows, for each fixed form id, what the
+lookup gave; `from=0x28` the globals' bytes, where the time's value offset was searched.
 
 **PASS:** every STATUS line shows a value (RADS may say `NOT INSTALLED`), TIME and UPDATES change while the page is
 open, CELL or HEALTH change between opens, both buttons work, and the console's controls match the page.
