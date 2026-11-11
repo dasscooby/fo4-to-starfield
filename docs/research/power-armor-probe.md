@@ -101,7 +101,16 @@ native code), each as its own variant so the log names which one the call needs.
 | `keyword` | `PowerArmorArmorKeyword_DO` -> `FO4SF_PAArmorKeyword` (ours, 000807) | |
 
 Run `race` first, then stage 10 again on the same card (control, step 3): does `SwitchToPowerArmor` now change the race,
-sit state or camera? If yes, add the other two (and name in the log which one made the difference). The frame armor
+sit state or camera?
+
+**What a stage-10 result would and would not prove.** `FO4SF_PARace` is a copy of HumanRace: same skeleton, graph and
+meshes. A race id that changes at stage 10 (before / now / settled in the log) proves the call now reaches the default
+object and sets the race (the entry path works with that object); it will probably show **nothing on screen**, so the log
+is the evidence and the screenshots are only the second half. No change proves only that this object alone is not enough
+(try the next variant), not that the call is dead. A visible climb-in or a camera change would be more than this kit is
+built to produce. Neither outcome says anything about a power armor body, the frame armor or the battery.
+
+If the race (or sit state, or camera) changes, add the other two (and name in the log which one made the difference). The frame armor
 (001909D6 in Fallout 4) and the battery are not set by any variant: their record shapes are not read yet (the owner PC
 offered `NEEDS-PC dump <ids>`). The check refuses a plugin whose default objects are not exactly the variant's; the
 script and the reader are unchanged (the reader already prints race before, right after and 4 s later). A variant stage
@@ -111,6 +120,11 @@ is its own folder and its own plan.json ("variant"); install one at a time (same
 
 **Throwaway state only. Do not save at any point.** The race swap (step 20) can break a save; do not autosave, quicksave
 or save on exit. Use a new-game start or a character you will delete.
+
+**A variant kit (`--variant`) is for a throwaway session only, never for a save the owner keeps.** A default-object
+override changes what the engine's power armor default objects point at for every save loaded with the plugin ticked, not
+just for this session's test: the plugin changes the game's rules for as long as it is in the load order. Install it for
+the test, quit without saving, uninstall it (`power_armor_probe_install.py uninstall`) before playing a real save.
 
 Screenshots (F12 or the usual key), named with the step: `00-arrival`, `01-control-seated`, `10a-before`, `10b-now`,
 `10c-settled` (first and third person for each), `20-after-setrace`, `30-after-restore`, and any message, HUD change or
