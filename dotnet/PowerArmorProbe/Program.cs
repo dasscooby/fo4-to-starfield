@@ -26,7 +26,7 @@
 // usage: PowerArmorProbe build <Starfield.esm> <out dir> [--control <furniture editor id>] [--with-hand] [--frame-art <ARMO editor id>] [--piece-art <ARMO editor id>]
 //        PowerArmorProbe check <plugin> <Starfield.esm> [same options]     exit 1 on a mismatch
 //        --frame-art / --piece-art: copy that vanilla ARMO (every field: its armatures, which are what make it wearable, and its own slot)
-//        into the frame / both pieces. Defaults Spacesuit_Mark1_Body / Spacesuit_Mark1_Helmet (the PC run of #733: an ARMO with NO armature
+//        into the frame / both pieces. Defaults Spacesuit_Mark1_Body / _Helmet / _Backpack (--pack-art: the second piece; the PC run of #733: an ARMO with NO armature
 //        is refused by the equip, with any race), so a stage always carries art; `none` is the offline test's opt-out, never the game's.
 //        PowerArmorProbe fixture <out dir>             a synthetic Starfield.esm holding the three records looked up
 using System.Globalization;
@@ -53,6 +53,8 @@ try
     string? fa = Take("--frame-art"), pa = Take("--piece-art");
     if (fa != null) PowerArmorProbe.FrameArt = fa == "none" ? null : fa;
     if (pa != null) PowerArmorProbe.PieceArt = pa == "none" ? null : pa;
+    string? ka = Take("--pack-art");
+    if (ka != null) PowerArmorProbe.PackArt = ka == "none" ? null : ka;
     int w = rest.IndexOf("--with-hand");
     if (w >= 0) { PowerArmorProbe.WithHand = true; rest.RemoveAt(w); }
     if (rest.Count == 3 && rest[0] == "build") return PowerArmorProbe.Build(rest[1], rest[2], control);
@@ -73,7 +75,7 @@ static class PowerArmorProbe
     public class Refusal(string m) : Exception(m);
 
     // options (set by the command line; check must be given the same ones as build)
-    public static string? FrameArt = "Spacesuit_Mark1_Body", PieceArt = "Spacesuit_Mark1_Helmet";
+    public static string? FrameArt = "Spacesuit_Mark1_Body", PieceArt = "Spacesuit_Mark1_Helmet", PackArt = "Spacesuit_Mark1_Backpack";   // PC run of #733 at 8fe7c27e: two pieces in ONE slot push each other off
     public static bool WithHand;
 
     const StarfieldRelease Release = StarfieldRelease.Starfield;
@@ -154,7 +156,8 @@ static class PowerArmorProbe
         });
         IArmorGetter? frameArt = FrameArt == null ? null : One(sf.Armors, FrameArt, "ARMO");
         IArmorGetter? pieceArt = PieceArt == null ? null : One(sf.Armors, PieceArt, "ARMO");
-        foreach (var (id, edid, name, slot, art) in Armors(frameArt, pieceArt))
+        IArmorGetter? packArt = PackArt == null ? null : One(sf.Armors, PackArt, "ARMO");
+        foreach (var (id, edid, name, slot, art) in Armors(frameArt, pieceArt, packArt))
         {
             var armor = art == null ? new Armor(Own(id), Release) : (Armor)art.Duplicate(Own(id));
             armor.EditorID = edid;
@@ -256,11 +259,11 @@ static class PowerArmorProbe
         return 0;
     }
 
-    static (uint Id, string Edid, string Name, FirstPersonFlag Slot, IArmorGetter? Art)[] Armors(IArmorGetter? frameArt, IArmorGetter? pieceArt) => new[]
+    static (uint Id, string Edid, string Name, FirstPersonFlag Slot, IArmorGetter? Art)[] Armors(IArmorGetter? frameArt, IArmorGetter? pieceArt, IArmorGetter? packArt) => new[]
     {
         (FrameId, FrameEdid, "FO4SF power armor frame", FirstPersonFlag.BODY, frameArt),
         (PieceHelmId, PieceHelmEdid, "FO4SF power armor helmet", FirstPersonFlag.Hat, pieceArt),
-        (PieceTorsoId, PieceTorsoEdid, "FO4SF power armor torso plate", FirstPersonFlag.UpperBody1VisOnly, pieceArt),
+        (PieceTorsoId, PieceTorsoEdid, "FO4SF power armor torso plate", FirstPersonFlag.UpperBody1VisOnly, packArt),
     };
 
     static void Write(StarfieldMod mod, string outDir, params ModKey[] masters)
@@ -341,8 +344,8 @@ static class PowerArmorProbe
         if (av != null) Console.WriteLine($"  AVIF {av.EditorID} {av.FormKey} type {av.Type} default {av.DefaultValue} min {av.Min} max {av.Max}");
         var armors = mod.Armors.ToList();
         Need(armors.Count == 3, "not exactly three ARMO (frame, helmet, torso plate)");
-        var wantArt = new Dictionary<uint, string?> { [FrameId] = FrameArt, [PieceHelmId] = PieceArt, [PieceTorsoId] = PieceArt };
-        foreach (var (id, edid, _, slot, _) in Armors(null, null))
+        var wantArt = new Dictionary<uint, string?> { [FrameId] = FrameArt, [PieceHelmId] = PieceArt, [PieceTorsoId] = PackArt };
+        foreach (var (id, edid, _, slot, _) in Armors(null, null, null))
         {
             var ar = armors.FirstOrDefault(x => x.FormKey == Own(id));
             Need(ar?.EditorID == edid, $"no ARMO {edid}");
@@ -441,7 +444,8 @@ static class PowerArmorProbe
         ExtendedList<ArmorAddonModel> Addons(params uint[] ids) => new(ids.Select(i => new ArmorAddonModel { ArmorAddon = new FormLinkNullable<IArmorAddonGetter>(Sf(i)) }));
         mod.Armors.Add(new Armor(Sf(0x0030A1), Release) { EditorID = "SynthArmorArt", Name = "Synthetic art armor", FirstPersonFlags = FirstPersonFlag.BODY, Armatures = Addons(0x0030A2, 0x0030A3) });
         mod.Armors.Add(new Armor(Sf(0x0030A4), Release) { EditorID = "Spacesuit_Mark1_Body", Name = "Synthetic suit body", FirstPersonFlags = FirstPersonFlag.BODY, Armatures = Addons(0x0030A5) });
-        mod.Armors.Add(new Armor(Sf(0x0030A6), Release) { EditorID = "Spacesuit_Mark1_Helmet", Name = "Synthetic suit helmet", FirstPersonFlags = FirstPersonFlag.Backpack, Armatures = Addons(0x0030A7) });
+        mod.Armors.Add(new Armor(Sf(0x0030A8), Release) { EditorID = "Spacesuit_Mark1_Backpack", Name = "Synthetic suit pack", FirstPersonFlags = FirstPersonFlag.Backpack, Armatures = Addons(0x0030A9) });
+        mod.Armors.Add(new Armor(Sf(0x0030A6), Release) { EditorID = "Spacesuit_Mark1_Helmet", Name = "Synthetic suit helmet", FirstPersonFlags = FirstPersonFlag.Hat, Armatures = Addons(0x0030A7) });
         Directory.CreateDirectory(outDir);
         mod.BeginWrite.ToPath(Path.Combine(outDir, "Starfield.esm")).WithNoLoadOrder().Write();
         Console.WriteLine($"wrote {Path.Combine(outDir, "Starfield.esm")}");

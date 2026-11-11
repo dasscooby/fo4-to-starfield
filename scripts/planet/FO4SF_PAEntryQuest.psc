@@ -58,7 +58,9 @@ bool FallbackEntryUsed = false
 string LastSitText = "0"
 Race StartRace = None
 Form[] SavedWorn = None     ; what the player wore at entry (up to 64 distinct items), re-equipped at the exit
-int SavedCount = 0          ; -1 when the game has no Actor.GetWornItem: nothing is restored then and the screen says so
+int SavedCount = 0          ; how many items the player's OnItemUnequipped reported while the suit went on
+bool Recording = false      ; true from just before the equips until 1 s after
+bool WatchOn = false        ; true when the registration for the player's OnItemUnequipped compiled in
 
 ; ---------------------------------------------------------------- init
 
@@ -169,25 +171,29 @@ bool Function IsSaved(Form aForm, int aCount)
     return false
 EndFunction
 
-int Function SaveWorn(Actor p)
-    {Records every distinct item the player wears (SavedWorn) and how many; -1 when the game has no Actor.GetWornItem. The entry
-     takes the place of what is worn in the slots of the suit; the exit puts it back (PC run of #733: nothing put it back itself).}
-    int n = -1
-;OPT Actor.GetWornItem     n = 0
-;OPT Actor.GetWornItem     int slot = 0
-;OPT Actor.GetWornItem     while slot < 64
-;OPT Actor.GetWornItem         Actor:WornItem w = p.GetWornItem(slot)
-;OPT Actor.GetWornItem         if w && w.item && n < 64 && !IsSaved(w.item, n)
-;OPT Actor.GetWornItem             SavedWorn[n] = w.item
-;OPT Actor.GetWornItem             n += 1
-;OPT Actor.GetWornItem         endif
-;OPT Actor.GetWornItem         slot += 1
-;OPT Actor.GetWornItem     endwhile
-    return n
+bool Function IsOurs(Form aForm)
+    return aForm == Thing(FrameId) || aForm == Thing(PieceHelmId) || aForm == Thing(PieceTorsoId)
 EndFunction
 
+; What the player wore is learned from the game's own events (PC run of #733 at 8fe7c27e: Starfield's Actor has no GetWornItem):
+; just before our three EquipItem calls the script listens to the player's OnItemUnequipped and records every base object that
+; comes off while the suit goes on (ours excluded); the exit equips those again. Both lines are guesses (;OPT): the registration
+; and the handler each compile on their own. Without them nothing is recorded and the screen says so.
+Function WatchWorn(Actor p)
+;OPT ScriptObject.RegisterForRemoteEvent     RegisterForRemoteEvent(p, "OnItemUnequipped")
+;OPT ScriptObject.RegisterForRemoteEvent     WatchOn = true
+EndFunction
+
+;OPT Actor.OnItemUnequipped Event Actor.OnItemUnequipped(Actor akSender, Form akBaseObject, ObjectReference akReference)
+;OPT Actor.OnItemUnequipped     if Recording && akBaseObject && SavedCount < 64 && !IsOurs(akBaseObject) && !IsSaved(akBaseObject, SavedCount)
+;OPT Actor.OnItemUnequipped         SavedWorn[SavedCount] = akBaseObject
+;OPT Actor.OnItemUnequipped         SavedCount += 1
+;OPT Actor.OnItemUnequipped         Trace("unequipped item=" + Id(akBaseObject))
+;OPT Actor.OnItemUnequipped     endif
+;OPT Actor.OnItemUnequipped EndEvent
+
 Function RestoreWorn(Actor p)
-    {Equips again what SaveWorn recorded (an item already worn stays as it is).}
+    {Equips again what the unequipped events recorded (an item already worn stays as it is).}
     int i = 0
     while i < SavedCount
         if SavedWorn[i]
@@ -244,14 +250,13 @@ EndFunction
 Function PutOn()
     Actor p = Game.GetPlayer()
     Trace("enter cycle=" + Cycle + " " + StateText("before"))
-    SavedCount = SaveWorn(p)
-    if SavedCount < 0
-        Trace("saved worn=na (not in this game's scripts): nothing will be put back at the exit")
-        SavedCount = 0
-        Say("The game cannot list what you wear: your own clothes will not be put back at the exit.")
-    else
-        Trace("saved worn=" + SavedCount)
+    SavedCount = 0
+    WatchWorn(p)
+    if !WatchOn
+        Trace("watch=na (the unequipped event is not in this game's scripts): nothing will be put back at the exit")
+        Say("The game gives no word of what comes off: your own gear will not be put back at the exit.")
     endif
+    Recording = true
     p.AddItem(Thing(FrameId), 1, true)
     p.AddItem(Thing(PieceHelmId), 1, true)
     p.AddItem(Thing(PieceTorsoId), 1, true)
@@ -277,9 +282,9 @@ Function TakeOff()
     p.RemoveItem(Thing(PieceHelmId), 1, true)
     p.RemoveItem(Thing(PieceTorsoId), 1, true)
     RestoreWorn(p)
-    Trace("restored worn=" + SavedCount)
+    Trace("restored worn=" + SavedCount + " watch=" + WatchOn)
     Phase = 0
-    Say("Suit OFF requested: value cleared, pieces unequipped and removed, your " + SavedCount + " worn items put back. Reading it back...")
+    Say("Suit OFF requested: value cleared, pieces unequipped and removed, your " + SavedCount + " pieces of gear put back. Reading it back...")
     StartTimer(READ1_S, TIMER_XREAD1)
     StartTimer(READ2_S, TIMER_XREAD2)
 EndFunction
@@ -341,7 +346,9 @@ Event OnTimer(int aiTimerID)
     elseif aiTimerID == TIMER_EXIT
         TakeOff()
     elseif aiTimerID == TIMER_READ1
-        Say(StateText("Suit 1 s after the entry"))
+        Recording = false
+        Trace("saved worn=" + SavedCount + " watch=" + WatchOn)
+        Say(StateText("Suit 1 s after the entry") + "; your gear that came off: " + SavedCount)
     elseif aiTimerID == TIMER_READ2
         Say(StateText("Suit 4 s after the entry"))
         EntryVerdict()

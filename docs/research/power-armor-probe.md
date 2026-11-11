@@ -272,3 +272,27 @@ Changed offline (awaiting a fourth PC run), the PC's four findings:
 
 Card changes: step 1 stages with the defaults (no art options needed); step 7 adds "the character wears what it wore before".
 Not yet seen: first-person arms, the inventory screen, a second enter and leave, the 120 s exit, the restore of a changed outfit.
+
+### PC run of #733 at 8fe7c27e: FAIL, and the fixes (FAL-361)
+
+Verified by the PC (11:37 to 11:44 UTC, test save, no save): equipped **2 of 3** (both pieces were the helmet copy in the same slot, one
+pushed the other off); in third person with the suit ON the character stood in plain clothes (the copies took the place of the own
+suit, pack and helmet, and none of the copies was drawn); after the exit the own gear **did not come back** (`Actor.GetWornItem` is not
+declared in Starfield's scripts, so nothing was recorded). The best state so far stays 1a6096e1 with art (PASS, slots BODY / Hat).
+
+Changed offline (awaiting a fifth PC run):
+
+1. **Two pieces, two slots.** New `--pack-art` (default `Spacesuit_Mark1_Backpack`, 01754E on the PC, one armature) for the second piece;
+   the helmet piece keeps `Spacesuit_Mark1_Helmet`. Each copy keeps its own slot.
+2. **Worn gear by events, not by listing.** `GetWornItem` is removed. Just before the three `EquipItem` calls the script registers for the
+   player's `OnItemUnequipped` (`RegisterForRemoteEvent`, `;OPT`, with the handler `Event Actor.OnItemUnequipped` also `;OPT`, each
+   compiled on its own), records every base object that comes off for 1 s (ours excluded), logs `saved worn=N watch=<bool>` and shows
+   "your gear that came off: N"; the exit equips them again (`restored worn=N`). If the registration does not compile, the screen says
+   the gear will not be put back. **Not run offline:** whether the player's event fires for an unequip caused by a slot clash, and the
+   Papyrus compile of the remote event form.
+3. **A frame-only stage** (does a copied suit body draw at all in the SSBODY slot?): `--piece-art none --pack-art none`. The two
+   pieces then have no armature and their equip is refused (an error in Papyrus.0.log, expected), the frame equips alone, and the
+   screen reads "equipped 1 of 3".
+
+Not changed: the look. Whether copies of the vanilla suit pieces draw over the character's own gear is what the PC run decides; the
+gear-restore should be read from the outfit in third person after the exit, not only from the log.

@@ -161,7 +161,7 @@ class EntryScriptTests(unittest.TestCase):
 
     def test_the_value_and_the_item_equip_reads_are_guesses_behind_opt(self):
         self.assertEqual(mpa.optional_names(ENTRY_PSC), ["Actor.GetSitState", "Actor.GetValue", "Actor.SetValue", "Actor.IsEquipped",
-                                                         "Actor.GetWornItem", "ObjectReference.MoveTo"])
+                                                         "ScriptObject.RegisterForRemoteEvent", "Actor.OnItemUnequipped", "ObjectReference.MoveTo"])
         self.assertEqual(mpa.enable(ENTRY_PSC, []), ENTRY_PSC)
         for name in ("EquipItem", "UnequipItem"):
             self.assertIn(name, mpa.REQUIRED["Actor"])
@@ -182,15 +182,23 @@ class EntryScriptTests(unittest.TestCase):
         """PC run of #733: the entry takes the place of what is worn in the suit's slots and nothing put it back."""
         put_on = ENTRY_PSC.split("Function PutOn()")[1].split("EndFunction")[0]
         take_off = ENTRY_PSC.split("Function TakeOff()")[1].split("EndFunction")[0]
-        self.assertLess(put_on.index("SavedCount = SaveWorn(p)"), put_on.index("p.AddItem("))      # recorded BEFORE the suit goes on
+        self.assertLess(put_on.index("WatchWorn(p)"), put_on.index("p.EquipItem("))                # listening BEFORE the suit goes on
+        self.assertLess(put_on.index("Recording = true"), put_on.index("p.EquipItem("))
         self.assertLess(take_off.index("p.RemoveItem(Thing(PieceTorsoId)"), take_off.index("RestoreWorn(p)"))
         self.assertIn("p.EquipItem(SavedWorn[i], false, true)", ENTRY_PSC.split("Function RestoreWorn")[1])
         self.assertIn("SavedWorn = new Form[64]", ENTRY_PSC.split("Event OnInit()")[1])
         self.assertIn('Trace("saved worn="', ENTRY_PSC)
         self.assertIn('Trace("restored worn="', ENTRY_PSC)
-        self.assertIn("will not be put back", ENTRY_PSC)                                  # said when the game cannot list the worn items
-        self.assertIn("worn items put back", ENTRY_PSC)
-        self.assertIn("p.GetWornItem(slot)", mpa.enable(ENTRY_PSC, ["Actor.GetWornItem"]))
+        self.assertIn("will not be put back", ENTRY_PSC)                                  # said when the game gives no unequipped event
+        self.assertIn("pieces of gear put back", ENTRY_PSC)
+        self.assertNotIn(";OPT Actor.GetWornItem", ENTRY_PSC)                                        # not in Starfield's scripts (PC run of #733 at 8fe7c27e)
+        on = mpa.enable(ENTRY_PSC, ["ScriptObject.RegisterForRemoteEvent", "Actor.OnItemUnequipped"])
+        self.assertIn('RegisterForRemoteEvent(p, "OnItemUnequipped")', on)
+        self.assertIn("Event Actor.OnItemUnequipped(Actor akSender, Form akBaseObject, ObjectReference akReference)", on)
+        handler = on.split("Event Actor.OnItemUnequipped")[1].split("EndEvent")[0]
+        self.assertIn("!IsOurs(akBaseObject)", handler)                                  # our own pieces coming off are not "worn gear"
+        self.assertIn("Recording", handler)
+        self.assertIn("Recording = false", on.split("aiTimerID == TIMER_READ1")[1].split("elseif")[0])   # recording stops 1 s after the entry
 
     def test_a_game_without_a_sit_state_still_enters_once(self):
         self.assertIn('elseif sitText == "na" && !FallbackEntryUsed', ENTRY_PSC)
@@ -261,12 +269,12 @@ BASES = {
     "Actor": "Scriptname Actor extends ObjectReference\nFunction SwitchToPowerArmor(ObjectReference a) native\nFunction SetRace(Race r) native\n"
              "Function EquipItem(Form f, bool a, bool b) native\nFunction UnequipItem(Form f, bool a, bool b) native\nbool Function IsEquipped(Form f) native\n"
              "Race Function GetRace() native\nObjectReference Function GetFurnitureReference() native\nint Function GetSitState() native\n"
-             "Actor:WornItem Function GetWornItem(int i) native\n",
+             "Actor:WornItem Function GetWornItem(int i) native\nEvent OnItemUnequipped(Form f, ObjectReference r) native\n",
     "Game": "Scriptname Game\nActor Function GetPlayer() native global\nForm Function GetFormFromFile(int i, string p) native global\n"
             "bool Function IsPluginInstalled(string p) native global\n",
     "Debug": "Scriptname Debug\nFunction Notification(string s) native global\nbool Function OpenUserLog(string n) native global\nbool Function TraceUser(string n, string t) native global\n",
     "Utility": "Scriptname Utility\nfloat Function GetCurrentRealTime() native global\n",
-    "ScriptObject": "Scriptname ScriptObject\nFunction StartTimer(float f, int i) native\n",
+    "ScriptObject": "Scriptname ScriptObject\nFunction StartTimer(float f, int i) native\nFunction RegisterForRemoteEvent(ScriptObject o, string e) native\n",
     "Quest": "Scriptname Quest extends ScriptObject\nbool Function GetStageDone(int i) native\n",
 }
 
@@ -293,7 +301,7 @@ class PrecheckTests(unittest.TestCase):
         self.assertEqual(r["optional"], {"Actor.GetWornItem": True, "Actor.GetFurnitureReference": True,
                                          "Actor.GetSitState": True, "Actor.IsInPowerArmor": False, "Game.GetCameraState": False,
                                          "ObjectReference.MoveTo": True, "Actor.GetValue": False, "Actor.SetValue": False,
-                                         "Actor.IsEquipped": True})
+                                         "Actor.IsEquipped": True, "ScriptObject.RegisterForRemoteEvent": True, "Actor.OnItemUnequipped": True})
 
     def test_a_missing_required_native_is_named(self):
         z = os.path.join(self.tmp.name, "cr.zip")
@@ -425,8 +433,8 @@ class StageTests(unittest.TestCase):
         self.assertEqual(check.returncode, 0, check.stdout)
         self.assertRegex(check.stdout, r"FURN FO4SF_PAEntryFurn keywords \[000900:Starfield.esm\] \(the control's, no FurnitureTypePowerArmor\)")
         self.assertRegex(check.stdout, r"AVIF FO4SF_PAInPowerArmor 00080C:FO4SFPowerArmorProbe.esm type Variable default 0 min 0 max 1")
-        for edid, slot, art in (("FO4SF_PAFrame", "BODY", "Spacesuit_Mark1_Body"), ("FO4SF_PAPieceHelm", "Backpack", "Spacesuit_Mark1_Helmet"),
-                                ("FO4SF_PAPieceTorso", "Backpack", "Spacesuit_Mark1_Helmet")):      # the copied art's OWN slot (fixture helmet: Backpack)
+        for edid, slot, art in (("FO4SF_PAFrame", "BODY", "Spacesuit_Mark1_Body"), ("FO4SF_PAPieceHelm", "Hat", "Spacesuit_Mark1_Helmet"),
+                                ("FO4SF_PAPieceTorso", "Backpack", "Spacesuit_Mark1_Backpack")):    # the copied art's OWN slot; two pieces, two slots
             self.assertRegex(check.stdout, rf"ARMO {edid} \S+ slot {slot} armatures 1 \(art: {art}\)")
         self.assertIn("REFR 00080B:FO4SFPowerArmorProbe.esm FO4SF_PAEntryFurnRef base 00080A:FO4SFPowerArmorProbe.esm at (3, 0, 0)", check.stdout)
 
@@ -509,6 +517,9 @@ class StageTests(unittest.TestCase):
         self.assertEqual(sorted(plan["outputs"]), sorted([PLUGIN, "Data/Scripts/FO4SF_PAProbeQuest.pex", "Data/Scripts/FO4SF_PAHandQuest.pex",
                                                     "Data/Scripts/FO4SF_PAEntryQuest.pex"]))
         self.assertEqual(plan["optional_entry"]["Actor.IsEquipped"], "kept")
+        self.assertEqual(plan["optional_entry"]["Actor.OnItemUnequipped"], "kept")
+        self.assertEqual(plan["optional_entry"]["ScriptObject.RegisterForRemoteEvent"], "kept")
+        self.assertEqual(plan["pack_art"], "Spacesuit_Mark1_Backpack")
         self.assertEqual(plan["optional_entry"]["Actor.GetValue"], "not declared in the base scripts")
         self.assertEqual(plan["optional_entry"]["Actor.GetSitState"][:8], "declared")
         self.assertFalse(plan["hand_quest_on"])

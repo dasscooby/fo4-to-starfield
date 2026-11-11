@@ -6,7 +6,7 @@ usage:
       sources (Scripts/Source of ContentResources.zip; inheritance followed). Exit 1 when a required one is missing.
   python make_power_armor_probe.py stage --out <dir> [--starfield <Starfield.esm>] [--compiler <exe>]
                                          [--content-resources <zip>] [--control <furniture editor id>] [--with-hand]
-                                         [--frame-art <ARMO editor id>] [--piece-art <ARMO editor id>]
+                                         [--frame-art <ARMO editor id>] [--piece-art <ARMO editor id>] [--pack-art <ARMO editor id>]
       1. dotnet/PowerArmorProbe build + check against the Starfield.esm given (offline_check.txt);
       2. the Papyrus compile: each optional reading (";OPT <Base.Name> " lines of the .psc) whose name the base sources
          declare is compiled on its own, the ones that compile are kept, every other one is reported in plan.json
@@ -52,6 +52,7 @@ ENTRY_PSC = os.path.join(HERE, ENTRY_SCRIPT + ".psc")
 DEFAULT_CONTROL = "NPCChairTech03_Free_270"
 DEFAULT_FRAME_ART = "Spacesuit_Mark1_Body"      # PC run of #733: pieces with an armature equip, pieces without one are refused
 DEFAULT_PIECE_ART = "Spacesuit_Mark1_Helmet"
+DEFAULT_PACK_ART = "Spacesuit_Mark1_Backpack"     # the second piece: a different slot than the helmet (PC run of #733 at 8fe7c27e: 2 of 3 equipped)
 STARFIELD = r"D:\SteamLibrary\steamapps\common\Starfield"
 LOG = os.path.join(os.path.expanduser("~"), "Documents", "My Games", "Starfield", "Logs", "Script", "User", "FO4SFPAProbe.0.log")
 # what the script cannot run without (the optional readings are the .psc's ";OPT" lines)
@@ -205,7 +206,7 @@ def stage(a):
     os.makedirs(work)
     tool = ["dotnet", "run", "-c", "Release", "--project", PROJECT, "--"]
     opts = ["--control", a.control] + (["--with-hand"] if a.with_hand else [])
-    opts += ["--frame-art", a.frame_art, "--piece-art", a.piece_art]
+    opts += ["--frame-art", a.frame_art, "--piece-art", a.piece_art, "--pack-art", a.pack_art]
     wrote = run(tool + ["build", a.starfield, out] + opts).stdout
     check = run(tool + ["check", os.path.join(out, PLUGIN), a.starfield] + opts).stdout
     with open(os.path.join(out, "offline_check.txt"), "w", encoding="utf-8") as f:
@@ -250,7 +251,7 @@ def stage(a):
         sys.exit(f"Starfield.esm changed during the build, nothing published; attempt kept in {out}")
     plan = {"kind": "power-armor-probe", "version": 1, "plugins": [PLUGIN], "outputs": stage_files(out),
             "inputs": {"Starfield.esm": {"sha256": before}}, "control": a.control, "optional": fate, "optional_hand": hand_fate, "optional_entry": entry_fate,
-            "hand_quest_on": bool(a.with_hand), "frame_art": a.frame_art, "piece_art": a.piece_art,
+            "hand_quest_on": bool(a.with_hand), "frame_art": a.frame_art, "piece_art": a.piece_art, "pack_art": a.pack_art,
             "log": "<My Games>/Starfield/Logs/Script/User/FO4SFPAProbe.0.log"}
     with open(os.path.join(out, "plan.json"), "w", encoding="utf-8") as f:
         json.dump(plan, f, indent=1)
@@ -262,7 +263,7 @@ def stage(a):
 no console; moves you into the room and shows on screen what the engine answered; start game enabled only with --with-hand,
 this stage: {'yes' if a.with_hand else 'no'}), QUST FO4SF_PAEntryQuest (the entry by script: sit on the entry chair and the race, the
 frame and pieces and the value are set; sit on the vanilla chair and they are undone; art: frame {a.frame_art or 'none'}, pieces
-{a.piece_art or 'none'}), FURN FO4SF_PAEntryFurn, AVIF FO4SF_PAInPowerArmor, ARMO FO4SF_PAFrame / PAPieceHelm / PAPieceTorso. Master Starfield.esm only; adds
+{a.piece_art or 'none'}, pack {a.pack_art or 'none'}), FURN FO4SF_PAEntryFurn, AVIF FO4SF_PAInPowerArmor, ARMO FO4SF_PAFrame / PAPieceHelm / PAPieceTorso. Master Starfield.esm only; adds
 records, overrides none. Checked against Starfield.esm {before}. Re-stage after a game update.
 Optional readings: {', '.join(f'{k}: {v}' for k, v in fate.items()) or 'none'}; by hand: {', '.join(f'{k}: {v}' for k, v in hand_fate.items()) or 'none'}; entry: {', '.join(f'{k}: {v}' for k, v in entry_fate.items()) or 'none'}.
 Install (the owner's word, game closed; loose scripts are not read, the installer packs them into a ba2):
@@ -302,6 +303,7 @@ def main(argv=None):
     s.add_argument("--with-hand", action="store_true")
     s.add_argument("--frame-art", default=DEFAULT_FRAME_ART)
     s.add_argument("--piece-art", default=DEFAULT_PIECE_ART)
+    s.add_argument("--pack-art", default=DEFAULT_PACK_ART)
     g = sub.add_parser("log")
     g.add_argument("--file", default=LOG)
     a = p.parse_args(argv)
