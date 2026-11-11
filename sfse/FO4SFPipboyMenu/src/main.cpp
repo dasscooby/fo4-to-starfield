@@ -29,8 +29,23 @@
 // engine event backend), 0x08 ProcessMessage (logged; stage a answers kShow itself, as the engine's refuses a menu
 // without a movie), and in stage a 0x0A IsMovieLoaded (true). The key is polled on a worker thread; every UI call runs
 // on the main thread through SFSE's task interface.
+//
+// Stage=3 (c), FAL-216: stage (b) plus the data channel, with the movie make_probe_swf.py --channel writes. Inside our
+// ProcessMessage, on the engine's own thread for this menu: at kShow the plugin finds the movie's two named children
+// (getChildByName) and adds a click listener on the button whose handler is ours; at kShow and at every kUpdate (sent
+// every 500 ms while the menu is open) it writes the player's position into the text field and reads it back. Pause
+// state and the input holders (the UI menu stack and ControlMap's active input contexts) are logged at show, while
+// open, at hide, on the main thread after each toggle, and on a second key. FlagSets cycles the menu flags per open.
+// Checked first, at stage c only: 13 more ids (singletons of Main, the player and ControlMap; five RTTI type
+// descriptors, by name; five Scaleform Value functions, each equal to SFSE 0.2.21's own address for 1.16.244), then,
+// before first use, the type of every object: Main, the player, ControlMap, the movie (GFx::MovieImpl) and its root
+// (GFx::AS3::MovieRoot), whose two slots we call (0x30 CreateFunction, 0x32 GetVariable; libxse and SFSE agree on
+// both) must be inside the image. Reads of engine objects whose layout only libxse states (menu stack, input
+// contexts, the pause byte, the position) are guarded: a fault logs "fault" instead of stopping the game.
 
 #include "pch.h"
+
+#include <cmath>
 
 // Win32 calls that libxse's REX::W32 does not wrap, imported the way REX/W32.cpp imports its own (REX/W32/BASE.h):
 // libxse refuses a <windows.h> included before it
@@ -52,6 +67,18 @@ namespace
 	constexpr std::size_t   kCtorScan = 0x200;
 	constexpr std::size_t   kHeaderBytes = 96;               // Address Library format 5 header (libxse REL/IDDB.cpp)
 	constexpr char          kTypeName[] = ".?AVIMenu@@";
+	constexpr auto          kFieldName = "fo4sfPosition";    // make_probe_swf.py FIELD_NAME
+	constexpr auto          kButtonName = "fo4sfButton";     // make_probe_swf.py BUTTON_NAME
+	constexpr std::size_t   kMovieRootAt = 0x18;             // GFx::Movie: RefCountBase 0x00, StateBag 0x10, root 0x18
+	constexpr std::size_t   kCreateFunctionSlot = 0x30;      // GFx::ASMovieRootBase (libxse and SFSE 0.2.21 agree)
+	constexpr std::size_t   kGetVariableSlot = 0x32;
+	constexpr std::size_t   kMainPausedAt = 0x448;           // libxse RE::Main::isGameMenuPaused
+	constexpr std::size_t   kMenuStackAt = 0x3F0;            // libxse RE::UI::menuStack (BSTArray: size, capacity, data)
+	constexpr std::size_t   kMenuFlagsAt = 0xC0;             // libxse RE::IMenu::flags
+	constexpr std::size_t   kContextsAt = 0x2A8;             // libxse RE::ControlMap::activeInputContexts (16-byte items)
+	constexpr std::size_t   kPositionAt = 0x80 + 0x0C;       // libxse RE::TESObjectREFR::data (0x80), OBJ_REFR::location
+	constexpr std::size_t   kMaxListed = 16;                 // menus and contexts listed per snapshot
+	constexpr std::size_t   kMaxFlagSets = 4;
 
 	struct Id
 	{
@@ -78,6 +105,20 @@ namespace
 		kLoadMovie,
 		kProcessMessage,
 		kIsMovieLoaded,
+		kIdCountB,                       // stages a and b check the ids above; stage c all of them
+		kMainSingleton = kIdCountB,
+		kPlayerSingleton,
+		kControlMapSingleton,
+		kMainRtti,
+		kPlayerRtti,
+		kControlMapRtti,
+		kMovieImplRtti,
+		kMovieRootRtti,
+		kValueAddRef,
+		kValueRelease,
+		kValueGetMember,
+		kValueSetMember,
+		kValueInvoke,
 		kIdCount
 	};
 
@@ -100,6 +141,37 @@ namespace
 		{ "IMenu.LoadMovie", 130618, "precedent" },
 		{ "IMenu.ProcessMessage", 130624, "precedent" },
 		{ "IMenu.IsMovieLoaded", 130619, "precedent" },
+		{ "Main.Singleton", 883591, "libxse" },
+		{ "PlayerCharacter.Singleton", 922868, "libxse" },
+		{ "ControlMap.Singleton", 938003, "libxse" },
+		{ "Main.RTTI", 859948, "libxse RTTI_Main, checked by name" },
+		{ "PlayerCharacter.RTTI", 860819, "libxse RTTI_PlayerCharacter, checked by name" },
+		{ "ControlMap.RTTI", 867481, "libxse RTTI_ControlMap, checked by name" },
+		{ "GFx.MovieImpl.RTTI", 841612, "libxse RTTI_Scaleform__GFx__MovieImpl, checked by name" },
+		{ "GFx.AS3.MovieRoot.RTTI", 842209, "libxse RTTI_Scaleform__GFx__AS3__MovieRoot, checked by name" },
+		{ "GFx.Value.ObjectAddRef", 169745, "libxse, equal to SFSE's" },
+		{ "GFx.Value.ObjectRelease", 169746, "libxse, equal to SFSE's" },
+		{ "GFx.Value.GetMember", 169748, "libxse, equal to SFSE's" },
+		{ "GFx.Value.SetMember", 169749, "libxse, equal to SFSE's" },
+		{ "GFx.Value.Invoke", 169750, "libxse, equal to SFSE's" },
+	} };
+
+	// stage c: each RTTI id's type name after its ".?AV" (class) or ".?AU" (struct) prefix, and SFSE 0.2.21's own
+	// 1.16.244 address of each Value function (sfse/ScaleformValue.h at 48535cc, ObjectInterface); the Address Library
+	// offset must equal it
+	constexpr std::array<std::pair<std::size_t, std::string_view>, 5> kRttiNames{ {
+		{ kMainRtti, "Main@@"sv },
+		{ kPlayerRtti, "PlayerCharacter@@"sv },
+		{ kControlMapRtti, "ControlMap@@"sv },
+		{ kMovieImplRtti, "MovieImpl@GFx@Scaleform@@"sv },
+		{ kMovieRootRtti, "MovieRoot@AS3@GFx@Scaleform@@"sv },
+	} };
+	constexpr std::array<std::pair<std::size_t, std::uint32_t>, 5> kSfseRvas{ {
+		{ kValueAddRef, 0x3352400 },
+		{ kValueRelease, 0x33524A0 },
+		{ kValueGetMember, 0x33528A0 },
+		{ kValueSetMember, 0x3352C90 },
+		{ kValueInvoke, 0x33530B0 },
 	} };
 
 	using Ctor_t = void* (*)(void*);
@@ -118,7 +190,7 @@ namespace
 	static_assert(sizeof(PrimaryVtable) == (1 + kSlots) * sizeof(std::uintptr_t));   // no padding: locator is slots[-1]
 
 	// INI (FO4SFPipboyMenu.ini next to the dll)
-	int           g_stage = 0;      // 0 off, 1 = (a), 2 = (b)
+	int           g_stage = 0;      // 0 off, 1 = (a), 2 = (b), 3 = (c)
 	std::uint32_t g_key = 0x79;     // F10
 	std::uint32_t g_flags = 0;      // OR'ed into the flags the constructor set
 	bool          g_keepAlive = true;
@@ -137,7 +209,26 @@ namespace
 	std::atomic<std::uint32_t>               g_otherMessages{ 0 };
 	std::atomic<int>                         g_expectOpen{ -1 };
 
+	// stage c (INI FlagSets, SnapshotKey)
+	std::array<std::uint32_t, kMaxFlagSets>  g_flagSets{};
+	std::size_t                              g_flagSetCount = 0;
+	std::uint32_t                            g_snapshotKey = 0x7A;   // F11; 0 = none
+	std::atomic<std::uint32_t>               g_ctorFlags{ 0 };
+	std::atomic<std::uint32_t>               g_shows{ 0 };
+	std::atomic<std::uint32_t>               g_updates{ 0 };
+	std::atomic<std::uint32_t>               g_clicks{ 0 };
+	std::atomic<std::uint32_t>               g_snapshots{ 0 };
+	std::atomic<bool>                        g_open{ false };          // the main thread's last IsMenuOpen
+	std::atomic<bool>                        g_channelOff{ false };    // a channel check refused: no more channel calls
+	std::atomic<const void*>                 g_listenedMovie{ nullptr };   // the movie our click listener is on
+	std::atomic<const void*>                 g_checkedMovie{ nullptr };    // the movie whose root RootOf checked
+	std::atomic<int>                         g_mainOk{ -1 };           // -1 unchecked, 0 refused, 1 checked
+	std::atomic<int>                         g_playerOk{ -1 };
+	std::atomic<int>                         g_controlMapOk{ -1 };
+
 	std::uintptr_t Address(std::size_t a_id) { return g_base + g_rva[a_id]; }
+
+	std::size_t IdCount() { return g_stage == 3 ? kIdCount : kIdCountB; }
 
 	bool InImage(std::uintptr_t a_addr, std::size_t a_len)
 	{
@@ -163,10 +254,334 @@ namespace
 		return static_cast<const RE::IMenu*>(a_menu)->uiMovie.get();
 	}
 
+	bool Refuse(std::string_view a_step, const std::string& a_what);
+
+	// ------------------------------------------------------------------------------------------- stage c: reading
+	// A read behind a pointer the engine handed us, or of a layout only libxse states: an access fault returns false
+	// instead of stopping the game (a structured exception handler; no C++ object lives in this frame)
+	bool Peek(std::uintptr_t a_addr, void* a_out, std::size_t a_len)
+	{
+		__try {
+			std::memcpy(a_out, reinterpret_cast<const void*>(a_addr), a_len);
+			return true;
+		} __except (1 /* EXCEPTION_EXECUTE_HANDLER */) {
+			return false;
+		}
+	}
+
+	template <class T>
+	bool Peek(std::uintptr_t a_addr, T& a_out)
+	{
+		return Peek(a_addr, &a_out, sizeof(T));
+	}
+
+	// the mangled name in an RTTI type descriptor (inside the image), or "" if it leaves the image unterminated
+	std::string TypeNameAt(std::uintptr_t a_descriptor)
+	{
+		std::string name;
+		for (std::size_t i = 0; i < 96 && InImage(a_descriptor + 0x10 + i, 1); ++i) {
+			const char c = *reinterpret_cast<const char*>(a_descriptor + 0x10 + i);
+			if (!c) {
+				return name;
+			}
+			name += (c >= 0x20 && c < 0x7F) ? c : '?';
+		}
+		return {};
+	}
+
+	bool NameIs(std::string_view a_name, std::string_view a_tail)   // ".?AV" + tail (a class) or ".?AU" + tail (a struct)
+	{
+		return a_name.size() == 4 + a_tail.size() && (a_name.starts_with(".?AV") || a_name.starts_with(".?AU")) &&
+		       a_name.substr(4) == a_tail;
+	}
+
+	struct ObjectType
+	{
+		std::uintptr_t descriptor = 0;
+		std::uint32_t  offset = 0;
+		std::string    name;
+	};
+
+	// an object's type through its vtable's complete object locator; false if a read faults or leaves the image
+	bool TypeOf(std::uintptr_t a_object, ObjectType& a_out)
+	{
+		std::uintptr_t vt = 0;
+		if (!a_object || !Peek(a_object, vt) || !InImage(vt - 8, 8)) {
+			return false;
+		}
+		const auto col = *reinterpret_cast<const std::uintptr_t*>(vt - 8);
+		if (!InImage(col, 0x14) || *reinterpret_cast<const std::uint32_t*>(col) != 1) {
+			return false;
+		}
+		a_out.offset = *reinterpret_cast<const std::uint32_t*>(col + 0x04);
+		a_out.descriptor = g_base + *reinterpret_cast<const std::uint32_t*>(col + 0x0C);
+		a_out.name = TypeNameAt(a_out.descriptor);
+		return !a_out.name.empty();
+	}
+
+	std::string ShortName(std::string_view a_name)   // ".?AVHUDMenu@@" -> "HUDMenu@@" -> "HUDMenu"
+	{
+		if (a_name.size() > 4) {
+			a_name.remove_prefix(4);
+		}
+		if (a_name.ends_with("@@")) {
+			a_name.remove_suffix(2);
+		}
+		return std::string(a_name);
+	}
+
+	// a singleton is the type its RTTI id names (the same descriptor, at subobject offset 0), checked once; a null
+	// singleton is not cached (it may not exist yet)
+	bool CheckSingleton(std::string_view a_what, std::size_t a_singleton, std::size_t a_rtti, std::atomic<int>& a_state)
+	{
+		const auto state = a_state.load();
+		if (state >= 0) {
+			return state == 1;
+		}
+		std::uintptr_t object = 0;
+		if (!Peek(Address(a_singleton), object) || !object) {
+			REX::INFO("step=object name={} result=null", a_what);
+			return false;
+		}
+		ObjectType type;
+		const bool known = TypeOf(object, type);
+		if (!known || type.descriptor != Address(a_rtti) || type.offset != 0) {
+			a_state = 0;
+			Refuse("object", std::format("name={} object={} type={} offset={} (its reads stay off)", a_what, Hex(object),
+				known ? type.name : "unreadable", Hex(type.offset)));
+			return false;
+		}
+		a_state = 1;
+		REX::INFO("step=object name={} object={} type={}", a_what, Hex(object), type.name);
+		return true;
+	}
+
+	std::uintptr_t Singleton(std::size_t a_singleton)
+	{
+		std::uintptr_t object = 0;
+		Peek(Address(a_singleton), object);
+		return object;
+	}
+
+	struct ArrayHead   // BSTArray (libxse): size, capacity, data
+	{
+		std::uint32_t  size;
+		std::uint32_t  capacity;
+		std::uintptr_t data;
+	};
+
+	std::string ReadPaused()
+	{
+		if (!CheckSingleton("Main", kMainSingleton, kMainRtti, g_mainOk)) {
+			return "?";
+		}
+		std::uint8_t paused = 0;
+		return Peek(Singleton(kMainSingleton) + kMainPausedAt, paused) ? std::to_string(paused) : "fault";
+	}
+
+	// the UI menu stack in stored order: each entry's type (ours: "ours") and flags
+	std::string ReadMenuStack()
+	{
+		const auto ui = reinterpret_cast<std::uintptr_t>(RE::UI::GetSingleton());
+		ArrayHead stack{};
+		if (!ui || !Peek(ui + kMenuStackAt, stack)) {
+			return "fault";
+		}
+		std::string out = std::format("{}[", stack.size);
+		for (std::uint32_t i = 0; i < stack.size && i < kMaxListed; ++i) {
+			std::uintptr_t menu = 0;
+			std::uintptr_t vt = 0;
+			std::uint32_t  flags = 0;
+			std::string    name = "fault";
+			if (Peek(stack.data + 8ull * i, menu) && menu && Peek(menu, vt)) {
+				ObjectType type;
+				name = vt == reinterpret_cast<std::uintptr_t>(g_vtbl.slots.data()) ? "ours" :
+				       TypeOf(menu, type)                                         ? ShortName(type.name) :
+				                                                                    "unknown";
+			}
+			const bool hasFlags = menu && Peek(menu + kMenuFlagsAt, flags);
+			out += std::format("{}{}/{}", i ? "," : "", name, hasFlags ? Hex(flags) : "?");
+		}
+		return out + "]";
+	}
+
+	// ControlMap's active input contexts in stored order (their ids)
+	std::string ReadContexts()
+	{
+		if (!CheckSingleton("ControlMap", kControlMapSingleton, kControlMapRtti, g_controlMapOk)) {
+			return "?";
+		}
+		ArrayHead list{};
+		if (!Peek(Singleton(kControlMapSingleton) + kContextsAt, list)) {
+			return "fault";
+		}
+		std::string out = std::format("{}[", list.size);
+		for (std::uint32_t i = 0; i < list.size && i < kMaxListed; ++i) {
+			std::uint8_t id = 0;
+			out += std::format("{}{}", i ? "," : "", Peek(list.data + 16ull * i, id) ? std::to_string(id) : "fault");
+		}
+		return out + "]";
+	}
+
+	// pause state and who holds input, on whichever thread calls it
+	void Snapshot(std::string_view a_tag)
+	{
+		const auto n = ++g_snapshots;
+		const auto paused = ReadPaused();
+		const auto menus = ReadMenuStack();
+		const auto contexts = ReadContexts();
+		REX::INFO("step=snapshot n={} tag={} paused={} menus={} contexts={} expected_open={}", n, a_tag, paused, menus,
+			contexts, g_expectOpen.load());
+	}
+
+	bool ReadPosition(std::array<float, 3>& a_xyz)
+	{
+		return CheckSingleton("PlayerCharacter", kPlayerSingleton, kPlayerRtti, g_playerOk) &&
+		       Peek(Singleton(kPlayerSingleton) + kPositionAt, a_xyz);
+	}
+
+	// ------------------------------------------------------------------------------------------- stage c: the channel
+	// our movie's ActionScript 3 root, checked once per movie: the pointer at +0x18 of the movie is a
+	// GFx::AS3::MovieRoot by RTTI, and its slots 0x30 and 0x32 are inside the image. The movie's own type is logged.
+	RE::Scaleform::GFx::ASMovieRootBase* RootOf(const void* a_menu)
+	{
+		const auto movie = reinterpret_cast<std::uintptr_t>(MovieOf(a_menu));
+		if (!movie || g_channelOff) {
+			return nullptr;
+		}
+		std::uintptr_t root = 0;
+		if (g_checkedMovie != MovieOf(a_menu)) {
+			ObjectType movieType;
+			ObjectType rootType;
+			std::uintptr_t vt = 0;
+			const bool movieKnown = TypeOf(movie, movieType);
+			if (!Peek(movie + kMovieRootAt, root) || !TypeOf(root, rootType) || rootType.descriptor != Address(kMovieRootRtti)) {
+				g_channelOff = true;
+				Refuse("channel", std::format("what=movie_root movie={} movie_type={} root={} root_type={}", Hex(movie),
+					movieKnown ? movieType.name : "unreadable", Hex(root), rootType.name.empty() ? "unreadable" : rootType.name));
+				return nullptr;
+			}
+			Peek(root, vt);
+			const auto* slot = reinterpret_cast<const std::uintptr_t*>(vt);
+			if (!InImage(vt, (kGetVariableSlot + 1) * 8) || !InImage(slot[kCreateFunctionSlot], 1) || !InImage(slot[kGetVariableSlot], 1)) {
+				g_channelOff = true;
+				Refuse("channel", std::format("what=root_slots root={} vtable={}", Hex(root), Hex(vt)));
+				return nullptr;
+			}
+			REX::INFO("step=movie_root movie={} movie_type={} root={} root_type={} root_offset={} create_function={} get_variable={}",
+				Hex(movie), movieKnown ? movieType.name : "unreadable", Hex(root), rootType.name, Hex(rootType.offset),
+				Hex(slot[kCreateFunctionSlot] - g_base), Hex(slot[kGetVariableSlot] - g_base));
+			g_checkedMovie = MovieOf(a_menu);
+		} else {
+			Peek(movie + kMovieRootAt, root);
+		}
+		return reinterpret_cast<RE::Scaleform::GFx::ASMovieRootBase*>(root);
+	}
+
+	int TypeCode(const RE::Scaleform::GFx::Value& a_value) { return static_cast<int>(a_value.GetType()); }
+
+	// the root's child of that instance name (getChildByName, an ActionScript 3 DisplayObjectContainer method)
+	bool ChildOf(RE::Scaleform::GFx::Value& a_root, const char* a_name, RE::Scaleform::GFx::Value& a_out)
+	{
+		const RE::Scaleform::GFx::Value name(a_name);
+		return a_root.Invoke("getChildByName", &a_out, &name, 1) && a_out.IsObject();
+	}
+
+	// the button's click handler: Scaleform calls it from the movie. Static and never released by us: the movie holds
+	// its own references (Scaleform's count at +0x08) on top of ours, so the count never reaches zero
+	class ClickHandler final : public RE::Scaleform::GFx::FunctionHandler
+	{
+	public:
+		void Call(const Params& a_params) override
+		{
+			const auto n = ++g_clicks;
+			REX::INFO("step=click n={} args={} movie={}", n, a_params.argCount, Hex(reinterpret_cast<std::uintptr_t>(a_params.movie)));
+		}
+	};
+	ClickHandler g_clickHandler;
+
+	// once per movie, at kShow: our function as the button's "click" listener
+	void ChannelListen(const void* a_menu)
+	{
+		auto* const root = RootOf(a_menu);
+		const auto  movie = MovieOf(a_menu);
+		if (!root || g_listenedMovie == movie) {
+			return;
+		}
+		g_listenedMovie = movie;
+		RE::Scaleform::GFx::Value top;
+		RE::Scaleform::GFx::Value button;
+		RE::Scaleform::GFx::Value function;
+		const bool gotRoot = root->GetVariable(&top, "root") && top.IsObject();
+		const bool gotButton = gotRoot && ChildOf(top, kButtonName, button);
+		bool       added = false;
+		if (gotButton) {
+			root->CreateFunction(&function, &g_clickHandler);
+			if (!function.IsUndefined()) {
+				std::array<RE::Scaleform::GFx::Value, 2> args;
+				args[0] = "click";
+				args[1] = function;
+				added = button.Invoke("addEventListener", nullptr, args.data(), args.size());
+			}
+		}
+		REX::INFO("step=listen root={} button={} function_type={} added={} event=click", gotRoot ? 1 : 0, gotButton ? 1 : 0,
+			TypeCode(function), added ? 1 : 0);
+	}
+
+	// at kShow and every kUpdate: the player's position into the field, then read back
+	void ChannelWrite(const void* a_menu, std::uint32_t a_n)
+	{
+		auto* const root = RootOf(a_menu);
+		if (!root) {
+			return;
+		}
+		std::array<float, 3> xyz{};
+		const bool  havePosition = ReadPosition(xyz) && std::isfinite(xyz[0]) && std::isfinite(xyz[1]) && std::isfinite(xyz[2]);
+		const auto  clicks = g_clicks.load();
+		const auto  text = havePosition ? std::format("X {:.1f} Y {:.1f} Z {:.1f} CLICKS {}", xyz[0], xyz[1], xyz[2], clicks) :
+		                                  std::format("NO POSITION CLICKS {}", clicks);
+		RE::Scaleform::GFx::Value top;
+		RE::Scaleform::GFx::Value field;
+		RE::Scaleform::GFx::Value back;
+		const bool gotRoot = root->GetVariable(&top, "root") && top.IsObject();
+		const bool gotField = gotRoot && ChildOf(top, kFieldName, field);
+		const bool set = gotField && field.SetMember("text", RE::Scaleform::GFx::Value(text.c_str()));
+		const bool got = gotField && field.GetMember("text", &back) && back.IsString();
+		const std::string read = got ? back.GetString() : "";
+		if (a_n <= 20 || a_n % 20 == 0 || read != text) {
+			REX::INFO("step=field n={} root={} field={} set={} read_back={} match={} text=\"{}\" read=\"{}\"", a_n,
+				gotRoot ? 1 : 0, gotField ? 1 : 0, set ? 1 : 0, got ? 1 : 0, read == text ? "yes" : "no", text, read);
+		}
+	}
+
+	std::uint32_t FlagSetIndex(std::uint32_t a_n) { return g_flagSetCount ? (a_n - 1) % static_cast<std::uint32_t>(g_flagSetCount) : 0; }
+	std::uint32_t FlagSet(std::uint32_t a_n) { return g_flagSetCount ? g_flagSets[FlagSetIndex(a_n)] : 0; }
+
+	// at kShow, before the engine handles it: the constructor's flags | Flags | this open's FlagSets entry
+	void ApplyFlagSet(void* a_self, std::uint32_t a_show)
+	{
+		auto*      imenu = static_cast<RE::IMenu*>(a_self);
+		const auto had = imenu->flags;
+		const auto want = g_ctorFlags.load() | g_flags | FlagSet(a_show);
+		if (had != want) {
+			imenu->flags = want;
+			imenu->flagsUpdated = true;
+		}
+		REX::INFO("step=flags show={} set={} had={} now={}", a_show, FlagSetIndex(a_show), Hex(had), Hex(imenu->flags));
+	}
+
 	// ------------------------------------------------------------------------------------------- the menu's slots
 	void* MenuDestroy(void* a_self, std::uint32_t a_flags)
 	{
 		REX::INFO("step=destroy menu={} flags={}", Hex(reinterpret_cast<std::uintptr_t>(a_self)), a_flags);
+		if (const auto movie = MovieOf(a_self)) {   // stage c: a later movie at the same address is checked again
+			if (g_listenedMovie == movie) {
+				g_listenedMovie = nullptr;
+			}
+			if (g_checkedMovie == movie) {
+				g_checkedMovie = nullptr;
+			}
+		}
 		g_engineDtor(a_self, a_flags & ~1u);   // the engine's IMenu destructor, without its delete: the memory is ours
 		if (a_flags & 1) {
 			std::free(a_self);
@@ -203,7 +618,10 @@ namespace
 	RE::UI_MESSAGE_RESULT MenuProcessMessage(void* a_self, RE::UIMessageData& a_message)
 	{
 		const auto type = a_message.type;
-		if (g_stage == 2 && type == RE::UI_MESSAGE_TYPE::kShow && !MovieOf(a_self)) {
+		if (g_stage == 3 && type == RE::UI_MESSAGE_TYPE::kShow) {
+			ApplyFlagSet(a_self, ++g_shows);
+		}
+		if (g_stage >= 2 && type == RE::UI_MESSAGE_TYPE::kShow && !MovieOf(a_self)) {
 			REX::INFO("step=load_movie menu={} caller=plugin before=show", Hex(reinterpret_cast<std::uintptr_t>(a_self)));
 			MenuLoadMovie(a_self, false, false);
 		}
@@ -218,6 +636,21 @@ namespace
 			                                                         "other"sv;
 			REX::INFO("step=message menu={} type={} raw={} result={}", Hex(reinterpret_cast<std::uintptr_t>(a_self)), name,
 				static_cast<std::uint32_t>(type), static_cast<std::int64_t>(result));
+		}
+		if (g_stage == 3) {   // stage c: after the engine's own handling, on its thread for this menu
+			if (type == RE::UI_MESSAGE_TYPE::kShow) {
+				ChannelListen(a_self);
+				ChannelWrite(a_self, 0);
+				Snapshot("show");
+			} else if (type == RE::UI_MESSAGE_TYPE::kUpdate) {
+				const auto n = ++g_updates;
+				ChannelWrite(a_self, n);
+				if (n % 10 == 1) {
+					Snapshot("open");
+				}
+			} else if (type == RE::UI_MESSAGE_TYPE::kHide) {
+				Snapshot("hide");
+			}
 		}
 		return result;
 	}
@@ -249,17 +682,19 @@ namespace
 		auto* imenu = static_cast<RE::IMenu*>(menu);
 		imenu->menuName = MenuName();
 		const auto ctorFlags = imenu->flags;
-		if (g_flags) {
-			imenu->flags |= g_flags;
+		const auto extra = g_flags | (g_stage == 3 ? FlagSet(n) : 0);   // stage c: this open's FlagSets entry
+		g_ctorFlags = ctorFlags;
+		if (extra) {
+			imenu->flags |= extra;
 			imenu->flagsUpdated = true;
 		}
 		if (g_keepAlive && ctorRefs == 1) {
 			REX::W32::InterlockedIncrement(refs);   // a public precedent's count: never released to zero
 		}
-		REX::INFO("step=create n={} menu={} vtables={} rtti={} refcount={} keep_alive={} ctor_flags={} flags={} depth={}", n,
-			Hex(base), vtables ? "engine" : "UNEXPECTED", rtti ? "engine" : "UNEXPECTED", ctorRefs, g_keepAlive ? 1 : 0,
-			Hex(ctorFlags), Hex(imenu->flags),
-			Hex(*reinterpret_cast<const std::uint8_t*>(base + 0x110)));
+		REX::INFO("step=create n={} menu={} vtables={} rtti={} refcount={} keep_alive={} ctor_flags={} flags={} depth={}{}",
+			n, Hex(base), vtables ? "engine" : "UNEXPECTED", rtti ? "engine" : "UNEXPECTED", ctorRefs, g_keepAlive ? 1 : 0,
+			Hex(ctorFlags), Hex(imenu->flags), Hex(*reinterpret_cast<const std::uint8_t*>(base + 0x110)),
+			g_stage == 3 ? std::format(" set={}", FlagSetIndex(n)) : "");
 		std::memcpy(static_cast<void*>(a_out), &menu, sizeof(menu));
 		return a_out;
 	}
@@ -314,7 +749,7 @@ namespace
 		if (format != 5 || version != kRuntime || pointerSize != 8) {
 			return Refuse("address_library", "reason=header (format 5, version 1.16.244.0 and pointer size 8 expected)");
 		}
-		for (std::size_t i = 0; i < kIdCount; ++i) {
+		for (std::size_t i = 0; i < IdCount(); ++i) {
 			const auto& id = kIds[i];
 			if (id.id >= count) {
 				return Refuse("id", std::format("name={} id={} reason=beyond_count count={}", id.name, id.id, count));
@@ -335,7 +770,7 @@ namespace
 			REX::INFO("step=id name={} id={} rva={} source={}", id.name, id.id, Hex(offset), id.source);
 		}
 		// the same ids through libxse (the lookups RE::UI and BSFixedString make): same file, same offsets
-		for (std::size_t i = 0; i < kIdCount; ++i) {
+		for (std::size_t i = 0; i < IdCount(); ++i) {
 			const auto viaLibrary = REL::ID(kIds[i].id).offset();
 			if (viaLibrary != g_rva[i]) {
 				return Refuse("id", std::format("name={} id={} reason=library_mismatch file={} libxse={}", kIds[i].name,
@@ -432,11 +867,31 @@ namespace
 		return Refuse("ctor", std::format("rva={} reason=no_primary_vtable_reference first={}", Hex(g_rva[kCtor]), Hex(kCtorScan)));
 	}
 
+	// stage c: each Value function's offset is SFSE 0.2.21's own address for it, and each RTTI id names its type
+	bool CheckChannelIds()
+	{
+		for (const auto& [id, rva] : kSfseRvas) {
+			if (g_rva[id] != rva) {
+				return Refuse("channel_ids", std::format("name={} rva={} sfse_rva={}", kIds[id].name, Hex(g_rva[id]), Hex(rva)));
+			}
+		}
+		for (const auto& [id, tail] : kRttiNames) {
+			const auto name = TypeNameAt(Address(id));
+			if (!NameIs(name, tail)) {
+				return Refuse("channel_ids", std::format("name={} type={} expected=.?AV{}", kIds[id].name,
+					name.empty() ? "unreadable" : name, tail));
+			}
+		}
+		REX::INFO("step=channel_ids value_functions=sfse_equal rtti_names=ok");
+		return true;
+	}
+
 	bool CheckEverything(const std::filesystem::path& a_dir)
 	{
 		if (!CheckImage() || !ReadAddressLibrary(a_dir / "versionlib-1-16-244-0.bin") ||
 			!CheckVtable(kVtblPrimary, 0x00, "primary") || !CheckVtable(kVtblInput, 0x10, "BSInputEventUser") ||
-			!CheckVtable(kVtblSink, 0x50, "BSTEventSink") || !CheckSlots() || !CheckCtor()) {
+			!CheckVtable(kVtblSink, 0x50, "BSTEventSink") || !CheckSlots() || !CheckCtor() ||
+			(g_stage == 3 && !CheckChannelIds())) {
 			return false;
 		}
 		const auto* engine = reinterpret_cast<const std::uintptr_t*>(Address(kVtblPrimary));
@@ -455,8 +910,8 @@ namespace
 		if (g_stage == 1) {
 			g_vtbl.slots[0x0A] = reinterpret_cast<std::uintptr_t>(&MenuIsMovieLoaded);
 		}
-		REX::INFO("step=ready stage={} replaced=0x00,0x03,0x04,0x05,0x06,0x08{} locator={}", g_stage == 1 ? "a" : "b",
-			g_stage == 1 ? ",0x0A" : "", Hex(g_vtbl.locator - g_base));
+		REX::INFO("step=ready stage={} replaced=0x00,0x03,0x04,0x05,0x06,0x08{} locator={}",
+			g_stage == 1 ? "a" : g_stage == 2 ? "b" : "c", g_stage == 1 ? ",0x0A" : "", Hex(g_vtbl.locator - g_base));
 		return true;
 	}
 
@@ -483,7 +938,23 @@ namespace
 		}
 		const int open = ui->IsMenuOpen(MenuName()) ? 1 : 0;
 		const int expected = g_expectOpen;
+		g_open = open == 1;
 		REX::INFO("step=state n={} open={} expected={} match={}", a_n, open, expected, open == expected ? "yes" : "no");
+		if (g_stage == 3) {
+			Snapshot(open ? "main_after_open" : "main_after_close");
+		}
+	}
+
+	// stage c, every 500 ms while the menu is open: one kUpdate, on which our ProcessMessage refreshes the field
+	void SendUpdate()
+	{
+		auto* ui = RE::UI::GetSingleton();
+		auto* queue = RE::UIMessageQueue::GetSingleton();
+		if (!ui || !queue || !ui->IsMenuOpen(MenuName())) {
+			g_open = false;
+			return;
+		}
+		queue->AddMessage(MenuName(), RE::UI_MESSAGE_TYPE::kUpdate);
 	}
 
 	bool GameInFront()
@@ -496,7 +967,9 @@ namespace
 	std::uint32_t KeyThread(void*)
 	{
 		std::uint32_t presses = 0;
+		std::uint32_t ticks = 0;
 		bool          down = false;
+		bool          snapDown = false;
 		for (;;) {
 			REX::W32::Sleep(30);
 			const bool now = (W32_IMPL_GetAsyncKeyState(static_cast<std::int32_t>(g_key)) & 0x8000) != 0;
@@ -507,6 +980,18 @@ namespace
 				g_task->AddTask([n]() { CheckState(n); });
 			}
 			down = now;
+			if (g_stage != 3) {
+				continue;
+			}
+			// stage c: the snapshot key (a main-thread snapshot, the control), and the refresh while open
+			const bool snap = g_snapshotKey && (W32_IMPL_GetAsyncKeyState(static_cast<std::int32_t>(g_snapshotKey)) & 0x8000) != 0;
+			if (snap && !snapDown && GameInFront()) {
+				g_task->AddTask([]() { Snapshot("key"); });
+			}
+			snapDown = snap;
+			if (g_open && ++ticks % 17 == 0) {   // 17 x 30 ms
+				g_task->AddTask([]() { SendUpdate(); });
+			}
 		}
 	}
 
@@ -535,7 +1020,7 @@ namespace
 			return;
 		}
 		REX::W32::CloseHandle(thread);
-		REX::INFO("step=key_thread key={}", Hex(g_key));
+		REX::INFO("step=key_thread key={}{}", Hex(g_key), g_stage == 3 ? std::format(" snapshot_key={}", Hex(g_snapshotKey)) : "");
 	}
 
 	void OnMovieCreated(RE::IMenu* a_menu)
@@ -561,6 +1046,27 @@ namespace
 			a_ini.c_str());
 		return text[0] ? static_cast<std::uint32_t>(std::wcstoul(text.data(), nullptr, 0)) : a_default;   // 0x.. or decimal
 	}
+
+	// stage c: FlagSets=<n>,<n>,... (up to four, 0x.. or decimal); open k uses entry (k - 1) mod count
+	void ReadFlagSets(const std::filesystem::path& a_ini)
+	{
+		std::array<wchar_t, 128> text{};
+		REX::W32::GetPrivateProfileStringW(L"FO4SFPipboyMenu", L"FlagSets", L"0x0,0x8,0x9", text.data(),
+			static_cast<std::uint32_t>(text.size()), a_ini.c_str());
+		const wchar_t* at = text.data();
+		while (*at && g_flagSetCount < kMaxFlagSets) {
+			wchar_t*   end = nullptr;
+			const auto value = std::wcstoul(at, &end, 0);
+			if (end == at) {
+				break;
+			}
+			g_flagSets[g_flagSetCount++] = static_cast<std::uint32_t>(value);
+			at = end;
+			while (*at == L',' || *at == L' ') {
+				++at;
+			}
+		}
+	}
 }
 
 SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
@@ -580,9 +1086,18 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 		Hex(g_flags), g_keepAlive ? 1 : 0);
 
 	// true in every case: a plugin that stays loaded and idle leaves its refusal line, the finding the job card reads
-	if (g_stage != 1 && g_stage != 2) {
-		REX::INFO("step=off (Stage=1 or 2 in FO4SFPipboyMenu.ini to probe)");
+	if (g_stage != 1 && g_stage != 2 && g_stage != 3) {
+		REX::INFO("step=off (Stage=1, 2 or 3 in FO4SFPipboyMenu.ini to probe)");
 		return true;
+	}
+	if (g_stage == 3) {
+		g_snapshotKey = ReadNumber(ini, L"SnapshotKey", 0x7A);
+		ReadFlagSets(ini);
+		std::string sets;
+		for (std::size_t i = 0; i < g_flagSetCount; ++i) {
+			sets += std::format("{}{}", i ? "," : "", Hex(g_flagSets[i]));
+		}
+		REX::INFO("step=load_c flag_sets={} snapshot_key={}", sets.empty() ? "none" : sets, Hex(g_snapshotKey));
 	}
 	if (runtime != kRuntime) {
 		Refuse("version", std::format("runtime={} expected={}", runtime.string(), kRuntime.string()));
@@ -590,6 +1105,10 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	}
 	if (g_key == 0 || g_key > 0xFE) {
 		Refuse("ini", std::format("key={}", Hex(g_key)));
+		return true;
+	}
+	if (g_stage == 3 && (g_snapshotKey > 0xFE || g_snapshotKey == g_key)) {
+		Refuse("ini", std::format("snapshot_key={} key={}", Hex(g_snapshotKey), Hex(g_key)));
 		return true;
 	}
 	if (!CheckEverything(dir)) {

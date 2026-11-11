@@ -46,6 +46,13 @@ class PluginTest(unittest.TestCase):
             names = [t["name"] for t in make_probe_swf.read_movie(movie)["tags"]]
             self.assertEqual(names.count("DefineShape3"), 1)
 
+    def test_stage_with_channel(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, movie = mpp.stage(tmp, channel=True)
+            self.assertTrue(movie.endswith(os.path.join("Interface", "FO4SF_PipboyMenu.swf")))
+            with open(movie, "rb") as f:
+                self.assertEqual(f.read(), make_probe_swf.movie_bytes(channel=True))
+
     def write(self, tmp, writer):
         path = os.path.join(tmp, "x.esm")
         with open(path, "wb") as f:
