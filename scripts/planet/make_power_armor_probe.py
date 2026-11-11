@@ -6,7 +6,11 @@ usage:
       sources (Scripts/Source of ContentResources.zip; inheritance followed). Exit 1 when a required one is missing.
   python make_power_armor_probe.py stage --out <dir> [--starfield <Starfield.esm>] [--compiler <exe>]
                                          [--content-resources <zip>] [--control <furniture editor id>]
-      1. dotnet/PowerArmorProbe build + check against the Starfield.esm given (offline_check.txt);
+                                         [--variant race,furniture,keyword]
+      1. dotnet/PowerArmorProbe build + check against the Starfield.esm given (offline_check.txt). --variant overrides
+         Starfield's empty power armor default objects in the plugin, each on its own (race: PowerArmorRace_DO ->
+         FO4SF_PARace; furniture: PowerArmorDefaultFrameFurniture_DO -> the suit, which also gets isPowerArmorFrame; keyword:
+         PowerArmorArmorKeyword_DO -> a keyword of ours); the PC run of 11 Nov (stage 10 did nothing) suggested it;
       2. the Papyrus compile: each optional reading (";OPT <Base.Name> " lines of the .psc) whose name the base sources
          declare is compiled on its own, the ones that compile are kept, every other one is reported in plan.json
          ("optional") and logs "na"; then the script itself;
@@ -41,6 +45,7 @@ PLUGIN = "FO4SFPowerArmorProbe.esm"
 SCRIPT = "FO4SF_PAProbeQuest"
 PSC = os.path.join(HERE, SCRIPT + ".psc")
 DEFAULT_CONTROL = "NPCChairTech03_Free_270"
+VARIANTS = ("race", "furniture", "keyword")
 STARFIELD = r"D:\SteamLibrary\steamapps\common\Starfield"
 LOG = os.path.join(os.path.expanduser("~"), "Documents", "My Games", "Starfield", "Logs", "Script", "User", "FO4SFPAProbe.0.log")
 # what the script cannot run without (the optional readings are the .psc's ";OPT" lines)
@@ -184,7 +189,10 @@ def stage(a):
     work = os.path.join(out, "work")
     os.makedirs(work)
     tool = ["dotnet", "run", "-c", "Release", "--project", PROJECT, "--"]
-    opts = ["--control", a.control]
+    variant = [v for v in a.variant.split(",") if v]
+    if [v for v in variant if v not in VARIANTS] or len(set(variant)) != len(variant):
+        sys.exit(f"--variant is a comma list of {', '.join(VARIANTS)}, each once (got {a.variant!r})")
+    opts = ["--control", a.control, "--variant", ",".join(variant)]
     wrote = run(tool + ["build", a.starfield, out] + opts).stdout
     check = run(tool + ["check", os.path.join(out, PLUGIN), a.starfield] + opts).stdout
     with open(os.path.join(out, "offline_check.txt"), "w", encoding="utf-8") as f:
@@ -216,7 +224,7 @@ def stage(a):
     if sha256(a.starfield) != before:
         sys.exit(f"Starfield.esm changed during the build, nothing published; attempt kept in {out}")
     plan = {"kind": "power-armor-probe", "version": 1, "plugins": [PLUGIN], "outputs": stage_files(out),
-            "inputs": {"Starfield.esm": {"sha256": before}}, "control": a.control, "optional": fate,
+            "inputs": {"Starfield.esm": {"sha256": before}}, "control": a.control, "variant": variant, "optional": fate,
             "log": "<My Games>/Starfield/Logs/Script/User/FO4SFPAProbe.0.log"}
     with open(os.path.join(out, "plan.json"), "w", encoding="utf-8") as f:
         json.dump(plan, f, indent=1)
@@ -226,6 +234,7 @@ def stage(a):
 {a.control} with FurnitureTypePowerArmor added), the vanilla {a.control} beside it as the control, RACE FO4SF_PARace
 (a copy of HumanRace), QUST FO4SF_PAProbeQuest (start game enabled, stages 10 / 20 / 30). Master Starfield.esm only; adds
 records, overrides none. Checked against Starfield.esm {before}. Re-stage after a game update.
+Variant (default objects overridden): {', '.join(variant) or 'none'}.
 Optional readings: {', '.join(f'{k}: {v}' for k, v in fate.items()) or 'none'}.
 Install (the owner's word, game closed; loose scripts are not read, the installer packs them into a ba2):
   python scripts\\planet\\power_armor_probe_install.py install --dir <this folder> --starfield <game dir>
@@ -261,6 +270,7 @@ def main(argv=None):
     s.add_argument("--compiler", default=os.path.join(STARFIELD, "Tools", "Papyrus Compiler", "PapyrusCompiler.exe"))
     s.add_argument("--content-resources", default=cr)
     s.add_argument("--control", default=DEFAULT_CONTROL)
+    s.add_argument("--variant", default="", help="comma list of default objects to override: race, furniture, keyword")
     g = sub.add_parser("log")
     g.add_argument("--file", default=LOG)
     a = p.parse_args(argv)

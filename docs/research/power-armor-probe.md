@@ -80,6 +80,33 @@ Reader findings from that run, fixed after it: the start line is logged at load,
 own rule: a none `controlref` no longer fails the control, only a sit state 3 near the control counts then; init and start
 are logged twice at load, which made "2 runs": an init is a new run only after a step.
 
+## Next test: the empty default objects (variants)
+
+The owner PC read both games' own files (names and ids only, 11 Nov): Starfield.esm keeps Fallout 4's power armor default
+objects (DFOB) under the **same form ids**, and five are empty (DATA none): `PowerArmorRace_DO` 0005C254,
+`PowerArmorDefaultFrameFurniture_DO` 0022BC97, `PowerArmorDefaultFrameArmor_DO` 0015503E, `PowerArmorArmorKeyword_DO`
+00140C44, `PowerArmorDefaultBatteryObject_DO` 000BD5C5. The keywords are wired (`FurnitureTypePowerArmor`,
+`isPowerArmorFrame`, `LinkPowerArmor`, `isPowerArmorBattery`, `NoPowerArmorUse`); no FURN, ARMO, RACE, NPC_, ACTI, MISC,
+WEAP or PERK record carries any of them. **Supported hypothesis, untested:** `SwitchToPowerArmor` did nothing because the
+objects it should lead to are not set. The test: our plugin overrides them (a record override in a ride-along plugin, no
+native code), each as its own variant so the log names which one the call needs.
+
+    python scripts\planet\make_power_armor_probe.py stage --out <dir> --variant race
+    python scripts\planet\make_power_armor_probe.py stage --out <dir2> --variant race,furniture,keyword
+
+| variant | overrides | needs |
+|---|---|---|
+| `race` | `PowerArmorRace_DO` -> `FO4SF_PARace` | (first run) |
+| `furniture` | `PowerArmorDefaultFrameFurniture_DO` -> the suit furniture, which also gets `isPowerArmorFrame` | |
+| `keyword` | `PowerArmorArmorKeyword_DO` -> `FO4SF_PAArmorKeyword` (ours, 000807) | |
+
+Run `race` first, then stage 10 again on the same card (control, step 3): does `SwitchToPowerArmor` now change the race,
+sit state or camera? If yes, add the other two (and name in the log which one made the difference). The frame armor
+(001909D6 in Fallout 4) and the battery are not set by any variant: their record shapes are not read yet (the owner PC
+offered `NEEDS-PC dump <ids>`). The check refuses a plugin whose default objects are not exactly the variant's; the
+script and the reader are unchanged (the reader already prints race before, right after and 4 s later). A variant stage
+is its own folder and its own plan.json ("variant"); install one at a time (same plugin name, same record).
+
 ## Session card
 
 **Throwaway state only. Do not save at any point.** The race swap (step 20) can break a save; do not autosave, quicksave

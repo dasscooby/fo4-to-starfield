@@ -224,6 +224,28 @@ class StageTests(unittest.TestCase):
         check = self.run_tool("check", out / PLUGIN, self.master)
         self.assertRegex(check.stdout, r"FURN FO4SF_PAProbeSuit keywords \[000900:Starfield.esm, 0F4A21:Starfield.esm\] \(control .*: 1 keywords\)")
 
+    def test_variants_override_only_their_default_objects(self):
+        for variant, n, kw in (("race", 1, 0), ("race,furniture,keyword", 3, 1)):
+            out = self.root / ("v_" + variant.replace(",", "_"))
+            proc = self.run_tool("build", self.master, out, "--variant", variant)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            check = self.run_tool("check", out / PLUGIN, self.master, "--variant", variant)
+            self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
+            self.assertIn(f"DefaultObject {n}", check.stdout)
+            self.assertEqual(("Keyword 1" in check.stdout), bool(kw))
+            # the plugin without the variant's flag is a mismatch: the check knows which overrides it must hold
+            self.assertEqual(self.run_tool("check", out / PLUGIN, self.master).returncode, 1)
+        self.assertIn("PowerArmorRace_DO 05C254:Starfield.esm Object 000802:FO4SFPowerArmorProbe.esm", check.stdout)
+        self.assertIn("15503F:Starfield.esm]", check.stdout)                       # isPowerArmorFrame on the suit
+        self.assertIn("000807:FO4SFPowerArmorProbe.esm", check.stdout)             # our armor keyword
+        self.assertEqual(self.run_tool("build", self.master, self.root / "v_bad", "--variant", "bogus").returncode, 1)
+
+    def test_variant_overrides_keep_the_form_ids_of_the_vanilla_records(self):
+        out = self.root / "v_raw"
+        self.assertEqual(self.run_tool("build", self.master, out, "--variant", "race").returncode, 0)
+        data = (out / PLUGIN).read_bytes()
+        self.assertIn(struct.pack("<I", 0x0005C254), data)                          # master index 0: Starfield.esm's own id
+
     def test_a_control_that_is_already_power_armor_is_refused(self):
         proc = self.run_tool("build", self.master, self.root / "b4", "--control", "SynthAlreadyPowerArmor")
         self.assertEqual(proc.returncode, 1)
@@ -257,6 +279,7 @@ class StageTests(unittest.TestCase):
         self.assertEqual(plan["plugins"], [PLUGIN])
         self.assertEqual(sorted(plan["outputs"]), sorted([PLUGIN, "Data/Scripts/FO4SF_PAProbeQuest.pex"]))
         self.assertEqual(plan["inputs"]["Starfield.esm"]["sha256"], mpa.sha256(str(self.master)))
+        self.assertEqual(plan["variant"], [])
         self.assertEqual(plan["optional"]["Actor.GetWornItem"], "kept")
         self.assertEqual(plan["optional"]["Actor.GetFurnitureReference"], "kept")
         self.assertTrue(plan["optional"]["Actor.GetSitState"].startswith("declared but did not compile"))
@@ -275,6 +298,26 @@ class StageTests(unittest.TestCase):
         self.assertIn("exists", str(e.exception))
         (final / PLUGIN).write_bytes(b"changed")
         self.assertTrue(any("changed after the stage" in p for p in mpa.verify_stage(str(final), plan)))
+
+    def test_stage_records_the_variant_and_refuses_a_bad_one(self):
+        z = self.root / "cr3.zip"
+        fake_sources(z)
+        compiler = fake_compiler(self.root)
+        old_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = str(Path(self.dotnet).parent) + os.pathsep + old_path
+        self.addCleanup(os.environ.__setitem__, "PATH", old_path)
+        args = ["--starfield", str(self.master), "--compiler", str(compiler), "--content-resources", str(z)]
+        final = self.root / "stage_race"
+        self.assertEqual(mpa.main(["stage", "--out", str(final), "--variant", "race"] + args), 0)
+        plan = json.loads((final / "plan.json").read_text())
+        self.assertEqual(plan["variant"], ["race"])
+        self.assertIn("DFOB PowerArmorRace_DO", (final / "offline_check.txt").read_text())
+        self.assertIn("Variant (default objects overridden): race", (final / "README.txt").read_text())
+        self.assertEqual(mpa.verify_stage(str(final), plan, str(self.master.parent)), [])
+        for bad in ("bogus", "race,race"):
+            with self.assertRaises(SystemExit) as e:
+                mpa.main(["stage", "--out", str(self.root / "stage_bad"), "--variant", bad] + args)
+            self.assertIn("--variant is a comma list", str(e.exception))
 
     def test_stage_refuses_when_a_required_native_is_missing(self):
         z = self.root / "cr2.zip"
