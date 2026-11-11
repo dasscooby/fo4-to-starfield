@@ -177,8 +177,11 @@ static class PowerArmorProbe
         // the PC compares a vanilla keyworded FURN; the script logs HasKeyword on the reference before the call)
         var comp = suit.Components.OfType<KeywordFormComponent>().FirstOrDefault();
         if (comp == null) { comp = new KeywordFormComponent(); suit.Components.Add(comp); }
-        comp.Keywords ??= new ExtendedList<IFormLinkGetter<IKeywordGetter>>();
-        foreach (var k in suit.Keywords) if (!comp.Keywords.Any(x => x.FormKey == k.FormKey)) comp.Keywords.Add(new FormLink<IKeywordGetter>(k.FormKey));
+        // the component is rebuilt in the list's order (FAL-342: a copy keeps the control's own component, and appending to it left
+        // the power armor keyword last there under --kw-first); keywords it already held that the list lacks follow
+        var held = (comp.Keywords ?? new ExtendedList<IFormLinkGetter<IKeywordGetter>>()).Select(k => k.FormKey).ToList();
+        comp.Keywords = new ExtendedList<IFormLinkGetter<IKeywordGetter>>(
+            suit.Keywords.Select(k => k.FormKey).Concat(held.Where(h => !suit.Keywords.Any(k => k.FormKey == h))).Select(k => (IFormLinkGetter<IKeywordGetter>)new FormLink<IKeywordGetter>(k)));
         mod.Furniture.Add(suit);
 
         var race = (Race)humanRace.Duplicate(Own(RaceId), new Race.TranslationMask(defaultOn: true) { Name = false });
@@ -348,7 +351,7 @@ static class PowerArmorProbe
             Need(keys.SequenceEqual(want), $"FURN keywords are not the control's plus {kw.EditorID} {kw.FormKey}" + (variants.Contains("furniture") ? $" plus {FrameKeywordEdid}" : ""));
             var ck = suit.Components.OfType<IKeywordFormComponentGetter>().SelectMany(c => c.Keywords ?? Enumerable.Empty<IFormLinkGetter<IKeywordGetter>>()).Select(k => k.FormKey).ToList();
             Console.WriteLine($"  FURN keyword form component [{string.Join(", ", ck)}]");
-            Need(want.All(w => ck.Contains(w)), "the FURN's keyword form component does not hold every keyword of its KWDA list");
+            Need(ck.Take(want.Count).SequenceEqual(want), "the FURN's keyword form component does not start with its KWDA list, in the same order");
             Need(suit.MarkerModel == control.MarkerModel, "FURN marker model differs from the control's");
             Need((suit.MarkerParameters?.Count ?? 0) == (control.MarkerParameters?.Count ?? 0), "FURN marker parameters differ from the control's");
             Need((suit.MarkerEntryPoints?.Count ?? 0) == (control.MarkerEntryPoints?.Count ?? 0), "FURN entry points differ from the control's");
@@ -417,6 +420,8 @@ static class PowerArmorProbe
         {
             EditorID = "NPCChairTech03_Free_270", MarkerModel = "Markers\\FurnitureMarkers\\ChairNeutral_Free_Marker.nif",
             Keywords = new ExtendedList<IFormLinkGetter<IKeywordGetter>> { new FormLink<IKeywordGetter>(other.FormKey) },
+            // the real chair has a keyword form component of its own; a copy keeps it (FAL-342)
+            Components = new ExtendedList<AComponent> { new KeywordFormComponent { Keywords = new ExtendedList<IFormLinkGetter<IKeywordGetter>> { new FormLink<IKeywordGetter>(other.FormKey) } } },
             MarkerParameters = new ExtendedList<FurnitureMarkerParameters> { new FurnitureMarkerParameters { Offset = new P3Float(0, 0.12f, 0) } },
             MarkerEntryPoints = new ExtendedList<FurnitureMarkerEntryPoints> { new FurnitureMarkerEntryPoints() },
         });
