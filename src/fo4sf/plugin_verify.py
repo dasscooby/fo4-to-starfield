@@ -17,6 +17,13 @@ PROBLEMS (exit 1; each rests on a rule with evidence):
                    tests/test_plugin_verify.py)
     persistence    a record in a persistent child group (GRUP type 8) has flag 0x400; one in a temporary group
                    (type 9) has not
+    exterior       no persistent child group (type 8) under an OVERRIDE of a master's exterior cell (inside an
+                   exterior block or sub-block, types 4 / 5; a plugin's own new cell only warns: the planet probe
+                   has that layout and ran in game, but its cell never loaded): in Starfield.esm 0 of 18,300 exterior cells have one, all 431
+                   persistent groups of its worlds sit under the world's own persistent cell, and FAL-208's plugin,
+                   the one file with such a group, crashed the game at SF+0x41efd6 (FAL-273, PC scan 11 Nov; the
+                   link from the group to the crash is the PC's inference, not proven). Put a persistent
+                   reference in an override of the world's persistent cell instead.
 WARNINGS (listed, do not fail): rules without evidence that they matter (the same rule for QUST, WRLD, LCTN,
 CELL, MISC, STAT: the planet probe loads in game without them; a world or cell child group whose WRLD or CELL
 record is not in the plugin; HEDR counts that differ from the real counts).
@@ -68,6 +75,7 @@ REF_FIELDS = (
 )
 GROUP_PERSISTENT, GROUP_TEMPORARY = 8, 9
 GROUP_WORLD_CHILDREN, GROUP_CELL_CHILDREN = 1, 6
+GROUP_EXTERIOR_BLOCK, GROUP_EXTERIOR_SUB_BLOCK = 4, 5
 
 
 class PluginVerifyError(Exception):
@@ -236,7 +244,17 @@ def _groups(rep, plugin, n_masters, by_offset):
                     _, lab, gtype, s, e, depth = it
                     while stack and stack[-1][0] <= s - 24:
                         stack.pop()
-                    stack.append((e, gtype))
+                    stack.append((e, gtype, lab))
+                    if gtype == GROUP_PERSISTENT and any(g in (GROUP_EXTERIOR_BLOCK, GROUP_EXTERIOR_SUB_BLOCK) for _, g, _l in stack[:-1]):
+                        # the enclosing cell children group (type 6) names the cell
+                        cell_id = next((struct.unpack("<I", l)[0] for _, g, l in reversed(stack) if g == GROUP_CELL_CHILDREN), 0)
+                        if cell_id >> 24 < n_masters:
+                            rep.bad(f"persistent child group under the exterior cell {cell_id:08X}, an override of a master's cell: "
+                                    "no Starfield world has one (all persistent groups are under the world's persistent cell); "
+                                    "FAL-208's plugin with this layout crashed the game (FAL-273)")
+                        else:
+                            rep.warn(f"persistent child group under the plugin's own exterior cell {cell_id:08X}: no Starfield world has "
+                                     "one (unproven for a new cell; an override of a master's cell is refused)")
                     if gtype in (GROUP_WORLD_CHILDREN, GROUP_CELL_CHILDREN):
                         fid = struct.unpack("<I", lab)[0]
                         kind = "WRLD" if gtype == GROUP_WORLD_CHILDREN else "CELL"
@@ -256,7 +274,7 @@ def _groups(rep, plugin, n_masters, by_offset):
                 rec = by_offset.get(off)
                 while stack and stack[-1][0] <= off:
                     stack.pop()
-                gtypes = [g for _, g in stack]
+                gtypes = [g for _, g, _l in stack]
                 if rec is not None:
                     last_rec[depth] = rec
                     in_p, in_t = GROUP_PERSISTENT in gtypes, GROUP_TEMPORARY in gtypes
