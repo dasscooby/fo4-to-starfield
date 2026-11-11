@@ -12,12 +12,12 @@ with the mouse. Moving the mouse slowly works best. The page does not pause the 
 | # | Do | You should see | Write down |
 | --- | --- | --- | --- |
 | 1 | Stand somewhere safe, in control. Press **F10**. | A green panel: `FO4SF PIP-BOY  STAT` at the top, `TAB 1 OF 2: STATUS`, seven lines, and two dark buttons at the bottom, **NEXT TAB** and **CLOSE**. | Did the panel appear? |
-| 2 | Read the seven lines. | `HEALTH`, `LEVEL ... XP`, `CARRIED ... MAX`, `RADS` (`NOT INSTALLED` unless the rads test is installed), `CELL` (a name or `NO NAME`, and a number in brackets), `WORLD`, `TIME ... DAY`. | The numbers for HEALTH, LEVEL, MAX and TIME, and every line that shows a `?`. |
+| 2 | Read the seven lines. | `HEALTH`, `LEVEL ... XP`, `CARRY WEIGHT MAX`, `RADS` (`NOT INSTALLED` unless the rads test is installed), `CELL` (a name or `NO NAME`, and a number in brackets), `WORLD`, `TIME ... DAY`. | The numbers for HEALTH, LEVEL, MAX and TIME, and every line that shows a `?`. |
 | 3 | Touch nothing for ten seconds. | The minutes of `TIME` go up (about one game minute every three seconds). | Did TIME change? |
 | 4 | Move the mouse down until the game's pointer is on **NEXT TAB**, then click once. | `TAB 2 OF 2: DATA`: `POSITION`, `UPDATES` counting up about twice a second, `NEXT TAB CLICKS 1`. | Did the tab change? Does UPDATES count up? |
 | 5 | Click **NEXT TAB** again. | Back to `TAB 1 OF 2: STATUS`. | Did it come back? |
 | 6 | Point at **CLOSE** and click. | The page goes away; you can walk again. | Did it close? |
-| 7 | Walk through a door or about thirty steps; pick something up or drop something; if it is safe, take a little damage (a short fall). Then press **F10**. | The page again. `CELL` (its name or its number) and `TIME` have changed; `HEALTH` is lower after damage; `CARRIED` changes if it shows a number. | Which lines changed? |
+| 7 | Walk through a door or about thirty steps; pick something up or drop something; if it is safe, take a little damage (a short fall). Then press **F10**. | The page again. `CELL` (its name or its number) and `TIME` have changed; `HEALTH` is lower after damage. | Which lines changed? |
 | 8 | Press **F10**. | The page closes. | Did F10 close it? |
 
 **Report:** the answers in the last column, plus a screenshot or a phone photo of each tab if you can. Say also if
@@ -50,7 +50,7 @@ Your own log card goes beside this one. This part only names what this head need
 `step=listen name=... added=1`; `step=page ... fields=8/8 set=8 match=8` lines whose `text=` changes; `step=click
 button=tab` per NEXT TAB and `step=click button=close`, `step=close ... sent=hide`, `step=state ... match=yes` for
 CLOSE. Any `refuse` or `step=page_unknown` line is a finding: post it whole. Also post `step=page_forms` and
-`step=page_form_arrays` whole: its `weight_names=` names the carried-weight value if `CARRIED` shows `?`.
+`step=page_form_arrays` whole: `known=` shows, for each fixed form id, what the lookup gave.
 
 **PASS:** every STATUS line shows a value (RADS may say `NOT INSTALLED`), TIME and UPDATES change while the page is
-open, CELL, HEALTH or CARRIED change between opens, both buttons work, and the console's controls match the page.
+open, CELL or HEALTH change between opens, both buttons work, and the console's controls match the page.
