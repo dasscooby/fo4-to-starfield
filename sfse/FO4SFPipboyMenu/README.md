@@ -18,7 +18,7 @@ and logs every step. Two stages, picked by `Stage` in `FO4SFPipboyMenu.ini`:
 | --- | --- |
 | `src/main.cpp` | the plugin: version guard, checks before use, the menu object, the key thread |
 | `src/pch.h` | precompiled header (libxse's game headers and SFSE layer) |
-| `FO4SFPipboyMenu.ini` | `Stage`, `Key` (default `0x79`, F10), `Flags` (0), `KeepAlive` (1); stage (c): `FlagSets` (`0x0,0x8,0x9`), `SnapshotKey` (`0x7A`, F11) |
+| `FO4SFPipboyMenu.ini` | `Stage`, `Key` (default `0x79`, F10), `Flags` (0), `KeepAlive` (1); stage (c): `FlagSets` (`0x0,0x8,0x9`), `SnapshotKey` (`0x7A`, F11), `ClickCall` (empty: off) |
 | `xmake.lua`, `build.ps1` | the PC build: FOCCPing's build path (`docs/spikes/combined-core-probes.md`, B0-2) |
 | `scripts/ui/make_probe_swf.py` | writes the stage (b) movie, and with `--channel` the stage (c) one (pure Python; test `tests/test_make_probe_swf.py`) |
 | `scripts/ui/make_pipboy_probe.py` | stages the empty `FO4SFPipboyProbe.esm` and the movie; `check` checks the plugin |
@@ -114,8 +114,9 @@ the engine's thread for this menu:
   (libxse's `ShowCursor`, bit 3) and `0x9` (bit 3 and bit 0; bit 0 is Fallout 4's "pauses game", unverified in
   Starfield). The snapshot's `paused=` and the menu stack show what each set does.
 
-**Checked first, at stage (c) only** (stages (a) and (b) check exactly their 16 ids, as before). Thirteen more ids, each
-in the file, non-zero, inside the image and equal through libxse; then `step=channel_ids`:
+**Checked first, at stage (c) only** (stages (a) and (b) check exactly their 16 ids, as before). Sixteen more ids, each
+in the file, non-zero, inside the image and equal through libxse; then `step=channel_ids`. These thirteen, and the
+three of the click's section below:
 
 | Name | Id | Source | Checked by |
 | --- | --- | --- | --- |
@@ -135,6 +136,40 @@ libxse states; their reads are guarded, so a wrong offset logs `fault` or a wron
 **Not verified until the session:** that `getChildByName` finds timeline children of a movie with no code; that the
 embedded font draws; that our menu gets the mouse (the flag sets test it); that kUpdate reaches an open menu of ours;
 what `isGameMenuPaused` and the context ids mean (the controls below settle it).
+
+### Stage (c) with `ClickCall`: a click reaches a quest (FAL-246, B0-3)
+
+The bridge FOCCPing tests (B0-2) runs from script to native. The Pip-Boy, the perk and S.P.E.C.I.A.L. screens,
+lockpicking and a C.A.M.P. menu need the other direction: a click causes a script action. With
+`ClickCall=<script>.<function>` (shipped empty: off), each `step=click` also queues, on the main thread through SFSE's
+task interface, one call of that global Papyrus function through the script VM's `DispatchStaticCall` (libxse's
+`IVirtualMachine` slot 0x2F). The session uses `ClickCall=FOCC_B0.Click`: the combined probe kit's B0 script resolves
+its probe quest (`FOCC_Probe.Q`) and logs `b0 click` in `focc.0.log` through that quest's `Trace`.
+
+Three more ids, checked like the others at stage (c) (in the file, non-zero, inside the image, equal through libxse,
+the RTTI ids by name in `step=channel_ids`); they are FOCCPing's:
+
+| Name | Id | Source | Checked by |
+| --- | --- | --- | --- |
+| GameVM.Singleton | 937585 | libxse | file + libxse; the object's RTTI (`GameVM`, offset 0) before the first read |
+| GameVM, BSScript.Internal.VirtualMachine RTTI | 865426, 870795 | libxse | the type descriptor's name (`GameVM@@`, `VirtualMachine@Internal@BSScript@@`) |
+
+Before the first call: the VM the GameVM holds (libxse `GameVM::impl`, +0xE0, a guarded read) is a
+`BSScript::Internal::VirtualMachine` by RTTI at offset 0 (`IVirtualMachine` is its first base), and its vtable's
+slots 0x00 to 0x2F are inside the image (`step=object name=VirtualMachine ... dispatch_static_call=<rva>`). Then each
+click logs `step=dispatch n=<k> call=FOCC_B0.Click queued=<0|1>`.
+
+**No arguments, no callback.** Arguments go into a `BSScrapArray` the VM hands over; growing it calls
+`ScrapHeap::Allocate`, which libxse 9d090c4 states as `REL::ID{ 0 }` (a lookup of id 0 stops the game). So the
+argument function returns true and never touches the array; the function's own line carries the evidence. The
+callback is a null functor, as the two public precedents that call `DispatchStaticCall` on libxse pass it (a web-view
+UI framework and a co-op mod). Passing values (which item was clicked) needs the scrap heap's ids first: the next step.
+
+**Not verified until the session:** that slot 0x2F is `DispatchStaticCall` on 1.16.244 (libxse's declaration; the
+precedent fork's agrees, but it is the same library's lineage, and SFSE 0.2.21 declares no VM vtable). A wrong slot
+can stop the game at the first click, so the session card runs this last, in a launch of its own. Also open: whether
+the VM runs the call while our menu is open or only after it closes (the card's 10-second hold reads it from the two
+logs' clocks), and that the queued call needs no other thread than the main one.
 
 ## Build (PC)
 
@@ -202,7 +237,8 @@ Take a screenshot while the menu is open after the fifth press, and one after th
 ### PASS at (c), `Stage=3` (steps: `docs/spikes/pipboy-channel-bridge-session.md`)
 
 1. Everything in (b), with `stage=3` and `step=ready stage=c`, after `step=load_c flag_sets=0x0,0x8,0x9
-   snapshot_key=0x7a` and, before `step=ready`, `step=channel_ids value_functions=sfse_equal rtti_names=ok`.
+   snapshot_key=0x7a click_call=none` and, before `step=ready`, `step=channel_ids value_functions=sfse_equal
+   rtti_names=ok`.
 2. **Text field in:** `step=movie_root ... root_type=.?AVMovieRoot@AS3@GFx@Scaleform@@`, then `step=field n=0 root=1
    field=1 set=1 read_back=1 match=yes text="X ... Y ... Z ... CLICKS 0"`, and further `step=field n=<k>` lines with
    changing numbers while the player moves with the menu open. The screenshot shows the line inside the green box. The
@@ -213,6 +249,11 @@ Take a screenshot while the menu is open after the fifth press, and one after th
 4. **Pause and input:** a `step=snapshot` line at `show`, `open`, `hide`, `main_after_open`, `main_after_close` and on
    each F11, for each flag set (opens 1 to 3: `set=0`, `1`, `2`). This stage records them; it passes or fails nothing
    on its own. Its controls are F11 in play with no menu, and F11 with the game's own pause menu open (Esc).
+5. **Click to quest** (`ClickCall=FOCC_B0.Click`, its own launch): `step=load_c ... click_call=FOCC_B0.Click`,
+   `step=object name=GameVM`, `step=object name=VirtualMachine ... dispatch_static_call=<rva>`, then per click on CLICK
+   one `step=click n=<k>` and one `step=dispatch n=<k> call=FOCC_B0.Click queued=1`, and in `focc.0.log` one
+   `b0 click` line per dispatch. The control: no `b0 click` line before the first click, none for the click beside
+   the button.
 
 ### What each failure line means
 
@@ -248,5 +289,11 @@ Take a screenshot while the menu is open after the fifth press, and one after th
 | `step=field ... set=1 read_back=1 match=yes` but no text on screen | (c): the field took the text and the embedded font did not draw | screenshot; the font is the next item |
 | `step=listen ... added=1` but no `step=click` on a click | (c): the click did not reach the movie (no cursor or no mouse input to our menu) | compare the flag sets' opens: the cursor bit is set 1 |
 | `step=field ... text="NO POSITION ..."` | (c): the player singleton was not readable as a PlayerCharacter | read the `step=object name=PlayerCharacter` line |
+| `refuse step=ini click_call=` | (c): `ClickCall` is not `<script>.<function>` with two Papyrus names | fix the ini, or empty it |
+| `refuse step=object name=GameVM ...` or `name=VirtualMachine ... (no click reaches a script)` | (c): the VM singleton or the VM it holds is not its type, or its vtable leaves the image; no click is dispatched for the rest of the session | report the types the line names |
+| `step=dispatch ... result=no_vm` | (c): no script VM yet when the click came | click again once in play |
+| `step=dispatch ... queued=0` | (c): the VM did not take the call: the script or the function is unknown to it | check `compile_b0.txt` and that the kit was staged at this head; `Papyrus.0.log` names it |
+| `queued=1` but no `b0 click` in `focc.0.log` | (c): the VM took the call and did not run it, or the probe quest is missing (`b0 refused quest=none`) | collect `Papyrus.0.log` |
+| the game stops at the first click after `step=dispatch` was due | (c): slot 0x2F is not `DispatchStaticCall` on 1.16.244 | remove the dll; report the crash log's module and offset |
 
 The probe changes no Starfield interface file, and nothing it makes goes into Git: no dll, no movie, no archive.

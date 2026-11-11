@@ -467,10 +467,14 @@ class ScriptContractTests(unittest.TestCase):
         self.assertIn("Scriptname FOCC Hidden Native", NATIVE)
         self.assertIn("\nint Function Ping(int v) global native\n", NATIVE)
         self.assertNotIn("EndFunction", NATIVE)
-        # the entry points: both resolve the quest (a logged refusal otherwise) and trace through it
+        # the entry points (Gmst, Ping, and FAL-246's Click): each resolves the quest (a logged refusal otherwise) and
+        # traces through it
         self.assertIn("Scriptname FOCC_B0 Hidden", B0)
-        self.assertEqual(B0.count('FOCC_ProbeQuest q = FOCC_Probe.Q("b0")'), 2)
-        self.assertEqual(B0.count("if q == None"), 2)
+        self.assertEqual(B0.count('FOCC_ProbeQuest q = FOCC_Probe.Q("b0")'), 3)
+        self.assertEqual(B0.count("if q == None"), 3)
+        # B0-3: the function FO4SFPipboyMenu.dll calls with no arguments on a click (ClickCall=FOCC_B0.Click)
+        self.assertIn('Function Click() global', B0)
+        self.assertIn('q.Trace("b0 click")', B0[B0.index("Function Click() global"):])
         self.assertNotIn("Debug.TraceUser", B0)
         # B0-1: the probe plugin's game setting read by name (Game.GetGameSettingInt, Starfield's Game.psc lines 217-221)
         self.assertIn('q.Trace("b0 gmst name=iFOCC_Pong value=" + Game.GetGameSettingInt("iFOCC_Pong"))', B0)

@@ -42,6 +42,16 @@
 // (GFx::AS3::MovieRoot), whose two slots we call (0x30 CreateFunction, 0x32 GetVariable; libxse and SFSE agree on
 // both) must be inside the image. Reads of engine objects whose layout only libxse states (menu stack, input
 // contexts, the pause byte, the position) are guarded: a fault logs "fault" instead of stopping the game.
+//
+// Stage c with ClickCall set (FAL-246, native to script): each click also reaches a quest. On the main thread (SFSE's
+// task interface) the plugin asks the script VM to run one global Papyrus function with no arguments
+// (ClickCall=FOCC_B0.Click: the combined probe's B0 script, which resolves its probe quest and logs "b0 click" there)
+// through IVirtualMachine::DispatchStaticCall, libxse's slot 0x2F. Checked first, at stage c: 3 more ids (FOCCPing's
+// GameVM singleton and two RTTI ids, the RTTI ids by name); before the first call, the GameVM singleton is a GameVM by
+// RTTI, the VM it holds (libxse GameVM::impl, +0xE0) a BSScript::Internal::VirtualMachine by RTTI at offset 0, and its
+// vtable's slots 0x00 to 0x2F are inside the image. No arguments: a BSScrapArray that grows calls
+// ScrapHeap::Allocate, which libxse 9d090c4 states as REL::ID{ 0 }, so the argument function never touches the array.
+// No callback: a null functor, as the public precedents pass.
 
 #include "pch.h"
 
@@ -79,6 +89,9 @@ namespace
 	constexpr std::size_t   kPositionAt = 0x80 + 0x0C;       // libxse RE::TESObjectREFR::data (0x80), OBJ_REFR::location
 	constexpr std::size_t   kMaxListed = 16;                 // menus and contexts listed per snapshot
 	constexpr std::size_t   kMaxFlagSets = 4;
+	constexpr std::size_t   kGameVmImplAt = 0xE0;            // libxse RE::GameVM::impl (BSTSmartPointer<IVirtualMachine>)
+	constexpr std::size_t   kDispatchStaticCallSlot = 0x2F;  // libxse IVirtualMachine::DispatchStaticCall
+	constexpr std::size_t   kMaxName = 64;                   // ClickCall: each of the script's and function's names
 
 	struct Id
 	{
@@ -119,6 +132,9 @@ namespace
 		kValueGetMember,
 		kValueSetMember,
 		kValueInvoke,
+		kGameVmSingleton,                // FAL-246: the click reaches a quest
+		kGameVmRtti,
+		kVmRtti,
 		kIdCount
 	};
 
@@ -154,17 +170,22 @@ namespace
 		{ "GFx.Value.GetMember", 169748, "libxse, equal to SFSE's" },
 		{ "GFx.Value.SetMember", 169749, "libxse, equal to SFSE's" },
 		{ "GFx.Value.Invoke", 169750, "libxse, equal to SFSE's" },
+		{ "GameVM.Singleton", 937585, "libxse, as FOCCPing" },
+		{ "GameVM.RTTI", 865426, "libxse RTTI_GameVM, checked by name" },
+		{ "BSScript.Internal.VirtualMachine.RTTI", 870795, "libxse RTTI_BSScript__Internal__VirtualMachine, checked by name" },
 	} };
 
 	// stage c: each RTTI id's type name after its ".?AV" (class) or ".?AU" (struct) prefix, and SFSE 0.2.21's own
 	// 1.16.244 address of each Value function (sfse/ScaleformValue.h at 48535cc, ObjectInterface); the Address Library
 	// offset must equal it
-	constexpr std::array<std::pair<std::size_t, std::string_view>, 5> kRttiNames{ {
+	constexpr std::array<std::pair<std::size_t, std::string_view>, 7> kRttiNames{ {
 		{ kMainRtti, "Main@@"sv },
 		{ kPlayerRtti, "PlayerCharacter@@"sv },
 		{ kControlMapRtti, "ControlMap@@"sv },
 		{ kMovieImplRtti, "MovieImpl@GFx@Scaleform@@"sv },
 		{ kMovieRootRtti, "MovieRoot@AS3@GFx@Scaleform@@"sv },
+		{ kGameVmRtti, "GameVM@@"sv },
+		{ kVmRtti, "VirtualMachine@Internal@BSScript@@"sv },
 	} };
 	constexpr std::array<std::pair<std::size_t, std::uint32_t>, 5> kSfseRvas{ {
 		{ kValueAddRef, 0x3352400 },
@@ -225,6 +246,13 @@ namespace
 	std::atomic<int>                         g_mainOk{ -1 };           // -1 unchecked, 0 refused, 1 checked
 	std::atomic<int>                         g_playerOk{ -1 };
 	std::atomic<int>                         g_controlMapOk{ -1 };
+
+	// stage c, FAL-246 (INI ClickCall=<script>.<function>; empty = off)
+	std::string                              g_clickScript;
+	std::string                              g_clickFunction;
+	std::atomic<int>                         g_gameVmOk{ -1 };
+	std::uintptr_t                           g_checkedVm = 0;          // main thread only: the VM whose type was checked
+	bool                                     g_vmOff = false;          // main thread only: a VM check refused
 
 	std::uintptr_t Address(std::size_t a_id) { return g_base + g_rva[a_id]; }
 
@@ -487,6 +515,64 @@ namespace
 		return a_root.Invoke("getChildByName", &a_out, &name, 1) && a_out.IsObject();
 	}
 
+	// ------------------------------------------------------------------------------------------- stage c: click to quest
+	// FAL-246, main thread only. The script VM: the GameVM singleton is a GameVM (RTTI, offset 0, once), the VM it holds a
+	// BSScript::Internal::VirtualMachine (RTTI at offset 0: IVirtualMachine is its first base), and its vtable's slots up
+	// to DispatchStaticCall's are inside the image. nullptr while there is none (logged) or after a refusal
+	RE::BSScript::IVirtualMachine* ScriptVm()
+	{
+		if (g_vmOff || !CheckSingleton("GameVM", kGameVmSingleton, kGameVmRtti, g_gameVmOk)) {
+			return nullptr;
+		}
+		std::uintptr_t vm = 0;
+		if (!Peek(Singleton(kGameVmSingleton) + kGameVmImplAt, vm) || !vm) {
+			REX::INFO("step=object name=VirtualMachine result=null");
+			return nullptr;
+		}
+		if (vm != g_checkedVm) {
+			ObjectType     type;
+			std::uintptr_t vt = 0;
+			const bool     known = TypeOf(vm, type) && Peek(vm, vt);
+			if (!known || type.descriptor != Address(kVmRtti) || type.offset != 0 ||
+				!InImage(vt, (kDispatchStaticCallSlot + 1) * 8)) {
+				g_vmOff = true;
+				Refuse("object", std::format("name=VirtualMachine object={} type={} offset={} vtable={} (no click reaches a script)",
+					Hex(vm), known ? type.name : "unreadable", Hex(type.offset), Hex(vt)));
+				return nullptr;
+			}
+			const auto* slot = reinterpret_cast<const std::uintptr_t*>(vt);
+			for (std::size_t i = 0; i <= kDispatchStaticCallSlot; ++i) {
+				if (!InImage(slot[i], 1)) {
+					g_vmOff = true;
+					Refuse("object", std::format("name=VirtualMachine vtable={} slot={} reason=outside_image", Hex(vt), Hex(i)));
+					return nullptr;
+				}
+			}
+			g_checkedVm = vm;
+			REX::INFO("step=object name=VirtualMachine object={} type={} dispatch_static_call={}", Hex(vm), type.name,
+				Hex(slot[kDispatchStaticCallSlot] - g_base));
+		}
+		return reinterpret_cast<RE::BSScript::IVirtualMachine*>(vm);
+	}
+
+	// after click n: the VM queues one call of the ClickCall function and runs it on its own schedule; that function's
+	// own log line says when it ran
+	void DispatchClick(std::uint32_t a_n)
+	{
+		auto* const vm = ScriptVm();
+		if (!vm) {
+			REX::INFO("step=dispatch n={} call={}.{} result=no_vm", a_n, g_clickScript, g_clickFunction);
+			return;
+		}
+		const RE::BSFixedString                                        script(g_clickScript.c_str());
+		const RE::BSFixedString                                        function(g_clickFunction.c_str());
+		const RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> noCallback{};
+		// no arguments: growing the array would call ScrapHeap::Allocate, REL::ID{ 0 } in libxse 9d090c4
+		const auto noArguments = [](RE::BSScrapArray<RE::BSScript::Variable>&) { return true; };
+		const bool queued = vm->DispatchStaticCall(script, function, noArguments, noCallback, 0);
+		REX::INFO("step=dispatch n={} call={}.{} queued={}", a_n, g_clickScript, g_clickFunction, queued ? 1 : 0);
+	}
+
 	// the button's click handler: Scaleform calls it from the movie. Static and never released by us: the movie holds
 	// its own references (Scaleform's count at +0x08) on top of ours, so the count never reaches zero
 	class ClickHandler final : public RE::Scaleform::GFx::FunctionHandler
@@ -496,6 +582,9 @@ namespace
 		{
 			const auto n = ++g_clicks;
 			REX::INFO("step=click n={} args={} movie={}", n, a_params.argCount, Hex(reinterpret_cast<std::uintptr_t>(a_params.movie)));
+			if (!g_clickScript.empty()) {   // FAL-246: on to the script VM, from the main thread
+				g_task->AddTask([n]() { DispatchClick(n); });
+			}
 		}
 	};
 	ClickHandler g_clickHandler;
@@ -1047,6 +1136,46 @@ namespace
 		return text[0] ? static_cast<std::uint32_t>(std::wcstoul(text.data(), nullptr, 0)) : a_default;   // 0x.. or decimal
 	}
 
+	// a value as ASCII; any other character as '?'
+	std::string ReadText(const std::filesystem::path& a_ini, const wchar_t* a_key)
+	{
+		std::array<wchar_t, 160> text{};
+		REX::W32::GetPrivateProfileStringW(L"FO4SFPipboyMenu", a_key, L"", text.data(), static_cast<std::uint32_t>(text.size()),
+			a_ini.c_str());
+		std::string out;
+		for (const wchar_t* at = text.data(); *at; ++at) {
+			out += (*at > 0x20 && *at < 0x7F) ? static_cast<char>(*at) : '?';
+		}
+		return out;
+	}
+
+	// stage c, FAL-246: ClickCall=<script>.<function>, two Papyrus names of up to 64 letters, digits and '_' (no digit
+	// first); "" = off. False if malformed
+	bool ParseClickCall(std::string_view a_call)
+	{
+		const auto name = [](std::string_view a_name) {
+			if (a_name.empty() || a_name.size() > kMaxName || (a_name[0] >= '0' && a_name[0] <= '9')) {
+				return false;
+			}
+			for (const char c : a_name) {
+				if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_')) {
+					return false;
+				}
+			}
+			return true;
+		};
+		if (a_call.empty()) {
+			return true;
+		}
+		const auto dot = a_call.find('.');
+		if (dot == std::string_view::npos || !name(a_call.substr(0, dot)) || !name(a_call.substr(dot + 1))) {
+			return false;
+		}
+		g_clickScript = a_call.substr(0, dot);
+		g_clickFunction = a_call.substr(dot + 1);
+		return true;
+	}
+
 	// stage c: FlagSets=<n>,<n>,... (up to four, 0x.. or decimal); open k uses entry (k - 1) mod count
 	void ReadFlagSets(const std::filesystem::path& a_ini)
 	{
@@ -1090,14 +1219,19 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 		REX::INFO("step=off (Stage=1, 2 or 3 in FO4SFPipboyMenu.ini to probe)");
 		return true;
 	}
+	std::string clickCall;
+	bool        clickCallOk = true;
 	if (g_stage == 3) {
 		g_snapshotKey = ReadNumber(ini, L"SnapshotKey", 0x7A);
 		ReadFlagSets(ini);
+		clickCall = ReadText(ini, L"ClickCall");
+		clickCallOk = ParseClickCall(clickCall);
 		std::string sets;
 		for (std::size_t i = 0; i < g_flagSetCount; ++i) {
 			sets += std::format("{}{}", i ? "," : "", Hex(g_flagSets[i]));
 		}
-		REX::INFO("step=load_c flag_sets={} snapshot_key={}", sets.empty() ? "none" : sets, Hex(g_snapshotKey));
+		REX::INFO("step=load_c flag_sets={} snapshot_key={} click_call={}", sets.empty() ? "none" : sets, Hex(g_snapshotKey),
+			clickCall.empty() ? "none" : clickCall);
 	}
 	if (runtime != kRuntime) {
 		Refuse("version", std::format("runtime={} expected={}", runtime.string(), kRuntime.string()));
@@ -1109,6 +1243,10 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	}
 	if (g_stage == 3 && (g_snapshotKey > 0xFE || g_snapshotKey == g_key)) {
 		Refuse("ini", std::format("snapshot_key={} key={}", Hex(g_snapshotKey), Hex(g_key)));
+		return true;
+	}
+	if (!clickCallOk) {
+		Refuse("ini", std::format("click_call={} (<script>.<function>: two Papyrus names, or empty)", clickCall));
 		return true;
 	}
 	if (!CheckEverything(dir)) {

@@ -1,21 +1,25 @@
-# Probe session card: the Pip-Boy data channel, the bridge ping B0-2 and the sidecar P1 (FAL-216)
+# Probe session card: the Pip-Boy data channel, the bridge ping B0-2 and the sidecar P1 (FAL-216), and a click that reaches a quest, B0-3 (FAL-246)
 
 For: the owner PC (Claude, the chosen one), Windows PowerShell, a checkout of `fo4sf/fo4-to-starfield` at the head
-this card is published with. One build round and one game session cover three tests:
+this card is published with. One build round and one game session (with the relaunch P1 already needs) cover four
+tests:
 
 | Test | Plugin | Settles |
 | --- | --- | --- |
-| **C**, Pip-Boy stage (c) | `sfse/FO4SFPipboyMenu`, `Stage=3` | native code writes a text field in our movie and hears a button click from it; pause state and who holds input per flag set |
+| **C**, Pip-Boy stage (c) | `sfse/FO4SFPipboyMenu`, `Stage=3` | native code writes a text field in our movie and hears a button click from it; pause state, who holds input and whether time runs, per flag set (the three menu answers, section 6) |
 | **B0-2**, the bridge ping | `sfse/FOCCPing` | a quest script calls our plugin and reads its answer, before and after a save and load |
 | **P1**, the sidecar | `sfse/FOCCSidecar` | one value written beside a save at save time and read back at load time |
+| **B0-3**, click to quest | `sfse/FO4SFPipboyMenu`, `Stage=3`, `ClickCall=FOCC_B0.Click` | a click in our menu reaches the probe quest's script (native to script); run last, in the relaunch |
 
 **Which steps need a save:** B0-2 makes one save (`focc_b0_a`) and loads it; P1 makes two saves (`focc_p1_a`,
-`focc_p1_b`) and loads one. Test C makes no save; it needs only a loaded game. Use a throwaway character's save.
+`focc_p1_b`) and loads one. Test C makes no save, and neither does B0-3; both need only a loaded game. Use a throwaway
+character's save.
 
 **Before the session.** FAL-187's stages (a) and (b) passed at `782f944a` (owner PC, 10 Nov, 20:02 and 20:06 UTC), and
 this head contains #704's head `256b3854`: `eb242b32`, which has that tree, with `main` merged in. Stage (c) is that
-movie with two more children. The PR's independent review must be CLEAR at this head. All three dlls
-come from this one head. The usual rules of `docs/spikes/combined-core-probes.md` hold: game closed for every copy,
+movie with two more children. B0-3 is FAL-246's pull request, stacked on #711 (FAL-216, head `e7925e00`): both
+independent reviews must be CLEAR, #711's at `e7925e00` and FAL-246's at this head, and all three dlls come from this
+one head. The usual rules of `docs/spikes/combined-core-probes.md` hold: game closed for every copy,
 never during a runner run, D: keeps 40 GB free, nothing from the PC goes into Git, a launch that does not reach the
 main menu is a result (remove the dlls first, then report).
 
@@ -45,10 +49,11 @@ python scripts\ui\make_pipboy_probe.py check "$exp\FO4SFPipboyProbe.esm"
 python scripts\ui\make_probe_swf.py --read "$exp\Data\Interface\FO4SF_PipboyMenu.swf" | Select-String 'DefineFont3|fo4sfPosition|fo4sfButton'
 ```
 
-Expect `ok:` from the check and three matching lines (the font and the two instance names). B0-2's script side is the
-combined probe kit (`FOCC.psc`, `FOCC_B0.psc`, GMST `iFOCC_Pong` = 7 in `FO4SFCombinedProbe.esm`): if
-`probe_install.py status --starfield $sf` does not show it installed, run the runbook's jobs `focc-stage` and
-`focc-install` first and check `compile_b0.txt` says compiled.
+Expect `ok:` from the check and three matching lines (the font and the two instance names). The script side of B0-2
+and B0-3 is the combined probe kit (`FOCC.psc`, `FOCC_B0.psc`, GMST `iFOCC_Pong` = 7 in `FO4SFCombinedProbe.esm`).
+`FOCC_B0.psc` gained `Click` at this head, so stage the kit from this head in any case: if `probe_install.py status
+--starfield $sf` shows an older kit installed, `probe_install.py uninstall` it first; then the runbook's jobs
+`focc-stage` and `focc-install`, and check `compile_b0.txt` says compiled.
 
 ## 3. Install (game closed). Take the receipts first
 
@@ -64,11 +69,12 @@ Copy-Item "D:\Modding\staging\pipboy_menu_c_$date\FO4SFPipboyMenu.dll","D:\Moddi
 Copy-Item "D:\Modding\staging\focc_ping_$date\FOCCPing.dll" $pl
 Copy-Item "D:\Modding\staging\focc_sidecar_$date\FOCCSidecar.dll","D:\Modding\staging\focc_sidecar_$date\FOCCSidecar.ini" $pl
 (Get-Content "$pl\FOCCSidecar.ini") -replace '^bEnabled=0','bEnabled=1' | Set-Content -Encoding ASCII "$pl\FOCCSidecar.ini"
-Select-String -Path "$pl\FO4SFPipboyMenu.ini","$pl\FOCCSidecar.ini" -Pattern '^(Stage|bEnabled|FlagSets|SnapshotKey)='
+Select-String -Path "$pl\FO4SFPipboyMenu.ini","$pl\FOCCSidecar.ini" -Pattern '^(Stage|bEnabled|FlagSets|SnapshotKey|ClickCall)='
 Get-FileHash -Algorithm SHA256 "$pl\*.dll"
 ```
 
-Expect `Stage=3`, `FlagSets=0x0,0x8,0x9`, `SnapshotKey=0x7A`, `bEnabled=1`, and the dll hashes equal to the builds'.
+Expect `Stage=3`, `FlagSets=0x0,0x8,0x9`, `SnapshotKey=0x7A`, `ClickCall=` (empty: no click reaches a script in the
+first launch), `bEnabled=1`, and the dll hashes equal to the builds'.
 Then the movie's plugin and archive, as for stage (b) (inside the `plugin_toggle.py` hold, as the FO4SFPipboyMenu
 README says):
 
@@ -80,17 +86,23 @@ python scripts\ui\pipboy_probe_install.py install --dir $exp --starfield $sf; $L
 
 Keys: **F10** opens and closes our menu; **F11** writes a snapshot line. Give each step about two seconds.
 
+**Time reads (item 12, "does time slow").** A *time read* is the console's `GetGlobalValue GameDaysPassed`; write
+down the number it prints. A *60-second window* runs from closing the console after one time read to opening it for
+the next. If the console refuses the command, write `time: unknown` and go on; substitute nothing.
+
 **Test C, the Pip-Boy data channel (no save).**
 
 1. *Control for pause and input:* F11 in plain play. Then Esc (the game's own pause menu), F11, Esc again.
-2. **Open 1** (flag set 0, `0x0`): F10. Wait 2 s. Hold W for 2 s (does the player move with our menu open?). Stop,
-   wait 1 s. Screenshot. Click CLICK once. F11. F10 to close. Without moving, open the console:
-   `player.getpos x`, `player.getpos y`, `player.getpos z`; close the console.
-3. **Open 2** (flag set 1, `0x8`, libxse's ShowCursor): F10. Click CLICK twice; click once on the green beside it
-   (*control for the click*). Hold W for 2 s, stop, wait 1 s. Screenshot. F11. F10 to close. `player.getpos x`, `y`,
-   `z` again.
-4. **Open 3** (flag set 2, `0x9`, ShowCursor and bit 0): F10. Click CLICK once. Hold W for 2 s. Screenshot. F11.
-   F10 to close.
+   *Control for time:* a time read, a 60-second window in plain play without moving, a time read.
+2. **Open 1** (flag set 0, `0x0`): a time read. F10. Wait 2 s. Hold W for 2 s (does the player move with our menu
+   open?). Stop, wait 1 s. Screenshot. Click CLICK once. F11. Keep the menu open to the end of the 60-second window,
+   F10 to close, and without moving a time read; then `player.getpos x`, `player.getpos y`, `player.getpos z`; close
+   the console.
+3. **Open 2** (flag set 1, `0x8`, libxse's ShowCursor): a time read. F10. Click CLICK twice; click once on the green
+   beside it (*control for the click*). Hold W for 2 s, stop, wait 1 s. Screenshot. F11. At the end of the 60-second
+   window F10 to close, a time read, `player.getpos x`, `y`, `z` again.
+4. **Open 3** (flag set 2, `0x9`, ShowCursor and bit 0): a time read. F10. Click CLICK once. Hold W for 2 s.
+   Screenshot. F11. At the end of the 60-second window F10 to close, a time read.
 5. If F10 does not close the menu within 5 s at any open, press Esc once; if it is still open, close the game the
    normal way and report it: that is a finding about that flag set, not a failure of the session.
 
@@ -122,8 +134,34 @@ Copy-Item "$sfseLogs\FO4SFPipboyMenu.log","$sfseLogs\FOCCPing.log","$sfseLogs\FO
 Copy-Item "$logs\focc.0.log" $out
 ```
 
-On `got=0`, add `Papyrus.0.log` now too. Then relaunch through the loader, delete `focc_p1_b` in the load menu, quit
-(P1's orphan step).
+On `got=0`, add `Papyrus.0.log` now too.
+
+**The relaunch: P1's orphan step, then B0-3, the click that reaches a quest (no save).** Game closed, turn the click on:
+
+```powershell
+(Get-Content "$pl\FO4SFPipboyMenu.ini") -replace '^ClickCall=.*','ClickCall=FOCC_B0.Click' | Set-Content -Encoding ASCII "$pl\FO4SFPipboyMenu.ini"
+Select-String -Path "$pl\FO4SFPipboyMenu.ini" -Pattern '^(Stage|ClickCall)='
+```
+
+Expect `Stage=3` and `ClickCall=FOCC_B0.Click`. Relaunch through the loader. In the load menu delete `focc_p1_b`
+(P1's orphan step). Then load the save the session started from (not a `focc_` save, so P1's read-backs stay as they
+are) and wait until in control:
+
+1. F10. If open 1 of Test C logged no `step=click`, F10 to close and F10 again until the open whose flag set did (open
+   2, `0x8`).
+2. Click CLICK twice, then once on the green beside it (*control*). Keep the menu open 10 s without clicking (*the
+   clock mark*: whether the script runs while our menu is open). F10 to close. Wait 10 s. Quit to desktop.
+
+This step runs last because it is the first call into the script VM from our menu: if the game stops at the first
+click, the earlier tests are already collected. Then collect it:
+
+```powershell
+New-Item -ItemType Directory -Force "$out\b03" | Out-Null
+Copy-Item "$sfseLogs\FO4SFPipboyMenu.log" "$out\b03\"; Copy-Item "$logs\focc.0.log" "$out\b03\"
+Copy-Item "$(Split-Path $logs)\Papyrus.0.log" "$out\b03\"
+```
+
+(`Papyrus.0.log` is in `Logs\Script`, the folder above `$logs`.)
 
 ## 5. Collect the rest, then uninstall (game closed)
 
@@ -142,13 +180,13 @@ session. Compare with the receipts.
 ## 6. What passes, and each test's control
 
 **Load (all three logs).** `FO4SFPipboyMenu.log`: `step=load ... stage=3`, `step=load_c flag_sets=0x0,0x8,0x9
-snapshot_key=0x7a`, 29 `step=id` lines, `step=channel_ids value_functions=sfse_equal rtti_names=ok`, `step=ready
-stage=c ... locator=<rva>`, `step=register result=ok`, `step=key_thread ... snapshot_key=0x7a`, and at each open
-`step=create ... vtables=engine rtti=engine ... set=<i>`. `FOCCPing.log`: `FOCCPing v0.3.0.0`,
-14 `step=id` lines, `step=rtti vtable=NativeFunctionBase offset=0x0 slots=0x06,0x0F,0x10,0x14,0x15 match`, `listening
-for PostDataLoad; FOCC.Ping binds then`, `step=object name=GameVM`, `step=object name=VirtualMachine`, `step=bind
-slot=0x1e`, `bound FOCC.Ping`. `FOCCSidecar.log`: `step=load runtime=1.16.244.0 ... enabled=1`, `step=listen`. Any
-`refuse step=` line stops that plugin's test; its README says what each one means.
+snapshot_key=0x7a click_call=none`, 32 `step=id` lines, `step=channel_ids value_functions=sfse_equal rtti_names=ok`,
+`step=ready stage=c ... locator=<rva>`, `step=register result=ok`, `step=key_thread ... snapshot_key=0x7a`, and at each
+open `step=create ... vtables=engine rtti=engine ... set=<i>`. `FOCCPing.log`: `FOCCPing v0.3.0.0`, 14 `step=id` lines,
+`step=rtti vtable=NativeFunctionBase offset=0x0 slots=0x06,0x0F,0x10,0x14,0x15 match`, `listening for PostDataLoad;
+FOCC.Ping binds then`, `step=object name=GameVM`, `step=object name=VirtualMachine`, `step=bind slot=0x1e`, `bound
+FOCC.Ping`. `FOCCSidecar.log`: `step=load runtime=1.16.244.0 ... enabled=1`, `step=listen`. Any `refuse step=` line
+stops that plugin's test; its README says what each one means.
 
 **C, text field in.** PASS: `step=movie_root ... root_type=.?AVMovieRoot@AS3@GFx@Scaleform@@`; at each open
 `step=field n=0 ... field=1 set=1 read_back=1 match=yes text="X <x> Y <y> Z <z> CLICKS <k>"`, then `step=field n=<k>`
@@ -182,5 +220,36 @@ the save the session started from (made before the plugin was installed) logs `p
 `"error": "not found"`: the plugin reads back only what it wrote, and never invents a value. The judge also lists
 `focc_p1_b`'s sidecar as the one orphan after its save was deleted.
 
+**B0-3, the click reaches a quest.** PASS: in `b03\FO4SFPipboyMenu.log`, `step=load_c ... click_call=FOCC_B0.Click`,
+then at the first click `step=object name=GameVM`, `step=object name=VirtualMachine ...
+type=.?AVVirtualMachine@Internal@BSScript@@ dispatch_static_call=<rva>`, and per click on CLICK one `step=click n=<k>`
+followed by one `step=dispatch n=<k> call=FOCC_B0.Click queued=1`; in `b03\focc.0.log` one `b0 click` line per
+`queued=1`, the same count. *Control:* the click beside the button adds neither line, and `b03\focc.0.log` has no `b0
+click` before the first click (the console never types `FOCC_B0.Click`). `queued=0`, or `queued=1` with no `b0 click`:
+`Papyrus.0.log` says why (README, the failure table). B0-3 has no judge of its own, and the judge `probes b0` ignores
+the `b0 click` lines.
+
+### The three menu answers (item 12 of the stage additions, FAL-246)
+
+The systems waiting on our menus (the Pip-Boy, lockpicking, the HUD, later V.A.T.S.) need three answers per flag set.
+Fill this table from Test C and B0-3; each answer is read against its control, never on its own:
+
+| | Does the game pause? | Who has the keys? | Does time slow? |
+| --- | --- | --- | --- |
+| How it is read | `paused=` in the `show`, `open` and `main_after_open` snapshots | `contexts=` and `menus=` in the same snapshots; whether W moved the player; whether CLICK logged `step=click` | the two time reads around the open: their difference against the plain-play control's |
+| Control | step 1: plain play's `paused=` against the Esc pause menu's | step 1: plain play's `contexts=` against the Esc pause menu's | step 1's 60-second window in plain play |
+| Open 1, `0x0` | | | |
+| Open 2, `0x8` | | | |
+| Open 3, `0x9` | | | |
+
+The answer words: **pauses** when `paused=` equals the Esc control's and differs from plain play's, else **runs**.
+Keys: **the game** when W moved the player and `contexts=` equals plain play's; **our menu** when W did not move it
+and CLICK logged; **both** or **neither** otherwise, as observed. Time: the open's difference divided by the
+control's: about 1 **runs**, about 0 **stopped**, in between **slowed** (give the ratio); `unknown` when the console
+refused the read. One more line from B0-3, for scripts: the `b0 click` lines' clock (`focc.0.log`, to the second)
+against `step=message ... type=hide` (`FO4SFPipboyMenu.log`, local time): clicks logged before the hide mean the
+script VM runs while that flag set's menu is open; clicks logged only at or after it mean scripts wait for the close.
+
 Send back: the three dll sha256s, the three logs and `focc_sidecar.log`, the sidecars, `focc.0.log`, `saves.json`, the
-two verdicts, the screenshots, and for test C the three opens side by side.
+two verdicts, the screenshots, for test C the three opens side by side, the `b03` folder, and the table of the three
+menu answers filled in.
