@@ -104,6 +104,7 @@ class TestCLI(unittest.TestCase):
         self.assertTrue(any(l.startswith("Starfield data dir:") and l.endswith("(exists)") for l in lines), text)
         self.assertTrue(any(l.startswith("work_dir:") and l.endswith("(exists)") for l in lines), text)
         self.assertTrue(any(l.startswith("staging_dir:") and l.endswith("(MISSING or not created)") for l in lines), text)
+        self.assertTrue(any(l.startswith("Python:") for l in lines), text)
 
     def test_status_reports_unset_directories(self):
         import contextlib

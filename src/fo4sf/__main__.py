@@ -33,6 +33,9 @@ def cmd_status(args: argparse.Namespace) -> int:
         return 1
 
     print("fo4-to-starfield status")
+    version = ".".join(str(n) for n in sys.version_info[:3])
+    py_ok = sys.version_info >= MIN_PYTHON
+    print(f"  Python: {version} ({'ok' if py_ok else 'needs ' + '.'.join(map(str, MIN_PYTHON)) + ' or newer'})")
     print(f"  config: {Path(args.config or 'config.toml').resolve()}")
     fo4 = cfg.get("fo4", {})
     data_dirs = fo4.get("data_dirs", [])
