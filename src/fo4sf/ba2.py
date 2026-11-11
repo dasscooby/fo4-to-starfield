@@ -113,10 +113,51 @@ class Ba2:
                     if off > self._size or off + chunk > self._size:
                         raise Ba2Error(f"{self.path}: DX10 entry {e.name} chunk is outside the file")
 
+    @staticmethod
+    def _unpacked_of(e: Entry) -> int:
+        if e.kind == "GNRL":
+            return e.unpacked
+        return sum(c[2] for c in (e.chunks or []))
+
+    @staticmethod
+    def _packed_of(e: Entry) -> int:
+        if e.kind == "GNRL":
+            return e.packed or e.unpacked
+        return sum((c[1] or c[2]) for c in (e.chunks or []))
+
+    @staticmethod
+    def _extension_of(name: str) -> str:
+        """Last dotted suffix of the basename; empty if the file has no extension.
+
+        Uses the basename so an extensionless file under a dotted directory
+        (meshes/setdressing.lod/readme) is not counted as extension 'lod/readme'.
+        """
+        base = name.replace("\\", "/").rsplit("/", 1)[-1]
+        if "." in base:
+            return base.rsplit(".", 1)[-1].lower()
+        return ""
+
     def summary(self) -> dict:
-        """Return a short summary of the archive contents."""
-        gnrl = sum(1 for e in self.entries if e.kind == "GNRL")
-        dx10 = sum(1 for e in self.entries if e.kind == "DX10")
+        """Return a short summary of the archive contents, including size totals and extension counts.
+
+        Useful for conversion planning: total unpacked bytes to process, and which file types dominate.
+        """
+        gnrl = 0
+        dx10 = 0
+        total_unpacked = 0
+        total_packed = 0
+        by_ext: dict = {}
+        for e in self.entries:
+            u = self._unpacked_of(e)
+            p = self._packed_of(e)
+            total_unpacked += u
+            total_packed += p
+            if e.kind == "GNRL":
+                gnrl += 1
+            else:
+                dx10 += 1
+            ext = self._extension_of(e.name)
+            by_ext[ext] = by_ext.get(ext, 0) + 1
         return {
             "path": self.path,
             "version": self.version,
@@ -124,6 +165,9 @@ class Ba2:
             "entries": len(self.entries),
             "general": gnrl,
             "textures": dx10,
+            "total_unpacked": total_unpacked,
+            "total_packed": total_packed,
+            "by_extension": dict(sorted(by_ext.items(), key=lambda x: -x[1])),
         }
 
     def size_estimates(self) -> dict:
@@ -131,18 +175,44 @@ class Ba2:
 
         Useful for conversion planning: packed is what you download/store, unpacked is peak RAM/temp during extract.
         Counts only the payload sizes recorded in the index; does not read file data.
+
+        Keys from #348 (on main): packed_bytes, unpacked_bytes, entries.
+        Extra split keys: general_unpacked, texture_unpacked, average_unpacked,
+        plus aliases total_packed / total_unpacked / entry_count.
         """
-        packed = 0
-        unpacked = 0
+        total_unpacked = 0
+        total_packed = 0
+        general_unpacked = 0
+        texture_unpacked = 0
         for e in self.entries:
+            u = self._unpacked_of(e)
+            p = self._packed_of(e)
+            total_unpacked += u
+            total_packed += p
             if e.kind == "GNRL":
-                packed += e.packed or e.unpacked
-                unpacked += e.unpacked
-            elif e.kind == "DX10" and e.chunks:
-                for _off, pk, up, _s, _e in e.chunks:
-                    packed += pk or up
-                    unpacked += up
-        return {"packed_bytes": packed, "unpacked_bytes": unpacked, "entries": len(self.entries)}
+                general_unpacked += u
+            else:
+                texture_unpacked += u
+        n = len(self.entries)
+        return {
+            "packed_bytes": total_packed,
+            "unpacked_bytes": total_unpacked,
+            "entries": n,
+            "total_unpacked": total_unpacked,
+            "total_packed": total_packed,
+            "general_unpacked": general_unpacked,
+            "texture_unpacked": texture_unpacked,
+            "entry_count": n,
+            "average_unpacked": total_unpacked // n if n else 0,
+        }
+
+    def total_unpacked_estimate(self) -> int:
+        """Estimate the total unpacked size of all entries in bytes.
+
+        For GNRL uses the unpacked field; for DX10 sums the unpacked chunk sizes
+        (DDS header is not included in the estimate).
+        """
+        return self.size_estimates()["unpacked_bytes"]
 
     def largest_entries(self, n: int = 10) -> list:
         """Return the n largest entries by unpacked size, useful for conversion planning.
@@ -150,23 +220,13 @@ class Ba2:
         Each item is a dict with name, kind, unpacked bytes, and packed bytes (0 if uncompressed).
         For DX10 textures the unpacked size is the sum of chunk unpacked sizes (excluding the DDS header).
         """
-        def unpacked_of(e: Entry) -> int:
-            if e.kind == "GNRL":
-                return e.unpacked
-            return sum(c[2] for c in (e.chunks or []))   # c[2] is unpacked
-
-        def packed_of(e: Entry) -> int:
-            if e.kind == "GNRL":
-                return e.packed or e.unpacked
-            return sum((c[1] or c[2]) for c in (e.chunks or []))
-
-        ranked = sorted(self.entries, key=unpacked_of, reverse=True)[:n]
+        ranked = sorted(self.entries, key=self._unpacked_of, reverse=True)[:n]
         return [
             {
                 "name": e.name,
                 "kind": e.kind,
-                "unpacked": unpacked_of(e),
-                "packed": packed_of(e),
+                "unpacked": self._unpacked_of(e),
+                "packed": self._packed_of(e),
             }
             for e in ranked
         ]
