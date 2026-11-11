@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -86,6 +87,27 @@ class PipboyProbeInstallTests(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.data, PLUGIN)))
         self.assertEqual(self.lines(), BEFORE)
         self.assertEqual(self.exp_record(), EXP_RECORD)
+
+    def test_prepacked_path_never_calls_archive_builder(self):
+        archive = os.path.join(self.staged, "FO4SFPipboyProbe - Main.ba2")
+        write(archive, archive_from_tree(Path(self.staged) / "Data"))
+        with patch.object(exp_install, "build_ba2", side_effect=AssertionError("must not build")):
+            code, output = self.run_main("install", "--dir", self.staged, "--prepacked", archive)
+        self.assertEqual(code, 0, output)
+        self.assertTrue(Path(self.data, pbi.RECORD).exists())
+
+    def test_wrong_prepacked_archive_refuses_without_game_changes(self):
+        archive = os.path.join(self.staged, "FO4SFPipboyProbe - Main.ba2")
+        write(archive, archive_from_tree(Path(self.staged) / "Data"))
+        raw = bytearray(Path(archive).read_bytes())
+        raw[0:4] = b"FAIL"
+        Path(archive).write_bytes(raw)
+        before = Path(self.plugins).read_bytes()
+        with patch.object(exp_install, "build_ba2", side_effect=AssertionError("must not build")):
+            code, output = self.run_main("install", "--dir", self.staged, "--prepacked", archive)
+        self.assertNotEqual(code, 0, output)
+        self.assertFalse(Path(self.data, pbi.RECORD).exists())
+        self.assertEqual(Path(self.plugins).read_bytes(), before)
 
     def test_the_names_match_the_stager(self):
         self.assertEqual(make_pipboy_probe.PLUGIN, PLUGIN)

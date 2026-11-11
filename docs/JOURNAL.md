@@ -2848,3 +2848,15 @@ before mutations. Tests use synthetic local stages, receipts and plugin lists on
 Focused catalog/recovery/GUI checks and guard results are recorded on the draft PR.
 No installed kit, game, Windows UI or source game asset was touched. UI and no-build
 installer actions follow in the next source slice; independent review remains required.
+
+## 2026-11-11 — Codex / Lone: FAL-274 Tests page and prebuilt installer path
+
+Continues draft #723 after Scribe CLEAR fe7a54f0 (FAL-288). Added the Tests tab,
+registration, per-kit install/remove/card buttons and standalone-card viewer. CLI uses
+saved locations and selected-profile environment; checks processes, recovery, settings,
+registry and journal state before the fixed installer. Existing archive-only flags let
+planet/Pip-Boy/quest installers validate a prebuilt archive without calling Archive2.
+Synthetic round trips preserve owner sentinel/plugin bytes and cover orphan removal,
+wrong/missing archives and action refusals. Windows helper card is source-only here.
+Radiation/power-armor wrapper flag coordination sent to their writer on FAL-273.
+No PC, game, actual install or game input on this Ubuntu source worker.

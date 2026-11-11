@@ -2,9 +2,11 @@
 
 Writer: Codex / The Lone Wanderer, Paperclip Ubuntu OptiPlex.
 
-Implementation is being published in slices in one draft PR. The first slice provides
-only the read-only catalog, owner-card parser and recovery coverage. The Tests tab,
-registration UI and install/remove actions are not available in this slice.
+The launcher window has a **Tests** tab. Choose a kit type, press **Add staged kit…**
+and choose its prepared stage folder. Each listed kit has **Install**, **Remove** and
+**Show card**. **Refresh** rereads receipts and the selected profile. Inventory hashing
+runs on a worker so the window can still respond. Cards open in a read-only dialog.
+The separate **Standalone owner card** button displays the FAL-224 owner test.
 
 ## Local catalog
 
@@ -23,7 +25,7 @@ file. It records explicit local stage folders only (absolute paths on that machi
 Other keys: `planet_probe`, `quest_probe`, `rads_probe`, `power_armor_probe`.
 Kit folders are registered deliberately; the launcher does not scan personal folders,
 build a kit, fetch dependencies, or download anything. Keep this machine-specific file
-private. The GUI registration controls arrive in the following slice.
+private. Registering a folder changes this catalog only, not game files.
 
 The list includes registered stages and owned installed kits even if their stage has
 disappeared. It reports `not installed`, `installed`, or `installed and active`.
@@ -66,12 +68,31 @@ replace operator preparation or grant permission to create accounts or modify th
 normal game. A successful menu-only run does not prove save isolation or a playable
 Commonwealth.
 
-## Remaining action and PC gates
+## Installer actions and PC gates
 
-Install/remove must use the kit's own installer, refuse a running/unknown game state
-and pass the interrupted-install gate before any changes. Existing archive-packing
-installer paths cannot be used unchanged by this page: an explicit validated prebuilt
-archive path is required. No archive build/download belongs in a Tests action.
+Install/remove use the kit's own fixed installer. They refuse a running/unknown game
+state, changed/unsaved locations, incomplete/unreadable recovery state, unknown or
+unregistered kit, missing installer, missing plugin/archive, double install, and removal
+of a kit that is not installed. The CLI rechecks processes, saved settings, stage registry
+and journal bytes immediately before invoking the installer. The installer retains its
+own no-overwrite, stage-validation, dependency, held-plugin and journal checks.
+
+The stage must contain `<primary plugin stem> - Main.ba2` next to the plugin. The page
+always passes **`--prepacked <that file>`**. exp_install.py and bridge_install.py validate
+this archive against the staged source inventory and use their normal exclusive-copy,
+hash and rollback paths; they never call Archive2 in this mode. Planet/Pip-Boy wrappers
+forward the flag; the quest wrapper already forwards its arguments to bridge_install.
+Default command-line installers still pack when explicitly called without --prepacked.
+The PC helper prepares archives separately through the existing packaging pipeline.
+An older kit wrapper that does not accept --prepacked refuses; it cannot silently build.
+Radiation/power armor wrappers belong to their writer's unmerged branches; forwarding
+this flag is coordinated on FAL-273. Missing scripts remain visible and disabled.
+
+For scripts/helpers, `launcher.py tests list|register|install|remove --settings <file>`
+uses the same model. Register takes `--kit <key> --stage <folder>`. Install/remove take
+`--kit <key> --starfield <expected saved game folder>`; a stale target refuses. These
+mutations are Windows-only. A configured instance uses its own LOCALAPPDATA and must
+pass instance.check_ready; the normal profile's plugin list is not used.
 
 The recovery guard now recognizes all five kit receipt names, including Pip-Boy,
 radiation and power armor. If an interrupted kit's installer is absent, recovery
@@ -79,5 +100,6 @@ refuses before making a plugin-list backup or running any installer; it preserve
 all journals for the PC helper. This does not install a missing tool automatically.
 
 Synthetic checks: `python3 -m unittest tests.test_launcher_test_kits tests.test_launcher_recovery tests.test_launcher_gui`.
-Windows GUI and game checks: NOT_RUN on Ubuntu. The bounded, exact-head PC helper
-recipe follows with the UI/action slice; this foundation is not a PC execution request.
+Action/prepacked checks: `python -m unittest tests.test_launcher_kit_actions tests.test_pipboy_probe_install tests.test_planet_probe_install tests.test_questprobe_install`.
+Use the repository Python environment with requirements-ci.txt.
+Windows GUI and game checks: NOT_RUN on Ubuntu. See the [Windows helper card](../testing/launcher-tests-pc.md); execute only after independent exact-head review.

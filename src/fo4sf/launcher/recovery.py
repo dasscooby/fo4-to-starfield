@@ -121,10 +121,10 @@ def recover(starfield, repo, *, apply=False, env=None, running=restore.game_runn
         raise ValueError("Close Starfield before recovering (an unknown process state also blocks recovery).")
     if apply:
         for comp in pending:
-            if not os.path.isfile(os.path.join(repo, COMPONENTS[comp][1])):
+            if not os.path.isfile(os.path.join(repo, *COMPONENTS[comp][1].split("/"))):
                 raise ValueError(f"Recovery installer for {comp} is unavailable; keep all journals and ask the PC helper.")
     for comp in pending:
-        argv = [sys.executable, "-I", os.path.join(repo, COMPONENTS[comp][1]),
+        argv = [sys.executable, "-I", os.path.join(repo, *COMPONENTS[comp][1].split("/")),
                 "uninstall", "--starfield", starfield]
         say(f"Recover install: roll back interrupted {comp}")
         if apply:

@@ -3,6 +3,7 @@ import json
 import ntpath
 import os
 import re
+import sys
 from dataclasses import dataclass
 
 from . import files
@@ -175,6 +176,102 @@ def list_kits(starfield, registered, plugins_txt, repo):
         rows.append({"key": kit.key, "title": kit.title, "stage": stage, "installed": installed,
                      "state": "installed and active" if enabled else "installed" if installed else "not installed",
                      "problems": problems, "notice": SAVE_NOTICE if installed else "",
-                     "installer_available": os.path.isfile(os.path.join(repo, kit.installer)),
+                     "installer_available": os.path.isfile(os.path.join(repo, *kit.installer.split("/"))),
                      "card_available": bool(stage) and os.path.isfile(os.path.join(stage, CARD))})
     return rows
+
+
+def register(path, key, folder):
+    """Record a chosen existing local stage; game files are never written here."""
+    if key not in BY_KEY:
+        raise ValueError("Unknown test kit")
+    folder = os.path.abspath(folder)
+    if not os.path.isdir(folder) or not os.path.isfile(os.path.join(folder, BY_KEY[key].plugin)):
+        raise ValueError("Choose the staged kit folder containing its test plugin")
+    registered = load_registry(path)
+    registered[key] = folder
+    files.save_json(path, {"schema": 1, "kits": registered})
+
+
+def context(values, environ):
+    """The saved target and its profile. Instance lists never use the normal profile."""
+    from . import instance
+    folder = values["instance"] or values["starfield"]
+    if not folder or not os.path.isfile(os.path.join(folder, "Starfield.exe")) or not os.path.isdir(os.path.join(folder, "Data")):
+        raise ValueError("Confirm an existing Starfield folder on the Locations tab")
+    env = dict(environ)
+    if values["instance"]:
+        instance.check_ready(folder)
+        env = instance.env_for(folder, environ)
+    local = env.get("LOCALAPPDATA", "")
+    if not local or not os.path.isabs(local):
+        raise ValueError("Cannot find this profile's Plugins.txt (LOCALAPPDATA)")
+    return os.path.abspath(folder), os.path.join(local, "Starfield", "Plugins.txt"), env
+
+
+def inventory(settings_path, repo, *, environ=None):
+    from . import settings
+    values = settings.load(settings_path)
+    folder, plugins, _env = context(values, os.environ if environ is None else environ)
+    return list_kits(folder, load_registry(registry_path(settings_path)), plugins, repo)
+
+
+def execute(key, action, settings_path, repo, *, expected_folder, running, run, environ=None):
+    """One fixed installer, with fail-closed checks immediately before invocation.
+
+    No builds: install always passes an existing archive to --prepacked. Unsupported
+    older installers reject that option rather than silently building an archive.
+    """
+    from . import recovery, settings
+    if key not in BY_KEY or action not in ("install", "remove"):
+        raise ValueError("Unknown test kit or action")
+    def idle():
+        try:
+            state = running()
+        except Exception as error:
+            raise ValueError(f"Cannot check Starfield processes; nothing changed: {error}") from None
+        if state is not False:
+            raise ValueError("Close Starfield before installing or removing a test kit (unknown state also refuses)")
+    idle()
+    values = settings.load(settings_path)
+    folder, plugins, env = context(values, os.environ if environ is None else environ)
+    norm = lambda path: os.path.normcase(os.path.abspath(path))  # noqa: E731
+    if not expected_folder or norm(expected_folder) != norm(folder):
+        raise ValueError("Saved game location changed; reload the Tests page")
+    reason = recovery.play_reason(folder)
+    if reason:
+        raise ValueError(reason)
+    records = recovery.inspect(folder)[0]
+    registered = load_registry(registry_path(settings_path))
+    rows = {row["key"]: row for row in list_kits(folder, registered, plugins, repo)}
+    if key not in rows:
+        raise ValueError("Test kit is neither staged nor installed; add its stage folder first")
+    row, kit = rows[key], BY_KEY[key]
+    if not row["installer_available"]:
+        raise ValueError("This kit's installer is unavailable in this checkout; ask the PC helper to update it")
+    if action == "remove" and not row["installed"]:
+        raise ValueError("This test kit is not installed")
+    if action == "install" and row["installed"]:
+        raise ValueError("This test kit is already installed; remove it before changing its stage")
+    argv = [sys.executable, "-I", os.path.join(repo, *kit.installer.split("/")),
+            "uninstall" if action == "remove" else "install", "--starfield", folder]
+    if action == "install":
+        stage = row["stage"]
+        if not stage or not os.path.isfile(os.path.join(stage, kit.plugin)):
+            raise ValueError("The staged test plugin is missing; ask the PC helper to prepare the kit")
+        archive = os.path.join(stage, os.path.splitext(kit.plugin)[0] + " - Main.ba2")
+        if not os.path.isfile(archive):
+            raise ValueError("The prebuilt test archive is missing; ask the PC helper to prepare it (nothing built)")
+        argv += ["--dir", stage, "--prepacked", archive]
+    # Hashing/reading inventory can take time; late game, settings, registry or journal
+    # changes must not act on the previously selected target.
+    idle()
+    if settings.load(settings_path) != values or load_registry(registry_path(settings_path)) != registered:
+        raise ValueError("Settings or test stages changed; reload the Tests page")
+    reason = recovery.play_reason(folder)
+    if reason or recovery.inspect(folder)[0] != records:
+        raise ValueError(reason or "Installation state changed; reload the Tests page")
+    result = run(argv, cwd=repo, env=env)
+    if result.returncode:
+        raise ValueError(f"Test {action} stopped (exit {result.returncode}); keep the installer's journal and read its report")
+    return 0

@@ -10,6 +10,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -99,6 +100,27 @@ class PlanetProbeInstallTests(unittest.TestCase):
     def exp_record(self):
         with open(os.path.join(self.data, exp_install.RECORD), "rb") as f:
             return f.read()
+
+    def test_prepacked_path_never_calls_archive_builder(self):
+        archive = os.path.join(self.staged, "FO4SFPlanet - Main.ba2")
+        write(archive, archive_from_tree(Path(self.staged) / "Data"))
+        with patch.object(exp_install, "build_ba2", side_effect=AssertionError("must not build")):
+            code, output = self.run_main("install", "--dir", self.staged, "--prepacked", archive)
+        self.assertEqual(code, 0, output)
+        self.assertTrue(Path(self.data, ppi.RECORD).exists())
+
+    def test_wrong_prepacked_archive_refuses_without_game_changes(self):
+        archive = os.path.join(self.staged, "FO4SFPlanet - Main.ba2")
+        write(archive, archive_from_tree(Path(self.staged) / "Data"))
+        raw = bytearray(Path(archive).read_bytes())
+        raw[0:4] = b"FAIL"
+        Path(archive).write_bytes(raw)
+        before = Path(self.plugins).read_bytes()
+        with patch.object(exp_install, "build_ba2", side_effect=AssertionError("must not build")):
+            code, output = self.run_main("install", "--dir", self.staged, "--prepacked", archive)
+        self.assertNotEqual(code, 0, output)
+        self.assertFalse(Path(self.data, ppi.RECORD).exists())
+        self.assertEqual(Path(self.plugins).read_bytes(), before)
 
     def test_install_rides_along_and_uninstall_restores(self):
         code, out = self.run_main("install", "--dir", self.staged)

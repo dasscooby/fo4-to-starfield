@@ -72,13 +72,15 @@ def install(a):
     if problems:
         sys.exit("pipboy probe not installed (re-stage with make_pipboy_probe.py stage): " + "; ".join(problems))
     return installer(["install", "--exp-dir", d, "--starfield", a.starfield, "--pack",
-                      "--plugins", make_pipboy_probe.PLUGIN])
+                      "--plugins", make_pipboy_probe.PLUGIN] +
+                     (["--prepacked", a.prepacked] if getattr(a, "prepacked", "") else []))
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cmd", choices=("install", "uninstall", "status", "order", "active"))
     ap.add_argument("--dir", default="", help="the staged probe folder (install)")
+    ap.add_argument("--prepacked", default="", help="verify and install this existing archive; never build")
     ap.add_argument("--starfield", required=True, help="the game folder (Starfield.exe)")
     a = ap.parse_args(argv)
     if a.cmd == "install":

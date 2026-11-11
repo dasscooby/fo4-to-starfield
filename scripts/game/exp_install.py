@@ -561,7 +561,9 @@ def refuse_while_held(data, what):
 
 
 def install(a):
-    if getattr(a, "pack", False):
+    if getattr(a, "prepacked", "") and not getattr(a, "pack", False):
+        sys.exit("--prepacked requires --pack; nothing installed")
+    if getattr(a, "pack", False) and not getattr(a, "prepacked", ""):
         with tempfile.TemporaryDirectory(prefix="fo4sf-exp-pack-") as packing_dir:
             return _install(a, packing_dir)
     return _install(a)
@@ -632,7 +634,8 @@ def _install(a, packing_dir=None):
         key = "plugin/" + plugin if plugin is not None else "Data/" + relative.replace("\\", "/")
         identities[relative] = inputs[key]
     if packed:
-        built = build_ba2(a, os.path.join(a.exp_dir, "Data"), os.path.join(packing_dir, ba2))
+        built = getattr(a, "prepacked", "") or build_ba2(
+            a, os.path.join(a.exp_dir, "Data"), os.path.join(packing_dir, ba2))
         files.append((built, ba2))
         identities[ba2] = digest(built)
     if source_inventory(a.exp_dir, plugins) != inputs:
@@ -738,6 +741,7 @@ def main(argv=None):
     ap.add_argument("--starfield", required=True)
     ap.add_argument("--plugins", default="", help="comma-separated plugin file names to activate")
     ap.add_argument("--pack", action="store_true", help="install the staged Data tree as '<first plugin> - Main.ba2'")
+    ap.add_argument("--prepacked", default="", help="with --pack, verify and install this existing archive; never build")
     ap.add_argument("--needs", default="", help="runner features the queue needs (runner_features.py); refuse without")
     a = ap.parse_args(argv)
     if a.cmd == "install":
