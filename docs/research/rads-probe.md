@@ -112,7 +112,9 @@ The owner PC's reading (**untested; it fits all five sessions**): in this engine
 applied and taken back at once. An effect on an ingestible is a third behaviour (kept and repeated every update).
 This head changes exactly what that reading says to change, and nothing else:
 1. **`Detrimental` is kept** on our effect (the template's flags are kept untouched; our MGEF now differs from
-   `DamageHealthContact` in word 14 only). `check` compares every flag with the template.
+   `DamageHealthContact` in the actor value (word 14) and in what `CopyEffect` clears on purpose: resist, skill and third values, keywords,
+   conditions, the script and the counter effects, with the archetype rebuilt as a plain value modifier; the owner PC's read-back of the
+   staged DATA, not of those other fields, is what showed word 14 and the flag bit). `check` compares every flag with the template.
 2. **The value is flagged "damage is positive"** (`AVFL` bit 26, `0x04000000`, Mutagen `DamageIsPositive`, Fallout 4's own way of
    declaring Rads; the AVIF now reads `DefaultToZero | DamageIsPositive`). By the sign rule the owner PC read from the engine
    (negate when exactly one of the effect's Detrimental and the value's bit 26 is set), Detrimental + bit 26 is **no
