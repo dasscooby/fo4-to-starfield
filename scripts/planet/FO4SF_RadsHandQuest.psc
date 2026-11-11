@@ -103,6 +103,14 @@ bool Function ModHealth(Actor p, float delta)
     return ok
 EndFunction
 
+bool Function ModRads(Actor p, float delta)
+    {Our value moved by delta with Actor.ModValue; false when the game declares no such call (the caller then uses SetValue).}
+    bool ok = false
+;OPT Actor.ModValue     p.ModValue(RadsAV, delta)
+;OPT Actor.ModValue     ok = true
+    return ok
+EndFunction
+
 Function ApplyRoute(Actor p)
     float rads = p.GetValue(RadsAV)
     int pen = (rads * PenaltyPerRad) as int
@@ -205,6 +213,11 @@ Function Settle()
     else
         Say(UsedWhat + " used: the effect left rads at " + (have as int) + ", expected " + (WantRads as int) + ". Setting " + (WantRads as int))
         Trace("settle used=" + UsedWhat + " ok=false want=" + WantRads + " had=" + have)
-        p.SetValue(RadsAV, WantRads)
+        ; Ninth session of the probe (FAL-213): a correction by the difference reaches the number; SetValue wrote the base apart
+        ; from the stored change of a cast (300 stored, SetValue 100 read 400). SetValue only when ModValue is not declared.
+        if !ModRads(p, WantRads - have)
+            p.SetValue(RadsAV, WantRads)
+        endif
+        Trace("settle fix want=" + WantRads + " now=" + p.GetValue(RadsAV))
     endif
 EndFunction

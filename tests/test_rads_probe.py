@@ -45,7 +45,8 @@ class HandScriptTests(unittest.TestCase):
         self.assertRegex(HAND_PSC, r"if rads != LastRads\n\s+ApplyRoute\(p\)\n\s+Say\(Describe\(p\)\)")
         # the failure path says so on screen and sets the value
         self.assertIn('" used: the effect left rads at "', HAND_PSC)
-        self.assertIn("p.SetValue(RadsAV, WantRads)", HAND_PSC)
+        self.assertIn("ModRads(p, WantRads - have)", HAND_PSC)
+        self.assertIn("p.SetValue(RadsAV, WantRads)", HAND_PSC)       # only when ModValue is not declared
 
     def test_an_item_used_while_another_settles_is_added_not_dropped(self):
         """FAL-278: the second Rad Dose of the card (step 5) came inside the first one's 3 s and was dropped, then the settle
@@ -89,6 +90,7 @@ class HandScriptTests(unittest.TestCase):
         self.assertEqual(mrp.enable(HAND_PSC, []), HAND_PSC)
         self.assertEqual(mrp.optional_names(HAND_PSC), ["Actor.GetValueMax", "Actor.ModValue"])
         self.assertEqual(len(re.findall(r"^;OPT Actor\.ModValue +p\.ModValue\(HealthAV, delta\)", HAND_PSC, re.M)), 1)
+        self.assertEqual(len(re.findall(r"^;OPT Actor\.ModValue +p\.ModValue\(RadsAV, delta\)", HAND_PSC, re.M)), 1)
 
     def test_nothing_the_script_calls_is_missing_from_the_required_list(self):
         for base, name in (("Actor", "GetItemCount"), ("Debug", "Notification")):
