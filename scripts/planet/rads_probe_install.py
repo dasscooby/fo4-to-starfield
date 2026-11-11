@@ -40,7 +40,17 @@ def installer(argv):
         exp_install.RECORD = saved
 
 
+def prepacked_supported():
+    """True when exp_install.py itself knows --prepacked (FAL-274, #723). Without it the flag would reach an installer that
+    rejects it, or one that builds its own archive: the wrapper refuses before anything is installed."""
+    with open(exp_install.__file__, encoding="utf-8") as f:
+        return "--prepacked" in f.read()
+
+
 def install(a):
+    if getattr(a, "prepacked", "") and not prepacked_supported():
+        sys.exit("--prepacked is not supported by this exp_install.py (it lands with FAL-274 / #723); nothing installed. "
+                 "Install without --prepacked to pack the archive here.")
     d = os.path.abspath(a.dir)
     plan = make_rads_probe.load_plan(d)
     problems = make_rads_probe.verify_stage(d, plan, os.path.join(a.starfield, "Data"))
