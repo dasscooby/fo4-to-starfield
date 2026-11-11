@@ -3,6 +3,11 @@ using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Plugins.Records;
 using Mutagen.Bethesda.Starfield;
 
+if (args.SequenceEqual(new[] { "--linked-references-only" }))
+{
+    LinkedReferenceTests.Run();
+    return;
+}
 if (args.SequenceEqual(new[] { "--activation-only" }))
 {
     ActivationParentTests.Run();
@@ -192,3 +197,4 @@ NativeDoorBaseTests.Run();
 MissingDoorEndpointTests.Run();
 ActivationParentTests.Run();
 LockTests.Run();
+LinkedReferenceTests.Run();

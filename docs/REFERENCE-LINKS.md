@@ -81,9 +81,16 @@ attraction rule) now become source-scoped target KYWD records with stable
 `KYWD:<source FormKey>` map entries. Color, resolved name and notes are retained.
 EditorIDs include a source-identity digest rather than reusing unrelated vanilla
 keywords with similar names. Specialized keyword categories/flags/attraction
-semantics still need translators. Targets
-outside the supplied exports, skipped actors/objects, unsupported flag bits and
-relative-position teleports are reported as unresolved. Relative teleports need
+semantics still need translators. A linked-reference target present in the supplied
+source exports, with a valid source FormKey but no placed output record, produces
+a counted `linked_references.reference` warning naming source, field and target.
+The link is omitted without guessing a replacement; the source export is unchanged.
+A reservation held by another record kind (such as STAT), an absent/null/malformed
+target, and source/map conflicts remain blocking. Discriminator/keyword validation
+still runs when the target produces only a warning, so a bad discriminator still
+blocks output. This exception applies only to linked-reference targets: missing
+enable parents and teleport destinations retain their blocking behavior.
+Unsupported flag bits and relative-position teleports are also unresolved. Relative teleports need
 additional handling for the converted door pivot. Ownership, container locks, actor behavior
 and scripts remain separate work. No unsupported case is assigned a numeric-ID
 guess.
@@ -101,7 +108,8 @@ the source export; activation behavior is not implemented. Warnings alone permit
 output by default with fidelity `partial_with_warnings`, never
 `resolved_exported_relationships`. `build-state.json` counts all issues plus
 warnings as `unresolved` and separately records `warnings` and `blocking`.
-`--strict-activation-parents` makes these warnings block output with exit 2.
+`--strict-activation-parents` makes every warning block output with exit 2,
+including linked-reference and lock warnings despite the option's historical name.
 `--allow-unresolved` explicitly overrides that gate (as well as other issues),
 recording `partial_explicitly_allowed`. Report-only runs never emit a plugin or
 mark the build complete. Other unresolved links retain their existing blocking behavior.

@@ -53,6 +53,25 @@ public static class Relationships
         var sourceRefs = new Dictionary<string, PlacedObject>(StringComparer.OrdinalIgnoreCase);
         var sourceCells = new Dictionary<string, Cell>(StringComparer.OrdinalIgnoreCase);
         var sources = exports.ToArray();
+        // Source presence is separate from successful placement. Keep the exact
+        // map identity so a reservation occupied by a different record kind is
+        // never mistaken for an ordinary unconverted reference (#416).
+        var exportedReferences = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var reservedReferences = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (identity, id) in ids.Where(pair => pair.Key.StartsWith("REFR:", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (reservedReferences.TryGetValue(identity, out var prior) && prior != id)
+                throw new InvalidOperationException($"conflicting source reference reservation {identity}");
+            reservedReferences[identity] = id;
+        }
+        foreach (var export in sources)
+        foreach (var reference in export.GetProperty("refs").EnumerateArray())
+        {
+            var source = reference.GetProperty("formkey").GetString()!;
+            var identity = $"REFR:FO4Port_{export.GetProperty("cell").GetString()}:{source}";
+            if (!exportedReferences.TryAdd(source, identity))
+                throw new InvalidOperationException($"duplicate source reference {source}");
+        }
         // Resolve record type from actual records, not an editor ID or a numeric
         // base link. Any local override wins, including deletion/type changes.
         var localRecords = mod.EnumerateMajorRecords().ToDictionary(r => r.FormKey);
@@ -239,6 +258,21 @@ public static class Relationships
             report.Issues.Add(new(source, field, key, "target reference was not placed"));
             return null;
         }
+        PlacedObject? ResolveLinkedReference(string source, string? key)
+        {
+            const string field = "linked_references.reference";
+            if (key != null && sourceRefs.TryGetValue(key, out var target)) return target;
+            if (key != null && FormKey.TryFactory(key, out var sourceKey) && !sourceKey.IsNull &&
+                exportedReferences.TryGetValue(key, out var identity))
+            {
+                if (reservedReferences.TryGetValue(identity, out var id) && localRecords.ContainsKey(new FormKey(mod.ModKey, id)))
+                    report.Issues.Add(new(source, field, key, "target reservation is occupied by a record that is not a placed object"));
+                else
+                    report.Warnings.Add(new(source, field, key, $"target {key} is present in source exports but was not placed; link omitted"));
+            }
+            else report.Issues.Add(new(source, field, key, "target reference is absent from source exports, null or malformed"));
+            return null;
+        }
         static P3Float Pos(JsonElement e) => new(e[0].GetSingle() / 70f, e[1].GetSingle() / 70f, e[2].GetSingle() / 70f);
         static P3Float Rot(JsonElement e) => new(e[0].GetSingle(), e[1].GetSingle(), e[2].GetSingle());
         void MakeTeleportEndpointPersistent(PlacedObject endpoint)
@@ -323,7 +357,7 @@ public static class Relationships
             if (reference.TryGetProperty("linked_references", out var links))
             foreach (var link in links.EnumerateArray())
             {
-                var resolved = Resolve(source, "linked_references.reference", link.GetProperty("reference").GetString());
+                var resolved = ResolveLinkedReference(source, link.GetProperty("reference").GetString());
                 var discriminator = link.GetProperty("keyword_or_reference").GetString();
                 PlacedObject? discriminatorTarget = null;
                 Keyword? keywordTarget = null;
