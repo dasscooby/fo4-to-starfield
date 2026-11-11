@@ -210,11 +210,12 @@ def stage(a):
     with open(os.path.join(out, PIN), "w", encoding="utf-8") as f:
         json.dump({"masters": {os.path.basename(a.core): core_sha256}}, f, indent=1)
     shutil.copy(os.path.join(HERE, SCRIPT + ".psc"), os.path.join(out, SCRIPT + ".psc"))
+    lift_desc = "the tool's default 2.5" if a.z_lift is None else str(a.z_lift)
     with open(os.path.join(out, "README.txt"), "w", encoding="utf-8") as f:
         f.write(f"""Map markers into the merged world (Claude-cloud, {datetime.date.today().isoformat()}). docs/terrain/map-markers.md.
 {a.plugin}: QUST FO4SF_MapMarkersQuest (0x800, start game enabled) carrying {SCRIPT}, built against
   {os.path.abspath(a.core)} (its MapMarker REFRs by FormID: rebuild with every core build), and an override of
-  each of those REFRs: the marker's own name on the map, the arrival lifted {'the tool\'s default 2.5' if a.z_lift is None else a.z_lift} m.{extra_note}
+  each of those REFRs: the marker's own name on the map, the arrival lifted {lift_desc} m.{extra_note}
   Its WRLD copy (an override too, loading after the core's): --world {a.world}{WORLDS[a.world]}.
   {PIN} pins that core's sha256: the installer refuses a Data folder holding any other build of it.
 Data\\Scripts\\{SCRIPT}.pex: compiled from {SCRIPT}.psc here.
