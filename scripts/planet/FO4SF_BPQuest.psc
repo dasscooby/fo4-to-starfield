@@ -17,8 +17,8 @@ string BpPlugin = "FO4SFBuildPieces.esm"
 string CorePlugin = "FO4TerrainCore.esm"
 string CorePlugin2 = "FO4TerrainCore_Mars.esm"
 int ShellBase = 0x802
-int RecipeBase = 0x82A
 int[] CoreIds ;the stager's ids, filled in LoadIds
+int[] RecipeIds ;the recipe of each piece (an entry's own, or with variants the piece's own inner recipe), filled in LoadIds
 
 int TIMER_READY = 1
 float ReadyS = 20.0
@@ -62,8 +62,9 @@ string Function CoreName()
 EndFunction
 
 Function LoadIds()
-    {The core ids of the pieces, one array line each; the stager replaces the next line with them (none as committed).}
+    {The core ids and the recipe ids of the pieces, one array line each; the stager replaces the next line with them (none as committed).}
     CoreIds = new int[0]
+    RecipeIds = new int[0]
     ;COREIDS
 EndFunction
 
@@ -78,7 +79,7 @@ int Function Report(string When)
         if Cid != 0
             Named += 1
             Form ShellF = Game.GetFormFromFile(ShellBase + N - 1, BpPlugin)
-            Form RecipeF = Game.GetFormFromFile(RecipeBase + N - 1, BpPlugin)
+            Form RecipeF = Game.GetFormFromFile(RecipeIds[N - 1], BpPlugin)
             Form CoreF = Game.GetFormFromFile(Cid, CoreName())
             Trace("piece when=" + When + " n=" + N + " shell=" + Id(ShellF) + " recipe=" + Id(RecipeF) + " coreid=" + Cid + " core=" + Id(CoreF))
             if ShellF != None && RecipeF != None

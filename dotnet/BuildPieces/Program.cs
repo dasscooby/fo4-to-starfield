@@ -20,7 +20,9 @@
 //                [--workbench <kywd>] [--filter <kywd|own>]   the workbench keyword and the filter chosen separately (a keyword editor id or its
 //                         6 hex digits; own = a KYWD of our own with a full name, FO4SF_BPCategory); the template's stays for the one not named
 //                [--variants]   with --set fo4: the junk walls 01..07, the pier shack walls and the roofs are ONE recipe each whose created
-//                         object is a form list of their shells (FO4SF_BPList1.., ids 852..), as the vanilla bed entries
+//                         object is a form list (FO4SF_BPList1.., ids 852..) of one RECIPE per variant (FO4SF_BPInner<n>, ids 860..), each
+//                         making its shell, as the vanilla bed entries (co_Outpost_Furniture_BedList02_Beds: nine _Decor recipes among them)
+//                [--inner same|bare]   the inner recipes' filing: same as the list recipe (default) or no workbench keyword and no filter
 //        BuildPieces check <plugin> <Starfield.esm> <core.esm> [same options]     exit 1 on a mismatch
 //        BuildPieces fixture <out dir>              a synthetic Starfield.esm and core (out/Starfield.esm, out/FO4TerrainCore.esm)
 using System.Text;
@@ -45,9 +47,10 @@ try
         return v;
     }
     bool Flag(string name) => rest.Remove(name);
-    var o = new BuildPieces.Options(Opt("--cobj") ?? BuildPieces.DefaultCobj, Opt("--shell") ?? "clone", Opt("--category") ?? "vanilla", Opt("--pieces"), Opt("--tab"), Opt("--set"), Opt("--workbench"), Opt("--filter"), Flag("--variants"));
+    var o = new BuildPieces.Options(Opt("--cobj") ?? BuildPieces.DefaultCobj, Opt("--shell") ?? "clone", Opt("--category") ?? "vanilla", Opt("--pieces"), Opt("--tab"), Opt("--set"), Opt("--workbench"), Opt("--filter"), Flag("--variants"), Opt("--inner") ?? "same");
     if (o.Set != null && !BuildPieces.Sets.ContainsKey(o.Set)) throw new BuildPieces.Refusal("--set is one of: " + string.Join(", ", BuildPieces.Sets.Keys));
     if ((o.Workbench != null || o.Filter != null) && (o.Tab != null || o.Category != "vanilla")) throw new BuildPieces.Refusal("--workbench and --filter are their own choice: not together with --tab or --category add|replace");
+    if (o.Inner != "same" && o.Inner != "bare") throw new BuildPieces.Refusal("--inner is same or bare");
     if (o.Shell != "clone" && o.Shell != "plain") throw new BuildPieces.Refusal("--shell is clone or plain");
     if (o.Category != "vanilla" && o.Category != "add" && o.Category != "replace") throw new BuildPieces.Refusal("--category is vanilla, add or replace");
     if (rest.Count == 2 && rest[0] == "menu") return BuildPieces.Menu(rest[1], o);
@@ -69,13 +72,15 @@ return 2;
 static class BuildPieces
 {
     public class Refusal(string m) : Exception(m);
-    public record Options(string Cobj, string Shell, string Category, string? Pieces, string? Tab = null, string? Set = null, string? Workbench = null, string? Filter = null, bool Variants = false);
+    public record Options(string Cobj, string Shell, string Category, string? Pieces, string? Tab = null, string? Set = null, string? Workbench = null, string? Filter = null, bool Variants = false, string Inner = "same");
     public record Piece(int N, uint CoreId, string Edid, string Model, string Name);
     // one recipe of the menu: a single piece, or (--variants) several shells in one form list (the menu's "VARIANTS" entry); ListIdx -1 = no list
     public record Entry(int K, string Name, List<Piece> Members, int ListIdx)
     {
         public bool IsList => ListIdx >= 0;
         public FormKey Key => IsList ? Own(ListBase + (uint)ListIdx) : Own(ShellBase + (uint)(Members[0].N - 1));
+        // the recipe a piece is built by: the entry's own recipe, or (in a list) the piece's own inner recipe, one per variant
+        public uint RecipeId(Piece p) => IsList ? InnerBase + (uint)(p.N - 1) : RecipeBase + (uint)(K - 1);
     }
 
     public const string DefaultCobj = "co_Outpost_Crafting_WorkbenchIndustrialStation";
@@ -85,7 +90,7 @@ static class BuildPieces
 
     // the layout (scripts/planet/FO4SF_BPQuest.psc carries the quest id; the shells and recipes are found by the game's menu)
     public const int MaxPieces = 40;                                                   // room for 40 shells and 40 recipes
-    const uint QuestId = 0x800, CategoryId = 0x801, ShellBase = 0x802, RecipeBase = 0x82A, ListBase = 0x852;   // RecipeBase = ShellBase + MaxPieces
+    const uint QuestId = 0x800, CategoryId = 0x801, ShellBase = 0x802, RecipeBase = 0x82A, ListBase = 0x852, InnerBase = 0x860;   // RecipeBase = ShellBase + MaxPieces; InnerBase = ListBase + MaxLists: one recipe per variant of a list
     const string QuestEdid = "FO4SF_BPQuest", Script = "FO4SF_BPQuest", CategoryEdid = "FO4SF_BPCategory", CategoryName = "FO4 pieces";
     static readonly uint[] Counts = { 1, 1, 2, 2 };                       // the small cost of piece 1..4, repeating
     static uint Cost(int n) => Counts[(n - 1) % Counts.Length];
@@ -252,8 +257,9 @@ static class BuildPieces
     {
         using var core = Open(corePath);
         var pieces = ChoosePieces(core, o);
+        var rid = Entries(pieces, o).SelectMany(e => e.Members.Select(m => (m.N, Id: e.RecipeId(m)))).ToDictionary(x => x.N, x => x.Id);
         string Q(string s) => "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
-        Console.WriteLine("[" + string.Join(",", pieces.Select(p => $"{{\"n\":{p.N},\"core_id\":{p.CoreId},\"edid\":{Q(p.Edid)},\"model\":{Q(p.Model)},\"name\":{Q(p.Name)}}}")) + "]");
+        Console.WriteLine("[" + string.Join(",", pieces.Select(p => $"{{\"n\":{p.N},\"core_id\":{p.CoreId},\"edid\":{Q(p.Edid)},\"model\":{Q(p.Model)},\"name\":{Q(p.Name)},\"recipe_id\":{rid[p.N]}}}")) + "]");
         return 0;
     }
 
@@ -273,7 +279,12 @@ static class BuildPieces
         if (rec is IFormListGetter fli)
         {
             Console.WriteLine($"    FLST {fli.Items.Count} item(s) (a VARIANTS entry's created object):");
-            foreach (var it in fli.Items) Console.WriteLine($"      {Hex(it.FormKey)} {N(it.FormKey)} [{(sf.EnumerateMajorRecords().FirstOrDefault(r => r.FormKey == it.FormKey)?.GetType().Name.Replace("BinaryOverlay", "") ?? "not in this file")}]");
+            foreach (var it in fli.Items) {
+                var ir = sf.EnumerateMajorRecords().FirstOrDefault(r => r.FormKey == it.FormKey);
+                Console.WriteLine($"      {Hex(it.FormKey)} {N(it.FormKey)} [{(ir?.GetType().Name.Replace("BinaryOverlay", "") ?? "not in this file")}]");
+                if (ir is IConstructibleObjectGetter ic)   // a recipe in the list (the vanilla variants): what it makes and how it is filed
+                    Console.WriteLine($"        recipe makes {Hex(ic.CreatedObject.FormKey)} {N(ic.CreatedObject.FormKey)}, workbench {(ic.WorkbenchKeyword.IsNull ? "none" : Hex(ic.WorkbenchKeyword.FormKey) + " " + N(ic.WorkbenchKeyword.FormKey))}, filters [{string.Join(", ", L(ic.RecipeFilters).Select(f => N(f.FormKey)))}], limit {(ic.MaxBuildCountGlobal.IsNull ? "none" : N(ic.MaxBuildCountGlobal.FormKey))}, sort {ic.MenuSortOrder}, components {ic.ConstructableComponents?.Count ?? 0}, conditions {ic.Conditions?.Count ?? 0}, menu art {(ic.MenuArtObject.IsNull ? "none" : N(ic.MenuArtObject.FormKey))}, description \"{ic.Description?.String}\"");
+            }
         }
         if (rec is IActivatorGetter ac) Console.WriteLine($"    ACTI keywords [{string.Join(", ", ac.Keywords?.Select(k => N(k.FormKey)) ?? Enumerable.Empty<string>())}], model {ac.Model?.File}, scripts [{string.Join(", ", ac.VirtualMachineAdapter?.Scripts.Select(s => s.Name) ?? Array.Empty<string>())}], components {ac.Components?.Count ?? 0}");
         // where a station's picture comes from is not known offline: print every set field of the created object and of the COBJ,
@@ -395,6 +406,36 @@ static class BuildPieces
         return (t.WorkbenchKeyword.FormKey, o.Category == "add" ? tf.Append(cat.Value).ToList() : tf.Skip(1).Append(cat.Value).ToList());
     }
 
+    // a recipe: the template's copy with the created object, a small cost and the filing of --tab/--workbench/--filter; bare = no workbench
+    // keyword and no filter (an inner recipe of a variants list that is not offered by a workshop itself)
+    static ConstructibleObject Recipe(IConstructibleObjectGetter t, Options o, FormKey key, string edid, FormKey made, string desc, float sort, uint cost, CostComponent comp, FormKey? cat, FormKey? wbKey, bool bare)
+    {
+        var rc = t.Duplicate(key);
+        rc.EditorID = edid;
+        rc.CreatedObject.SetTo(made);
+        rc.Description = desc;
+        rc.MenuSortOrder = sort;
+        rc.ConstructableComponents = new ExtendedList<ConstructibleObjectComponent>
+        {
+            new ConstructibleObjectComponent { Component = new FormLink<IItemGetter>(comp.Component), RequiredCount = cost },
+        };
+        rc.VirtualMachineAdapter = null;
+        if (bare)
+        {
+            rc.WorkbenchKeyword.SetToNull();
+            rc.RecipeFilters = new ExtendedList<IFormLinkGetter<IKeywordGetter>>();
+        }
+        else if (cat != null || wbKey != null)
+        {
+            var (wb, fl) = Filing(t, o, cat, wbKey);
+            rc.WorkbenchKeyword.SetTo(wb);
+            var filters = new ExtendedList<IFormLinkGetter<IKeywordGetter>>();
+            foreach (var f in fl) filters.Add(new FormLink<IKeywordGetter>(f));
+            rc.RecipeFilters = filters;
+        }
+        return rc;
+    }
+
     public static int Build(string sfPath, string corePath, string outDir, Options o)
     {
         using var sf = Open(sfPath);
@@ -455,28 +496,15 @@ static class BuildPieces
             if (e.IsList)
             {
                 var fl = new FormList(e.Key, Release) { EditorID = $"FO4SF_BPList{e.ListIdx + 1}" };
-                foreach (var m in e.Members) fl.Items.Add(new FormLink<IStarfieldMajorRecordGetter>(Own(ShellBase + (uint)(m.N - 1))));
+                // the vanilla way (co_Outpost_Furniture_BedList02_Beds): the list holds one RECIPE per variant, each making one shell
+                foreach (var m in e.Members)
+                {
+                    fl.Items.Add(new FormLink<IStarfieldMajorRecordGetter>(Own(e.RecipeId(m))));
+                    mod.ConstructibleObjects.Add(Recipe(t, o, Own(e.RecipeId(m)), $"FO4SF_BPInner{m.N}", Own(ShellBase + (uint)(m.N - 1)), m.Name, t.MenuSortOrder + 100 + m.N, Cost(m.N), comp, cat, wbKey, o.Inner == "bare"));
+                }
                 mod.FormLists.Add(fl);
             }
-            var rc = t.Duplicate(Own(RecipeBase + (uint)(e.K - 1)));
-            rc.EditorID = $"FO4SF_BPRecipe{e.K}";
-            rc.CreatedObject.SetTo(e.Key);
-            rc.Description = e.Name;
-            rc.MenuSortOrder = t.MenuSortOrder + e.K;
-            rc.ConstructableComponents = new ExtendedList<ConstructibleObjectComponent>
-            {
-                new ConstructibleObjectComponent { Component = new FormLink<IItemGetter>(comp.Component), RequiredCount = Cost(e.K) },
-            };
-            rc.VirtualMachineAdapter = null;
-            if (cat != null || wbKey != null)
-            {
-                var (wb, fl) = Filing(t, o, cat, wbKey);
-                rc.WorkbenchKeyword.SetTo(wb);
-                var filters = new ExtendedList<IFormLinkGetter<IKeywordGetter>>();
-                foreach (var f in fl) filters.Add(new FormLink<IKeywordGetter>(f));
-                rc.RecipeFilters = filters;
-            }
-            mod.ConstructibleObjects.Add(rc);
+            mod.ConstructibleObjects.Add(Recipe(t, o, Own(RecipeBase + (uint)(e.K - 1)), $"FO4SF_BPRecipe{e.K}", e.Key, e.Name, t.MenuSortOrder + e.K, Cost(e.K), comp, cat, wbKey, false));
         }
 
         var q = new Quest(Own(QuestId), Release)
@@ -488,7 +516,7 @@ static class BuildPieces
         q.VirtualMachineAdapter = new QuestAdapter { Version = 6, ObjectFormat = 2, ExtraBindDataVersion = 3, Script = new ScriptEntry { Name = "", Flags = ScriptEntry.Flag.Local } };
         q.VirtualMachineAdapter.Scripts.Add(new ScriptEntry { Name = Script, Flags = ScriptEntry.Flag.Local });
         mod.Quests.Add(q);
-        mod.ModHeader.Stats.NextFormID = 0x860;   // 0x852..0x85F: the form lists (MaxLists)
+        mod.ModHeader.Stats.NextFormID = 0x888;   // 0x852..0x85F: the form lists (MaxLists); 0x860..0x887: the recipes inside them (MaxPieces)
         if (!mod.ModHeader.MasterReferences.Any(m => m.Master == SfEsm)) mod.ModHeader.MasterReferences.Add(new MasterReference { Master = SfEsm });
 
         Directory.CreateDirectory(outDir);
@@ -506,8 +534,8 @@ static class BuildPieces
         Console.WriteLine($"wrote {path} ({new FileInfo(path).Length:N0} bytes): {pieces.Count} pieces in {entries.Count} recipe(s), shell {o.Shell}, category {o.Category}{(o.Tab != null ? " tab " + o.Tab : "")}{(o.Workbench != null ? " workbench " + o.Workbench : "")}{(o.Filter != null ? " filter " + o.Filter : "")}{(o.Variants ? " variants" : "")}, template COBJ {t.EditorID} {Hex(t.FormKey)}, cost {names.GetValueOrDefault(comp.Component, "?")} x{string.Join(",", entries.Select(e => Cost(e.K)))}");
         foreach (var e in entries)
         {
-            if (e.IsList) Console.WriteLine($"  recipe {e.K} {RecipeBase + e.K - 1:X6} makes form list {e.Key.ID:X6} \"{e.Name}\" of {e.Members.Count} shells");
-            foreach (var p in e.Members) Console.WriteLine($"  piece {p.N}: shell {ShellBase + p.N - 1:X6} recipe {RecipeBase + e.K - 1:X6} <- core {p.CoreId:X6} {p.Edid} model {p.Model}");
+            if (e.IsList) Console.WriteLine($"  recipe {e.K} {RecipeBase + e.K - 1:X6} makes form list {e.Key.ID:X6} \"{e.Name}\" of {e.Members.Count} recipes (one per shell, from {InnerBase:X6})");
+            foreach (var p in e.Members) Console.WriteLine($"  piece {p.N}: shell {ShellBase + p.N - 1:X6} recipe {e.RecipeId(p):X6} <- core {p.CoreId:X6} {p.Edid} model {p.Model}");
         }
         return 0;
     }
@@ -540,8 +568,9 @@ static class BuildPieces
         var wbWant0 = WorkbenchKey(sf, o);
         int own = OwnKeyword(o, tabKey) ? 1 : 0;
         int lists = entries.Count(e => e.IsList);
-        int want = 1 + pieces.Count + entries.Count + lists + own;
-        Need(mod.EnumerateMajorRecords().Count() == want, $"not exactly {want} records ({pieces.Count} shells, {entries.Count} COBJ, {lists} form list(s), 1 QUST{(own == 0 ? "" : ", 1 KYWD")})");
+        int inner = entries.Where(e => e.IsList).Sum(e => e.Members.Count);
+        int want = 1 + pieces.Count + entries.Count + lists + inner + own;
+        Need(mod.EnumerateMajorRecords().Count() == want, $"not exactly {want} records ({pieces.Count} shells, {entries.Count} COBJ, {inner} inner COBJ, {lists} form list(s), 1 QUST{(own == 0 ? "" : ", 1 KYWD")})");
 
         FormKey? catKey = tabKey;
         if (own == 1)
@@ -576,7 +605,17 @@ static class BuildPieces
             {
                 var fl = mod.FormLists.FirstOrDefault(x => x.FormKey == e.Key);
                 Need(fl?.EditorID == $"FO4SF_BPList{e.ListIdx + 1}", $"no FLST FO4SF_BPList{e.ListIdx + 1} at {e.Key}");
-                Need(fl != null && fl.Items.Select(i => i.FormKey).SequenceEqual(e.Members.Select(m => Own(ShellBase + (uint)(m.N - 1)))), $"form list {e.ListIdx + 1} is not the shells [{string.Join(", ", e.Members.Select(m => m.N))}]");
+                Need(fl != null && fl.Items.Select(i => i.FormKey).SequenceEqual(e.Members.Select(m => Own(e.RecipeId(m)))), $"form list {e.ListIdx + 1} is not the recipes of the variants [{string.Join(", ", e.Members.Select(m => m.N))}]");
+                foreach (var m in e.Members)
+                {
+                    var ir = mod.ConstructibleObjects.FirstOrDefault(c => c.FormKey == Own(e.RecipeId(m)));
+                    Need(ir?.EditorID == $"FO4SF_BPInner{m.N}", $"no COBJ FO4SF_BPInner{m.N} at {Own(e.RecipeId(m))}");
+                    if (ir == null) continue;
+                    Need(ir.CreatedObject.FormKey == Own(ShellBase + (uint)(m.N - 1)), $"inner recipe {m.N} does not make shell {m.N}");
+                    Need(o.Inner == "bare" ? ir.WorkbenchKeyword.IsNull && ir.RecipeFilters.Count == 0 : ir.WorkbenchKeyword.FormKey == Filing(t, o, catKey, wbWant0).Workbench && ir.RecipeFilters.Select(f => f.FormKey).SequenceEqual(Filing(t, o, catKey, wbWant0).Filters), $"inner recipe {m.N} filing is not --inner {o.Inner}");
+                    Need(ir.ConstructableComponents.Count == 1 && ir.ConstructableComponents[0].Component.FormKey == comp.Component && ir.ConstructableComponents[0].RequiredCount == Cost(m.N), $"inner recipe {m.N} cost is not {names.GetValueOrDefault(comp.Component, "?")} x{Cost(m.N)}");
+                    Console.WriteLine($"    inner COBJ {ir.FormKey} makes {Hex(ir.CreatedObject.FormKey)}, workbench {(ir.WorkbenchKeyword.IsNull ? "none" : Hex(ir.WorkbenchKeyword.FormKey))}, filters {ir.RecipeFilters.Count}");
+                }
             }
             var p = e.Members[0];
             var rc = mod.ConstructibleObjects.FirstOrDefault(c => c.FormKey == Own(RecipeBase + (uint)(e.K - 1)));
@@ -619,6 +658,9 @@ static class BuildPieces
         var f1 = new Keyword(S(0x000E02), Release) { EditorID = "OutpostFilterCraftingStations" };
         var f2 = new Keyword(S(0x000E03), Release) { EditorID = "OutpostFilterCraftingAll" };
         sf.Keywords.Add(wb); sf.Keywords.Add(f1); sf.Keywords.Add(f2);
+        // the keywords of --set fo4's default placement (2CFDE6 workbench keyword, 06D72D filter): the fixture's names are made up, the PC reads the real ones
+        sf.Keywords.Add(new Keyword(S(0x2CFDE6), Release) { EditorID = "FO4SFTestBenchKeyword" });
+        sf.Keywords.Add(new Keyword(S(0x06D72D), Release) { EditorID = "FO4SFTestFilterKeyword" });
         uint tabId = 0x000E20;
         foreach (var kv in Tabs.Values) sf.Keywords.Add(new Keyword(S(tabId++), Release) { EditorID = kv });   // OutpostCategoryStructures .. Defenses
         var limit = new Global(S(0x000E10), Release) { EditorID = "OutpostStationLimit" };
@@ -645,6 +687,14 @@ static class BuildPieces
         sf.Furniture.Add(bed1); sf.Furniture.Add(bed2);
         var bedList = new FormList(S(0x000C10), Release) { EditorID = "OutpostFurnitureBedList02_Beds" };
         bedList.Items.Add(new FormLink<IStarfieldMajorRecordGetter>(bed1.FormKey)); bedList.Items.Add(new FormLink<IStarfieldMajorRecordGetter>(bed2.FormKey));
+        // the vanilla variants are RECIPES in the list (co_Outpost_Furniture_BedList02_Decor1_01 ...), each making one object
+        var cd = new ConstructibleObject(S(0x2E3010), Release) { EditorID = "co_Outpost_Furniture_BedList02_Decor1_01", MenuSortOrder = 21 };
+        cd.CreatedObject.SetTo(bed2.FormKey);
+        cd.WorkbenchKeyword.SetTo(wb.FormKey);
+        cd.RecipeFilters = new ExtendedList<IFormLinkGetter<IKeywordGetter>> { new FormLink<IKeywordGetter>(f1.FormKey) };
+        cd.ConstructableComponents = new ExtendedList<ConstructibleObjectComponent> { new ConstructibleObjectComponent { Component = new FormLink<IItemGetter>(ironRes.FormKey), RequiredCount = 2 } };
+        sf.ConstructibleObjects.Add(cd);
+        bedList.Items.Add(new FormLink<IStarfieldMajorRecordGetter>(cd.FormKey));
         sf.FormLists.Add(bedList);
         var cb = new ConstructibleObject(S(0x2E3000), Release) { EditorID = "co_Outpost_Furniture_BedList02_Beds", MenuSortOrder = 20 };
         cb.CreatedObject.SetTo(bedList.FormKey);
