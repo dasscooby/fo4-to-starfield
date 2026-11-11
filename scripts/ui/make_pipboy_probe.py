@@ -1,6 +1,6 @@
 """The Pip-Boy probe's empty plugin and its movie (FAL-187; sfse/FO4SFPipboyMenu/README.md).
 
-usage: python scripts/ui/make_pipboy_probe.py stage <dir> [--no-label] [--channel]
+usage: python scripts/ui/make_pipboy_probe.py stage <dir> [--no-label] [--channel | --page]
                                                                          FO4SFPipboyProbe.esm + Data/Interface/<movie>
        python scripts/ui/make_pipboy_probe.py check <FO4SFPipboyProbe.esm>
 
@@ -10,7 +10,8 @@ fo4sf.planet.esm.PluginWriter, the writer of our planet probe, with Starfield.es
 `check` refuses anything else: not TES4, no ESM flag, another master, or any record or group. Nothing is written into
 the repo. The staged folder is exp_install.py's shape (the plugin plus a Data tree): `exp_install.py install --pack`
 packs Data into "FO4SFPipboyProbe - Main.ba2" beside the plugin. `stage --channel` writes the movie with the data
-channel's text field and button (FAL-216, the plugin's Stage=3) under the same name.
+channel's text field and button (FAL-216, the plugin's Stage=3) under the same name; `stage --page` writes the STAT
+page (FAL-272, the plugin's Stage=4) under the same name.
 """
 import argparse
 import os
@@ -35,14 +36,14 @@ def plugin_bytes():
     return PluginWriter(MASTERS, flags=ESM, author=AUTHOR, description=DESCRIPTION).to_bytes()
 
 
-def stage(out, label=True, channel=False):
+def stage(out, label=True, channel=False, page=False):
     """Writes <out>/FO4SFPipboyProbe.esm and <out>/Data/Interface/FO4SF_PipboyMenu.swf; returns the two paths."""
     os.makedirs(out, exist_ok=True)
     esm = os.path.join(out, PLUGIN)
     with open(esm, "wb") as f:
         f.write(plugin_bytes())
     movie = os.path.join(out, "Data", *MOVIE.split("/"))
-    make_probe_swf.write_movie(movie, label=make_probe_swf.LABEL if label else None, channel=channel)
+    make_probe_swf.write_movie(movie, label=make_probe_swf.LABEL if label else None, channel=channel, page=page)
     return esm, movie
 
 
@@ -64,13 +65,15 @@ def main(argv=None):
     s = sub.add_parser("stage")
     s.add_argument("out")
     s.add_argument("--no-label", action="store_true", help="the rectangle alone")
-    s.add_argument("--channel", action="store_true", help="the data channel's movie (FAL-216, Stage=3)")
+    kind = s.add_mutually_exclusive_group()
+    kind.add_argument("--channel", action="store_true", help="the data channel's movie (FAL-216, Stage=3)")
+    kind.add_argument("--page", action="store_true", help="the STAT page's movie (FAL-272, Stage=4)")
     c = sub.add_parser("check")
     c.add_argument("plugin")
     a = ap.parse_args(argv)
     try:
         if a.cmd == "stage":
-            esm, movie = stage(a.out, label=not a.no_label, channel=a.channel)
+            esm, movie = stage(a.out, label=not a.no_label, channel=a.channel, page=a.page)
             check(esm)
             print(f"staged {esm} and {movie}; pack into {ARCHIVE}")
         else:
