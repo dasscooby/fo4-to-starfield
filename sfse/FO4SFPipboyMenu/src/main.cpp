@@ -50,12 +50,13 @@
 // buttons, NEXT TAB (the other set of lines) and CLOSE (the menu closes, as on F10). The values are collected on the
 // main thread (SFSE's task, before each kShow and kUpdate) and only written on the menu's thread. Every value is read,
 // not called for, except two calls: the player's own GetActorValue, and the engine's lookup of a form by its form id
-// (TESForm::LookupByID, equal to SFSE 0.2.21's GetFormByNumericID). The health, carry weight, experience and FO4SF_Rads
-// are actor values whose ActorValueInfo forms are found by form id (Starfield.esm's 0x001 to 0xFFF; FO4SF_Rads at
-// local id 0x800 of any plugin) and named by their editor ID; the game time is the GameHour (0x38) and GameDaysPassed
-// (0x39) globals; the level is the player's base TESNPC's TESActorBaseData; the place is the parent cell's and its
-// worldspace's names. (The data handler's per-type form lists, read at 5a4e6016, were empty: their raw entries are
-// logged once, step=page_form_arrays, to settle the layout.)
+// (TESForm::LookupByID, equal to SFSE 0.2.21's GetFormByNumericID). The health, carry weight and experience are the
+// actor values Starfield.esm's ActorValueInfo forms 0x2D4, 0x2DC and 0x2C9 name, and the game time its GameHour (0x38)
+// and GameDaysPassed (0x39) globals: each accepted by its form id and RTTI type (at 3eb30d71 four of them did not pass
+// an editor-ID check). FO4SF_Rads is found by editor ID at local id 0x800 of any plugin; the level is the player's base
+// TESNPC's TESActorBaseData; the place is the parent cell's and its worldspace's names. (The data handler's per-type
+// form lists, read at 5a4e6016, were empty: their raw entries are logged once, step=page_form_arrays, to settle the
+// layout.)
 // Checked before use: each form's type by its RTTI name; each base class's offset (ActorValueOwner, TESActorBaseData,
 // TESFullName) from the RTTI class hierarchy, and that subobject's vtable naming the same complete type there; the
 // string reader on our own menu name first; and which ActorValueOwner slot is GetActorValue (libxse declares a virtual
@@ -110,6 +111,9 @@ namespace
 	constexpr std::uint32_t kRadsLocalId = 0x800;            // FO4SF_Rads in FO4SFRadsProbe.esm (dotnet/RadsProbe AvifId)
 	constexpr std::uint32_t kGameHourId = 0x38;              // Starfield.esm GLOB GameHour (docs/ai/test-queue.md)
 	constexpr std::uint32_t kGameDaysPassedId = 0x39;        // Starfield.esm GLOB GameDaysPassed
+	constexpr std::uint32_t kHealthId = 0x2D4;               // Starfield.esm AVIF Health (the PC's read, 11 Nov)
+	constexpr std::uint32_t kCarryWeightId = 0x2DC;          // Starfield.esm AVIF CarryWeight
+	constexpr std::uint32_t kExperienceId = 0x2C9;           // Starfield.esm AVIF Experience
 	constexpr std::size_t   kFormArrayEntries = 0xE0;        // form-list entries logged (SFSE: 0xDA before unk14E0)
 	constexpr std::size_t   kFormArraysAt = 0x70;            // TESDataHandler::formArrays, libxse and SFSE agree: 0x18
 	constexpr std::size_t   kFormArrayBytes = 0x18;          //   each, a lock, then a BSTArray of TESForm*
@@ -671,16 +675,6 @@ namespace
 			   });
 	}
 
-	bool HasText(std::string_view a_text, std::string_view a_part)   // ASCII, either case
-	{
-		for (std::size_t i = 0; i + a_part.size() <= a_text.size(); ++i) {
-			if (SameText(a_text.substr(i, a_part.size()), a_part)) {
-				return true;
-			}
-		}
-		return false;
-	}
-
 	// a line as the page's font draws it: upper case, a character the font lacks as "?", at most kPageColumns
 	std::string PageText(std::string_view a_text)
 	{
@@ -841,7 +835,6 @@ namespace
 		bool           globals = false;    // the globals were looked up
 		std::uintptr_t health = 0;         // ActorValueInfo forms
 		std::uintptr_t carryWeight = 0;
-		std::uintptr_t inventoryWeight = 0;
 		std::uintptr_t experience = 0;
 		std::uintptr_t rads = 0;
 		std::uintptr_t gameHour = 0;       // TESGlobal forms
@@ -935,46 +928,53 @@ namespace
 		}
 	}
 
-	template <std::size_t N>
-	std::pair<std::string, std::string> FoundMissing(const std::array<Want, N>& a_want)
+	// a form by its fixed form id, accepted by its RTTI type alone (at 3eb30d71 the editor-ID check passed Health 0x2D4
+	// and not 0x2C9, 0x2DC, 0x38 or 0x39): what the lookup gave is logged in full, its type name, the four bytes at
+	// +0x2C (the form type byte among them) and the editor ID as read
+	std::string AcceptById(std::uint32_t a_id, std::string_view a_name, std::string_view a_type, std::size_t a_editorIdAt,
+		std::uintptr_t& a_out)
 	{
-		std::string found;
-		std::string missing;
-		for (const auto& want : a_want) {
-			auto& into = *want.form ? found : missing;
-			into += std::format("{}{}", into.empty() ? "" : ",", want.editorId);
+		const auto     form = FormById(a_id);
+		ObjectType     type;
+		std::uintptr_t entry = 0;
+		std::string    name;
+		std::uint32_t  bytes = 0;
+		if (IsType(form, a_type, type)) {
+			a_out = form;
+			if (Peek(form + a_editorIdAt, entry)) {
+				ReadPoolString(entry, name);
+			}
 		}
-		return { found.empty() ? "none" : found, missing.empty() ? "none" : missing };
+		if (form) {
+			Peek(form + 0x2C, bytes);
+		}
+		return std::format("{}:{:x}:form={}:type={}:bytes2c={:08x}:name={}:{}", a_name, a_id, form ? 1 : 0,
+			type.name.empty() ? "unreadable" : type.name, bytes, name.empty() ? "-" : name, a_out ? "used" : "refused");
 	}
 
-	// the page's forms by form id, each typed by RTTI and named by its editor ID before it is used: the globals
-	// GameHour 0x38 and GameDaysPassed 0x39; the actor values among Starfield.esm's ids 0x001 to 0xFFF; FO4SF_Rads at
-	// local id 0x800 of each full plugin (01 to FD) and each light plugin (FE000 to FEFFF)
+	// the page's forms by form id: the globals and actor values by their fixed ids and RTTI type (AcceptById); every
+	// ActorValueInfo among Starfield.esm's ids 0x001 to 0xFFF listed with its editor ID as read, once; FO4SF_Rads by its
+	// editor ID at local id 0x800 of each full plugin (01 to FD) and each light plugin (FE000 to FEFFF)
 	void FindForms()
 	{
-		std::array<Want, 2> globals{ { { "GameHour", &g_forms.gameHour }, { "GameDaysPassed", &g_forms.gameDaysPassed } } };
-		for (const auto id : { kGameHourId, kGameDaysPassedId }) {
-			const auto form = FormById(id);
-			Match(globals, form, EditorIdOf(form, "TESGlobal@@", kGlobalEditorIdAt));
-		}
+		std::string known = AcceptById(kGameHourId, "GameHour", "TESGlobal@@", kGlobalEditorIdAt, g_forms.gameHour);
+		known += " " + AcceptById(kGameDaysPassedId, "GameDaysPassed", "TESGlobal@@", kGlobalEditorIdAt, g_forms.gameDaysPassed);
+		known += " " + AcceptById(kHealthId, "Health", "ActorValueInfo@@", kAvifEditorIdAt, g_forms.health);
+		known += " " + AcceptById(kCarryWeightId, "CarryWeight", "ActorValueInfo@@", kAvifEditorIdAt, g_forms.carryWeight);
+		known += " " + AcceptById(kExperienceId, "Experience", "ActorValueInfo@@", kAvifEditorIdAt, g_forms.experience);
 		g_forms.globals = true;
-		std::array<Want, 4> values{ { { "Health", &g_forms.health }, { "CarryWeight", &g_forms.carryWeight },
-			{ "InventoryWeight", &g_forms.inventoryWeight }, { "Experience", &g_forms.experience } } };
 		std::uint32_t typed = 0;
-		std::string   sample;
-		std::string   weights;
+		std::string   avifs;
 		for (std::uint32_t id = 1; id < kCoreFormIds; ++id) {
 			const auto form = FormById(id);
-			const auto name = form ? EditorIdOf(form, "ActorValueInfo@@", kAvifEditorIdAt) : std::string();
-			if (name.empty()) {
+			ObjectType type;
+			if (!form || !IsType(form, "ActorValueInfo@@", type)) {
 				continue;
 			}
-			if (typed++ < 4) {
-				sample += std::format("{}{:x}={}", sample.empty() ? "" : ",", id, name);
-			}
-			Match(values, form, name);
-			if (weights.size() < 240 && (HasText(name, "weight") || HasText(name, "encumb") || HasText(name, "mass"))) {
-				weights += std::format("{}{}", weights.empty() ? "" : ",", name);
+			++typed;
+			const auto name = EditorIdOf(form, "ActorValueInfo@@", kAvifEditorIdAt);
+			if (avifs.size() < 2000) {
+				avifs += std::format("{}{:x}={}", avifs.empty() ? "" : ",", id, name.empty() ? "-" : name);
 			}
 		}
 		std::array<Want, 1> rads{ { { "FO4SF_Rads", &g_forms.rads } } };
@@ -988,12 +988,8 @@ namespace
 			}
 		}
 		g_forms.avifs = typed > 0;
-		const auto [globalsFound, globalsMissing] = FoundMissing(globals);
-		const auto [valuesFound, valuesMissing] = FoundMissing(values);
-		REX::INFO("step=page_forms lookup=by_form_id globals_found={} globals_missing={} avif_typed={} found={} "
-			"missing={} rads={} sample={} weight_names={}", globalsFound, globalsMissing, typed, valuesFound, valuesMissing,
-			g_forms.rads ? std::format("{:08X}", radsId) : "not_installed", sample.empty() ? "none" : sample,
-			weights.empty() ? "none" : weights);
+		REX::INFO("step=page_forms lookup=by_form_id known={} avif_typed={} rads={} avif_ids={}", known, typed,
+			g_forms.rads ? std::format("{:08X}", radsId) : "not_installed", avifs.empty() ? "none" : avifs);
 	}
 
 	// the player's ActorValueOwner and its GetActorValue slot: the base's offset from PlayerCharacter's RTTI
@@ -1161,8 +1157,7 @@ namespace
 			{ "TAB 1 OF 2: STATUS",
 				std::format("HEALTH {}", ActorValueText("health", g_forms.health)),
 				std::format("LEVEL {}   XP {}", LevelText(), ActorValueText("experience", g_forms.experience)),
-				std::format("CARRIED {}   MAX {}", ActorValueText("inventory_weight", g_forms.inventoryWeight),
-					ActorValueText("carry_weight", g_forms.carryWeight)),
+				std::format("CARRY WEIGHT MAX {}", ActorValueText("carry_weight", g_forms.carryWeight)),
 				std::format("RADS {}", rads),
 				std::format("CELL {}", cell),
 				std::format("WORLD {}", world),
