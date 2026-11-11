@@ -292,6 +292,10 @@ def summarize(lines, run=-1):
         out["problems"].append("the game gave no list of active effects (fx na): Starfield's own radiation cannot be seen")
     if src == "health":
         out["problems"].append("no maximum or base reading for Health (both na): the route is judged on the current health")
+    if any(num(x.get("rads")) and x["rads"] < 0 for x in states):
+        out["problems"].append("our value read below zero (the AVIF minimum is not enforced for an effect's change): an effect applied more than once per cast")
+    if any(e.get("clamped") is True for e in r if e["event"] == "route"):
+        out["problems"].append("the script clamped our value at 0 before routing it (a route line has clamped=true)")
     for e in bad:
         out["problems"].append(f"the route's ModValue was not called at rads {fmt(e.get('rads'))} (delta {fmt(e.get('delta'))})")
     out["verdict"] = (f"CONTROL OK ({why}). Own value takes a number: {out['setvalue']}; effect +100: {eff.get(20)}; effect +200: {eff.get(30)}; "

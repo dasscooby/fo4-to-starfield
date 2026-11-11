@@ -127,6 +127,16 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(s["route"], {})
 
 
+class NegativeValueTests(unittest.TestCase):
+    def test_a_value_below_zero_is_a_note_and_a_clamp_is_a_note(self):
+        lines = [x.replace("rads=100.0 health=200.0 base=na max=190.0 applied=-10 fx=none", "rads=-59700.0 health=200.0 base=na max=190.0 applied=-10 fx=none") for x in good_log()]
+        s = pl.summarize(lines)
+        self.assertTrue(any("below zero" in p for p in s["problems"]))
+        lines = [x.replace("ok=true", "ok=true clamped=true") if " route " in x else x for x in good_log()]
+        self.assertTrue(any("clamped our value at 0" in p for p in pl.summarize(lines)["problems"]))
+        self.assertEqual(pl.summarize(good_log())["problems"], [])
+
+
 class VanillaControlTests(unittest.TestCase):
     def vc(self, **kw):
         return good_log() + [line(60.0, "vcontrol", **kw)]

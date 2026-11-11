@@ -67,6 +67,26 @@ AVIF and whose spell entries have duration 0). The hand kit (#719) should not be
 Stage 10 now also writes a non-zero number (50) to our value, reads it, and writes 0 (`set` lines; the reader's
 "own value takes a number" line).
 
+## The fourth session (head 88e99c4d): the vanilla spell works, ours does not
+
+Owner PC run with `--control-spell DamageHealthSpell` (0029AAE9: one effect, `DamageHealthContact` on Health, magnitude 40,
+duration 0). **Verified in the game log:** no crash; the vanilla spell, cast by the same script, moved Health 6195 to 6155
+(-40): **`Cast` from a quest script applies value modifiers**. Our spell (stages 20, 30) still moved nothing, so the fault
+is in our records. The two spells differ in `ETYP` (`00013F43` ours, copied from the artifact power; `00013F44` the working
+one) and in `SPIT` (ours 15 and 1 in the first two words, byte 14 zero; the working one 0, 0 and byte 14 one). Why ours is
+refused is **unresolved**: the owner PC's guess is a cost the player cannot pay, or the delivery byte; neither tested.
+RadAway (stage 40) **did** apply, about once per frame: 300 x -200 = -59,700 read after the settle, then -59,900 after the
+script's force. The AVIF minimum (0) is not enforced for a change made by an effect. **Verified** (the readings); "once per
+frame" is a reading of the size, frames not counted. Cause: with `NoDuration` set and `Recover` cleared on a timed template the
+effect stayed live and subtracted every update.
+This head: the effect and the spell are copied from **`DamageHealthSpell` and its effect** (preferred; the build prints
+`templates (preferred)`; `--template-spell` still overrides) with only the actor value changed and `Detrimental` cleared; the
+effect's own duration flags are **kept** (the forced `NoDuration` / no `Recover` of 222e2a45 is gone, `check` compares every
+other flag with the template). RadAway's item template prefers a vanilla medicine whose one effect has duration 0. The script
+**clamps our value at 0** before the route (`clamped=true` in the route line), and the reader notes a value below zero or a
+clamp. Untested in play. The `Detrimental` clearing is the sign rule (owner PC's disassembly reading): `DamageHealthContact`
+presumably carries it (Health lost 40 with magnitude +40), so without clearing it ours would be negative.
+
 ## Second control: a vanilla instant effect (stage 50)
 
 Asked by the owner PC so one session separates "our effect is wrong" from "Cast on the player from a quest script applies no

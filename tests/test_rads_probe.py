@@ -237,7 +237,7 @@ class StageTests(unittest.TestCase):
         template's own subrecords (equip type, effect ids, description) and none of its keywords or conditions."""
         out = self.root / "b2t"
         proc = self.run_tool("build", self.master, out)
-        self.assertIn("templates (relaxed): SPEL SynthSelfSpell", proc.stdout)
+        self.assertIn("templates (preferred): SPEL DamageHealthSpell", proc.stdout)
         self.assertIn("MGEF SynthValueEffect", proc.stdout)
         self.assertIn("ALCH SynthAid", proc.stdout)
         data = (out / PLUGIN).read_bytes()
@@ -267,7 +267,7 @@ class StageTests(unittest.TestCase):
         self.assertNotIn(b"CTDA", subs[b"SPEL"] + subs[b"MGEF"] + subs[b"ALCH"])
         check = self.run_tool("check", out / PLUGIN, self.master)
         self.assertEqual(check.returncode, 0, check.stdout)
-        self.assertIn("templates (relaxed)", check.stdout)
+        self.assertIn("templates (preferred)", check.stdout)
 
     def test_the_mgef_data_word_14_is_our_actor_value_and_the_flags_do_not_negate(self):
         """Both game crashes (FAL-213): the engine reads the effect's actor value (DATA word 14, Mutagen's
@@ -291,6 +291,17 @@ class StageTests(unittest.TestCase):
         self.assertEqual(words[17], 0)
         self.assertIn("actor value (DATA word 14) 000800:FO4SFRadsProbe.esm",
                       self.run_tool("check", out / PLUGIN, self.master).stdout)
+
+    def test_the_preferred_template_is_the_vanilla_damage_spell_and_its_flags_are_kept(self):
+        """Fourth session: DamageHealthSpell works from Cast; the copy keeps its effect's own flags (only Detrimental off)."""
+        out = self.root / "b2p"
+        proc = self.run_tool("build", self.master, out)
+        self.assertIn("templates (preferred): SPEL DamageHealthSpell", proc.stdout)
+        self.assertEqual(self.run_tool("check", out / PLUGIN, self.master).returncode, 0)
+
+    def test_the_script_clamps_our_value_at_zero_before_the_route(self):
+        self.assertRegex(PSC, r"if rads < 0\.0\n(?:.*\n)*?\s+p\.SetValue\(RadsAV, 0\.0\)\n\s+rads = 0\.0\n\s+clamped = true")
+        self.assertIn('" clamped=" + clamped', PSC)
 
     def test_the_effect_is_instant_and_does_not_recover(self):
         """Third session: a timed, recovering template effect with duration 0 applies and undoes its change at once.
@@ -390,7 +401,7 @@ class StageTests(unittest.TestCase):
         self.assertEqual((plan["health"], plan["avif_type"]), ("Health", "Variable"))
         self.assertEqual(sorted(plan["outputs"]), sorted([PLUGIN, "Data/Scripts/FO4SF_RadsProbeQuest.pex"]))
         self.assertEqual(plan["inputs"]["Starfield.esm"]["sha256"], mrp.sha256(str(self.master)))
-        self.assertTrue(plan["templates"].startswith("relaxed: SPEL SynthSelfSpell"))
+        self.assertTrue(plan["templates"].startswith("preferred: SPEL DamageHealthSpell"))
         self.assertEqual(plan["optional"]["Actor.ModValue"], "kept")
         self.assertEqual(plan["optional"]["Actor.GetActiveEffects"], "kept")
         self.assertTrue(plan["optional"]["Actor.GetBaseValue"].startswith("declared but did not compile"))

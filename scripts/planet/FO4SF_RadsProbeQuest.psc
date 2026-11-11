@@ -153,6 +153,14 @@ EndFunction
 
 Function ApplyRoute(Actor p)
     float rads = p.GetValue(RadsAV)
+    bool clamped = false
+    if rads < 0.0
+        ; the engine does not enforce the value's minimum for a change made by an effect (fourth session: -59,900): clamp at 0
+        ; before the route, or a negative number would raise Health
+        p.SetValue(RadsAV, 0.0)
+        rads = 0.0
+        clamped = true
+    endif
     int pen = (rads * PenaltyPerRad) as int
     float want = -1.0 * pen
     float delta = want - Applied
@@ -163,7 +171,7 @@ Function ApplyRoute(Actor p)
             Applied = want
         endif
     endif
-    Trace("route rads=" + rads + " want=" + want + " delta=" + delta + " applied=" + Applied + " ok=" + ok)
+    Trace("route rads=" + rads + " want=" + want + " delta=" + delta + " applied=" + Applied + " ok=" + ok + " clamped=" + clamped)
 EndFunction
 
 ; ---------------------------------------------------------------- poll and steps
