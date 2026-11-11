@@ -7,7 +7,12 @@ usage:
   python make_power_armor_probe.py stage --out <dir> [--starfield <Starfield.esm>] [--compiler <exe>]
                                          [--content-resources <zip>] [--control <furniture editor id>] [--with-hand]
                                          [--frame-art <ARMO editor id>] [--piece-art <ARMO editor id>] [--pack-art <ARMO editor id>]
-      1. dotnet/PowerArmorProbe build + check against the Starfield.esm given (offline_check.txt);
+                                         [--variant race,furniture,keyword,armor] [--armor <armor editor id>] [--kw-first]
+      1. dotnet/PowerArmorProbe build + check against the Starfield.esm given (offline_check.txt). --variant overrides
+         Starfield's empty power armor default objects in the plugin, each on its own (race: PowerArmorRace_DO ->
+         FO4SF_PARace; furniture: PowerArmorDefaultFrameFurniture_DO -> the suit, which also gets isPowerArmorFrame; keyword:
+         PowerArmorArmorKeyword_DO -> a keyword of ours; armor: PowerArmorDefaultFrameArmor_DO -> a copy of a plain vanilla
+         armor (--armor, required with it) that carries isPowerArmorFrame); the PC run of 11 Nov (stage 10 did nothing) suggested it;
       2. the Papyrus compile: each optional reading (";OPT <Base.Name> " lines of the .psc) whose name the base sources
          declare is compiled on its own, the ones that compile are kept, every other one is reported in plan.json
          ("optional") and logs "na"; then the script itself;
@@ -17,8 +22,8 @@ usage:
          Spacesuit_Mark1_Helmet: an ARMO with no armature cannot be equipped, PC run of #733); `none` only for offline tests.
       3. plan.json (SHA-256 of every file, of Starfield.esm, the optional readings' fate) and README.txt. Built in a new
          <out>.partial-<time>-<pid> and renamed to <out> only when every step passed; an existing <out> is refused.
-  python make_power_armor_probe.py log [--file <FO4SFPAProbe.0.log>]
-      the run's user log as one table and a verdict (src/fo4sf/powerarmor/probe_log.py); exit 0 when the control held,
+  python make_power_armor_probe.py log [--file <FO4SFPAProbe.0.log>] [--papyrus <Papyrus.0.log>]
+      the run's user log (and the game's Papyrus log: errors naming our forms, a refused stage 10) as one table and a verdict (src/fo4sf/powerarmor/probe_log.py); exit 0 when the control held,
       1 when the session is inconclusive.
 Nothing here installs anything: scripts/planet/power_armor_probe_install.py does, on the owner's word, game closed.
 """
@@ -53,7 +58,9 @@ DEFAULT_CONTROL = "NPCChairTech03_Free_270"
 DEFAULT_FRAME_ART = "Spacesuit_Mark1_Body"      # PC run of #733: pieces with an armature equip, pieces without one are refused
 DEFAULT_PIECE_ART = "Spacesuit_Mark1_Helmet"
 DEFAULT_PACK_ART = "Spacesuit_Mark1_Backpack"     # the second piece: a different slot than the helmet (PC run of #733 at 8fe7c27e: 2 of 3 equipped)
+VARIANTS = ("race", "furniture", "keyword", "armor")
 STARFIELD = r"D:\SteamLibrary\steamapps\common\Starfield"
+PAPYRUS_LOG = os.path.join(os.path.expanduser("~"), "Documents", "My Games", "Starfield", "Logs", "Script", "Papyrus.0.log")
 LOG = os.path.join(os.path.expanduser("~"), "Documents", "My Games", "Starfield", "Logs", "Script", "User", "FO4SFPAProbe.0.log")
 # what the script cannot run without (the optional readings are the .psc's ";OPT" lines)
 REQUIRED = {
@@ -138,7 +145,9 @@ def compile_text(compiler, text, src_dir, out_dir, script=SCRIPT):
         with open(os.path.join(work, script + ".psc"), "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
         os.makedirs(out_dir, exist_ok=True)
-        r = subprocess.run([compiler, script + ".psc", "-f=Starfield_Papyrus_Flags.flg", f"-i={work};{src_dir}", f"-o={out_dir}"],
+        # a .cmd/.bat stand-in is not a Win32 image: start it through the command interpreter
+        shell = ["cmd.exe", "/c"] if os.name == "nt" and str(compiler).lower().endswith((".cmd", ".bat")) else []
+        r = subprocess.run([*shell, compiler, script + ".psc", "-f=Starfield_Papyrus_Flags.flg", f"-i={work};{src_dir}", f"-o={out_dir}"],
                            cwd=work, capture_output=True, text=True)
     ok = r.returncode == 0 and "Compilation succeeded" in r.stdout and os.path.exists(os.path.join(out_dir, script + ".pex"))
     if ok:
@@ -205,7 +214,13 @@ def stage(a):
     work = os.path.join(out, "work")
     os.makedirs(work)
     tool = ["dotnet", "run", "-c", "Release", "--project", PROJECT, "--"]
-    opts = ["--control", a.control] + (["--with-hand"] if a.with_hand else [])
+    variant = [v for v in a.variant.split(",") if v]
+    if [v for v in variant if v not in VARIANTS] or len(set(variant)) != len(variant):
+        sys.exit(f"--variant is a comma list of {', '.join(VARIANTS)}, each once (got {a.variant!r})")
+    if "armor" in variant and not a.armor:
+        sys.exit("--variant armor copies a plain vanilla armor: name it with --armor <armor editor id> (the tool lists candidates)")
+    opts = ["--control", a.control, "--variant", ",".join(variant)] + (["--armor", a.armor] if a.armor else []) + (
+        ["--kw-first"] if a.kw_first else []) + (["--with-hand"] if a.with_hand else [])
     opts += ["--frame-art", a.frame_art, "--piece-art", a.piece_art, "--pack-art", a.pack_art]
     wrote = run(tool + ["build", a.starfield, out] + opts).stdout
     check = run(tool + ["check", os.path.join(out, PLUGIN), a.starfield] + opts).stdout
@@ -250,7 +265,7 @@ def stage(a):
     if sha256(a.starfield) != before:
         sys.exit(f"Starfield.esm changed during the build, nothing published; attempt kept in {out}")
     plan = {"kind": "power-armor-probe", "version": 1, "plugins": [PLUGIN], "outputs": stage_files(out),
-            "inputs": {"Starfield.esm": {"sha256": before}}, "control": a.control, "optional": fate, "optional_hand": hand_fate, "optional_entry": entry_fate,
+            "inputs": {"Starfield.esm": {"sha256": before}}, "control": a.control, "variant": variant, "armor": a.armor, "kw_first": bool(a.kw_first), "optional": fate, "optional_hand": hand_fate, "optional_entry": entry_fate,
             "hand_quest_on": bool(a.with_hand), "frame_art": a.frame_art, "piece_art": a.piece_art, "pack_art": a.pack_art,
             "log": "<My Games>/Starfield/Logs/Script/User/FO4SFPAProbe.0.log"}
     with open(os.path.join(out, "plan.json"), "w", encoding="utf-8") as f:
@@ -265,6 +280,7 @@ this stage: {'yes' if a.with_hand else 'no'}), QUST FO4SF_PAEntryQuest (the entr
 frame and pieces and the value are set; sit on the vanilla chair and they are undone; art: frame {a.frame_art or 'none'}, pieces
 {a.piece_art or 'none'}, pack {a.pack_art or 'none'}), FURN FO4SF_PAEntryFurn, AVIF FO4SF_PAInPowerArmor, ARMO FO4SF_PAFrame / PAPieceHelm / PAPieceTorso. Master Starfield.esm only; adds
 records, overrides none. Checked against Starfield.esm {before}. Re-stage after a game update.
+Variant (default objects overridden): {', '.join(variant) or 'none'}{f' (frame armor: a copy of {a.armor})' if a.armor else ''}.
 Optional readings: {', '.join(f'{k}: {v}' for k, v in fate.items()) or 'none'}; by hand: {', '.join(f'{k}: {v}' for k, v in hand_fate.items()) or 'none'}; entry: {', '.join(f'{k}: {v}' for k, v in entry_fate.items()) or 'none'}.
 Install (the owner's word, game closed; loose scripts are not read, the installer packs them into a ba2):
   python scripts\\planet\\power_armor_probe_install.py install --dir <this folder> --starfield <game dir>
@@ -281,8 +297,12 @@ def log(a):
     if not os.path.isfile(a.file):
         print(f"no log at {a.file}")
         return 2
+    papyrus = None
+    if a.papyrus and os.path.isfile(a.papyrus):      # the game's own log: a refusal of SwitchToPowerArmor is only there
+        with open(a.papyrus, encoding="utf-8", errors="replace") as f:
+            papyrus = f.read().splitlines()
     with open(a.file, encoding="utf-8", errors="replace") as f:
-        s = probe_log.summarize(f)
+        s = probe_log.summarize(f, papyrus=papyrus)
     print("\n".join(probe_log.report(s)))
     return 0 if s["control"][0] else 1
 
@@ -304,8 +324,12 @@ def main(argv=None):
     s.add_argument("--frame-art", default=DEFAULT_FRAME_ART)
     s.add_argument("--piece-art", default=DEFAULT_PIECE_ART)
     s.add_argument("--pack-art", default=DEFAULT_PACK_ART)
+    s.add_argument("--variant", default="", help="comma list of default objects to override: race, furniture, keyword, armor")
+    s.add_argument("--armor", default="", help="the plain vanilla armor the armor variant copies (editor ID)")
+    s.add_argument("--kw-first", action="store_true", help="FurnitureTypePowerArmor first in the suit's keyword list")
     g = sub.add_parser("log")
     g.add_argument("--file", default=LOG)
+    g.add_argument("--papyrus", default=PAPYRUS_LOG, help="the game's Papyrus.0.log (errors naming our forms are shown)")
     a = p.parse_args(argv)
     return {"precheck": precheck, "stage": stage, "log": log}[a.cmd](a)
 

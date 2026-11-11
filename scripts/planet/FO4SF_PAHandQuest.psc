@@ -1,6 +1,6 @@
 Scriptname FO4SF_PAHandQuest extends Quest
 {The power armor probe by hand (fo4-to-starfield, docs/research/power-armor-probe.md, "By hand"). Attached to QUST
- FO4SF_PAHandQuest (0x807) of FO4SFPowerArmorProbe.esm: start game enabled, NO properties (every form is found with
+ FO4SF_PAHandQuest (0x809) of FO4SFPowerArmorProbe.esm: start game enabled, NO properties (every form is found with
  Game.GetFormFromFile, as in FO4SF_PAProbeQuest: a property would make the temporary references persistent).
  No console, no stage numbers. The quest starts with the game (load a throwaway save that is already in the world):
    1. 30 s after it starts it says on screen that it will move you into the test room, and does (ObjectReference.MoveTo
@@ -26,7 +26,7 @@ string ProbePlugin = "FO4SFPowerArmorProbe.esm"
 int CellId = 0x800          ; CELL FO4SF_PAProbeCell
 int SuitRefId = 0x804       ; REFR the suit furniture
 int ControlRefId = 0x805    ; REFR the vanilla control furniture
-int ArrivalRefId = 0x808    ; REFR the arrival XMarker: PERSISTENT, so it is found while the room is not loaded (the COC marker 0x806 is temporary)
+int ArrivalRefId = 0x80A    ; REFR the arrival XMarker: PERSISTENT, so it is found while the room is not loaded (the COC marker 0x806 is temporary)
 
 ; ---------------------------------------------------------------- state
 

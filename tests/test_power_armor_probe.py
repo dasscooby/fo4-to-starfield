@@ -44,7 +44,7 @@ class HandScriptTests(unittest.TestCase):
             m = re.search(rf"^int {name} = (0x[0-9A-Fa-f]+)", HAND_PSC, re.M)
             self.assertIsNotNone(m, name)
             self.assertEqual(int(m.group(1), 16), ids[name], name)
-        self.assertEqual(ids["HandQuestId"], 0x807)
+        self.assertEqual(ids["HandQuestId"], 0x809)
         self.assertIn(f'string ProbePlugin = "{PLUGIN}"', HAND_PSC)
         self.assertIn('HandScript = "FO4SF_PAHandQuest"', TOOL_SRC)
         self.assertTrue(HAND_PSC.startswith("Scriptname FO4SF_PAHandQuest extends Quest"))
@@ -105,7 +105,7 @@ class HandScriptTests(unittest.TestCase):
         self.assertIn("ObjectReference coc = Ref(ArrivalRefId)", HAND_PSC)
         self.assertNotIn("Ref(CocRefId)", HAND_PSC)                                # the temporary COC marker is not the target
         self.assertIn('elseif InRoom >= RoomLimit && (sitText == "0" || sitText == "na")', HAND_PSC)
-        self.assertEqual(const_ids(TOOL_SRC)["ArrivalRefId"], 0x808)
+        self.assertEqual(const_ids(TOOL_SRC)["ArrivalRefId"], 0x80A)
 
     def test_the_hand_log_lines_end(self):
         self.assertIn('"FO4SFPAHAND rt="', HAND_PSC)
@@ -127,7 +127,7 @@ class EntryScriptTests(unittest.TestCase):
             m = re.search(rf"^int {psc_name} = (0x[0-9A-Fa-f]+)", ENTRY_PSC, re.M)
             self.assertIsNotNone(m, psc_name)
             self.assertEqual(int(m.group(1), 16), ids[tool_name], psc_name)
-        self.assertEqual(ids["EntryQuestId"], 0x809)
+        self.assertEqual(ids["EntryQuestId"], 0x80B)
         own = {k: v for k, v in ids.items() if 0x800 <= v < 0x1000}                    # ours; the others are Starfield.esm's
         self.assertEqual(len(set(own.values())), len(own), "two records share an id")
         self.assertLess(max(v for k, v in own.items() if k != "FirstTileId"), ids["FirstTileId"])
@@ -248,7 +248,9 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(mpa.enable(PSC, []), PSC)
         names = mpa.optional_names(PSC)
         self.assertEqual(names, ["Actor.GetWornItem", "Actor.GetFurnitureReference", "Actor.GetSitState",
-                                 "Actor.IsInPowerArmor", "Game.GetCameraState"])
+                                 "Actor.IsInPowerArmor", "ObjectReference.HasKeyword", "ObjectReference.AddKeyword", "Game.GetCameraState"])
+        self.assertIn('" haskw=" + kb + " addkw=" + ka + " haskw2=" + k2 + " haskwc=" + KwChair(suit)', PSC)
+        self.assertIn("if kb == \"false\"", PSC)                                 # AddKeyword only when the game does not see it
 
     def test_enabling_an_optional_reading_uncomments_exactly_its_lines(self):
         on = mpa.enable(PSC, ["Actor.IsInPowerArmor"])
@@ -263,7 +265,7 @@ class ScriptTests(unittest.TestCase):
 
 BASES = {
     "Form": "Scriptname Form\nint Function GetFormID() native\n",
-    "ObjectReference": "Scriptname ObjectReference extends Form\nfloat Function GetPositionX() native\nfloat Function GetPositionY() native\nFunction MoveTo(ObjectReference a) native\n"
+    "ObjectReference": "Scriptname ObjectReference extends Form\nbool Function HasKeyword(Keyword k) native\nFunction AddKeyword(Keyword k) native\nfloat Function GetPositionX() native\nfloat Function GetPositionY() native\nFunction MoveTo(ObjectReference a) native\n"
                        "float Function GetPositionZ() native\nfloat Function GetDistance(ObjectReference a) native\nCell Function GetParentCell() native\n"
                        "Function AddItem(Form f, int n, bool s) native\nFunction RemoveItem(Form f, int n, bool s) native\nint Function GetItemCount(Form f) native\n",
     "Actor": "Scriptname Actor extends ObjectReference\nFunction SwitchToPowerArmor(ObjectReference a) native\nFunction SetRace(Race r) native\n"
@@ -299,7 +301,8 @@ class PrecheckTests(unittest.TestCase):
         self.assertEqual(r["missing"], [])
         self.assertTrue(r["required"]["Actor.GetDistance"])                  # declared on ObjectReference
         self.assertEqual(r["optional"], {"Actor.GetWornItem": True, "Actor.GetFurnitureReference": True,
-                                         "Actor.GetSitState": True, "Actor.IsInPowerArmor": False, "Game.GetCameraState": False,
+                                         "Actor.GetSitState": True, "Actor.IsInPowerArmor": False, "ObjectReference.HasKeyword": True, "ObjectReference.AddKeyword": True,
+                                         "Game.GetCameraState": False,
                                          "ObjectReference.MoveTo": True, "Actor.GetValue": False, "Actor.SetValue": False,
                                          "Actor.IsEquipped": True, "ScriptObject.RegisterForRemoteEvent": True, "Actor.OnItemUnequipped": True})
 
@@ -373,6 +376,7 @@ class StageTests(unittest.TestCase):
         self.assertIn("QUST FO4SF_PAHandQuest flags 0 scripts []", check.stdout)   # off, and no script, unless --with-hand
         self.assertIn("QUST FO4SF_PAEntryQuest flags StartGameEnabled scripts [FO4SF_PAEntryQuest (0 properties)]", check.stdout)
         self.assertIn("(0 properties)", check.stdout)
+        self.assertIn("FURN keyword form component [000900:Starfield.esm, 0F4A21:Starfield.esm]", check.stdout)   # FAL-212, 11 Nov
 
     def test_the_plugin_adds_records_and_overrides_none(self):
         """Raw bytes: every record carries load index 1 (our own plugin; Starfield.esm is master 0)."""
@@ -432,11 +436,11 @@ class StageTests(unittest.TestCase):
         check = self.run_tool("check", out / PLUGIN, self.master)
         self.assertEqual(check.returncode, 0, check.stdout)
         self.assertRegex(check.stdout, r"FURN FO4SF_PAEntryFurn keywords \[000900:Starfield.esm\] \(the control's, no FurnitureTypePowerArmor\)")
-        self.assertRegex(check.stdout, r"AVIF FO4SF_PAInPowerArmor 00080C:FO4SFPowerArmorProbe.esm type Variable default 0 min 0 max 1")
+        self.assertRegex(check.stdout, r"AVIF FO4SF_PAInPowerArmor 00080E:FO4SFPowerArmorProbe.esm type Variable default 0 min 0 max 1")
         for edid, slot, art in (("FO4SF_PAFrame", "BODY", "Spacesuit_Mark1_Body"), ("FO4SF_PAPieceHelm", "Hat", "Spacesuit_Mark1_Helmet"),
                                 ("FO4SF_PAPieceTorso", "Backpack", "Spacesuit_Mark1_Backpack")):    # the copied art's OWN slot; two pieces, two slots
             self.assertRegex(check.stdout, rf"ARMO {edid} \S+ slot {slot} armatures 1 \(art: {art}\)")
-        self.assertIn("REFR 00080B:FO4SFPowerArmorProbe.esm FO4SF_PAEntryFurnRef base 00080A:FO4SFPowerArmorProbe.esm at (3, 0, 0)", check.stdout)
+        self.assertIn("REFR 00080D:FO4SFPowerArmorProbe.esm FO4SF_PAEntryFurnRef base 00080C:FO4SFPowerArmorProbe.esm at (3, 0, 0)", check.stdout)
 
     def test_the_three_armor_name_humanrace_not_the_copy_and_the_hand_script_is_off_the_record_without_with_hand(self):
         """FAL-361 PC run of #733: 'armor cannot be equipped by the passed in actor's race'; the hand quest's OnInit ran unflagged."""
@@ -476,7 +480,7 @@ class StageTests(unittest.TestCase):
         self.assertEqual(check.returncode, 0, check.stdout)
         self.assertEqual(check.stdout.count("keywords 2 (source 2), value 7 weight 7.5 health 100"), 3)       # frame, helmet, pack
         data = (out / PLUGIN).read_bytes()
-        self.assertEqual(data.count(b"KSIZ"), 3 + 2)             # the three copies + the two furniture (suit, entry) carry keywords
+        self.assertEqual(data.count(b"KSIZ"), 3 + 2 * 2)         # the three copies + the two furniture (suit, entry), each twice: KWDA and the keyword form component
         self.assertIn("if (art == null) { armor.Keywords = null; armor.Value = 0; armor.Weight = 0; }", TOOL_SRC)
         # a copy stripped of its keywords is refused by check: rebuild with none-art then check against the default art
         none = ["--frame-art", "none", "--piece-art", "none", "--pack-art", "none"]
@@ -498,6 +502,60 @@ class StageTests(unittest.TestCase):
         gone = self.run_tool("build", self.master, self.root / "e5", "--piece-art", "Spacesuit_Mark1_Nothing")
         self.assertEqual(gone.returncode, 1)
         self.assertIn("0 ARMO named Spacesuit_Mark1_Nothing", gone.stderr)
+
+    def test_variants_override_only_their_default_objects(self):
+        for variant, n, kw in (("race", 1, 0), ("race,furniture,keyword", 3, 1)):
+            out = self.root / ("v_" + variant.replace(",", "_"))
+            proc = self.run_tool("build", self.master, out, "--variant", variant)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            check = self.run_tool("check", out / PLUGIN, self.master, "--variant", variant)
+            self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
+            self.assertIn(f"DefaultObject {n}", check.stdout)
+            self.assertEqual(("Keyword 1" in check.stdout), bool(kw))
+            # the plugin without the variant's flag is a mismatch: the check knows which overrides it must hold
+            self.assertEqual(self.run_tool("check", out / PLUGIN, self.master).returncode, 1)
+        self.assertIn("PowerArmorRace_DO 05C254:Starfield.esm Object 000802:FO4SFPowerArmorProbe.esm", check.stdout)
+        self.assertIn("15503F:Starfield.esm]", check.stdout)                       # isPowerArmorFrame on the suit
+        self.assertIn("000807:FO4SFPowerArmorProbe.esm", check.stdout)             # our armor keyword
+        self.assertEqual(self.run_tool("build", self.master, self.root / "v_bad", "--variant", "bogus").returncode, 1)
+
+    def test_the_armor_variant_copies_a_named_plain_armor_and_gives_it_the_frame_keyword(self):
+        out = self.root / "v_armor"
+        v = "race,furniture,keyword,armor"
+        bad = self.run_tool("build", self.master, self.root / "v_armor_bad", "--variant", v)       # no --armor: refused, lists candidates
+        self.assertEqual(bad.returncode, 1)
+        self.assertIn("name it with --armor <editor id>", bad.stderr)
+        self.assertIn("SynthPlainArmor", bad.stderr)
+        self.assertFalse((self.root / "v_armor_bad" / PLUGIN).exists())
+        proc = self.run_tool("build", self.master, out, "--variant", v, "--armor", "SynthPlainArmor")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("ARMO FO4SF_PAFrameArmor = copy of SynthPlainArmor", proc.stdout)
+        check = self.run_tool("check", out / PLUGIN, self.master, "--variant", v, "--armor", "SynthPlainArmor")
+        self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
+        self.assertIn("ARMO FO4SF_PAFrameArmor 000808:FO4SFPowerArmorProbe.esm (copy of SynthPlainArmor 0A0001:Starfield.esm)", check.stdout)
+        self.assertIn("keywords [000900:Starfield.esm, 15503F:Starfield.esm] component [000900:Starfield.esm, 15503F:Starfield.esm] armor rating 7", check.stdout)
+        self.assertIn("PowerArmorDefaultFrameArmor_DO 15503E:Starfield.esm Object 000808:FO4SFPowerArmorProbe.esm", check.stdout)
+        self.assertIn("Armor 4", check.stdout)        # the entry kit's three plus the variant's frame armor
+        self.assertIn("DefaultObject 4", check.stdout)
+        self.assertEqual(self.run_tool("check", out / PLUGIN, self.master, "--variant", "race,furniture,keyword").returncode, 1)
+        self.assertEqual(self.run_tool("build", self.master, self.root / "v_armor_none", "--variant", v, "--armor", "NoSuchArmor").returncode, 1)
+
+    def test_kw_first_puts_the_power_armor_keyword_first_in_the_list_and_the_check_knows(self):
+        out = self.root / "kwfirst"
+        proc = self.run_tool("build", self.master, out, "--kw-first")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        check = self.run_tool("check", out / PLUGIN, self.master, "--kw-first")
+        self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
+        self.assertIn("FURN FO4SF_PAProbeSuit keywords [0F4A21:Starfield.esm, 000900:Starfield.esm]", check.stdout)
+        self.assertIn("component [0F4A21:Starfield.esm, 000900:Starfield.esm]".replace("component ", "keyword form component "), check.stdout)
+        self.assertEqual(self.run_tool("check", out / PLUGIN, self.master).returncode, 1)          # the default order is a mismatch
+        self.assertEqual(self.run_tool("check", self.root / "b1" / PLUGIN, self.master, "--kw-first").returncode, 1)
+
+    def test_variant_overrides_keep_the_form_ids_of_the_vanilla_records(self):
+        out = self.root / "v_raw"
+        self.assertEqual(self.run_tool("build", self.master, out, "--variant", "race").returncode, 0)
+        data = (out / PLUGIN).read_bytes()
+        self.assertIn(struct.pack("<I", 0x0005C254), data)                          # master index 0: Starfield.esm's own id
 
     def test_a_control_that_is_already_power_armor_is_refused(self):
         proc = self.run_tool("build", self.master, self.root / "b4", "--control", "SynthAlreadyPowerArmor")
@@ -540,8 +598,12 @@ class StageTests(unittest.TestCase):
         self.assertEqual(plan["optional_entry"]["Actor.GetSitState"][:8], "declared")
         self.assertFalse(plan["hand_quest_on"])
         self.assertEqual(plan["inputs"]["Starfield.esm"]["sha256"], mpa.sha256(str(self.master)))
+        self.assertEqual(plan["variant"], [])
+        self.assertFalse(plan["kw_first"])
         self.assertEqual(plan["optional"]["Actor.GetWornItem"], "kept")
         self.assertEqual(plan["optional"]["Actor.GetFurnitureReference"], "kept")
+        self.assertEqual(plan["optional"]["ObjectReference.HasKeyword"], "kept")
+        self.assertEqual(plan["optional"]["ObjectReference.AddKeyword"], "kept")
         self.assertTrue(plan["optional"]["Actor.GetSitState"].startswith("declared but did not compile"))
         self.assertEqual(plan["optional"]["Actor.IsInPowerArmor"], "not declared in the base scripts")
         self.assertEqual(plan["optional"]["Game.GetCameraState"], "not declared in the base scripts")
@@ -560,6 +622,36 @@ class StageTests(unittest.TestCase):
         self.assertIn("exists", str(e.exception))
         (final / PLUGIN).write_bytes(b"changed")
         self.assertTrue(any("changed after the stage" in p for p in mpa.verify_stage(str(final), plan)))
+
+    def test_stage_records_the_variant_and_refuses_a_bad_one(self):
+        z = self.root / "cr3.zip"
+        fake_sources(z)
+        compiler = fake_compiler(self.root)
+        old_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = str(Path(self.dotnet).parent) + os.pathsep + old_path
+        self.addCleanup(os.environ.__setitem__, "PATH", old_path)
+        args = ["--starfield", str(self.master), "--compiler", str(compiler), "--content-resources", str(z)]
+        final = self.root / "stage_race"
+        self.assertEqual(mpa.main(["stage", "--out", str(final), "--variant", "race"] + args), 0)
+        plan = json.loads((final / "plan.json").read_text())
+        self.assertEqual(plan["variant"], ["race"])
+        self.assertIn("DFOB PowerArmorRace_DO", (final / "offline_check.txt").read_text())
+        self.assertIn("Variant (default objects overridden): race", (final / "README.txt").read_text())
+        self.assertEqual(mpa.verify_stage(str(final), plan, str(self.master.parent)), [])
+        with self.assertRaises(SystemExit) as e:                                  # armor without --armor: refused before the tool
+            mpa.main(["stage", "--out", str(self.root / "stage_noarmor"), "--variant", "armor"] + args)
+        self.assertIn("name it with --armor", str(e.exception))
+        full = self.root / "stage_armor"
+        self.assertEqual(mpa.main(["stage", "--out", str(full), "--variant", "race,furniture,keyword,armor", "--armor", "SynthPlainArmor"] + args), 0)
+        plan = json.loads((full / "plan.json").read_text())
+        self.assertEqual((plan["variant"], plan["armor"]), (["race", "furniture", "keyword", "armor"], "SynthPlainArmor"))
+        self.assertIn("ARMO FO4SF_PAFrameArmor", (full / "offline_check.txt").read_text())
+        self.assertIn("frame armor: a copy of SynthPlainArmor", (full / "README.txt").read_text())
+        self.assertEqual(mpa.verify_stage(str(full), plan, str(self.master.parent)), [])
+        for bad in ("bogus", "race,race"):
+            with self.assertRaises(SystemExit) as e:
+                mpa.main(["stage", "--out", str(self.root / "stage_bad"), "--variant", bad] + args)
+            self.assertIn("--variant is a comma list", str(e.exception))
 
     def test_stage_refuses_when_a_required_native_is_missing(self):
         z = self.root / "cr2.zip"

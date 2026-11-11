@@ -113,7 +113,7 @@ if (Test-Path $pdb) { Copy-Item $pdb (Join-Path $Out 'FOCCPing.pdb') }
 
 $hash = { param($p) (Get-FileHash -Algorithm SHA256 $p).Hash.ToLower() }
 $record = [ordered]@{
-  plugin = 'FOCCPing'; plugin_version = '0.2.0'; built_at = (Get-Date).ToUniversalTime().ToString('o')
+  plugin = 'FOCCPing'; plugin_version = '0.3.0'; built_at = (Get-Date).ToUniversalTime().ToString('o')
   xmake = $xmakeVersion; compiler = $banner; sdk_root = $(if ($Sdk) { (Resolve-Path $Sdk).Path } else { $null })
   env_script = $(if ($Env) { (Resolve-Path $Env).Path } else { $null })
   library = [ordered]@{ path = (Resolve-Path $Lib).Path; commit = $libCommit; pinned = $PinnedLib; shared_commit = $sharedCommit; shared_pinned = $PinnedShared }

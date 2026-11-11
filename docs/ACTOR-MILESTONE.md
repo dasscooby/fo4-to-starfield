@@ -1,3 +1,5 @@
+> **Historical plan (8 October 2026):** the first-actor milestone as proposed then. Actors are now tracked in [mission/when-freedom-calls.md](mission/when-freedom-calls.md), [actors/](actors/) and [ROADMAP.md](ROADMAP.md).
+
 # Next milestone: one Fallout 4 actor in Starfield
 
 Owner direction: hardest task after the interior slice ([#31](https://github.com/dasscooby/fo4-to-starfield/issues/31)). This is a proposed execution plan for WP-13/WP-14 and spike S7, not a claim that actor conversion works or that all agents have accepted assignments.

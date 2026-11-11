@@ -1,6 +1,6 @@
 Scriptname FO4SF_PAEntryQuest extends Quest
 {The power armor ENTRY by script (fo4-to-starfield, FAL-361, piece B of FAL-359; docs/research/power-armor-probe.md, "Entry by script").
- Attached to QUST FO4SF_PAEntryQuest (0x809) of FO4SFPowerArmorProbe.esm: start game enabled, NO properties (every form is found with
+ Attached to QUST FO4SF_PAEntryQuest (0x80B) of FO4SFPowerArmorProbe.esm: start game enabled, NO properties (every form is found with
  Game.GetFormFromFile, as in FO4SF_PAHandQuest). No console, no stage numbers. Load a throwaway save that is already in the world:
    1. 30 s after it starts it says on screen that it will move you into the test room, and does (ObjectReference.MoveTo on the
       persistent arrival marker). When the game has no such call it says to type  coc FO4SF_PAProbeCell.
@@ -25,12 +25,12 @@ string ProbePlugin = "FO4SFPowerArmorProbe.esm"
 int CellId = 0x800          ; CELL FO4SF_PAProbeCell
 int KitRaceId = 0x802       ; RACE FO4SF_PARace, a copy of HumanRace: only logged at init, never set (the swap removed the body)
 int ControlRefId = 0x805    ; REFR the vanilla chair: the EXIT
-int ArrivalRefId = 0x808    ; REFR the arrival XMarker (persistent)
-int EntryRefId = 0x80B      ; REFR the entry chair (FURN FO4SF_PAEntryFurn)
-int InPaId = 0x80C          ; AVIF FO4SF_PAInPowerArmor
-int FrameId = 0x80D         ; ARMO FO4SF_PAFrame
-int PieceHelmId = 0x80E     ; ARMO FO4SF_PAPieceHelm
-int PieceTorsoId = 0x80F    ; ARMO FO4SF_PAPieceTorso
+int ArrivalRefId = 0x80A    ; REFR the arrival XMarker (persistent)
+int EntryRefId = 0x80D      ; REFR the entry chair (FURN FO4SF_PAEntryFurn)
+int InPaId = 0x80E          ; AVIF FO4SF_PAInPowerArmor
+int FrameId = 0x80F         ; ARMO FO4SF_PAFrame
+int PieceHelmId = 0x810     ; ARMO FO4SF_PAPieceHelm
+int PieceTorsoId = 0x811    ; ARMO FO4SF_PAPieceTorso
 
 ; ---------------------------------------------------------------- state
 
