@@ -237,14 +237,14 @@ class PagePluginTests(unittest.TestCase):
         self.assertIn("constexpr std::uint32_t kLookupByIdRva = 0x5DE3B0;", self.main)
         self.assertIn("kIdCountC,", self.main)
         self.assertIn("kDataHandlerSingleton = kIdCountC,", self.main)
-        self.assertIn("std::size_t IdCount() { return g_stage == 4 ? kIdCount : g_stage == 3 ? kIdCountC : kIdCountB; }",
+        self.assertIn("std::size_t IdCount() { return g_stage >= 4 ? kIdCount : g_stage == 3 ? kIdCountC : kIdCountB; }",
                       self.main)
         self.assertIn("constexpr std::uint32_t kDataHandlerRva = 0x5FD9B28;", self.main)
         check = function(self.main, "bool CheckPageIds()")
         self.assertIn("std::pair{ kDataHandlerSingleton, kDataHandlerRva }, std::pair{ kLookupById, kLookupByIdRva }", check)
         self.assertIn("if (g_rva[id] != rva) {", check)
         self.assertIn('return Refuse("page_ids"', check)
-        self.assertIn("(g_stage >= 3 && !CheckChannelIds()) || (g_stage == 4 && !CheckPageIds())", self.main)
+        self.assertIn("(g_stage >= 3 && !CheckChannelIds()) || (g_stage >= 4 && !CheckPageIds())", self.main)
         # libxse and SFSE 0.2.21 agree on the list layout and the two types
         for line in ("constexpr std::size_t   kFormArraysAt = 0x70;", "constexpr std::size_t   kFormArrayBytes = 0x18;",
                      "constexpr std::size_t   kGlobType = 0x0A;", "constexpr std::size_t   kAvifType = 0x6D;"):
@@ -357,7 +357,7 @@ class PagePluginTests(unittest.TestCase):
         self.assertIn("\nPageFlagSets=0x9\n", self.ini)
         self.assertIn("; 4 = stage (d): the STAT page", self.ini)
         self.assertIn('ReadFlagSets(ini, L"PageFlagSets", L"0x9");', self.main)
-        self.assertIn("if (g_stage < 1 || g_stage > 4) {", self.main)
+        self.assertIn("if (g_stage < 1 || g_stage > 5) {", self.main)                 # (e), FAL-301
         self.assertIn("### PASS at (d), `Stage=4`", self.readme)
         self.assertIn("## Stage (d): the STAT page (FAL-272)", self.readme)
         for line in ("refuse step=page_ids", "refuse step=page what=strings", "what=get_actor_value",
