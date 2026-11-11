@@ -39,18 +39,18 @@ Your own log card goes beside this one. This part only names what this head need
    `PageFlagSets=0x9`, `SnapshotKey=0x7A`. Then `pipboy_probe_install.py install --dir $exp --starfield $sf`.
 4. **Session:** launch through `sfse_loader.exe`, load a throwaway save, hand over to the owner. No save is made.
    After the owner's step 8, optionally press F11 once in play, then open the console for the controls:
-   `player.getav health`, `player.getav carryweight`, `player.getlevel`, `getglobalvalue gamehour`; quit to desktop.
+   `player.getav health`, `player.getav carryweight`, `player.getlevel`; quit to desktop.
 5. **Collect** `FO4SFPipboyMenu.log` (`My Games\Starfield\SFSE\Logs`) and the screenshots before any relaunch.
 6. **Uninstall** as in that card: `pipboy_probe_install.py uninstall --starfield $sf`, delete the dll and ini (and the
    bin file if it was not there before), and compare the receipts.
 
 **What the log must show** (`sfse/FO4SFPipboyMenu/README.md`, "PASS at (d)"): `step=ready stage=d` after
-`step=page_ids data_handler=sfse_equal`; at the first open `step=page_strings self_test=ok`,
-`step=page_actor_values ... get_actor_value_slot=0x01` and two `step=page_forms` lines with `found=`; two
+`step=page_ids data_handler=sfse_equal lookup_by_id=sfse_equal`; at the first open `step=page_strings self_test=ok`,
+`step=page_actor_values ... get_actor_value_slot=0x01`, `step=page_form_arrays` and `step=page_forms` with `found=`; two
 `step=listen name=... added=1`; `step=page ... fields=8/8 set=8 match=8` lines whose `text=` changes; `step=click
 button=tab` per NEXT TAB and `step=click button=close`, `step=close ... sent=hide`, `step=state ... match=yes` for
-CLOSE. Any `refuse` or `step=page_unknown` line is a finding: post it whole. Also post `step=page_forms list=AVIF`
-whole: its `weight_names=` names the carried-weight value if `CARRIED` shows `?`.
+CLOSE. Any `refuse` or `step=page_unknown` line is a finding: post it whole. Also post `step=page_forms` and
+`step=page_form_arrays` whole: its `weight_names=` names the carried-weight value if `CARRIED` shows `?`.
 
 **PASS:** every STATUS line shows a value (RADS may say `NOT INSTALLED`), TIME and UPDATES change while the page is
 open, CELL, HEALTH or CARRIED change between opens, both buttons work, and the console's controls match the page.
