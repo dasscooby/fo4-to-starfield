@@ -84,6 +84,13 @@ class WorldSourceTests(unittest.TestCase):
         self.assertIn("g_worldLoads.fetch_add(1) < kMaxWorldLoads", movie)
         self.assertIn("if (n == kMaxRegistered) {", function(self.world, "void CensusRegistered("))
 
+    def test_the_pc_build_copies_every_source_file(self):
+        # FAL-269 finding at 183f1975: build.ps1 builds from a copy, so a source file missing from $sources breaks it
+        build = (PLUGIN / "build.ps1").read_text(encoding="utf-8")
+        listed = re.search(r"\$sources = @\(([^)]*)\)", build).group(1)
+        for f in sorted((PLUGIN / "src").iterdir()):
+            self.assertIn(f"'src\\{f.name}'", listed, f.name)
+
     def test_the_ini_keys_and_defaults(self):
         for key, default in (("WorldKey", "0x77"), ("WorldMenu", ""), ("WorldMovie", "")):
             self.assertIn(f"\n{key}={default}\n", self.ini)
