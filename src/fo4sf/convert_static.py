@@ -686,3 +686,27 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
     if aliases:
         door["sequence_aliases"] = dict(aliases)
     return files, door
+
+
+# Grok: per-class mass scale (physics-conversion.md §4.2). Values are initial stubs from research notes;
+# owner can override. Applied before Havok mass write so small items feel lighter and large props heavier.
+# Synthetic tests in tests/test_mass_scale.py.
+CLASS_MASS_SCALE = {
+    "small_misc": 0.2,      # cans, caps, notes, keys — lighter than FO4 default
+    "medium_misc": 1.0,     # books, ammo boxes
+    "large_mstt": 2.0,      # crates, barrels, furniture pieces
+    "weapon": 1.0,          # world-placed WEAP pickups
+    "alch": 0.5,            # chems, food — typically light
+    "armor": 1.5,           # armor pieces
+    "ammo": 0.3,            # ammo boxes / loose
+    "note": 0.1,            # notes, holotapes
+    "container": 3.0,       # larger containers if treated as movable
+}
+
+def class_mass_scale(item_class: str, base_scale: float = 1.0) -> float:
+    """Return mass multiplier for a classified item. Falls back to base_scale.
+    item_class is a short token (small_misc, large_mstt, ...). Unknown classes keep base_scale.
+    """
+    if not item_class:
+        return base_scale
+    return CLASS_MASS_SCALE.get(item_class.lower(), base_scale)
