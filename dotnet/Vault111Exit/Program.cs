@@ -1,15 +1,16 @@
 // Vault111Exit: the ride-along kit for Vault 111's exit sequence (FAL-461; document `vault111-exit-sequence` on that task).
 //
-// FO4SFVault111Exit.esp (masters: Starfield.esm, FO4Port.esm). Adds, overrides one cell:
+// FO4SFVault111Exit.esm (master flag, so the installers that take .esm install it; masters: Starfield.esm, FO4Port.esm). Adds, overrides one cell:
 //   QUST  FO4SF_V111Exit            0x800  stages 5 10 20 30 (order of the sequence), script FO4SF_V111Exit, NO properties
 //   MISC  FO4SF_V111PipBoyToken     0x801  the player's proof of having taken the Pip-Boy
 //   ACTI  FO4SF_V111PipBoyPickup    0x802  script FO4SF_V111PipBoyPickup, no properties
 //   ACTI  FO4SF_V111DoorTerminal    0x803  script FO4SF_V111DoorTerminal; properties CogDoorId (int) and DoorPlugin (string)
 //   REFR  0x804 pickup, 0x805 terminal: temporary children of an override of the port's cell (a deep copy without children)
 // Positions, models and the cog door id come from a params file (the NewGame points step reads them from the port):
-//   {"plugin":"FO4SFVault111Exit.esp","cell":"FO4Port_Vault111Cryo",
-//    "pickup":{"pos":[x,y,z],"rot":[x,y,z],"model":"<mesh path>","name":"Pip-Boy"},
-//    "terminal":{"pos":[..],"rot":[..],"model":"<mesh path>","name":"Door control"},
+//   {"plugin":"FO4SFVault111Exit.esm","cell":"FO4Port_Vault111Cryo",
+//    "pickup":{"pos":[x,y,z],"rot":[x,y,z],"base_edid":"<port base editor id>","name":"Pip-Boy"},
+//    "terminal":{"pos":[..],"rot":[..],"base_edid":"<port base editor id>","name":"Door control"},
+// A spot names its mesh with "model" (a path) or "base_edid" (the model of that base record in FO4Port.esm, read at build time).
 //    "cog_door":{"plugin":"FO4Port.esm","id":"<hex>"}}
 //
 // usage: Vault111Exit build <params.json> <Starfield.esm> <FO4Port.esm> <out dir>
@@ -52,16 +53,18 @@ static class Kit
     static readonly ModKey Sf = ModKey.FromFileName("Starfield.esm"), PortKey = ModKey.FromFileName("FO4Port.esm");
     const StarfieldRelease Release = StarfieldRelease.Starfield;
 
-    record Spot(P3Float Pos, P3Float Rot, string Model, string Name);
+    record Spot(P3Float Pos, P3Float Rot, string? Model, string? BaseEdid, string Name);
     record Params(string Plugin, string Cell, Spot Pickup, Spot Terminal, string DoorPlugin, int DoorId);
 
     static P3Float P3(JsonElement e) { var f = e.EnumerateArray().Select(x => x.GetSingle()).ToArray(); if (f.Length != 3) throw new Refusal("a position needs 3 numbers"); return new P3Float(f[0], f[1], f[2]); }
 
     static Spot ReadSpot(JsonElement e, string what)
     {
-        string Str(string k) => e.TryGetProperty(k, out var v) && v.GetString() is { Length: > 0 } s ? s : throw new Refusal($"{what}.{k} is missing or empty");
+        string? Opt(string k) => e.TryGetProperty(k, out var v) && v.GetString() is { Length: > 0 } s ? s : null;
+        string Str(string k) => Opt(k) ?? throw new Refusal($"{what}.{k} is missing or empty");
         var rot = e.TryGetProperty("rot", out var r) ? P3(r) : new P3Float(0, 0, 0);
-        return new Spot(P3(e.GetProperty("pos")), rot, Str("model"), Str("name"));
+        if (Opt("model") == null && Opt("base_edid") == null) throw new Refusal($"{what}.model or {what}.base_edid is needed");
+        return new Spot(P3(e.GetProperty("pos")), rot, Opt("model"), Opt("base_edid"), Str("name"));
     }
 
     static Params Read(string path)
@@ -70,7 +73,7 @@ static class Kit
         var p = doc.RootElement;
         var cog = p.GetProperty("cog_door");
         var plugin = p.GetProperty("plugin").GetString()!;
-        if (!plugin.EndsWith(".esp", StringComparison.OrdinalIgnoreCase)) throw new Refusal("plugin must be an .esp");
+        if (!plugin.EndsWith(".esm", StringComparison.OrdinalIgnoreCase)) throw new Refusal("plugin must be an .esm (the installers take .esm)");
         int id = Convert.ToInt32(cog.GetProperty("id").GetString(), 16);
         if (id <= 0 || id > 0x00FFFFFF) throw new Refusal("cog_door.id is not a plugin-local id");
         return new Params(plugin, p.GetProperty("cell").GetString()!, ReadSpot(p.GetProperty("pickup"), "pickup"), ReadSpot(p.GetProperty("terminal"), "terminal"),
@@ -89,6 +92,16 @@ static class Kit
         {
             MasterFlagsLookup = Styles(masters),
         });
+
+    /// <summary>The spot's mesh: its "model", else the model of the port base named by "base_edid".</summary>
+    static string ModelOf(IStarfieldModGetter port, Spot s)
+    {
+        if (s.Model != null) return s.Model;
+        foreach (var r in port.EnumerateMajorRecords())
+            if (r.EditorID == s.BaseEdid && r is IModeledGetter m && m.Model != null)
+                return m.Model.File.ToString().Replace('/', '\\');
+        throw new Refusal($"no base {s.BaseEdid} with a model in {port.ModKey}");
+    }
 
     static ICellGetter FindCell(IStarfieldModGetter port, string edid) =>
         port.Cells.Records.SelectMany(b => b.SubBlocks).SelectMany(s => s.Cells).FirstOrDefault(c => c.EditorID == edid)
@@ -121,6 +134,7 @@ static class Kit
         using var port = Open(portPath, Sf);
         var modKey = ModKey.FromFileName(p.Plugin);
         var mod = new StarfieldMod(modKey, Release);
+        mod.ModHeader.Flags |= StarfieldModHeader.HeaderFlag.Master;
         FormKey Own(uint id) => new(modKey, id);
 
         var q = new Quest(Own(QuestId), Release)
@@ -137,9 +151,10 @@ static class Kit
 
         StarfieldActivator Acti(uint id, string edid, Spot s, ScriptEntry script)
         {
+            var model = ModelOf(port, s);
             var a = new StarfieldActivator(Own(id), Release)
             {
-                EditorID = edid, Name = s.Name, Model = new Model { File = s.Model },
+                EditorID = edid, Name = s.Name, Model = new Model { File = model },
                 Flags = (StarfieldActivator.Flag)0, ActivationAngle = 360,
                 VirtualMachineAdapter = new VirtualMachineAdapter { Version = 6, ObjectFormat = 2 },
             };
@@ -183,7 +198,7 @@ static class Kit
             File.Move(tmp, path, overwrite: true);
         }
         finally { if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, true); }
-        Console.WriteLine($"wrote {path} ({new FileInfo(path).Length:N0} bytes): cell {cell.FormKey} {p.Cell}, pickup at {p.Pickup.Pos}, terminal at {p.Terminal.Pos}, cog door {p.DoorPlugin}:{p.DoorId:X6}");
+        Console.WriteLine($"wrote {path} ({new FileInfo(path).Length:N0} bytes): pickup model {ModelOf(port, p.Pickup)}, terminal model {ModelOf(port, p.Terminal)}, cell {cell.FormKey} {p.Cell}, pickup at {p.Pickup.Pos}, terminal at {p.Terminal.Pos}, cog door {p.DoorPlugin}:{p.DoorId:X6}");
         return 0;
     }
 
@@ -201,6 +216,7 @@ static class Kit
         void Need(bool ok, string what) { if (!ok) bad.Add(what); }
         FormKey Own(uint id) => new(modKey, id);
 
+        Need((mod.ModHeader.Flags & StarfieldModHeader.HeaderFlag.Master) != 0, "the plugin has no master flag");
         Need(mod.ModKey == modKey, $"file is {mod.ModKey}, params say {modKey}");
         Need(mod.ModHeader.MasterReferences.Select(m => m.Master.FileName.String).SequenceEqual(new[] { "Starfield.esm", "FO4Port.esm" }),
              "masters are not exactly Starfield.esm, FO4Port.esm: " + string.Join(", ", mod.ModHeader.MasterReferences.Select(m => m.Master)));
@@ -215,7 +231,7 @@ static class Kit
         {
             var a = mod.Activators.FirstOrDefault(x => x.FormKey == Own(id));
             Need(a != null && a.EditorID == edid, $"no ACTI {edid} at {id:X}");
-            Need(a?.Model?.File.ToString() == MeshPath(spot.Model), $"{edid} model is {a?.Model?.File}, not {spot.Model}");
+            Need(a?.Model?.File.ToString() == MeshPath(ModelOf(port, spot)), $"{edid} model is {a?.Model?.File}, not {ModelOf(port, spot)}");
             Need(a?.VirtualMachineAdapter?.Scripts.Count == 1 && a.VirtualMachineAdapter.Scripts[0].Name == edid, $"{edid} has not exactly its own script");
         }
         var ts = mod.Activators.FirstOrDefault(x => x.FormKey == Own(TerminalBaseId))?.VirtualMachineAdapter?.Scripts.FirstOrDefault();
@@ -269,14 +285,16 @@ static class Kit
         var block = new CellBlock { BlockNumber = (int)(n % 10), GroupType = GroupTypeEnum.InteriorCellBlock };
         var sub = new CellSubBlock { BlockNumber = (int)((n / 10) % 10), GroupType = GroupTypeEnum.InteriorCellSubBlock };
         sub.Cells.Add(cell); block.SubBlocks.Add(sub); port.Cells.Records.Add(block);
+        port.Statics.Add(new Static(new FormKey(PortKey, 0x001616), Release) { EditorID = "FO4Port_FixturePipboyGround", Model = new Model { File = "Meshes\\fixture\\pipboyground.nif" } });
+        port.Statics.Add(new Static(new FormKey(PortKey, 0x00138B), Release) { EditorID = "FO4Port_FixtureConsole", Model = new Model { File = "Meshes\\fixture\\console.nif" } });
         port.ModHeader.MasterReferences.Add(new MasterReference { Master = Sf });
         port.BeginWrite.ToPath(Path.Combine(outDir, "FO4Port.esm")).WithLoadOrder(Sf)
             .WithKnownMasters(new KeyedMasterStyle(Sf, MasterStyle.Full)).WithMastersListContent(MastersListContentOption.NoCheck).Write();
         File.WriteAllText(Path.Combine(outDir, "params.json"), JsonSerializer.Serialize(new
         {
-            plugin = "FO4SFVault111Exit.esp", cell = "FO4Port_Vault111Cryo",
-            pickup = new { pos = new[] { 10.5f, 20.25f, 1.5f }, rot = new[] { 0f, 0f, 0.5f }, model = "Props\\FixturePipBoy.nif", name = "Pip-Boy" },
-            terminal = new { pos = new[] { 30f, 40f, 1.25f }, rot = new[] { 0f, 0f, 1f }, model = "Props\\FixtureConsole.nif", name = "Door control" },
+            plugin = "FO4SFVault111Exit.esm", cell = "FO4Port_Vault111Cryo",
+            pickup = new { pos = new[] { 10.5f, 20.25f, 1.5f }, rot = new[] { 0f, 0f, 0.5f }, base_edid = "FO4Port_FixturePipboyGround", name = "Pip-Boy" },
+            terminal = new { pos = new[] { 30f, 40f, 1.25f }, rot = new[] { 0f, 0f, 1f }, base_edid = "FO4Port_FixtureConsole", name = "Door control" },
             cog_door = new { plugin = "FO4Port.esm", id = "000C0D" },
         }));
         Console.WriteLine($"wrote {outDir}/Starfield.esm, FO4Port.esm, params.json");

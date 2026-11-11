@@ -12,7 +12,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts" / "vault111_exit"
 TOOL_SRC = (ROOT / "dotnet" / "Vault111Exit" / "Program.cs").read_text(encoding="utf-8")
-PLUGIN = "FO4SFVault111Exit.esp"
+PLUGIN = "FO4SFVault111Exit.esm"
 NAMES = ("FO4SF_V111Exit", "FO4SF_V111PipBoyPickup", "FO4SF_V111DoorTerminal")
 TYPES = {"race", "cell", "form", "actor", "quest", "furniture", "keyword", "spell", "game", "debug", "utility", "int", "float",
          "string", "bool", "math", "location", "activator", "message", "armor", "weapon", "door", "objectreference"}
@@ -83,6 +83,48 @@ class ScriptTests(unittest.TestCase):
             params = re.findall(r"Event \w+\(\w+ (\w+)\)", code(n))
             self.assertEqual([x for x in decl + params if x.lower() in TYPES], [], n)
 
+    def test_the_log_lines_are_the_readers(self):
+        import sys
+        sys.path.insert(0, str(SCRIPTS))
+        import make_vault111_exit as mk
+        text = code("FO4SF_V111PipBoyPickup") + code("FO4SF_V111DoorTerminal")
+        for _, line in mk.LOG_STEPS:
+            self.assertIn(line.split(", stage")[0].split(" open_state")[0], text)
+        self.assertIn('"FO4SFV111"', code("FO4SF_V111DoorTerminal"))
+        self.assertIn('Log("terminal: no Pip-Boy', code("FO4SF_V111DoorTerminal"))
+        steps = ["a", "pickup: taken, stage 10", "terminal: no Pip-Boy, stage 5", "terminal: plugged in, stage 20", "terminal: cog door open_state before=3 after=2, stage 30"]
+        self.assertEqual(mk.read_log(steps), {"pickup": True, "plug": True, "open": True})
+        self.assertEqual(mk.read_log(steps[:1] + steps[3:]), {"pickup": False, "plug": True, "open": True})   # plug and open need no pickup line here, order is per step
+        self.assertEqual(mk.read_log(steps[4:] + steps[1:2]), {"pickup": True, "plug": False, "open": False})
+
+    def test_every_native_the_scripts_call_is_in_the_stagers_required_list(self):
+        import sys
+        sys.path.insert(0, str(SCRIPTS))
+        import make_vault111_exit as mk
+        called = set()
+        for n in NAMES:
+            called |= mk.called_natives(psc(n))
+        for base, name in called:
+            self.assertIn(name, mk.REQUIRED[base], f"{base}.{name}")
+
+    def test_the_precheck_finds_a_missing_native(self):
+        import sys
+        sys.path.insert(0, str(SCRIPTS))
+        import make_vault111_exit as mk
+        src = {"game": "Function GetFormFromFile(int a, string b) native global\nFunction GetPlayer() native global\n", "debug": ""}
+        self.assertIn("Debug.TraceUser", mk.missing_natives(src))
+        self.assertNotIn("Game.GetPlayer", mk.missing_natives(src))
+
+    def test_the_committed_params_name_the_scanned_ids_and_the_tool_reads_them(self):
+        spec = json.loads((SCRIPTS / "params.json").read_text())
+        self.assertEqual(spec["plugin"], PLUGIN)
+        self.assertEqual(spec["cell"], "FO4Port_Vault111Cryo")
+        self.assertEqual(spec["cog_door"], {"plugin": "FO4Port.esm", "id": "00126D"})
+        self.assertEqual(spec["pickup"]["base_edid"], "FO4Port_NpcPipboyGroundTake01")
+        self.assertEqual(spec["terminal"]["base_edid"], "FO4Port_V111GearDoorConsole02")
+        for k in ("pickup", "terminal"):
+            self.assertEqual(len(spec[k]["pos"]), 3)
+
     def test_the_kit_adds_no_master_beyond_starfield_and_the_port(self):
         self.assertIn("masters are not exactly Starfield.esm, FO4Port.esm", TOOL_SRC)
 
@@ -146,9 +188,9 @@ class ToolTests(unittest.TestCase):
     def test_build_refuses_a_missing_cell_a_missing_model_and_a_bad_door_id(self):
         spec = json.loads(self.params.read_text())
         for label, edit, word in (("cell", lambda s: s.update(cell="FO4Port_Nowhere"), "no CELL"),
-                                  ("model", lambda s: s["pickup"].pop("model"), "pickup.model"),
+                                  ("model", lambda s: s["pickup"].pop("base_edid"), "pickup.model or pickup.base_edid"),
                                   ("door", lambda s: s["cog_door"].update(id="0"), "cog_door.id"),
-                                  ("esm", lambda s: s.update(plugin="Kit.esm"), "must be an .esp")):
+                                  ("esp", lambda s: s.update(plugin="Kit.esp"), "must be an .esm")):
             s2 = json.loads(json.dumps(spec))
             edit(s2)
             p = self.tmp / f"bad_{label}.json"

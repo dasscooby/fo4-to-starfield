@@ -6,10 +6,10 @@ Event OnActivate(ObjectReference akActionRef)
     if akActionRef != Game.GetPlayer()
         return
     endif
-    Quest exitQuest = Game.GetFormFromFile(0x800, "FO4SFVault111Exit.esp") as Quest
-    Form tokenForm = Game.GetFormFromFile(0x801, "FO4SFVault111Exit.esp")
+    Quest exitQuest = Game.GetFormFromFile(0x800, "FO4SFVault111Exit.esm") as Quest
+    Form tokenForm = Game.GetFormFromFile(0x801, "FO4SFVault111Exit.esm")
     if exitQuest == None || tokenForm == None
-        Debug.Trace("FO4SF_V111PipBoyPickup: the quest or the token does not resolve")
+        Log("pickup: the quest or the token does not resolve")
         return
     endif
     Actor playerRef = Game.GetPlayer()
@@ -18,6 +18,13 @@ Event OnActivate(ObjectReference akActionRef)
     endif
     exitQuest.SetStage(10)
     Debug.Notification("Pip-Boy 3000 Mark IV taken")
-    Debug.Trace("FO4SF_V111PipBoyPickup: taken, stage 10")
+    Log("pickup: taken, stage 10")
     Disable()
 EndEvent
+
+Function Log(string line)
+    if !Debug.TraceUser("FO4SFV111", line)
+        Debug.OpenUserLog("FO4SFV111")
+        Debug.TraceUser("FO4SFV111", line)
+    endif
+EndFunction
