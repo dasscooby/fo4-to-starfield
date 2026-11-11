@@ -198,8 +198,16 @@ namespace
 	constexpr std::size_t   kItemStacksAt = 0x10;            // libxse RE::BGSInventoryItem::stacks, BSTArray<Stack>
 	constexpr std::size_t   kItemFlagsAt = 0x20;             // libxse RE::BGSInventoryItem::flags (bits 0-2: the equip slot)
 	constexpr std::size_t   kStackSize = 0x10;               // libxse sizeof(RE::BGSInventoryItem::Stack)
-	constexpr std::size_t   kStackCountAt = 0x08;            // libxse's comment says +0x10 beside its size 0x10: the PC's log decides
+	constexpr std::size_t   kStackCountAt = 0x08;            // a u32: the PC's step=kit_inventory read 01000000 here (11 Nov)
 	constexpr std::size_t   kKitMaxItems = 512;              // the inventory list's rows, at most
+	constexpr std::size_t   kFileCollectionAt = 0x1580;      // libxse RE::TESDataHandler::compiledFileCollection
+	constexpr std::size_t   kFileNameAt = 0x38;              // libxse RE::TESFile::fileName, char[260]
+	constexpr std::size_t   kFileNameSize = 260;
+	constexpr std::size_t   kFileCompileIndexAt = 0x1B7;     // libxse RE::TESFile::compileIndex
+	constexpr std::size_t   kFileIndexAt = 0x218;            // libxse RE::TESFile::fileIndex: full u8, medium u8, small u16
+	constexpr std::size_t   kKitMaxFiles = 4096;             // a file list's entries, at most
+	constexpr std::size_t   kQuestFlagsAt = 0x10C;           // libxse RE::TESQuest QUEST_DATA flags, u16 (bits: the PC's log)
+	constexpr std::size_t   kQuestBytesAt = 0x100;           // the quest's bytes logged once (flags and stage among them)
 	constexpr std::string_view kKitChars = " !#%&'()*+,-./0123456789:;<=>?ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_";   // KIT_FONT
 	constexpr auto          kKitTitle = "fo4sfTitle";        // NAMES
 	constexpr auto          kKitHeader = "fo4sfHeaderInfo";
@@ -226,7 +234,7 @@ namespace
 	// VALUE_PROVIDERS and LIST_PROVIDERS; av:<hex> is the actor value of that form id
 	constexpr std::array<std::string_view, 10> kKitValues{ "health", "level", "xp", "carry_max", "rads", "cell", "world",
 		"time", "days", "position" };
-	constexpr std::array<std::string_view, 2> kKitLists{ "kit_test", "inventory" };
+	constexpr std::array<std::string_view, 3> kKitLists{ "kit_test", "inventory", "quests" };
 	constexpr std::string_view kKitActorValue = "av:";
 	// the menus a main-thread snapshot asks the engine about (IsMenuRegistered, IsMenuOpen); only Console is named by
 	// libxse, the rest are guesses, and the first snapshot logs which of them are registered
@@ -1552,6 +1560,8 @@ namespace
 		std::string                                    title = "FO4SF PIP-BOY";
 		std::string                                    header;   // a value provider, or ""
 		std::string                                    hints;
+		std::string                                    missionFile;   // Mission=: our mission's plugin file, or ""
+		std::uint32_t                                  missionId = 0;   // and its form's local id in that file
 		std::vector<KitPage>                           pages;
 		std::vector<std::string>                       tabs;     // in the order of their first page
 		std::array<std::vector<std::size_t>, kKitTabs> subs;     // each tab's pages, in order
@@ -1669,6 +1679,39 @@ namespace
 		return true;
 	}
 
+	// parse_kit's check_mission: <plugin file>|<local id, 1 to 6 hex digits, not zero>; the file 1 to 64 characters
+	// (letters, digits, space _ - .) ending .esm, .esp or .esl
+	bool KitMission(std::string_view a_text)
+	{
+		const auto bar = a_text.find('|');
+		if (bar == std::string_view::npos || a_text.find('|', bar + 1) != std::string_view::npos) {
+			return false;
+		}
+		const auto file = KitTrim(a_text.substr(0, bar));
+		const auto hex = KitTrim(a_text.substr(bar + 1));
+		const auto lower = [](std::string_view a_s) {
+			std::string out(a_s);
+			std::ranges::transform(out, out.begin(), [](unsigned char a_c) { return static_cast<char>(std::tolower(a_c)); });
+			return out;
+		};
+		const auto fileChar = [](char a_c) {
+			return std::isalnum(static_cast<unsigned char>(a_c)) != 0 || std::string_view(" _-.").find(a_c) != std::string_view::npos;
+		};
+		const auto ext = file.size() > 4 ? lower(file.substr(file.size() - 4)) : std::string{};
+		if (file.size() > 64 || (ext != ".esm" && ext != ".esp" && ext != ".esl") || !std::ranges::all_of(file, fileChar) ||
+			hex.empty() || hex.size() > 6 ||
+			!std::ranges::all_of(hex, [](char a_c) { return std::isxdigit(static_cast<unsigned char>(a_c)) != 0; })) {
+			return false;
+		}
+		const auto id = static_cast<std::uint32_t>(std::strtoul(std::string(hex).c_str(), nullptr, 16));
+		if (!id) {
+			return false;
+		}
+		g_kit.missionFile = file;
+		g_kit.missionId = id;
+		return true;
+	}
+
 	std::string KitSignature()   // make_pipboy_kit.py signature(): the movie's fo4sfKitId
 	{
 		std::string tabs;
@@ -1748,6 +1791,8 @@ namespace
 					g_kit.header = value;
 				} else if (key == "Hints" && KitLabel(value, kKitHintColumns)) {
 					g_kit.hints = value;
+				} else if (key == "Mission" && g_kit.missionFile.empty() && KitMission(value)) {
+					// KitMission kept it
 				} else {
 					return KitRefuse(n, std::format("kit_key key={}", key));
 				}
@@ -2054,6 +2099,116 @@ namespace
 		return rows;
 	}
 
+	// a plugin file's form: its TESFile by name in the data handler's compiled file collection (libxse 9d090c4: files,
+	// smallFiles, mediumFiles at +0x00, +0x10, +0x20, each a BSTArray<TESFile*>; a file accepted by its RTTI), then
+	// the form id that file gives a_localId (full: the compile index, then fileIndex's full byte; small FE + 12 bits;
+	// medium FD + 16 bits), accepted only if the engine's lookup gives a form of RTTI type a_type. a_detail logs the
+	// file and every id tried
+	std::uint32_t KitFileForm(std::string_view a_file, std::uint32_t a_localId, std::string_view a_type, std::string& a_detail)
+	{
+		const auto handler = Singleton(kDataHandlerSingleton);
+		ObjectType type;
+		if (!IsType(handler, "TESDataHandler@@", type)) {
+			a_detail = "reason=data_handler";
+			return 0;
+		}
+		for (std::size_t kind = 0; kind < 3; ++kind) {   // full, small, medium
+			ArrayHead files{};
+			if (!Peek(handler + kFileCollectionAt + kind * 0x10, files) || files.size > files.capacity ||
+				files.size > kKitMaxFiles || (files.size && !files.data)) {
+				a_detail = std::format("reason=files kind={} size={} capacity={}", kind, files.size, files.capacity);
+				return 0;
+			}
+			for (std::uint32_t i = 0; i < files.size; ++i) {
+				std::uintptr_t                  file = 0;
+				ObjectType                      fileType;
+				std::array<char, kFileNameSize> name{};
+				if (!Peek(files.data + i * sizeof(std::uintptr_t), file) || !IsType(file, "TESFile@@", fileType) ||
+					!Peek(file + kFileNameAt, name.data(), name.size()) ||
+					!SameText(std::string_view(name.data(), strnlen(name.data(), name.size())), a_file)) {
+					continue;
+				}
+				std::uint8_t                compile = 0;
+				std::array<std::uint8_t, 4> index{};
+				Peek(file + kFileCompileIndexAt, compile);
+				Peek(file + kFileIndexAt, index.data(), index.size());
+				const std::uint32_t smallIndex = index[2] | (index[3] << 8);
+				std::vector<std::uint32_t> ids;
+				if (kind == 0) {
+					ids = { (std::uint32_t{ compile } << 24) | (a_localId & 0xFFFFFF), (std::uint32_t{ index[0] } << 24) | (a_localId & 0xFFFFFF) };
+				} else if (kind == 1) {
+					ids = { 0xFE000000u | ((smallIndex & 0xFFF) << 12) | (a_localId & 0xFFF) };
+				} else {
+					ids = { 0xFD000000u | (std::uint32_t{ index[1] } << 16) | (a_localId & 0xFFFF) };
+				}
+				a_detail = std::format("file_kind={} file={} compile_index={:02x} file_index={}", kind, Hex(file), compile,
+					KitBytes(file + kFileIndexAt, 4));
+				for (const auto id : ids) {
+					ObjectType formType;
+					const auto form = FormById(id);
+					a_detail += std::format(" tried={:08X}:{}", id, form && TypeOf(form, formType) ? ShortName(formType.name) : "none");
+					if (IsType(form, a_type, formType)) {
+						return id;
+					}
+				}
+				return 0;
+			}
+		}
+		a_detail = "reason=file_not_loaded";
+		return 0;
+	}
+
+	// the quest list (FAL-431; README, "Stage (e)", lists): our mission first, the quest [Kit] Mission= names, by its
+	// file and local id (KitFileForm), accepted by its RTTI (TESQuest); its name (TESFullName, at +0x40 in Starfield's
+	// RTTI) and its QUEST_DATA flags as read (u16 at +0x10C, the running and completed bits not named until the PC's
+	// log does). The first read logs the quest's bytes from +0x100 once (step=kit_quest), where the flags and the
+	// current stage are; the stage shows ? until then. Starfield's own quests are not listed yet
+	std::vector<KitRow> KitQuestRows()
+	{
+		static std::uint32_t formId = 0;
+		static bool          logged = false;
+		const auto           unread = [](std::string_view a_why, const std::string& a_detail) {
+			Unknown("quests", std::format("reason={} {}", a_why, a_detail));
+			return std::vector<KitRow>{ { "QUESTS NOT READ", "", { { "REASON", std::string(a_why) } } } };
+		};
+		if (g_kit.missionFile.empty()) {
+			return unread("no_mission", "");
+		}
+		std::string detail;
+		if (!formId) {
+			formId = KitFileForm(g_kit.missionFile, g_kit.missionId, "TESQuest@@", detail);
+		}
+		const auto quest = formId ? FormById(formId) : 0;
+		ObjectType type;
+		if (!IsType(quest, "TESQuest@@", type)) {
+			if (!logged) {
+				logged = true;
+				REX::INFO("step=kit_quest mission={}|{:X} found=no {}", g_kit.missionFile, g_kit.missionId, detail);
+			}
+			formId = 0;
+			return unread("mission_not_found", std::format("mission={}|{:X}", g_kit.missionFile, g_kit.missionId));
+		}
+		std::string    name;   // its TESFullName as the inventory reads one, else its form id
+		std::uintptr_t entry = 0;
+		const auto     at = BaseOffset(type, "TESFullName@@");
+		if (!at || !CheckSubobject(quest, type, *at) || !Peek(quest + *at + kFullNameAt, entry) || !ReadPoolString(entry, name) ||
+			name.empty()) {
+			name = std::format("{:08X}", formId);
+		}
+		std::uint16_t flags = 0;
+		const bool    flagged = Peek(quest + kQuestFlagsAt, flags);
+		if (!logged) {
+			logged = true;
+			REX::INFO("step=kit_quest mission={}|{:X} found=yes form={:08X} quest={} type={} full_name_at={} name=\"{}\" flags={} "
+				"bytes100={} {}", g_kit.missionFile, g_kit.missionId, formId, Hex(quest), type.name, at ? Hex(*at) : "none", name,
+				flagged ? std::format("{:04x}", flags) : "unreadable", KitBytes(quest + kQuestBytesAt, 0x40), detail);
+		}
+		std::string file = g_kit.missionFile;
+		std::ranges::transform(file, file.begin(), [](unsigned char a_c) { return static_cast<char>(std::toupper(a_c)); });
+		return { { name, "", { { "FORM", std::format("{:08X}", formId) }, { "FILE", file },
+			{ "FLAGS", flagged ? std::format("{:04X}", flags) : "?" }, { "STAGE", "?" } } } };
+	}
+
 	// the selected row's value rows: a label and its value right-aligned, or, for a value longer than its column,
 	// the label alone and the value on the lines below across both columns
 	void KitInfoLines(const std::vector<std::pair<std::string, std::string>>& a_info, KitScreen& a_screen)
@@ -2102,6 +2257,8 @@ namespace
 			rows = KitTestRows(state);
 		} else if (page.list == "inventory") {
 			rows = KitInventoryRows();
+		} else if (page.list == "quests") {
+			rows = KitQuestRows();
 		} else {
 			for (const auto& line : page.notice) {
 				rows.push_back({ line, "", {} });
