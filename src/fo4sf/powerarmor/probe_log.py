@@ -232,7 +232,10 @@ def summarize(lines, run=-1, papyrus=None):
                                "haskw": step.get("haskw") if step else None, "addkw": step.get("addkw") if step else None,
                                "haskw2": step.get("haskw2") if step else None}
         if step and "settled" not in by and by:
-            out["problems"].append(f"stage {stage}: no settled reading (the 4 s timer never ran); judged on the reading right after the call")
+            if "now" not in by:        # the log ends inside the call: step_result already says so, nothing was judged
+                out["problems"].append(f"stage {stage}: no reading after the call (the log ends inside it); nothing is judged")
+            else:
+                out["problems"].append(f"stage {stage}: no settled reading (the 4 s timer never ran); judged on the reading right after the call")
     if cut:
         out["problems"].append(f"{cut} line(s) without end=true were left out (cut)")
     if len(rs) > 1:

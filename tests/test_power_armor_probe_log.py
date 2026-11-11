@@ -281,6 +281,9 @@ class AddKeywordAndCrashTests(unittest.TestCase):
         self.assertTrue(s["verdict"].startswith("CONTROL OK"), s["verdict"])
         self.assertEqual(s["steps"][20]["result"], "not run")
         self.assertIn("the game may have ended during the call", "\n".join(pl.report(s)))
+        notes = [p for p in s["problems"] if p.startswith("stage 10")]
+        self.assertEqual(notes, ["stage 10: no reading after the call (the log ends inside it); nothing is judged"])    # FAL-339
+        self.assertNotIn("judged on the reading right after the call", "\n".join(pl.report(s)))
 
 
 class TableTests(unittest.TestCase):
