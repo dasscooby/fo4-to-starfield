@@ -281,6 +281,13 @@ reversible within a session; a save through it is untested). **Open:** why the k
 seen through `HasKeyword` on the reference while the copied chair's own keywords are (neither the reordering nor the keyword
 form component changed it); `AddKeyword` on the reference is the working route.
 
+**Reproduced from the card alone (owner PC, 11 Nov 05:38 to 05:43 UTC, 51a03e53, `armor` kit, no console help).** Stage 10 line
+`haskw=false addkw=Done haskw2=true haskwc=true`: `ObjectReference.AddKeyword` from Papyrus works on the reference, and the base
+keyword is still not seen before it. No "not valid power armor furniture" line; the game ends about seven seconds after the stage
+line with 0xC0000005 at `Starfield.exe+0x12cf1c0`, r8 = 0, the same place as at 05:20. The reader reports stage 10 as `no reading
+after the call: the log ends inside it` (a crash is a result), stages 20 and 30 `not run`, `CONTROL OK`. No save. Evidence on the PC:
+`pc-708-51a03e53\stage-armor`, `probe-pa-20261111T053843Z`.
+
 **Recommendation of the owner PC for the stage scope:** the climb-in by script now: `SetRace` (proven both ways), equip our
 frame and armor pieces, our own sit or camera flow, a flag of ours for "in power armor"; keep the native as a research line
 that becomes useful once Fallout 4's power armor race, skeleton and addons are converted. One more variant is possible for the
