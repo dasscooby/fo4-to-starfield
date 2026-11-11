@@ -258,6 +258,31 @@ class HasKeywordTests(unittest.TestCase):
             self.assertFalse(any("HasKeyword(FurnitureTypePowerArmor)" in l for l in pl.report(s)))
 
 
+class AddKeywordAndCrashTests(unittest.TestCase):
+    def step10(self, kb, ka, k2):
+        return [l.replace("suitref=%d" % s32(SUITREF), "suitref=%d haskw=%s addkw=%s haskw2=%s" % (s32(SUITREF), kb, ka, k2), 1)
+                if " step " in l and "stage=10" in l else l for l in head() + sat() + steps()]
+
+    def test_the_keyword_added_by_script_is_reported_before_and_after(self):
+        out = pl.report(pl.summarize(self.step10("false", "done", "true")))
+        self.assertIn("suit reference HasKeyword(FurnitureTypePowerArmor): false before the call, AddKeyword by script, true after", out)
+        out = pl.report(pl.summarize(self.step10("false", "done", "false")))
+        self.assertTrue(any("AddKeyword by script, false after" in l for l in out))
+
+    def test_without_add_keyword_a_false_keyword_still_says_the_call_will_be_refused(self):
+        out = pl.report(pl.summarize(self.step10("false", "na", "false")))
+        self.assertTrue(any("false and AddKeyword is not available" in l and "will be refused" in l for l in out), out)
+
+    def test_a_log_that_ends_after_the_before_reading_is_a_crash_result_not_a_failed_session(self):
+        lines = head() + sat() + [l for l in steps()[:2]]                       # the step line and 'before', then nothing
+        s = pl.summarize(lines)
+        self.assertTrue(s["control"][0])
+        self.assertTrue(s["steps"][10]["result"].startswith("no reading after the call: the log ends inside it"), s["steps"][10]["result"])
+        self.assertTrue(s["verdict"].startswith("CONTROL OK"), s["verdict"])
+        self.assertEqual(s["steps"][20]["result"], "not run")
+        self.assertIn("the game may have ended during the call", "\n".join(pl.report(s)))
+
+
 class TableTests(unittest.TestCase):
     def test_the_quests_form_id_is_printed_for_setstage(self):
         out = pl.report(pl.summarize(head() + sat() + steps()))

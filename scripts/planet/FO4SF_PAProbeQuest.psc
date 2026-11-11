@@ -120,6 +120,19 @@ string Function KwOnRef(ObjectReference r)
     return s
 EndFunction
 
+string Function KwAdd(ObjectReference r)
+    {Adds FurnitureTypePowerArmor to the reference by script ("done"), "na" when Form.AddKeyword is not declared or does not
+     compile. Asked for by the owner PC (11 Nov): the base FURN's keyword list is not seen through HasKeyword on a reference,
+     the native tests the reference. Only called when HasKeyword is false before the call.}
+    string s = "na"
+;OPT Form.AddKeyword     Keyword k = Game.GetFormFromFile(0x0003430B, "Starfield.esm") as Keyword
+;OPT Form.AddKeyword     if r && k
+;OPT Form.AddKeyword         r.AddKeyword(k)
+;OPT Form.AddKeyword         s = "done"
+;OPT Form.AddKeyword     endif
+    return s
+EndFunction
+
 string Function Camera()
     string s = "na"
 ;OPT Game.GetCameraState     s = "" + Game.GetCameraState()
@@ -174,7 +187,14 @@ EndFunction
 
 Function Step10(Actor p)
     ObjectReference suit = Ref(SuitRefId)
-    Trace("step stage=10 call=SwitchToPowerArmor suitref=" + Id(suit) + " haskw=" + KwOnRef(suit))
+    string kb = KwOnRef(suit)
+    string ka = "na"
+    string k2 = kb
+    if kb == "false"
+        ka = KwAdd(suit)
+        k2 = KwOnRef(suit)
+    endif
+    Trace("step stage=10 call=SwitchToPowerArmor suitref=" + Id(suit) + " haskw=" + kb + " addkw=" + ka + " haskw2=" + k2)
     Reading("before", 10)
     if suit
         p.SwitchToPowerArmor(suit)

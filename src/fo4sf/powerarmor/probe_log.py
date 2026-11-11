@@ -54,6 +54,8 @@ def value(key, text):
             return xyz if len(xyz) == 3 else text
         except ValueError:
             return text
+    if key == "addkw":                       # "done" or "na"
+        return low
     if key == "worn" and text == "-1":        # the script's value when Actor.GetWornItem is not available
         return "na"
     if key in ID_KEYS:
@@ -154,6 +156,11 @@ def step_result(stage, step, states, start):
         return "not run", []
     before = states.get("before")
     last = states.get("settled") or states.get("now")
+    if before is not None and last is None:
+        # the reading right after the call is logged at once: a log that stops here ends inside the call. A crash is a
+        # result (PC run of 11 Nov: 0xC0000005 inside the native, null frame armor), not a failed session.
+        return ("no reading after the call: the log ends inside it, the game may have ended during the call (a crash is a "
+                "result: see the Papyrus log and the crash dump)"), []
     if before is None or last is None:
         return "no readings", []
     ch = changes(before, last)
@@ -222,7 +229,8 @@ def summarize(lines, run=-1, papyrus=None):
         if refusal:                 # the call ran and the game refused it: not "no logged change"
             result = "refused by the game: " + refusal
         out["steps"][stage] = {"call": step.get("call") if step else None, "result": result, "changed": ch, "states": by,
-                               "haskw": step.get("haskw") if step else None}
+                               "haskw": step.get("haskw") if step else None, "addkw": step.get("addkw") if step else None,
+                               "haskw2": step.get("haskw2") if step else None}
         if step and "settled" not in by and by:
             out["problems"].append(f"stage {stage}: no settled reading (the 4 s timer never ran); judged on the reading right after the call")
     if cut:
@@ -281,13 +289,19 @@ def report(summary):
         lines.append(f"stage {stage} {s['call'] or '-'}: {shown}")
     if summary.get("unavailable"):
         lines.append("readings the game gave as na: " + ", ".join(summary["unavailable"]))
-    kw = (summary["steps"].get(10) or {}).get("haskw")
-    if kw is False:
-        lines.append("suit reference HasKeyword(FurnitureTypePowerArmor) before the call: false: the game does not see the keyword "
-                     "on the reference, the call will be refused (PC run of 11 Nov: the base FURN's KWDA list was not seen)")
+    s10 = summary["steps"].get(10) or {}
+    kw, added, kw2 = s10.get("haskw"), s10.get("addkw"), s10.get("haskw2")
+    if kw is False and added == "done":
+        lines.append("suit reference HasKeyword(FurnitureTypePowerArmor): false before the call, AddKeyword by script, "
+                     f"{'true' if kw2 is True else 'false' if kw2 is False else 'not read'} after")
+    elif kw is False:
+        lines.append("suit reference HasKeyword(FurnitureTypePowerArmor) before the call: false" + (
+            " and AddKeyword is not available (na)" if added == "na" else "") +
+            ": the game does not see the keyword on the reference, the call will be refused (PC run of 11 Nov: the base "
+            "FURN's KWDA list was not seen)")
     elif kw is True:
-        lines.append("suit reference HasKeyword(FurnitureTypePowerArmor) before the call: true (a real entry: it can crash the game "
-                     "on a null the kit does not yet supply: throwaway sessions only)")
+        lines.append("suit reference HasKeyword(FurnitureTypePowerArmor) before the call: true (a real entry: it can crash the "
+                     "game on a null the kit does not supply: throwaway sessions only)")
     if summary.get("papyrus"):
         lines += ["game Papyrus log: " + e for e in summary["papyrus"]]
     elif not summary.get("papyrus_read"):

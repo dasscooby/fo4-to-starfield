@@ -172,8 +172,48 @@ and the reader prints it: **false** = the call will be refused; **true** = a rea
 > **WARNING: do not run stage 10 of this kit on a game anyone cares about, and do not stage it for a normal session.** If the
 > keyword is seen, `SwitchToPowerArmor` goes into the engine's power armor code and **crashes the game on a null** until the
 > missing default objects or pieces are supplied (the next kit follows the owner PC's dump note). Throwaway sessions only,
-> no save, uninstall afterwards. The script does **not** add the keyword by script (that would force the crash); the console
-> bypass above is the owner PC's own step.
+> no save, uninstall afterwards. Since the owner PC's 04:17 request the
+> script adds the keyword itself when `HasKeyword` is false (see "The frame armor" below); that forces the entry.
+
+## The frame armor (owner PC, 11 Nov 04:17 UTC) and the `armor` variant
+
+**Verified (owner PC, offline read of the recorder dump and Starfield.exe 1.16.244.0; names and offsets only):** the 04:12
+crash is on the Papyrus thread inside the native call itself (return addresses inside the success path 0x12d4b20 and the
+native 0x1fcb100). The crashing function (0xb64fc0) tests the form type of its second argument, an item form, without a
+null check, and that argument is null. The null comes from `0x12cb810(actor, 0)`, which returns **the frame armor**: it starts
+from `PowerArmorDefaultFrameArmor_DO` (accepted only if it is an ARMO); if the actor already has power armor extra data and
+the power armor race it searches the actor's inventory for armor carrying the keyword of `PowerArmorFrameKeyword_DO`
+(`isPowerArmorFrame` 0015503F); one more inventory branch is not decoded. With the default object empty it returned null.
+So the order of gates so far: (1) the suit base is furniture, (2) the reference has `FurnitureTypePowerArmor`, (3) a frame
+armor exists; the race slot is read later in the same function. **Unresolved:** the undecoded inventory branch; the
+battery and armor-keyword reads (inferred to be read on exit and for the pieces).
+
+The `armor` variant (built from the owner PC's note, untested in game):
+
+    python scripts\planet\make_power_armor_probe.py stage --out <dir> --variant race,furniture,keyword,armor --armor <armor editor id>
+
+| variant | overrides | needs |
+|---|---|---|
+| `armor` | `PowerArmorDefaultFrameArmor_DO` 0015503E -> `FO4SF_PAFrameArmor` (ours, 000808): **a copy of a plain vanilla armor** plus `isPowerArmorFrame` 0015503F, in its KWDA list and its keyword form component | `--armor <armor editor id>` |
+
+**Which armor is copied is not chosen here:** this box has no Starfield.esm, so no editor ID of a real plain armor can be
+named from evidence. `--armor` is required with the variant; without it the tool refuses and lists the first 12 ARMO
+editor IDs of the Starfield.esm it was given. The owner PC picks one (a plain suit or clothing record without power or
+special behavior) and writes it in the stage's README. The check requires the copy to keep the armor's rating, value and
+keywords. The set to run is `race,furniture,keyword,armor` (the owner PC's note: keep the race, fill frame furniture and
+armor keyword, add the frame armor).
+
+**Script change (the owner PC's request):** before the call, stage 10 logs `haskw` (`HasKeyword(FurnitureTypePowerArmor)` on
+the suit reference); if it is false the script calls `AddKeyword` on the reference (optional reading `Form.AddKeyword`,
+`na` when the name does not exist or compile), logs `addkw` (`done` / `na`) and reads `haskw2`, all on the one step line
+that is written before the call. This replaces the console line of the 04:07 session. The owner PC is separately checking
+whether the base FURN's keywords are simply not visible through `HasKeyword` on a reference (one of the copied chair's own
+keywords, 00144A65, on our reference and on the vanilla control); if so `AddKeyword` is the way. The keyword form component
+change of a05fbc4d stays until that is known.
+
+**Reader:** a log that stops after the stage-10 `before` reading is reported as a result, `no reading after the call: the log
+ends inside it, the game may have ended during the call (a crash is a result: see the Papyrus log and the crash dump)`, and
+the verdict stays `CONTROL OK`; the later stages read `not run`. The session is not a failed one.
 
 ## Session card
 

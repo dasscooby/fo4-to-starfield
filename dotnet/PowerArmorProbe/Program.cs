@@ -24,8 +24,12 @@
 //   race       PowerArmorRace_DO -> FO4SF_PARace
 //   furniture  PowerArmorDefaultFrameFurniture_DO -> FO4SF_PAProbeSuit, and the suit also gets isPowerArmorFrame
 //   keyword    PowerArmorArmorKeyword_DO -> KYWD FO4SF_PAArmorKeyword (ours, 000807)
-// usage: PowerArmorProbe build <Starfield.esm> <out dir> [--control <furniture editor id>] [--variant <list>]
-//        PowerArmorProbe check <plugin> <Starfield.esm> [--control <furniture editor id>] [--variant <list>]     exit 1 on a mismatch
+//   armor      PowerArmorDefaultFrameArmor_DO -> ARMO FO4SF_PAFrameArmor (ours, 000808): a copy of a plain vanilla armor
+//              (--armor <editor id>, required with this variant: the tool lists candidates when it is missing) plus
+//              isPowerArmorFrame, in its KWDA list and its keyword form component. The PC crash of 11 Nov (a null frame
+//              armor inside the native) is why: the native takes the frame armor from this default object.
+// usage: PowerArmorProbe build <Starfield.esm> <out dir> [--control <furniture editor id>] [--variant <list>] [--armor <armor editor id>]
+//        PowerArmorProbe check <plugin> <Starfield.esm> [--control <furniture editor id>] [--variant <list>] [--armor <armor editor id>]     exit 1 on a mismatch
 //        PowerArmorProbe fixture <out dir>             a synthetic Starfield.esm holding the three records looked up
 using System.Globalization;
 using Mutagen.Bethesda.Plugins;
@@ -48,9 +52,10 @@ try
         return v;
     }
     control = Take("--control", control);
+    var armor = Take("--armor", "");
     var variants = PowerArmorProbe.ParseVariants(Take("--variant", ""));
-    if (rest.Count == 3 && rest[0] == "build") return PowerArmorProbe.Build(rest[1], rest[2], control, variants);
-    if (rest.Count == 3 && rest[0] == "check") return PowerArmorProbe.Check(rest[1], rest[2], control, variants);
+    if (rest.Count == 3 && rest[0] == "build") return PowerArmorProbe.Build(rest[1], rest[2], control, variants, armor);
+    if (rest.Count == 3 && rest[0] == "check") return PowerArmorProbe.Check(rest[1], rest[2], control, variants, armor);
     if (rest.Count == 2 && rest[0] == "fixture") return PowerArmorProbe.Fixture(rest[1]);
 }
 catch (PowerArmorProbe.Refusal r)
@@ -58,8 +63,8 @@ catch (PowerArmorProbe.Refusal r)
     Console.Error.WriteLine("refused: " + r.Message);
     return 1;
 }
-Console.Error.WriteLine("usage: PowerArmorProbe build <Starfield.esm> <out dir> [--control <edid>] [--variant race,furniture,keyword] | " +
-                        "check <plugin> <Starfield.esm> [--control <edid>] [--variant ...] | fixture <out dir>");
+Console.Error.WriteLine("usage: PowerArmorProbe build <Starfield.esm> <out dir> [--control <edid>] [--variant race,furniture,keyword,armor] [--armor <edid>] | " +
+                        "check <plugin> <Starfield.esm> [--control <edid>] [--variant ...] [--armor <edid>] | fixture <out dir>");
 return 2;
 
 static class PowerArmorProbe
@@ -78,21 +83,24 @@ static class PowerArmorProbe
     const string KeywordEdid = "FurnitureTypePowerArmor", HumanRaceEdid = "HumanRace", FrameKeywordEdid = "isPowerArmorFrame";
     const uint ArmorKeywordId = 0x807;
     const string ArmorKeywordEdid = "FO4SF_PAArmorKeyword";
+    const uint FrameArmorId = 0x808;
+    const string FrameArmorEdid = "FO4SF_PAFrameArmor";
     // variant -> the vanilla default object it overrides
     static readonly Dictionary<string, string> Dobj = new()
     {
         ["race"] = "PowerArmorRace_DO", ["furniture"] = "PowerArmorDefaultFrameFurniture_DO", ["keyword"] = "PowerArmorArmorKeyword_DO",
+        ["armor"] = "PowerArmorDefaultFrameArmor_DO",
     };
     public static List<string> ParseVariants(string list)
     {
         var v = list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct().ToList();
         var bad = v.Where(x => !Dobj.ContainsKey(x)).ToList();
-        if (bad.Count > 0) throw new Refusal($"unknown variant {string.Join(", ", bad)} (race, furniture, keyword)");
+        if (bad.Count > 0) throw new Refusal($"unknown variant {string.Join(", ", bad)} (race, furniture, keyword, armor)");
         return v;
     }
     static FormKey Target(string variant) => variant switch
     {
-        "race" => Own(RaceId), "furniture" => Own(SuitId), _ => Own(ArmorKeywordId),
+        "race" => Own(RaceId), "furniture" => Own(SuitId), "armor" => Own(FrameArmorId), _ => Own(ArmorKeywordId),
     };
     // dotnet/TestCell's vanilla forms
     const uint Floor = 0x050776, Omni = 0x03D38C, CocMarker = 0x000032, LightingTemplate = 0x006658, ImageSpace = 0x122393;
@@ -121,7 +129,23 @@ static class PowerArmorProbe
 
     // ---------------------------------------------------------------- build
 
-    public static int Build(string templatePath, string outDir, string controlEdid, List<string> variants)
+    // the vanilla armor a frame armor copies: named with --armor; without it the tool lists what Starfield.esm has
+    static IArmorGetter FrameArmorTemplate(IStarfieldModDisposableGetter sf, string armorEdid)
+    {
+        if (armorEdid != "") return One(sf.Armors, armorEdid, "ARMO");
+        var some = sf.Armors.Where(a => a.EditorID != null).Select(a => a.EditorID!).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).Take(12);
+        throw new Refusal($"the armor variant copies a plain vanilla armor: name it with --armor <editor id> ({sf.Armors.Count} ARMO in Starfield.esm, " +
+                          $"the first by editor ID: {string.Join(", ", some)})");
+    }
+
+    // a keyword of ours on a copied record in its KWDA list and in its keyword form component (the same two places the suit uses)
+    static void AddKeywordBoth(IList<IFormLinkGetter<IKeywordGetter>> list, IList<IFormLinkGetter<IKeywordGetter>> comp, FormKey k)
+    {
+        if (!list.Any(x => x.FormKey == k)) list.Add(new FormLink<IKeywordGetter>(k));
+        if (!comp.Any(x => x.FormKey == k)) comp.Add(new FormLink<IKeywordGetter>(k));
+    }
+
+    public static int Build(string templatePath, string outDir, string controlEdid, List<string> variants, string armorEdid = "")
     {
         using var sf = OpenTemplate(templatePath);
         var kw = One(sf.Keywords, KeywordEdid, "KYWD");
@@ -156,6 +180,26 @@ static class PowerArmorProbe
         race.EditorID = RaceEdid;
         race.Name = RaceName;
         mod.Races.Add(race);
+
+        // the frame armor of the armor variant: a copy of a plain vanilla armor plus isPowerArmorFrame
+        string frameNote = "";
+        if (variants.Contains("armor"))
+        {
+            var tmpl = FrameArmorTemplate(sf, armorEdid);
+            var frameKw = One(sf.Keywords, FrameKeywordEdid, "KYWD").FormKey;
+            var fa = (Armor)tmpl.Duplicate(Own(FrameArmorId), new Armor.TranslationMask(defaultOn: true) { Name = false, Description = false });
+            fa.EditorID = FrameArmorEdid;
+            fa.Name = null;
+            fa.Description = null;
+            fa.Keywords ??= new ExtendedList<IFormLinkGetter<IKeywordGetter>>();
+            var fcomp = fa.Components.OfType<KeywordFormComponent>().FirstOrDefault();
+            if (fcomp == null) { fcomp = new KeywordFormComponent(); fa.Components.Add(fcomp); }
+            fcomp.Keywords ??= new ExtendedList<IFormLinkGetter<IKeywordGetter>>();
+            foreach (var k in fa.Keywords) if (!fcomp.Keywords.Any(x => x.FormKey == k.FormKey)) fcomp.Keywords.Add(new FormLink<IKeywordGetter>(k.FormKey));
+            AddKeywordBoth(fa.Keywords, fcomp.Keywords, frameKw);
+            mod.Armors.Add(fa);
+            frameNote = $"; ARMO {FrameArmorEdid} = copy of {tmpl.EditorID} {tmpl.FormKey} + {FrameKeywordEdid} {frameKw}";
+        }
 
         // the default objects a variant overrides: the vanilla record, only its Object pointing at ours
         if (variants.Contains("keyword"))
@@ -212,7 +256,7 @@ static class PowerArmorProbe
         Console.WriteLine($"wrote {path} ({new FileInfo(path).Length:N0} bytes): CELL {CellEdid} {cell.FormKey}, FURN {SuitEdid} = copy of " +
                           $"{control.EditorID} {control.FormKey} + {kw.EditorID} {kw.FormKey}, control reference of {control.EditorID}, " +
                           $"RACE {RaceEdid} = copy of {humanRace.EditorID} {humanRace.FormKey}, QUST {QuestEdid} stages [{string.Join(",", Stages)}]" +
-                          (variants.Count == 0 ? "" : "; variant " + string.Join(",", variants) + ": " + string.Join(", ", variants.Select(v => $"{Dobj[v]} -> {Target(v)}"))));
+                          frameNote + (variants.Count == 0 ? "" : "; variant " + string.Join(",", variants) + ": " + string.Join(", ", variants.Select(v => $"{Dobj[v]} -> {Target(v)}"))));
         return 0;
     }
 
@@ -238,7 +282,7 @@ static class PowerArmorProbe
 
     // ---------------------------------------------------------------- check (Mutagen read-back)
 
-    public static int Check(string pluginPath, string templatePath, string controlEdid, List<string> variants)
+    public static int Check(string pluginPath, string templatePath, string controlEdid, List<string> variants, string armorEdid = "")
     {
         using var sf = OpenTemplate(templatePath);
         var kw = One(sf.Keywords, KeywordEdid, "KYWD");
@@ -260,6 +304,21 @@ static class PowerArmorProbe
         var foreign = mod.EnumerateMajorRecords().Where(r => r.FormKey.ModKey != Plugin && r is not IDefaultObjectGetter)
             .Select(r => r.FormKey.ToString()).ToList();
         Need(foreign.Count == 0, $"records of another plugin (overrides): {string.Join(", ", foreign)}");
+        var armors = mod.Armors.ToList();
+        Need(armors.Count == (variants.Contains("armor") ? 1 : 0), $"{armors.Count} armor(s) of ours, {(variants.Contains("armor") ? 1 : 0)} expected");
+        if (variants.Contains("armor") && armors.Count == 1)
+        {
+            var tmpl = FrameArmorTemplate(sf, armorEdid);
+            var frameKw = One(sf.Keywords, FrameKeywordEdid, "KYWD").FormKey;
+            var fa = armors[0];
+            var akw = fa.Keywords?.Select(k => k.FormKey).ToList() ?? new();
+            var ack = fa.Components.OfType<IKeywordFormComponentGetter>().SelectMany(c => c.Keywords ?? Enumerable.Empty<IFormLinkGetter<IKeywordGetter>>()).Select(k => k.FormKey).ToList();
+            Console.WriteLine($"  ARMO {fa.EditorID} {fa.FormKey} (copy of {tmpl.EditorID} {tmpl.FormKey}) keywords [{string.Join(", ", akw)}] component [{string.Join(", ", ack)}] armor rating {fa.ArmorRating}");
+            Need(fa.FormKey == Own(FrameArmorId) && fa.EditorID == FrameArmorEdid, "not exactly our frame armor");
+            Need(akw.Contains(frameKw) && ack.Contains(frameKw), $"the frame armor does not carry {FrameKeywordEdid} in its KWDA list and its keyword form component");
+            Need((tmpl.Keywords ?? Enumerable.Empty<IFormLinkGetter<IKeywordGetter>>()).Select(k => k.FormKey).All(akw.Contains), "the frame armor lost a keyword of the armor it copies");
+            Need(fa.ArmorRating == tmpl.ArmorRating && fa.Value == tmpl.Value, "the frame armor's rating or value differs from the armor it copies");
+        }
         var dobjs = mod.DefaultObjects.ToList();
         Need(dobjs.Count == variants.Count, $"{dobjs.Count} default object override(s), {variants.Count} variant(s) ({string.Join(",", variants)})");
         foreach (var v in variants)
@@ -345,6 +404,9 @@ static class PowerArmorProbe
         mod.DefaultObjects.Add(new DefaultObject(Sf(0x22BC97), Release) { EditorID = "PowerArmorDefaultFrameFurniture_DO" });
         mod.DefaultObjects.Add(new DefaultObject(Sf(0x140C44), Release) { EditorID = "PowerArmorArmorKeyword_DO" });
         mod.Races.Add(new Race(Sf(0x013746), Release) { EditorID = HumanRaceEdid });
+        mod.Armors.Add(new Armor(Sf(0x0A0001), Release) { EditorID = "SynthPlainArmor", ArmorRating = 7, Value = 33,
+            Keywords = new ExtendedList<IFormLinkGetter<IKeywordGetter>> { new FormLink<IKeywordGetter>(other.FormKey) } });
+        mod.DefaultObjects.Add(new DefaultObject(Sf(0x15503E), Release) { EditorID = "PowerArmorDefaultFrameArmor_DO" });
         mod.Furniture.Add(new Furniture(Sf(0x0027D5), Release)
         {
             EditorID = "NPCChairTech03_Free_270", MarkerModel = "Markers\\FurnitureMarkers\\ChairNeutral_Free_Marker.nif",
