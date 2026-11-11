@@ -116,6 +116,24 @@ offered `NEEDS-PC dump <ids>`). The check refuses a plugin whose default objects
 script and the reader are unchanged (the reader already prints race before, right after and 4 s later). A variant stage
 is its own folder and its own plan.json ("variant"); install one at a time (same plugin name, same record).
 
+## Result of the variant runs (11 Nov, 03:37 to 03:49 UTC)
+
+Kits built at 5133e77c (the delta to 67521dd8 is the doc only), run by the owner PC (Claude), evidence
+`probe-pa-20261111T033742Z` and `probe-pa-20261111T034412Z` on the PC. **Verified:** filling the empty default objects does
+**not** wake `SwitchToPowerArmor`.
+
+| variant | stage 10 `SwitchToPowerArmor` on the suit | stage 20 / 30 `SetRace` | control |
+|---|---|---|---|
+| `race` | race, sit state, cell, position unchanged before / now / settled | set, restored | sit state 3 at 0.12 |
+| `race,furniture,keyword` | unchanged, same lines | set, restored | sit state 3 at 0.12 |
+
+`race,furniture` alone was not run (the full set already shows nothing). So the three default objects are not the gate, or not
+the only one: the lead from the default-object diff is **not confirmed**. The game still gives `na` for camera state, worn
+count, `IsInPowerArmor` and the player's furniture. Next (owner PC, offline): read the native in Starfield.exe against
+Fallout4.exe (stub, or live code gated on something nameable: a keyword on the furniture, the frame armor default object, the
+battery, a furniture entry type). Until that says "live, gated on X", no more kit variants for this call; the fallback (race
+swap plus our own armor and camera, by script) stays available and `SetRace` works both ways.
+
 ## Session card
 
 **Throwaway state only. Do not save at any point.** The race swap (step 20) can break a save; do not autosave, quicksave
