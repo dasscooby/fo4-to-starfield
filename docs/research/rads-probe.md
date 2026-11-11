@@ -359,3 +359,26 @@ Does the value, and the route's effect on Health, survive a save? Use a characte
 * Route moves `health` but not `max`/`base`: the permanent modifier does not touch the maximum; alternative 1 or 2.
 * `fx` lists effects at stage 20 and later that are not ours: Starfield's own radiation or hazard logic acts on a value
   named like ours, or something else applies at the same time; look the ids up before the next step.
+
+## By hand (FAL-273): no console, messages on screen
+
+The same plugin carries a second quest, `FO4SF_RadsHandQuest` (script `FO4SF_RadsHandQuest.psc`), and a test item, ALCH
+`FO4SF_RadDose` "Rad Dose" (a copy of the same vanilla template as RadAway, the same effect at **+100**). Nothing needs a
+stage: the probe's own quest sits idle until a stage is set. The script tops the inventory up to three RadAway and three Rad
+Dose at the quest's first run (a second run of `OnInit`, seen on the PC 0.18 s later, adds and says nothing), then polls once
+a second and shows one plain line per use: `Rad Dose used. Rads 100, health 195` (whole numbers; `max health` instead of `health`
+when Actor.GetValueMax is declared). Health carries minus a tenth of the rads, as in the probe. The item's own effect does not
+move the value on this game (PC, 11 Nov: the probe's RadAway does not either); 3 s after a use the script corrects the value
+by the difference (ModValue; SetValue only without it) and the diagnostic ("the effect left rads at X, expected Y") goes to the
+log only, never the screen. Every on-screen line is also a line in `FO4SFRadsHand.0.log` (`FO4SFRADSHAND ... end=true`). Offline only: the script's compile and the game are the PC's.
+
+### Owner card (eight steps, no console)
+
+1. Tick `FO4SFRadsProbe.esm` in the load order and start a new game (or load a save you may throw away; do not save).
+2. After the intro, wait 10 s. Messages: "Rads kit: 3 RadAway and 3 Rad Dose added ..." then "Rads 0, max health N". Write N down.
+3. Open the inventory (Aid or Medicine): is there a **Rad Dose** and a **RadAway**, three of each?
+4. Use one **Rad Dose**. Within 5 s a message: "Rad Dose used. Rads 100, health ...". Health should be 10 lower than N.
+5. Use a second Rad Dose. Message "Rad Dose used. Rads 200, ...", health 20 lower than N.
+6. Use one **RadAway**. Message "RadAway used. Rads 0, ..." (200 minus 200), health back to N.
+7. Use a **RadAway** once more: "RadAway used. Rads 0, ..." again (nothing to lower). Until 3 s after a use the screen shows nothing for that item, and rads are kept between 0 and 1000.
+8. Quit without saving. Screenshot each message you saw (or write them down), and tell which of steps 4 to 6 showed a message.

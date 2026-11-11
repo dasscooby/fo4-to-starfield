@@ -1,8 +1,9 @@
 """FO4SFPipboyMenu's stage (c), the data channel (FAL-216), as text: the PR #704 plugin keeps every check and refusal
 line of stages (a) and (b) and their 16 ids, stage (c) checks its 16 more ids (13 for the channel, 3 for FAL-246's click
-to quest; only stage (c) does), the Scaleform Value functions against SFSE's own addresses, the RTTI ids by name, and
-every object before it is used; the instance names the plugin looks for are the ones make_probe_swf.py --channel
-writes; the ini, README and session card agree. No compiler here: the PC build is the compile check."""
+to quest; only stages (c) and (d) do; stage (d)'s two more ids are tests/test_pipboy_stat_page.py's), the Scaleform
+Value functions against SFSE's own addresses, the RTTI ids by name, and every object before it is used; the
+instance names the plugin looks for are the ones make_probe_swf.py --channel writes; the ini, README and session
+card agree. No compiler here: the PC build is the compile check."""
 import os
 import re
 import sys
@@ -28,6 +29,7 @@ IDS_C = [("Main.Singleton", 883591), ("PlayerCharacter.Singleton", 922868), ("Co
          ("GFx.Value.ObjectRelease", 169746), ("GFx.Value.GetMember", 169748), ("GFx.Value.SetMember", 169749),
          ("GFx.Value.Invoke", 169750)]
 IDS_VM = [("GameVM.Singleton", 937585), ("GameVM.RTTI", 865426), ("BSScript.Internal.VirtualMachine.RTTI", 870795)]
+IDS_D = [("TESDataHandler.Singleton", 937572), ("TESForm.LookupByID", 47401)]
 SFSE_RVAS = [("kValueAddRef", "0x3352400"), ("kValueRelease", "0x33524A0"), ("kValueGetMember", "0x33528A0"),
              ("kValueSetMember", "0x3352C90"), ("kValueInvoke", "0x33530B0")]
 
@@ -47,15 +49,17 @@ class ChannelPluginTests(unittest.TestCase):
 
     def test_the_ids_in_order_and_stages_a_and_b_read_only_theirs(self):
         found = re.findall(r'\{ "([A-Za-z0-9_.]+)", (\d+), "', self.main)
-        self.assertEqual([(n, int(i)) for n, i in found], IDS_B + IDS_C + IDS_VM)
+        self.assertEqual([(n, int(i)) for n, i in found], IDS_B + IDS_C + IDS_VM + IDS_D)
         enum = self.main[self.main.index("kUISingleton,"):self.main.index("kIdCount\n")]
         self.assertIn("kIsMovieLoaded,\n\t\tkIdCountB,", enum)
         self.assertIn("kMainSingleton = kIdCountB,", enum)
-        self.assertIn("std::size_t IdCount() { return g_stage == 3 ? kIdCount : kIdCountB; }", self.main)
+        self.assertIn("kVmRtti,\n\t\tkIdCountC,", enum)
+        self.assertIn("std::size_t IdCount() { return g_stage == 4 ? kIdCount : g_stage == 3 ? kIdCountC : kIdCountB; }",
+                      self.main)
         library = function(self.main, "bool ReadAddressLibrary(")
         self.assertEqual(library.count("for (std::size_t i = 0; i < IdCount(); ++i) {"), 2)
         self.assertNotIn("i < kIdCount;", library)
-        self.assertIn("(g_stage == 3 && !CheckChannelIds())", self.main)
+        self.assertIn("(g_stage >= 3 && !CheckChannelIds())", self.main)
         for name, _ in IDS_C:
             self.assertIn(name.split(".")[-1] if name.startswith("GFx.Value") else name.split(".")[0], self.readme)
 
@@ -126,7 +130,7 @@ class ChannelPluginTests(unittest.TestCase):
         self.assertIn('Refuse("channel_ids"', self.main)
         self.assertIn('Refuse("channel"', self.main)
         self.assertIn('Refuse("object"', self.main)
-        self.assertIn("if (g_stage == 3 && (g_snapshotKey > 0xFE || g_snapshotKey == g_key)) {", self.main)
+        self.assertIn("if (g_stage >= 3 && (g_snapshotKey > 0xFE || g_snapshotKey == g_key)) {", self.main)
 
     def test_ini_readme_and_card_agree(self):
         for line in ("Stage=0", "FlagSets=0x0,0x8,0x9", "SnapshotKey=0x7A", "Flags=0", "KeepAlive=1"):
