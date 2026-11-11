@@ -361,3 +361,178 @@ naming only the fields it saw change.
 * Stage 20 sets the race: `SetRace` works at runtime on the player (A3), so a power armor race can carry a skeleton and graph.
   Restored at stage 30 means the swap is reversible in this session; whether a save survives it is **not** tested here.
 * Both fail: the combined core's climb-in suit is a worn-suit design only until SFSE or another route is researched.
+
+## By hand (FAL-273): no console, the answers on screen
+
+The same plugin carries a second quest, `FO4SF_PAHandQuest` (0x809, script `FO4SF_PAHandQuest.psc`, no properties). It asks
+the probe's stage 10 question, `SwitchToPowerArmor` on the suit furniture, and shows what the engine answered as messages on
+screen. **The furniture is not in the vanilla world**: it stands in the probe's own cell `FO4SF_PAProbeCell`, so the smallest
+thing the owner can use is that room. The script moves the player there itself 30 s after the quest starts
+(`ObjectReference.MoveTo` on the arrival marker, an optional name; the target is `FO4SF_PAProbeArrival` (0x80A), an XMarker in the cell's *persistent* group at the COC marker's place, because a temporary reference of a cell that is not loaded cannot be found by the script (FAL-316 finding): when the game has no such call the screen says to type
+`coc FO4SF_PAProbeCell`, the one console line left). The race swap (stages 20 and 30) is **not** in the hand version, because
+it can break a save; it stays with the console probe.
+
+In the room, on screen: what stands where; every change of the furniture the player is on (the control chair: "Sitting
+works"; the suit: sit state and `in power armor`); and, when the player walks within 2 units of the suit (or after 60 s in the
+room), the call (the 60 s fallback only while standing, never while seated on the control chair) and its answer 1 s and 4 s later: in power armor, furniture, sit state, camera, race unchanged or not, worn
+armor slots. A reading the game has no call for says `not in this game's scripts`. Every message is also a line of
+`FO4SFPAHand.0.log`. Offline only: the Papyrus compile and the game are the PC's.
+
+### Owner card (seven steps, no console; follows the #708 PC run: the call is expected to do nothing)
+
+1. Tick `FO4SFPowerArmorProbe.esm`. Load a save of a **throwaway** character already in the world (not the opening); do not save.
+2. Wait. Message: "Power armor test: in 30 s you are moved into a small test room." Then "Moving you into the test room." (If instead you read "type coc FO4SF_PAProbeCell", do that, nothing else.)
+3. In the room a message names the two furnitures: vanilla chair on your left (control), suit on your right. Walk to the left one and sit (activate it). Message "You are seated (sit state 3) ... sitting works." (`Actor.GetFurnitureReference` is not in Starfield's scripts, so the screen goes by the sit state.) If you cannot sit, say so and stop.
+4. Stand up. Walk up to the right-hand furniture and stand next to it (do not activate it yet). Message "You walked up to the suit: calling SwitchToPowerArmor on it now."
+5. Watch the screen and the character for 5 s: any climb-in animation, camera change, or HUD change. Three messages follow ("Suit 1 s after the call: ...", "Suit 4 s after the call: ...", then "Result: nothing changed ..." or "Result: something CHANGED ..."). The PC run of the probe (11 Nov, #708 at 9e252a4a) saw **nothing change** on this chair-plus-keyword furniture, so "nothing changed" is the expected result; a change is the news. Screenshot each.
+6. Now activate the suit furniture once. Does a message say "You are on the SUIT furniture ..."? Did anything animate?
+7. Quit without saving. Tell: step 3 worked or not; the two "Suit ..." messages as read; what you saw at steps 5 and 6.
+
+## Entry by script (FAL-361, piece B of FAL-359): kit, hand mode, card
+
+Status: **built offline, not run in game.** The #708 run showed that `SwitchToPowerArmor` on a keyword furniture does nothing,
+and the console probe showed `SetRace` to a copy of HumanRace works on the player both ways. So the entry here does not ask the
+engine to climb in: a script does the four things that make up "being in a suit" for our own design, and undoes them.
+
+Same plugin (`FO4SFPowerArmorProbe.esm`, still master Starfield.esm only, adds records, overrides none), new records:
+
+| Record | What |
+|---|---|
+| QUST `FO4SF_PAEntryQuest` (0x80B), script `FO4SF_PAEntryQuest.psc` | start game enabled, one stage, no properties; hand mode (no console) with an on-screen line for every step and a line of `FO4SFPAEntry.0.log` for each |
+| FURN `FO4SF_PAEntryFurn` (0x80C), reference 0x80D 3 units ahead of the arrival | **the furniture of ours**: every field of the control chair (`NPCChairTech03_Free_270`), and **no** power armor keyword, so the engine has nothing power-armor-shaped to react to |
+| AVIF `FO4SF_PAInPowerArmor` (0x80E) | our value for "in power armor": variable, default 0, min 0, max 1 |
+| ARMO `FO4SF_PAFrame` (0x80F, slot BODY), `FO4SF_PAPieceHelm` (0x810, Hat), `FO4SF_PAPieceTorso` (0x811, UpperBody1VisOnly) | our frame and two pieces: a name, a slot, weight and value 0, no script |
+| RACE `FO4SF_PARace` (0x802, from the console probe) | the kit race: a copy of HumanRace |
+
+**The entry** (sit on the entry chair; the script waits 2 s): `AddItem` and `EquipItem` of the frame and
+both pieces, `SetValue` of our value to 1; **no race swap** (see "PC rerun" below). It reads the state back after 1 s and 4 s and says on screen which held, and whether the race changed.
+**The exit** (sit on the vanilla chair on the left, or 120 s in the suit): value to 0, `UnequipItem` and `RemoveItem` of the three,
+read back after 1 s and 4 s. Sit state 3 within 1.5 units of the
+chair is the trigger (the console probe's seated control was 0.12 units away); when the game has no `GetSitState` the first walk up to
+the entry chair is the trigger, once, and the exit is the 120 s timer.
+
+**Stage options (art now defaults, see "PC runs at 1a6096e1").** `--with-hand` keeps the by-hand quest (`FO4SF_PAHandQuest`) start game enabled: it is **off by default** now,
+because it and the entry quest both move the player into the room at 30 s and both talk. `--frame-art <ARMO editor id>` and
+`--piece-art <ARMO editor id>` copy a vanilla ARMO (every field, so its armatures, which are the look) into the frame / the two
+pieces; `check` is given the same options as `build` and refuses a plugin that does not match.
+
+Names the script guesses are `;OPT` lines (the stager compiles each alone and keeps what compiles, in `plan.json` `optional_entry`):
+`Actor.GetValue`, `Actor.SetValue` (our value; **the value is the least certain native**), `Actor.IsEquipped`, `Actor.GetSitState`,
+`ObjectReference.MoveTo`. Required, in the stager's list: `Actor.EquipItem`, `Actor.UnequipItem`, `ObjectReference.AddItem`,
+`RemoveItem`, `GetItemCount`. **Not run offline:** the Papyrus compile (the PC's compiler), the real Starfield.esm, and the game.
+
+### What the player sees, and what is honestly missing
+
+* **Third person with `--frame-art none --piece-art none` (the offline opt-out; no longer the default):** the player stays HumanRace, and the three ARMO have **no armature**, so nothing
+  changes on the body. The only visible results are the on-screen lines, three items appearing
+  in and leaving the inventory, and (if the game can read it) the value. **First person:** the same, no arms or camera change.
+* **With `--frame-art` / `--piece-art`:** the vanilla armor's armatures are worn: third person shows that armor over the character
+  (a copied suit's own slots and look decide whether it looks like a frame); a vanilla ARMA names HumanRace (or the races it was made
+  for), which the player is, so the equip should be accepted; unknown until run.
+* **Missing, not attempted:** a climb-in animation (the engine's own did nothing); a power armor HUD or camera; a steel frame as art
+  (no frame model is made here); a fusion core, damage or carry-weight rules (the value is only ours: nothing reads it, so
+  nothing changes in play); the Starfield power armor state (`IsInPowerArmor` is not in Starfield's scripts); stopping the player
+  from taking the pieces off by hand (`EquipItem` is called with prevent-removal false); a save made while in the suit. Throwaway state only,
+  no save (a first-time script that adds items is still not a save-safe design).
+
+### Card (eight steps; throwaway character, no console, game closed first for the install)
+
+1. Stage with the defaults (the suit art is built in; no `--with-hand`) and install (`power_armor_probe_install.py install --dir <stage> --starfield <game dir>`) and tick `FO4SFPowerArmorProbe.esm`. Load a save of a **throwaway** character already in the world (not the opening). Do not save at any point.
+2. Wait 30 s. Messages: "Power armor entry test: in 30 s you are moved into a small test room", then "Moving you into the test room." (If you read "type coc FO4SF_PAProbeCell", do that and nothing else.) Screenshot third person and the inventory (armor tab) now: the **before**.
+3. The message "Test room: the ENTRY chair is 3 units ahead of you" appears. Walk to the chair ahead and sit (activate it). Message "You sat on the entry chair (sit state 3): the suit goes on in 2 s." If you cannot sit, say so and stop.
+4. Two seconds later "Suit ON requested ...", then "Suit 1 s after the entry: ..." and "Suit 4 s after the entry: ..." and "Result: the suit is ON" or "only partly on. Did not hold: ...". Copy every line.
+5. Stand up. Screenshot first person and third person, and the inventory (three FO4SF items, equipped or not). Note any visible change, T-pose, missing head or hands, stall, speed or jump change.
+6. Walk to the vanilla chair on your left and sit. Message "You sat on the exit chair ...", 2 s later "Suit OFF requested ...", "1 s after the exit ...", "4 s after the exit ..." and "Result: the suit is OFF" or "the exit did NOT undo everything. Still set: ...". Copy them.
+7. Stand up. Screenshots again, same three views, and the inventory: the **after** (the character should wear what it wore before; the log has `saved worn=` and `restored worn=`). Optionally enter and leave a second time (sit on the entry chair again).
+8. Quit to the desktop **without saving**. The entry's own log is `FO4SFPAEntry.0.log` in `My Games\Starfield\Logs\Script\User` (no reader for it yet: every line is plain text ending `end=true`); paste it with the screenshots and the eight copied lines. Tell: which of step 4's four held, whether step 6 undid them, what the screenshots show.
+
+### PC run of #733 at e9acb003 and the fixes (FAL-361)
+
+Verified by the PC (Claude, 11 Nov 09:37 to 09:43 UTC, test save, no save): the entry runs end to end; race became the kit race, 3 of 3
+in the bag, value 1.0; the exit restored race, bag and value. **The equip failed**: `armor cannot be equipped by the passed in actor's race`
+(Papyrus.0.log, three ARMO). Fixes, offline only, awaiting a second PC run: (1) the three ARMO now name the kit race (`FO4SF_PARace`) as
+their race, and `check` refuses otherwise; (2) a quest script's OnInit runs although the quest is not start game enabled (the hand
+quest moved the player and called `SwitchToPowerArmor` over the entry run), so the hand script is now **left off the record** unless
+`--with-hand` is given. Not changed: `init` logs `entryref=none controlref=none` because `Game.GetFormFromFile` cannot resolve a
+temporary reference of a cell that is not loaded (FAL-316); the entry quest looks the chairs up again once the player is in the room,
+where they resolve, so the log's init line is expected to say none. Third person and the inventory were not captured; with the race
+fix the equip should now put the (art-less) pieces on, still nothing visible without `--frame-art`.
+
+### PC rerun of #733 at f5d38adb: the race swap is dropped (FAL-361)
+
+Verified by the PC (10:15 to 10:21 UTC): naming the copied race on the ARMO did not help (same three equip errors, `RNAM` was the copy).
+The cause is the armature: a race is accepted by an ARMA's race list, the ARMO here had none, and the copy is in no vanilla ARMA. Worse,
+**third person in the copied race showed only a floating head and hair**: HumanRace's skin (`Skin_Naked` 000D64, armatures 012204 and
+030580) names HumanRace and two other races, not the copy. The hand quest stayed silent (no hand log); `init` still logs refs none
+(unresolved temporary refs, as before). So the race copy is the wrong tool without its own skin and armatures.
+
+Changed (option b of the PC's two, offline only, awaiting a third PC run): **the entry no longer calls `SetRace`**; the player stays
+HumanRace; the three ARMO name HumanRace (with `--frame-art` / `--piece-art` they keep the copied vanilla ARMO's own race and armature);
+the value stays as it was; `check` refuses an ARMO that names the copied race. The screen says "race CHANGED" if anything else changes
+it. `FO4SF_PARace` stays in the plugin for the console probe (its stage 20/30 swap is the PC-proven both-ways result) and is only
+logged at init. **Not done:** (a) the own-skin kit race (copies of Skin_Naked and its two ARMA naming the copy, plus armatures per
+piece); worth it only if the suit needs its own skeleton or size. **Equip may still be refused** with no art: an ARMO with no armature
+may not equip even for HumanRace; the rerun decides, and `--frame-art` is the fallback (give it any vanilla ARMO).
+
+### PC runs of #733 at 1a6096e1: PASS with art, FAIL without (FAL-361)
+
+Verified by the PC (10:51 and 11:01 UTC, test save, no save): **without art** the equip is refused again (`armor cannot be equipped by the
+passed in actor's race`) although the race is untouched and the ARMO read HumanRace: an ARMO with no armature cannot be worn, whatever
+race it names; the character stays whole in third person. **With `--frame-art Spacesuit_Mark1_Body --piece-art Spacesuit_Mark1_Helmet`
+the whole entry passes**: equipped 3 of 3, value 1.0, race unchanged, "the suit is ON"; the exit gives bag 0 of 3, equipped 0 of 3, value
+0, "the suit is OFF"; no Papyrus error. Third person: a suit body and pack with a **bare head** (the helmet copy was forced into the Hat
+slot and drew nothing); after the exit the character looked as before.
+
+Changed offline (awaiting a fourth PC run), the PC's four findings:
+
+1. **Art is not optional.** The tool and the stager default to `Spacesuit_Mark1_Body` (frame) and `Spacesuit_Mark1_Helmet` (both pieces);
+   a missing name refuses the stage by name; `none` is the offline tests' explicit opt-out and `check` then refuses nothing else.
+2. **A copied piece keeps its own slot** (the helmet's), not the slot we named; only an armature-less piece (`none`) gets our slot.
+   Both pieces carry the helmet art by default, so the "torso" piece is a second helmet: if a body plate is wanted, give a real one.
+3. **What the player wore is recorded and put back.** At entry the script records every distinct worn item (`Actor.GetWornItem`, `;OPT`,
+   up to 64) before the suit goes on and logs `saved worn=N`; at exit, after our pieces are removed, it equips them again and logs
+   `restored worn=N` and says so on screen. When the game cannot list the worn items it says so at entry and nothing is put back.
+4. **`init` refs none** is unchanged: unresolved temporary references of an unloaded cell (FAL-316); not a fault of the entry.
+
+Card changes: step 1 stages with the defaults (no art options needed); step 7 adds "the character wears what it wore before".
+Not yet seen: first-person arms, the inventory screen, a second enter and leave, the 120 s exit, the restore of a changed outfit.
+
+### PC run of #733 at 8fe7c27e: FAIL, and the fixes (FAL-361)
+
+Verified by the PC (11:37 to 11:44 UTC, test save, no save): equipped **2 of 3** (both pieces were the helmet copy in the same slot, one
+pushed the other off); in third person with the suit ON the character stood in plain clothes (the copies took the place of the own
+suit, pack and helmet, and none of the copies was drawn); after the exit the own gear **did not come back** (`Actor.GetWornItem` is not
+declared in Starfield's scripts, so nothing was recorded). The best state so far stays 1a6096e1 with art (PASS, slots BODY / Hat).
+
+Changed offline (awaiting a fifth PC run):
+
+1. **Two pieces, two slots.** New `--pack-art` (default `Spacesuit_Mark1_Backpack`, 01754E on the PC, one armature) for the second piece;
+   the helmet piece keeps `Spacesuit_Mark1_Helmet`. Each copy keeps its own slot.
+2. **Worn gear by events, not by listing.** `GetWornItem` is removed. Just before the three `EquipItem` calls the script registers for the
+   player's `OnItemUnequipped` (`RegisterForRemoteEvent`, `;OPT`, with the handler `Event Actor.OnItemUnequipped` also `;OPT`, each
+   compiled on its own), records every base object that comes off for 1 s (ours excluded), logs `saved worn=N watch=<bool>` and shows
+   "your gear that came off: N"; the exit equips them again (`restored worn=N`). If the registration does not compile, the screen says
+   the gear will not be put back. **Not run offline:** whether the player's event fires for an unequip caused by a slot clash, and the
+   Papyrus compile of the remote event form.
+3. **A frame-only stage** (does a copied suit body draw at all in the SSBODY slot?): `--piece-art none --pack-art none`. The two
+   pieces then have no armature and their equip is refused (an error in Papyrus.0.log, expected), the frame equips alone, and the
+   screen reads "equipped 1 of 3".
+
+Not changed: the look. Whether copies of the vanilla suit pieces draw over the character's own gear is what the PC run decides; the
+gear-restore should be read from the outfit in third person after the exit, not only from the log.
+
+### PC run of #733 at 59a76008: the logic passes, the copies are not drawn (FAL-361)
+
+Verified by the PC (12:02 to 12:09 UTC, test save, no save): entry `unequipped item=` x3 (the character's own suit, helmet and pack),
+`saved worn=3 watch=true`, equipped 3 of 3, value 1, "the suit is ON"; exit `restored worn=3`, bag 0, equipped 0, value 0; **in third
+person after the exit the character's own suit, pack and helmet are back** (the `OnItemUnequipped` record works). With the suit ON the
+character is in plain clothes: the three copies are worn and not drawn. A console `additem` + `equipitem` of the vanilla Mark 1 body
+01754D, helmet 01754F and pack 01754E draws fully, so the game draws a vanilla set and the fault is in the copies. A record compare
+(staged FO4SF_PAFrame against 01754D): the copy had **no KSIZ / KWDA** (vanilla: five keywords) and a DATA of twelve zero bytes (vanilla
+value, weight 7.5, health); the five armature links, RNAM, BO64 and templates matched.
+
+Changed offline (awaiting a seventh PC run): the tool no longer strips the copied ARMO: keywords, value, weight and health stay the
+source's (only an armature-less piece, `none`, is built bare); `check` prints them and refuses a copy whose keywords, value, weight or
+health differ from its source. **Whether the keywords are the whole cause is the PC's inference, not yet shown**: if the copies still
+do not draw, the next suspect is the copy's missing instance data (templates and object-template combinations) or a keyword the game
+reads from the FormID of the original. Not seen yet: first person, the inventory screen, a second enter and leave, the 120 s exit.

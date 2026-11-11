@@ -5,7 +5,8 @@ usage:
       read only, no game: every native the script needs, and each optional reading's name, looked up in Starfield's base
       sources (Scripts/Source of ContentResources.zip; inheritance followed). Exit 1 when a required one is missing.
   python make_power_armor_probe.py stage --out <dir> [--starfield <Starfield.esm>] [--compiler <exe>]
-                                         [--content-resources <zip>] [--control <furniture editor id>]
+                                         [--content-resources <zip>] [--control <furniture editor id>] [--with-hand]
+                                         [--frame-art <ARMO editor id>] [--piece-art <ARMO editor id>] [--pack-art <ARMO editor id>]
                                          [--variant race,furniture,keyword,armor] [--armor <armor editor id>] [--kw-first]
       1. dotnet/PowerArmorProbe build + check against the Starfield.esm given (offline_check.txt). --variant overrides
          Starfield's empty power armor default objects in the plugin, each on its own (race: PowerArmorRace_DO ->
@@ -15,6 +16,10 @@ usage:
       2. the Papyrus compile: each optional reading (";OPT <Base.Name> " lines of the .psc) whose name the base sources
          declare is compiled on its own, the ones that compile are kept, every other one is reported in plan.json
          ("optional") and logs "na"; then the script itself;
+         The entry kit (FAL-361, FO4SF_PAEntryQuest) is built the same way. --with-hand keeps the by-hand quest
+         FO4SF_PAHandQuest start game enabled (off by default: it and the entry quest would both move the player and talk);
+         --frame-art / --piece-art copy a vanilla ARMO into the entry kit's frame / pieces (defaults Spacesuit_Mark1_Body /
+         Spacesuit_Mark1_Helmet: an ARMO with no armature cannot be equipped, PC run of #733); `none` only for offline tests.
       3. plan.json (SHA-256 of every file, of Starfield.esm, the optional readings' fate) and README.txt. Built in a new
          <out>.partial-<time>-<pid> and renamed to <out> only when every step passed; an existing <out> is refused.
   python make_power_armor_probe.py log [--file <FO4SFPAProbe.0.log>] [--papyrus <Papyrus.0.log>]
@@ -45,7 +50,14 @@ PROJECT = os.path.join(REPO, "dotnet", "PowerArmorProbe")
 PLUGIN = "FO4SFPowerArmorProbe.esm"
 SCRIPT = "FO4SF_PAProbeQuest"
 PSC = os.path.join(HERE, SCRIPT + ".psc")
+HAND_SCRIPT = "FO4SF_PAHandQuest"        # the by-hand mode (FAL-273): same plugin, its own quest and script
+HAND_PSC = os.path.join(HERE, HAND_SCRIPT + ".psc")
+ENTRY_SCRIPT = "FO4SF_PAEntryQuest"      # the entry by script (FAL-361): same plugin, its own quest and script
+ENTRY_PSC = os.path.join(HERE, ENTRY_SCRIPT + ".psc")
 DEFAULT_CONTROL = "NPCChairTech03_Free_270"
+DEFAULT_FRAME_ART = "Spacesuit_Mark1_Body"      # PC run of #733: pieces with an armature equip, pieces without one are refused
+DEFAULT_PIECE_ART = "Spacesuit_Mark1_Helmet"
+DEFAULT_PACK_ART = "Spacesuit_Mark1_Backpack"     # the second piece: a different slot than the helmet (PC run of #733 at 8fe7c27e: 2 of 3 equipped)
 VARIANTS = ("race", "furniture", "keyword", "armor")
 STARFIELD = r"D:\SteamLibrary\steamapps\common\Starfield"
 PAPYRUS_LOG = os.path.join(os.path.expanduser("~"), "Documents", "My Games", "Starfield", "Logs", "Script", "Papyrus.0.log")
@@ -55,12 +67,15 @@ REQUIRED = {
     "Actor": ["SwitchToPowerArmor", "SetRace", "GetRace", "GetPositionX", "GetPositionY", "GetPositionZ", "GetDistance",
               "GetParentCell"],
     "Game": ["GetPlayer", "GetFormFromFile", "IsPluginInstalled"],
-    "Debug": ["OpenUserLog", "TraceUser"],
+    "Debug": ["OpenUserLog", "TraceUser", "Notification"],
     "Utility": ["GetCurrentRealTime"],
     "Quest": ["GetStageDone"],
     "ScriptObject": ["StartTimer"],
     "Form": ["GetFormID"],
+    # the entry kit's own natives (FAL-361); a missing one stops the stage, the guesses are its ;OPT lines
+    "ObjectReference": ["AddItem", "RemoveItem", "GetItemCount"],
 }
+REQUIRED["Actor"] += ["EquipItem", "UnequipItem"]
 OPT = re.compile(r"^;OPT (?P<name>[\w]+\.[\w]+) ", re.M)
 
 
@@ -97,17 +112,21 @@ def read_sources(zip_path):
     return sources
 
 
-def precheck_sources(sources, text):
+def precheck_sources(sources, text, hand_text="", entry_text=""):
     """{"required": {"Base.Name": bool}, "optional": {"Base.Name": bool}, "missing": [required names not declared]}."""
     req = {f"{b}.{f}": declares(sources, b, f) for b, fs in REQUIRED.items() for f in fs}
-    opt = {n: declares(sources, *n.split(".")) for n in optional_names(text)}
+    opt = {n: declares(sources, *n.split(".")) for n in dict.fromkeys(optional_names(text) + optional_names(hand_text) + optional_names(entry_text))}
     return {"required": req, "optional": opt, "missing": [k for k, ok in req.items() if not ok]}
 
 
 def precheck(a):
     with open(PSC, encoding="utf-8") as f:
         text = f.read()
-    r = precheck_sources(read_sources(a.content_resources), text)
+    with open(HAND_PSC, encoding="utf-8") as f:
+        hand_text = f.read()
+    with open(ENTRY_PSC, encoding="utf-8") as f:
+        entry_text = f.read()
+    r = precheck_sources(read_sources(a.content_resources), text, hand_text, entry_text)
     for k, ok in r["required"].items():
         print(f"{'ok  ' if ok else 'MISSING'}  {k}")
     for k, ok in r["optional"].items():
@@ -120,20 +139,22 @@ def precheck(a):
     return 0 if not r["missing"] else 1
 
 
-def compile_text(compiler, text, src_dir, out_dir):
+def compile_text(compiler, text, src_dir, out_dir, script=SCRIPT):
     """Compile the script's text; (True, "") or (False, the compiler's first error line)."""
     with tempfile.TemporaryDirectory(prefix="fo4sf-pa-compile-") as work:
-        with open(os.path.join(work, SCRIPT + ".psc"), "w", encoding="utf-8", newline="\n") as f:
+        with open(os.path.join(work, script + ".psc"), "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
         os.makedirs(out_dir, exist_ok=True)
         # a .cmd/.bat stand-in is not a Win32 image: start it through the command interpreter
         shell = ["cmd.exe", "/c"] if os.name == "nt" and str(compiler).lower().endswith((".cmd", ".bat")) else []
-        r = subprocess.run([*shell, compiler, SCRIPT + ".psc", "-f=Starfield_Papyrus_Flags.flg", f"-i={work};{src_dir}", f"-o={out_dir}"],
+        r = subprocess.run([*shell, compiler, script + ".psc", "-f=Starfield_Papyrus_Flags.flg", f"-i={work};{src_dir}", f"-o={out_dir}"],
                            cwd=work, capture_output=True, text=True)
-    ok = r.returncode == 0 and "Compilation succeeded" in r.stdout and os.path.exists(os.path.join(out_dir, SCRIPT + ".pex"))
+    ok = r.returncode == 0 and "Compilation succeeded" in r.stdout and os.path.exists(os.path.join(out_dir, script + ".pex"))
     if ok:
         return True, ""
-    err = next((l.strip() for l in (r.stdout + r.stderr).splitlines() if "error" in l.lower()), "no compiler output")
+    # the compiler's own lines: "X.psc(12,3): ..." (some carry no word "error", e.g. "variable race cannot have the same name ...")
+    lines = [l.strip() for l in (r.stdout + r.stderr).splitlines() if ".psc(" in l or "error" in l.lower()]
+    err = " | ".join(lines[:8]) if lines else "no compiler output"
     return False, err
 
 
@@ -199,39 +220,53 @@ def stage(a):
     if "armor" in variant and not a.armor:
         sys.exit("--variant armor copies a plain vanilla armor: name it with --armor <armor editor id> (the tool lists candidates)")
     opts = ["--control", a.control, "--variant", ",".join(variant)] + (["--armor", a.armor] if a.armor else []) + (
-        ["--kw-first"] if a.kw_first else [])
+        ["--kw-first"] if a.kw_first else []) + (["--with-hand"] if a.with_hand else [])
+    opts += ["--frame-art", a.frame_art, "--piece-art", a.piece_art, "--pack-art", a.pack_art]
     wrote = run(tool + ["build", a.starfield, out] + opts).stdout
     check = run(tool + ["check", os.path.join(out, PLUGIN), a.starfield] + opts).stdout
     with open(os.path.join(out, "offline_check.txt"), "w", encoding="utf-8") as f:
         f.write(wrote + check)
     with open(PSC, encoding="utf-8") as f:
         text = f.read()
+    with open(HAND_PSC, encoding="utf-8") as f:
+        hand_text = f.read()
+    with open(ENTRY_PSC, encoding="utf-8") as f:
+        entry_text = f.read()
     src = extract_sources(a.content_resources, work)
-    pre = precheck_sources(read_sources(a.content_resources), text)
+    pre = precheck_sources(read_sources(a.content_resources), text, hand_text, entry_text)
     if pre["missing"]:
         sys.exit(f"the base scripts do not declare {pre['missing']}: do not stage (attempt kept in {out})")
-    # each optional reading on its own: declared, then compiles
-    fate, keep = {}, []
-    for name, declared in pre["optional"].items():
-        if not declared:
-            fate[name] = "not declared in the base scripts"
-            continue
-        ok, err = compile_text(a.compiler, enable(text, [name]), src, os.path.join(work, "try"))
-        fate[name] = "kept" if ok else f"declared but did not compile: {err}"
-        if ok:
-            keep.append(name)
     scripts = os.path.join(out, "Data", "Scripts")
-    final_text = enable(text, keep)
-    ok, err = compile_text(a.compiler, final_text, src, scripts)
-    if not ok:
-        sys.exit(f"the Papyrus compile of {SCRIPT}.psc with {keep or 'no optional reading'} failed: {err}")
-    with open(os.path.join(out, SCRIPT + ".psc"), "w", encoding="utf-8", newline="\n") as f:
-        f.write(final_text)
+
+    def build_script(name, source_text):
+        """Each optional reading of the script on its own (declared, then compiles), then the script with the kept ones:
+        the fate of every optional reading. Exits when the script does not compile."""
+        fate, keep = {}, []
+        for opt in optional_names(source_text):
+            if not pre["optional"][opt]:
+                fate[opt] = "not declared in the base scripts"
+                continue
+            ok, err = compile_text(a.compiler, enable(source_text, [opt]), src, os.path.join(work, "try"), name)
+            fate[opt] = "kept" if ok else f"declared but did not compile: {err}"
+            if ok:
+                keep.append(opt)
+        final_text = enable(source_text, keep)
+        ok, err = compile_text(a.compiler, final_text, src, scripts, name)
+        if not ok:
+            sys.exit(f"the Papyrus compile of {name}.psc with {keep or 'no optional reading'} failed: {err}")
+        with open(os.path.join(out, name + ".psc"), "w", encoding="utf-8", newline="\n") as f:
+            f.write(final_text)
+        return fate
+
+    fate = build_script(SCRIPT, text)
+    hand_fate = build_script(HAND_SCRIPT, hand_text)
+    entry_fate = build_script(ENTRY_SCRIPT, entry_text)
     shutil.rmtree(work)
     if sha256(a.starfield) != before:
         sys.exit(f"Starfield.esm changed during the build, nothing published; attempt kept in {out}")
     plan = {"kind": "power-armor-probe", "version": 1, "plugins": [PLUGIN], "outputs": stage_files(out),
-            "inputs": {"Starfield.esm": {"sha256": before}}, "control": a.control, "variant": variant, "armor": a.armor, "kw_first": bool(a.kw_first), "optional": fate,
+            "inputs": {"Starfield.esm": {"sha256": before}}, "control": a.control, "variant": variant, "armor": a.armor, "kw_first": bool(a.kw_first), "optional": fate, "optional_hand": hand_fate, "optional_entry": entry_fate,
+            "hand_quest_on": bool(a.with_hand), "frame_art": a.frame_art, "piece_art": a.piece_art, "pack_art": a.pack_art,
             "log": "<My Games>/Starfield/Logs/Script/User/FO4SFPAProbe.0.log"}
     with open(os.path.join(out, "plan.json"), "w", encoding="utf-8") as f:
         json.dump(plan, f, indent=1)
@@ -239,10 +274,14 @@ def stage(a):
         f.write(f"""Power armor probe ({datetime.date.today().isoformat()}). docs/research/power-armor-probe.md
 {PLUGIN} (sha256 {plan['outputs'][PLUGIN]}): CELL FO4SF_PAProbeCell (coc FO4SF_PAProbeCell), FURN FO4SF_PAProbeSuit (a copy of
 {a.control} with FurnitureTypePowerArmor added), the vanilla {a.control} beside it as the control, RACE FO4SF_PARace
-(a copy of HumanRace), QUST FO4SF_PAProbeQuest (start game enabled, stages 10 / 20 / 30). Master Starfield.esm only; adds
+(a copy of HumanRace), QUST FO4SF_PAProbeQuest (start game enabled, stages 10 / 20 / 30), QUST FO4SF_PAHandQuest (by hand:
+no console; moves you into the room and shows on screen what the engine answered; start game enabled only with --with-hand,
+this stage: {'yes' if a.with_hand else 'no'}), QUST FO4SF_PAEntryQuest (the entry by script: sit on the entry chair and the race, the
+frame and pieces and the value are set; sit on the vanilla chair and they are undone; art: frame {a.frame_art or 'none'}, pieces
+{a.piece_art or 'none'}, pack {a.pack_art or 'none'}), FURN FO4SF_PAEntryFurn, AVIF FO4SF_PAInPowerArmor, ARMO FO4SF_PAFrame / PAPieceHelm / PAPieceTorso. Master Starfield.esm only; adds
 records, overrides none. Checked against Starfield.esm {before}. Re-stage after a game update.
 Variant (default objects overridden): {', '.join(variant) or 'none'}{f' (frame armor: a copy of {a.armor})' if a.armor else ''}.
-Optional readings: {', '.join(f'{k}: {v}' for k, v in fate.items()) or 'none'}.
+Optional readings: {', '.join(f'{k}: {v}' for k, v in fate.items()) or 'none'}; by hand: {', '.join(f'{k}: {v}' for k, v in hand_fate.items()) or 'none'}; entry: {', '.join(f'{k}: {v}' for k, v in entry_fate.items()) or 'none'}.
 Install (the owner's word, game closed; loose scripts are not read, the installer packs them into a ba2):
   python scripts\\planet\\power_armor_probe_install.py install --dir <this folder> --starfield <game dir>
 Remove:  python scripts\\planet\\power_armor_probe_install.py uninstall --starfield <game dir>
@@ -250,7 +289,7 @@ Read:    python scripts\\planet\\make_power_armor_probe.py log
 Session card: docs/research/power-armor-probe.md. THROWAWAY STATE ONLY, NO SAVE (the race swap can break a save).
 """)
     os.replace(out, final)
-    print(f"staged {final}: {PLUGIN}, {SCRIPT}.pex, offline_check.txt, plan.json, README.txt; optional readings: {fate}")
+    print(f"staged {final}: {PLUGIN}, {SCRIPT}.pex, {HAND_SCRIPT}.pex, {ENTRY_SCRIPT}.pex, offline_check.txt, plan.json, README.txt; optional readings: {fate}")
     return 0
 
 
@@ -281,6 +320,10 @@ def main(argv=None):
     s.add_argument("--compiler", default=os.path.join(STARFIELD, "Tools", "Papyrus Compiler", "PapyrusCompiler.exe"))
     s.add_argument("--content-resources", default=cr)
     s.add_argument("--control", default=DEFAULT_CONTROL)
+    s.add_argument("--with-hand", action="store_true")
+    s.add_argument("--frame-art", default=DEFAULT_FRAME_ART)
+    s.add_argument("--piece-art", default=DEFAULT_PIECE_ART)
+    s.add_argument("--pack-art", default=DEFAULT_PACK_ART)
     s.add_argument("--variant", default="", help="comma list of default objects to override: race, furniture, keyword, armor")
     s.add_argument("--armor", default="", help="the plain vanilla armor the armor variant copies (editor ID)")
     s.add_argument("--kw-first", action="store_true", help="FurnitureTypePowerArmor first in the suit's keyword list")

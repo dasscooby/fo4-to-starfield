@@ -90,6 +90,11 @@ python scripts\ui\pipboy_probe_install.py install --dir $exp --starfield $sf; $L
 
 Keys: **F10** opens and closes our menu; **F11** writes a snapshot line. Give each step about two seconds.
 
+**Clicking our button.** The game draws its own pointer while our menu shows it (flag sets `0x8` and `0x9`). It starts
+at the screen centre at every open and does not follow the desktop pointer: it moves with relative mouse motion, about
+0.40 pixels of a 1280-wide screenshot per unit (owner PC, 10 Nov). Move it onto CLICK from the centre; a click aimed at
+the desktop pointer's place misses. Only at `0x9` do clicks reach our menu (section 7).
+
 **Time reads (item 12, "does time slow").** A *time read* is the console's `GetGlobalValue GameDaysPassed`; write
 down the number it prints. A *60-second window* runs from closing the console after one time read to opening it for
 the next. If the console refuses the command, write `time: unknown` and go on; substitute nothing.
@@ -124,6 +129,11 @@ Load `focc_b0_a` from the menu, then:
 cgf "FOCC_B0.Ping" 43
 cgf "FOCC_B0.Gmst"
 ```
+
+**B0-2 without a save**, when saving is not released: install `FOCCPing.dll` and the combined probe kit only, start
+from the main menu with `coc FO4Core_RedRocketSpawn` (no save made without the kit is loaded), then
+`cgf "FOCC_B0.Gmst"`, `cgf "FOCC_B0.Ping" 41`, `cgf "FOCC_B0.Ping" 43`, `cgf "FOCC_B0.Gmst"`. The judge passes on the
+first read of 7 and an answered ping (`probes b0`); only "still bound after a load" stays NOT_RUN.
 
 **P1, the sidecar (two saves, one load).** In the console `save focc_p1_a`. Load the save the session started from
 (menu). In the console `save focc_p1_b`. Load `focc_p1_a` (menu). Quit to desktop.
@@ -200,8 +210,10 @@ line in the green box. *Control:* the console's `player.getpos x/y/z` after open
 numbers before that close, to 0.1.
 
 **C, click out.** PASS: `step=listen root=1 button=1 ... added=1 event=click` at the first open, and one `step=click
-n=<k>` per click on CLICK (1, then 2 more, then 1: n=1 to 4 if every open takes the mouse), and the next `step=field`
-reads that `CLICKS` count. *Control:* the click on the green beside the button (open 2) adds no `step=click`. An open
+n=<k>` per click on CLICK (1, then 2 more, then 1: n=1 to 4 if every open takes the mouse), and the next logged
+`step=field` reads that `CLICKS` count. Field lines are logged for n = 0 to 20 and then every 20th (and on a mismatch),
+so after the first ten seconds of an open the count shows at n = 40, 60, ... *Control:* a click beside the button at
+the same flag set adds no `step=click`. An open
 whose clicks log nothing is that flag set's finding (no cursor or no mouse for our menu), not a fail, as long as one
 open logs its clicks.
 
@@ -258,3 +270,33 @@ script VM runs while that flag set's menu is open; clicks logged only at or afte
 Send back: the three dll sha256s, the three logs and `focc_sidecar.log`, the sidecars, `focc.0.log`, `saves.json`, the
 two verdicts, the screenshots, for test C the three opens side by side, the `b03` folder, and the table of the three
 menu answers filled in.
+
+## 7. Results at `e7925e00` (owner PC, 10 Nov 2026, 22:52 to 23:06 UTC; landed as #711)
+
+Build round: all three dlls built (exit 0, libxse `9d090c4` / `9fbb74d`). **Test C: PC PASS.** Three sessions on the
+test save, no save made, the owner's set put back each time. `FO4SFPipboyMenu.log` had every load line above and no
+`refuse` line (FOCCPing and FOCCSidecar were not installed).
+
+- **Text field in: PASS.** `step=field n=0 ... match=yes`; with W held at open 1 the field went X 1.5 to -6.7 about
+  twice a second; the console's position after the close equals the last field line.
+- **Click out: PASS at `0x9`.** Two clicks on CLICK logged `step=click n=1` and `n=2`, and the next logged field line
+  read `CLICKS 2`. Five clicks off the button at `0x9` logged nothing. At `0x8` clicks on the button logged nothing
+  (they reach the game: the player attacks). At `0x0` there is no pointer.
+- **Pause and input:** `paused=0` with our menu open at every flag set; no set pauses the game.
+
+| | flags | pointer | W moves the player | a click goes to | contexts |
+|---|---|---|---|---|---|
+| plain play | | | | | `2[0,1]` |
+| the game's pause menu | | | | | `paused=1`, `7[0,1,78,2,11,3,13]` |
+| open 1 | 0x0 | none | yes | the game | `2[0,1]` |
+| open 2 | 0x8 | shown | yes | the game | adds 13 |
+| open 3 | 0x9 | shown | no | our menu | adds 13 |
+
+Open findings: the menu-stack read logged `menus=0[]` everywhere, also in the game's pause menu. That is a read that
+succeeded with size 0 (a failed one logs `fault`), so it does not show the offset is wrong: `0x3F0` is libxse's own,
+held by its `static_assert`. The cause is unresolved; since #722, `menus=` asks the engine's `IsMenuOpen` instead. What
+pauses the game is still to find (the pause menu adds contexts 78, 2, 11 and 3). F10 closed the menu at
+every open (18 of 18 `match=yes`).
+
+**B0-2 and P1: NOT_RUN.** They need saves (and P1 a deletion in the load menu), which the owner had not released; the
+two dlls were built and not installed.

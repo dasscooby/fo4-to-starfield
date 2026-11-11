@@ -9,6 +9,13 @@
 //   REFR  control                the vanilla control furniture itself, 2.5 m to the left (temporary): the player must
 //                                be able to sit on it, or the session proves nothing
 //   RACE  FO4SF_PARace           a copy of HumanRace (name replaced by a plain string)
+//   QUST  FO4SF_PAHandQuest      the by-hand mode (FAL-273): start game enabled, NO properties, script FO4SF_PAHandQuest: moves the player
+//                                into the cell, says on screen what stands where and what the engine answered to SwitchToPowerArmor
+//   QUST  FO4SF_PAEntryQuest     the power armor ENTRY by script (FAL-361, piece B of FAL-359): start game enabled, NO properties.
+//                                On sitting on FURN FO4SF_PAEntryFurn (a copy of the control, no keyword) it does NOT swap the race (PC run: the copy has
+//                                no skin); it adds and equips ARMO FO4SF_PAFrame, FO4SF_PAPieceHelm, FO4SF_PAPieceTorso and sets AVIF
+//                                FO4SF_PAInPowerArmor to 1; sitting on the control chair undoes all of it. The by-hand quest above is
+//                                start game enabled only with --with-hand (the two would both move the player and both talk).
 //   QUST  FO4SF_PAProbeQuest     start game enabled, stages 10 / 20 / 30, script FO4SF_PAProbeQuest with NO properties
 //                                (the script finds every form with Game.GetFormFromFile; a property would make the
 //                                temporary references persistent)
@@ -16,6 +23,11 @@
 // TestCell ones: floor 050776, omni light 03D38C, COC marker 000032, lighting template 006658, image space 122393).
 // The local ids are the script's (scripts/planet/FO4SF_PAProbeQuest.psc; tests/test_power_armor_probe.py compares).
 //
+// usage: PowerArmorProbe build <Starfield.esm> <out dir> [--control <furniture editor id>] [--with-hand] [--frame-art <ARMO editor id>] [--piece-art <ARMO editor id>]
+//        PowerArmorProbe check <plugin> <Starfield.esm> [same options]     exit 1 on a mismatch
+//        --frame-art / --piece-art: copy that vanilla ARMO (every field: its armatures, which are what make it wearable, and its own slot)
+//        into the frame / both pieces. Defaults Spacesuit_Mark1_Body / _Helmet / _Backpack (--pack-art: the second piece; the PC run of #733: an ARMO with NO armature
+//        is refused by the equip, with any race), so a stage always carries art; `none` is the offline test's opt-out, never the game's.
 // Variants (--variant race,furniture,keyword; none by default: the kit of the first PC run, 11 Nov, where stage 10 did
 // nothing). The owner PC found Starfield.esm keeps Fallout 4's power armor default objects (DFOB) under the same form
 // ids with an empty DATA: PowerArmorRace_DO, PowerArmorDefaultFrameFurniture_DO, PowerArmorArmorKeyword_DO. A variant
@@ -42,21 +54,28 @@ try
 {
     var rest = args.ToList();
     var control = "NPCChairTech03_Free_270";
-    string Take(string flag, string dflt)
+    string? Take(string flag)
     {
-        int i = rest.IndexOf(flag);
-        if (i < 0) return dflt;
-        if (i + 1 >= rest.Count) throw new PowerArmorProbe.Refusal($"{flag} needs a value");
-        var v = rest[i + 1];
-        rest.RemoveRange(i, 2);
+        int j = rest.IndexOf(flag);
+        if (j < 0) return null;
+        if (j + 1 >= rest.Count) throw new PowerArmorProbe.Refusal(flag + " needs an editor ID");
+        var v = rest[j + 1];
+        rest.RemoveRange(j, 2);
         return v;
     }
-    control = Take("--control", control);
-    var armor = Take("--armor", "");
+    control = Take("--control") ?? control;
+    string? fa = Take("--frame-art"), pa = Take("--piece-art");
+    if (fa != null) PowerArmorProbe.FrameArt = fa == "none" ? null : fa;
+    if (pa != null) PowerArmorProbe.PieceArt = pa == "none" ? null : pa;
+    string? ka = Take("--pack-art");
+    if (ka != null) PowerArmorProbe.PackArt = ka == "none" ? null : ka;
+    string armorEdid = Take("--armor") ?? "";
     PowerArmorProbe.KwFirst = rest.Remove("--kw-first");
-    var variants = PowerArmorProbe.ParseVariants(Take("--variant", ""));
-    if (rest.Count == 3 && rest[0] == "build") return PowerArmorProbe.Build(rest[1], rest[2], control, variants, armor);
-    if (rest.Count == 3 && rest[0] == "check") return PowerArmorProbe.Check(rest[1], rest[2], control, variants, armor);
+    var variants = PowerArmorProbe.ParseVariants(Take("--variant") ?? "");
+    int w = rest.IndexOf("--with-hand");
+    if (w >= 0) { PowerArmorProbe.WithHand = true; rest.RemoveAt(w); }
+    if (rest.Count == 3 && rest[0] == "build") return PowerArmorProbe.Build(rest[1], rest[2], control, variants, armorEdid);
+    if (rest.Count == 3 && rest[0] == "check") return PowerArmorProbe.Check(rest[1], rest[2], control, variants, armorEdid);
     if (rest.Count == 2 && rest[0] == "fixture") return PowerArmorProbe.Fixture(rest[1]);
 }
 catch (PowerArmorProbe.Refusal r)
@@ -64,13 +83,17 @@ catch (PowerArmorProbe.Refusal r)
     Console.Error.WriteLine("refused: " + r.Message);
     return 1;
 }
-Console.Error.WriteLine("usage: PowerArmorProbe build <Starfield.esm> <out dir> [--control <edid>] [--variant race,furniture,keyword,armor] [--armor <edid>] | " +
-                        "check <plugin> <Starfield.esm> [--control <edid>] [--variant ...] [--armor <edid>] | fixture <out dir>");
+Console.Error.WriteLine("usage: PowerArmorProbe build <Starfield.esm> <out dir> [--control <edid>] [--with-hand] [--frame-art <edid>] [--piece-art <edid>] [--pack-art <edid>] [--variant race,furniture,keyword,armor] [--armor <edid>] [--kw-first] | " +
+                        "check <plugin> <Starfield.esm> [same options] | fixture <out dir>");
 return 2;
 
 static class PowerArmorProbe
 {
     public class Refusal(string m) : Exception(m);
+
+    // options (set by the command line; check must be given the same ones as build)
+    public static string? FrameArt = "Spacesuit_Mark1_Body", PieceArt = "Spacesuit_Mark1_Helmet", PackArt = "Spacesuit_Mark1_Backpack";   // PC run of #733 at 8fe7c27e: two pieces in ONE slot push each other off
+    public static bool WithHand;
 
     const StarfieldRelease Release = StarfieldRelease.Starfield;
     static readonly ModKey SfEsm = ModKey.FromFileName("Starfield.esm");
@@ -78,9 +101,12 @@ static class PowerArmorProbe
 
     // the layout (scripts/planet/FO4SF_PAProbeQuest.psc carries the same ids)
     const uint CellId = 0x800, SuitId = 0x801, RaceId = 0x802, QuestId = 0x803, SuitRefId = 0x804, ControlRefId = 0x805,
-        CocRefId = 0x806, FirstTileId = 0x810;
+        CocRefId = 0x806, HandQuestId = 0x809, ArrivalRefId = 0x80A,
+        EntryQuestId = 0x80B, EntryFurnId = 0x80C, EntryRefId = 0x80D, InPaId = 0x80E, FrameId = 0x80F, PieceHelmId = 0x810, PieceTorsoId = 0x811, FirstTileId = 0x820;
     const string CellEdid = "FO4SF_PAProbeCell", SuitEdid = "FO4SF_PAProbeSuit", RaceEdid = "FO4SF_PARace",
-        QuestEdid = "FO4SF_PAProbeQuest", Script = "FO4SF_PAProbeQuest";
+        QuestEdid = "FO4SF_PAProbeQuest", Script = "FO4SF_PAProbeQuest", HandQuestEdid = "FO4SF_PAHandQuest", HandScript = "FO4SF_PAHandQuest",
+        EntryQuestEdid = "FO4SF_PAEntryQuest", EntryScript = "FO4SF_PAEntryQuest", EntryFurnEdid = "FO4SF_PAEntryFurn", InPaEdid = "FO4SF_PAInPowerArmor",
+        FrameEdid = "FO4SF_PAFrame", PieceHelmEdid = "FO4SF_PAPieceHelm", PieceTorsoEdid = "FO4SF_PAPieceTorso";
     const string KeywordEdid = "FurnitureTypePowerArmor", HumanRaceEdid = "HumanRace", FrameKeywordEdid = "isPowerArmorFrame";
     const uint ArmorKeywordId = 0x807;
     const string ArmorKeywordEdid = "FO4SF_PAArmorKeyword";
@@ -107,9 +133,9 @@ static class PowerArmorProbe
         "race" => Own(RaceId), "furniture" => Own(SuitId), "armor" => Own(FrameArmorId), _ => Own(ArmorKeywordId),
     };
     // dotnet/TestCell's vanilla forms
-    const uint Floor = 0x050776, Omni = 0x03D38C, CocMarker = 0x000032, LightingTemplate = 0x006658, ImageSpace = 0x122393;
+    const uint Floor = 0x050776, Omni = 0x03D38C, CocMarker = 0x000032, XMarker = 0x00003B, LightingTemplate = 0x006658, ImageSpace = 0x122393;
     const float Tile = 8f, LightZ = 4f;
-    static readonly P3Float SuitPos = new(0, -2.5f, 0), ControlPos = new(0, 2.5f, 0), CocPos = new(-5, 0, 0.1f);
+    static readonly P3Float SuitPos = new(0, -2.5f, 0), ControlPos = new(0, 2.5f, 0), CocPos = new(-5, 0, 0.1f), EntryPos = new(3, 0, 0);
     static readonly ushort[] Stages = { 10, 20, 30 };
     const string RaceName = "FO4SF PA race";
 
@@ -189,6 +215,33 @@ static class PowerArmorProbe
         race.Name = RaceName;
         mod.Races.Add(race);
 
+        // the entry kit (FAL-361): a furniture of ours that is the control's fields and no keyword, the value, the frame and the pieces
+        var entry = (Furniture)control.Duplicate(Own(EntryFurnId), new Furniture.TranslationMask(defaultOn: true) { Name = false });
+        entry.EditorID = EntryFurnEdid;
+        entry.Name = null;
+        mod.Furniture.Add(entry);
+        mod.ActorValueInformation.Add(new ActorValueInformation(Own(InPaId), Release)
+        {
+            EditorID = InPaEdid, Name = "FO4SF in power armor", Type = ActorValueInformation.Types.Variable,
+            Flags = ActorValueInformation.Flag.DefaultToZero, DefaultValue = 0f, Min = 0f, Max = 1f,
+        });
+        IArmorGetter? frameArt = FrameArt == null ? null : One(sf.Armors, FrameArt, "ARMO");
+        IArmorGetter? pieceArt = PieceArt == null ? null : One(sf.Armors, PieceArt, "ARMO");
+        IArmorGetter? packArt = PackArt == null ? null : One(sf.Armors, PackArt, "ARMO");
+        foreach (var (id, edid, name, slot, art) in Armors(frameArt, pieceArt, packArt))
+        {
+            var armor = art == null ? new Armor(Own(id), Release) : (Armor)art.Duplicate(Own(id));
+            armor.EditorID = edid;
+            armor.Name = name;
+            armor.VirtualMachineAdapter = null;
+            if (art == null) armor.FirstPersonFlags = slot;          // copied art keeps its own slot: a helmet copy forced into Hat was not drawn (PC run)
+            // a copy keeps the source's keywords, value, weight and health: the game goes by the keywords for a spacesuit part (PC run of
+            // #733 at 59a76008: a copy without KSIZ/KWDA and with a zero DATA was worn but not drawn, the vanilla set drew)
+            if (art == null) { armor.Keywords = null; armor.Value = 0; armor.Weight = 0; }
+            if (art == null) armor.Race.SetTo(humanRace.FormKey);   // no race swap (PC run of #733: the copied race has no skin): the player stays HumanRace
+            mod.Armors.Add(armor);
+        }
+
         // the frame armor of the armor variant: a copy of a plain vanilla armor plus isPowerArmorFrame
         string frameNote = "";
         if (variants.Contains("armor"))
@@ -229,9 +282,15 @@ static class PowerArmorProbe
         var zero = new P3Float(0, 0, 0);
         PlacedObject Ref(uint id, FormKey b, P3Float pos, P3Float rot, string? edid = null) =>
             new(Own(id), Release) { EditorID = edid, Base = new FormLinkNullable<IPlaceableObjectGetter>(b), Position = pos, Rotation = rot };
+        // the hand quest moves the player here from another cell: a temporary reference of an unloaded cell cannot be found by
+        // Game.GetFormFromFile (FAL-316 finding), a persistent one can; XMarker 00003B as dotnet/CoreStorage
+        var arrival = Ref(ArrivalRefId, Sf(XMarker), CocPos, new P3Float(0, 0, (float)(Math.PI / 2)), "FO4SF_PAProbeArrival");
+        arrival.MajorRecordFlagsRaw |= 0x400;
+        cell.Persistent.Add(arrival);
         cell.Temporary.Add(Ref(CocRefId, Sf(CocMarker), CocPos, new P3Float(0, 0, (float)(Math.PI / 2))));       // facing +X
         cell.Temporary.Add(Ref(SuitRefId, suit.FormKey, SuitPos, zero, "FO4SF_PAProbeSuitRef"));
         cell.Temporary.Add(Ref(ControlRefId, control.FormKey, ControlPos, zero, "FO4SF_PAProbeControlRef"));
+        cell.Temporary.Add(Ref(EntryRefId, entry.FormKey, EntryPos, zero, "FO4SF_PAEntryFurnRef"));
         for (float x = -Tile; x <= Tile; x += Tile)
             for (float y = -Tile; y <= Tile; y += Tile) cell.Temporary.Add(Ref(next++, Sf(Floor), new P3Float(x, y, 0), zero));
         for (float x = -4; x <= 4; x += 8)
@@ -257,16 +316,58 @@ static class PowerArmorProbe
         };
         quest.VirtualMachineAdapter.Scripts.Add(new ScriptEntry { Name = Script, Flags = ScriptEntry.Flag.Local });
         mod.Quests.Add(quest);
+
+        // the by-hand quest: one stage, no properties (the script finds every form with Game.GetFormFromFile)
+        var handQuest = new Quest(Own(HandQuestId), Release)
+        {
+            EditorID = HandQuestEdid, Name = "FO4SF power armor by hand", FormVersion = 581, Version2 = 12,
+            Data = new QuestData { Flags = WithHand ? Quest.Flag.StartGameEnabled : default, Priority = 30 },
+        };
+        handQuest.Stages.Add(new QuestStage { Index = 10 });
+        // the hand script is attached only with --with-hand: a quest script's OnInit runs although the quest is not start game enabled
+        // (PC run of #733: it moved the player and called SwitchToPowerArmor over the entry quest)
+        if (WithHand)
+        {
+            handQuest.VirtualMachineAdapter = new QuestAdapter
+            {
+                Version = 6, ObjectFormat = 2, ExtraBindDataVersion = 3,
+                Script = new ScriptEntry { Name = "", Flags = ScriptEntry.Flag.Local },
+            };
+            handQuest.VirtualMachineAdapter.Scripts.Add(new ScriptEntry { Name = HandScript, Flags = ScriptEntry.Flag.Local });
+        }
+        mod.Quests.Add(handQuest);
+
+        // the entry quest (FAL-361): one stage, no properties, start game enabled
+        var entryQuest = new Quest(Own(EntryQuestId), Release)
+        {
+            EditorID = EntryQuestEdid, Name = "FO4SF power armor entry", FormVersion = 581, Version2 = 12,
+            Data = new QuestData { Flags = Quest.Flag.StartGameEnabled, Priority = 30 },
+        };
+        entryQuest.Stages.Add(new QuestStage { Index = 10 });
+        entryQuest.VirtualMachineAdapter = new QuestAdapter
+        {
+            Version = 6, ObjectFormat = 2, ExtraBindDataVersion = 3,
+            Script = new ScriptEntry { Name = "", Flags = ScriptEntry.Flag.Local },
+        };
+        entryQuest.VirtualMachineAdapter.Scripts.Add(new ScriptEntry { Name = EntryScript, Flags = ScriptEntry.Flag.Local });
+        mod.Quests.Add(entryQuest);
         mod.ModHeader.Stats.NextFormID = next;
 
         Write(mod, outDir, SfEsm);
         var path = Path.Combine(outDir, Plugin.FileName);
         Console.WriteLine($"wrote {path} ({new FileInfo(path).Length:N0} bytes): CELL {CellEdid} {cell.FormKey}, FURN {SuitEdid} = copy of " +
                           $"{control.EditorID} {control.FormKey} + {kw.EditorID} {kw.FormKey}, control reference of {control.EditorID}, " +
-                          $"RACE {RaceEdid} = copy of {humanRace.EditorID} {humanRace.FormKey}, QUST {QuestEdid} stages [{string.Join(",", Stages)}]" +
+                          $"RACE {RaceEdid} = copy of {humanRace.EditorID} {humanRace.FormKey}, QUST {HandQuestEdid} (start game enabled: {WithHand}), QUST {EntryQuestEdid}, FURN {EntryFurnEdid}, AVIF {InPaEdid}, ARMO {FrameEdid} / {PieceHelmEdid} / {PieceTorsoEdid} (art: frame {FrameArt ?? "none"}, pieces {PieceArt ?? "none"}), QUST {QuestEdid} stages [{string.Join(",", Stages)}]" +
                           frameNote + (variants.Count == 0 ? "" : "; variant " + string.Join(",", variants) + ": " + string.Join(", ", variants.Select(v => $"{Dobj[v]} -> {Target(v)}"))));
         return 0;
     }
+
+    static (uint Id, string Edid, string Name, FirstPersonFlag Slot, IArmorGetter? Art)[] Armors(IArmorGetter? frameArt, IArmorGetter? pieceArt, IArmorGetter? packArt) => new[]
+    {
+        (FrameId, FrameEdid, "FO4SF power armor frame", FirstPersonFlag.BODY, frameArt),
+        (PieceHelmId, PieceHelmEdid, "FO4SF power armor helmet", FirstPersonFlag.Hat, pieceArt),
+        (PieceTorsoId, PieceTorsoEdid, "FO4SF power armor torso plate", FirstPersonFlag.UpperBody1VisOnly, packArt),
+    };
 
     static void Write(StarfieldMod mod, string outDir, params ModKey[] masters)
     {
@@ -313,12 +414,13 @@ static class PowerArmorProbe
             .Select(r => r.FormKey.ToString()).ToList();
         Need(foreign.Count == 0, $"records of another plugin (overrides): {string.Join(", ", foreign)}");
         var armors = mod.Armors.ToList();
-        Need(armors.Count == (variants.Contains("armor") ? 1 : 0), $"{armors.Count} armor(s) of ours, {(variants.Contains("armor") ? 1 : 0)} expected");
-        if (variants.Contains("armor") && armors.Count == 1)
+        int wantArmors = 3 + (variants.Contains("armor") ? 1 : 0);          // the entry kit's three, plus the armor variant's frame armor
+        Need(armors.Count == wantArmors, $"{armors.Count} armor(s) of ours, {wantArmors} expected");
+        if (variants.Contains("armor") && armors.Any(x => x.FormKey == Own(FrameArmorId)))
         {
             var tmpl = FrameArmorTemplate(sf, armorEdid);
             var frameKw = One(sf.Keywords, FrameKeywordEdid, "KYWD").FormKey;
-            var fa = armors[0];
+            var fa = armors.First(x => x.FormKey == Own(FrameArmorId));
             var akw = fa.Keywords?.Select(k => k.FormKey).ToList() ?? new();
             var ack = fa.Components.OfType<IKeywordFormComponentGetter>().SelectMany(c => c.Keywords ?? Enumerable.Empty<IFormLinkGetter<IKeywordGetter>>()).Select(k => k.FormKey).ToList();
             Console.WriteLine($"  ARMO {fa.EditorID} {fa.FormKey} (copy of {tmpl.EditorID} {tmpl.FormKey}) keywords [{string.Join(", ", akw)}] component [{string.Join(", ", ack)}] armor rating {fa.ArmorRating}");
@@ -339,8 +441,9 @@ static class PowerArmorProbe
         Need(mod.Keywords.Select(k => k.FormKey).SequenceEqual(variants.Contains("keyword") ? new[] { Own(ArmorKeywordId) } : Array.Empty<FormKey>()),
              "keywords of ours are not exactly the armor keyword of the keyword variant");
 
-        var suit = mod.Furniture.SingleOrDefault();
-        Need(suit?.FormKey == Own(SuitId) && suit.EditorID == SuitEdid, "not exactly our FURN");
+        Need(mod.Furniture.Count() == 2, "not exactly two FURN (the suit and the entry furniture)");
+        var suit = mod.Furniture.FirstOrDefault(f => f.FormKey == Own(SuitId));
+        Need(suit?.EditorID == SuitEdid, "no FURN FO4SF_PAProbeSuit");
         if (suit != null)
         {
             var keys = suit.Keywords?.Select(k => k.FormKey).ToList() ?? new();
@@ -361,12 +464,54 @@ static class PowerArmorProbe
         Need(race?.FormKey == Own(RaceId) && race.EditorID == RaceEdid, "not exactly our RACE");
         if (race != null) Console.WriteLine($"  RACE {race.EditorID} {race.FormKey} (copy of {humanRace.EditorID} {humanRace.FormKey}) name {race.Name?.String}");
 
+        // the entry kit (FAL-361): the furniture is the control's fields and NO keyword, the value, the frame and the pieces
+        var entry = mod.Furniture.FirstOrDefault(f => f.FormKey == Own(EntryFurnId));
+        Need(entry?.EditorID == EntryFurnEdid, "no FURN FO4SF_PAEntryFurn");
+        if (entry != null)
+        {
+            var ek = entry.Keywords?.Select(k => k.FormKey).ToList() ?? new();
+            var ck = control.Keywords?.Select(k => k.FormKey).ToList() ?? new();
+            Console.WriteLine($"  FURN {entry.EditorID} keywords [{string.Join(", ", ek)}] (the control's, no {kw.EditorID})");
+            Need(ek.SequenceEqual(ck) && !ek.Contains(kw.FormKey), "the entry FURN's keywords are not exactly the control's");
+            Need(entry.MarkerModel == control.MarkerModel, "the entry FURN's marker model differs from the control's");
+        }
+        var av = mod.ActorValueInformation.SingleOrDefault();
+        Need(av?.FormKey == Own(InPaId) && av.EditorID == InPaEdid, "not exactly our AVIF");
+        if (av != null) Console.WriteLine($"  AVIF {av.EditorID} {av.FormKey} type {av.Type} default {av.DefaultValue} min {av.Min} max {av.Max}");
+        var wantArt = new Dictionary<uint, string?> { [FrameId] = FrameArt, [PieceHelmId] = PieceArt, [PieceTorsoId] = PackArt };
+        foreach (var (id, edid, _, slot, _) in Armors(null, null, null))
+        {
+            var ar = armors.FirstOrDefault(x => x.FormKey == Own(id));
+            Need(ar?.EditorID == edid, $"no ARMO {edid}");
+            if (ar == null) continue;
+            var artEdid = wantArt[id];
+            var art = artEdid == null ? null : One(sf.Armors, artEdid, "ARMO");
+            Console.WriteLine($"  ARMO {ar.EditorID} {ar.FormKey} slot {ar.FirstPersonFlags} armatures {ar.Armatures?.Count ?? 0} (art: {artEdid ?? "none"})");
+            Need(art == null ? ar.FirstPersonFlags == slot : ar.FirstPersonFlags == art.FirstPersonFlags, $"ARMO {edid} is not in slot {(art == null ? slot : art.FirstPersonFlags)}");
+            Need((ar.Armatures?.Count ?? 0) == (art?.Armatures?.Count ?? 0), $"ARMO {edid} armatures differ from {artEdid ?? "none"}");
+            Need(ar.VirtualMachineAdapter == null, $"ARMO {edid} carries a script");
+            if (art != null)
+            {
+                var wantKw = art.Keywords?.Select(k => k.FormKey).ToList() ?? new();
+                var gotKw = ar.Keywords?.Select(k => k.FormKey).ToList() ?? new();
+                Console.WriteLine($"    keywords {gotKw.Count} (source {wantKw.Count}), value {ar.Value} weight {ar.Weight} health {ar.Health} (source {art.Value} / {art.Weight} / {art.Health})");
+                Need(gotKw.SequenceEqual(wantKw), $"ARMO {edid} keywords differ from {artEdid} (the game goes by them for a spacesuit part)");
+                Need(ar.Value == art.Value && ar.Weight == art.Weight && ar.Health == art.Health, $"ARMO {edid} value, weight or health differ from {artEdid}");
+            }
+            Need(ar.Race.FormKey != Own(RaceId), $"ARMO {edid} names the copied race (no race swap: it has no skin)");
+            if (art == null) Need(ar.Race.FormKey == humanRace.FormKey, $"ARMO {edid} does not name HumanRace");
+        }
+
         var cell = mod.Cells.Records.SelectMany(b => b.SubBlocks).SelectMany(s => s.Cells).SingleOrDefault();
         Need(cell?.FormKey == Own(CellId) && cell.EditorID == CellEdid, "not exactly our CELL");
         if (cell != null)
         {
             Need(cell.Flags is { } fl && (fl & Cell.Flag.IsInteriorCell) != 0, "CELL is not an interior");
-            Need(cell.Persistent.Count == 0, "CELL has persistent references (the probe's are temporary)");
+            var persist = cell.Persistent.OfType<IPlacedObjectGetter>().ToList();
+            Need(cell.Persistent.Count == 1 && persist.Count == 1 && persist[0].FormKey == Own(ArrivalRefId) && (persist[0].MajorRecordFlagsRaw & 0x400) != 0
+                 && persist[0].Base.FormKey == Sf(XMarker) && persist[0].Position == CocPos,
+                 "the CELL's persistent group is not exactly the arrival XMarker (the probe's other references are temporary)");
+            if (persist.Count == 1) Console.WriteLine($"  REFR {persist[0].FormKey} {persist[0].EditorID} persistent, base {persist[0].Base.FormKey} at ({F(persist[0].Position.X)}, {F(persist[0].Position.Y)}, {F(persist[0].Position.Z)})");
             var objs = cell.Temporary.OfType<IPlacedObjectGetter>().ToDictionary(o => o.FormKey);
             void Ref(uint id, FormKey b, P3Float pos, string what)
             {
@@ -377,10 +522,31 @@ static class PowerArmorProbe
             Ref(SuitRefId, Own(SuitId), SuitPos, "the suit reference (base, position, temporary)");
             Ref(ControlRefId, control.FormKey, ControlPos, "the control reference (base, position, temporary)");
             Ref(CocRefId, Sf(CocMarker), CocPos, "the COC marker");
+            Ref(EntryRefId, Own(EntryFurnId), EntryPos, "the entry furniture reference (base, position, temporary)");
             Console.WriteLine($"  CELL {cell.EditorID} {cell.FormKey}: {objs.Count} temporary references");
         }
 
-        var quest = mod.Quests.SingleOrDefault();
+        Need(mod.Quests.Count() == 3, "not exactly three QUST (the probe's, the by-hand one and the entry one)");
+        var entryQ = mod.Quests.FirstOrDefault(q => q.FormKey == Own(EntryQuestId));
+        Need(entryQ?.EditorID == EntryQuestEdid, "no QUST FO4SF_PAEntryQuest");
+        if (entryQ != null)
+        {
+            var es = entryQ.VirtualMachineAdapter?.Scripts.ToList() ?? new();
+            Console.WriteLine($"  QUST {entryQ.EditorID} flags {entryQ.Data?.Flags} scripts [{string.Join(", ", es.Select(s => $"{s.Name} ({s.Properties.Count} properties)"))}]");
+            Need(entryQ.Data?.Flags.HasFlag(Quest.Flag.StartGameEnabled) == true, "the entry QUST is not start game enabled");
+            Need(es.Count == 1 && es[0].Name == EntryScript && es[0].Properties.Count == 0, $"the entry QUST script is not {EntryScript} without properties");
+        }
+        var hand = mod.Quests.FirstOrDefault(q => q.FormKey == Own(HandQuestId));
+        Need(hand?.EditorID == HandQuestEdid, "no QUST FO4SF_PAHandQuest");
+        if (hand != null)
+        {
+            var hs = hand.VirtualMachineAdapter?.Scripts.ToList() ?? new();
+            Console.WriteLine($"  QUST {hand.EditorID} flags {hand.Data?.Flags} scripts [{string.Join(", ", hs.Select(s => $"{s.Name} ({s.Properties.Count} properties)"))}]");
+            Need(hand.Data?.Flags.HasFlag(Quest.Flag.StartGameEnabled) == WithHand, WithHand ? "the by-hand QUST is not start game enabled (--with-hand)" : "the by-hand QUST is start game enabled (only --with-hand does that)");
+            Need(WithHand ? hs.Count == 1 && hs[0].Name == HandScript && hs[0].Properties.Count == 0 : hs.Count == 0,
+                 WithHand ? $"the by-hand QUST script is not {HandScript} without properties" : "the by-hand QUST carries a script (only --with-hand attaches it)");
+        }
+        var quest = mod.Quests.FirstOrDefault(q => q.FormKey == Own(QuestId));
         Need(quest?.FormKey == Own(QuestId) && quest.EditorID == QuestEdid, "not exactly our QUST");
         if (quest != null)
         {
@@ -427,6 +593,12 @@ static class PowerArmorProbe
         });
         mod.Furniture.Add(new Furniture(Sf(0x0027D6), Release) { EditorID = "SynthAlreadyPowerArmor",
             Keywords = new ExtendedList<IFormLinkGetter<IKeywordGetter>> { new FormLink<IKeywordGetter>(kw.FormKey) } });
+        ExtendedList<IFormLinkGetter<IKeywordGetter>> Kws() => new() { new FormLink<IKeywordGetter>(other.FormKey), new FormLink<IKeywordGetter>(kw.FormKey) };
+        ExtendedList<ArmorAddonModel> Addons(params uint[] ids) => new(ids.Select(i => new ArmorAddonModel { ArmorAddon = new FormLinkNullable<IArmorAddonGetter>(Sf(i)) }));
+        mod.Armors.Add(new Armor(Sf(0x0030A1), Release) { EditorID = "SynthArmorArt", Name = "Synthetic art armor", Keywords = Kws(), Value = 7, Weight = 7.5f, Health = 100, FirstPersonFlags = FirstPersonFlag.BODY, Armatures = Addons(0x0030A2, 0x0030A3) });
+        mod.Armors.Add(new Armor(Sf(0x0030A4), Release) { EditorID = "Spacesuit_Mark1_Body", Name = "Synthetic suit body", Keywords = Kws(), Value = 7, Weight = 7.5f, Health = 100, FirstPersonFlags = FirstPersonFlag.BODY, Armatures = Addons(0x0030A5) });
+        mod.Armors.Add(new Armor(Sf(0x0030A8), Release) { EditorID = "Spacesuit_Mark1_Backpack", Name = "Synthetic suit pack", Keywords = Kws(), Value = 7, Weight = 7.5f, Health = 100, FirstPersonFlags = FirstPersonFlag.Backpack, Armatures = Addons(0x0030A9) });
+        mod.Armors.Add(new Armor(Sf(0x0030A6), Release) { EditorID = "Spacesuit_Mark1_Helmet", Name = "Synthetic suit helmet", Keywords = Kws(), Value = 7, Weight = 7.5f, Health = 100, FirstPersonFlags = FirstPersonFlag.Hat, Armatures = Addons(0x0030A7) });
         Directory.CreateDirectory(outDir);
         mod.BeginWrite.ToPath(Path.Combine(outDir, "Starfield.esm")).WithNoLoadOrder().Write();
         Console.WriteLine($"wrote {Path.Combine(outDir, "Starfield.esm")}");
