@@ -549,5 +549,21 @@ class TestCLI(unittest.TestCase):
                 rc, text = self._run_validate(cfg, tex)
         self.assertEqual(rc, 0, text)
 
+
+    def test_status_reports_revision(self):
+        with tempfile.TemporaryDirectory() as td:
+            cfg = Path(td) / "config.toml"
+            cfg.write_text("[paths]\nwork_dir = \"/tmp/w\"\n")
+            import io
+            import contextlib
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = main(["--config", str(cfg), "status"])
+            self.assertEqual(rc, 0)
+            out = buf.getvalue()
+            self.assertIn("revision:", out)
+            # In this checkout it is a short hex hash
+            self.assertRegex(out, r"revision: [0-9a-f]{7,12}")
+
 if __name__ == "__main__":
     unittest.main()

@@ -34,6 +34,8 @@ def cmd_status(args: argparse.Namespace) -> int:
 
     print("fo4-to-starfield status")
     print(f"  config: {Path(args.config or 'config.toml').resolve()}")
+    root = _repo_root()
+    print(f"  revision: {_git_revision(root)}")
     fo4 = cfg.get("fo4", {})
     data_dirs = fo4.get("data_dirs", [])
     print(f"  Fallout 4 data dirs: {len(data_dirs)} configured")
@@ -96,6 +98,23 @@ def _repo_root() -> Path | None:
     """This checkout's root, when running from one (config paths must stay outside it: no game data in Git)."""
     root = Path(__file__).resolve().parents[2]
     return root if (root / ".git").exists() and (root / "src" / "fo4sf").is_dir() else None
+
+def _git_revision(root: Path | None) -> str:
+    """Short commit hash of this checkout, or 'unknown' if not a git repo or git unavailable."""
+    if root is None:
+        return "unknown"
+    try:
+        import subprocess
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=root,
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        ).strip()
+        return out or "unknown"
+    except Exception:
+        return "unknown"
 
 
 def _inside(p: Path, root: Path | None) -> bool:
