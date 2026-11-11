@@ -57,7 +57,7 @@ if (Get-Command git.exe -ErrorAction SilentlyContinue) {
   elseif ($sharedCommit -ne $PinnedShared) { "note: lib\commonlib-shared is at $sharedCommit, not the pinned $PinnedShared (recorded in build.json)" }
 }
 $src = $PSScriptRoot
-$sources = @('xmake.lua', 'src\main.cpp', 'src\pch.h', 'FO4SFPipboyMenu.ini')
+$sources = @('xmake.lua', 'src\main.cpp', 'src\pch.h', 'src\world.cpp', 'src\world.h', 'FO4SFPipboyMenu.ini')
 foreach ($s in $sources) { if (-not (Test-Path (Join-Path $src $s))) { "missing $s in $src"; exit 1 } }
 if ($Sdk -and -not (Test-Path (Join-Path $Sdk 'VC\Tools\MSVC'))) { "-Sdk $Sdk has no VC\Tools\MSVC folder: xmake's --sdk takes a Visual Studio-shaped root"; exit 1 }
 

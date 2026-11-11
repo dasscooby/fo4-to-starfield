@@ -1,8 +1,8 @@
 # Load order on the test PC: what writes Plugins.txt, and why ref ids move between sessions
 
-Written 22 Oct 2026 from the code on main and the Install thread's reads of the owner's PC. There is no single
-enforced load order today; this page records the three orders that exist and who changes the file. Nothing here is
-verified beyond what each line says.
+Written 22 Oct 2026 from the code on main and the Install thread's reads of the owner's PC; launcher preservation
+updated 11 Nov for FAL-354. This page records who changes the file. Nothing here is verified beyond what each line
+says; the dated PC observations below are historical.
 
 ## Who writes Plugins.txt
 
@@ -66,22 +66,40 @@ verified beyond what each line says.
 
 ## Target order
 
-`scripts/game/load_order.py` (module doc) is the one definition, and since 28 Oct it is the order the runner's own
-tools leave behind (`cycle.ps1` runs `exp_install.py order`, `map_markers_install.py order` and `bridge_install.py
-order` before every launch), so a file those tools just wrote is already in it and `play` changes nothing on a test
-install, with two exceptions: an unticked markers or bridge line (held off by `plugin_toggle.py`) still moves to the
-end, where the runner leaves it, and a plugin that masters the markers or the bridge loads after them:
+`scripts/game/load_order.py` (module doc) is the definition. Since the FAL-354 correction, it keeps any order in
+which each plugin follows all its masters. If repair is needed, the earliest original line whose masters have
+already been placed goes next. Markers, bridge and later-installed kits have no special priority. A valid file is
+left byte-equal, with no backup or rewrite. Unticked lines stay unticked. This retains the historical valid game
+order and runner orders while also accepting kits appended after markers or the bridge.
 
-1. every line keeps its place, in file order, except that
-2. a plugin loads after each of its masters that has a line (a patch for one of ours comes right after it), and
-3. FO4SFMapMarkers goes after everything else and FO4SFBridge last of all.
-
-The cores, FO4Port and the experiments stay in the order their installs appended them. The order the game wrote at
-11:26 on 22 Oct (TerrainCore, TerrainCore_Mars, ActorRaider, Mission, Port, MapMarkers, Bridge) is in the target, so
-a game that writes it again changes nothing. Until 28 Oct the target also sorted the cores, the experiments and
-FO4Port into fixed groups: on the full install of 28 Oct (Install thread) that would have moved 7 lines the install
-tools had just placed, so the groups went and the runner's rules are the target (`tests/test_load_order.py` holds
-that file). `fix` copies the old file to `Plugins.txt.bak-<time>` before writing and never ticks or unticks a line;
+The runner's explicit `map_markers_install.py order` and `bridge_install.py order` commands still place their
+components at the end; those tools are separate from launcher `play` and are unchanged by this correction.
+`fix` copies the old file to `Plugins.txt.bak-<time>` before a necessary repair and never ticks or unticks a line;
 both `check` and `fix` refuse (exit 6) a missing or inactive master, a master cycle or a duplicated line. In the
 launcher, `load_order=fix` (the default) runs it before each start, `check` refuses to start on a different order, and
 `off` leaves the file alone; `play --dry-run` only reports what `fix` would move.
+
+## Two ride-along kits, 11 Nov 2026 (FAL-354)
+
+**Verified offline:** at base `ba286735f320a80d10164e0327559bfb68202ba7`, the old `target()` gives markers group 1
+and bridge group 2, ahead of their original line positions in the sort key. Given Mission, MapMarkers, an unticked
+Bridge, PipboyProbe, RadsProbe, it emits Mission, PipboyProbe, RadsProbe, MapMarkers, Bridge. A synthetic
+`plugin_toggle.py off/on` pair alone preserves that original file; adding the launcher's load-order fix reproduces
+the reorder. The tests in `tests/test_plugin_toggle.py` and `tests/test_load_order.py` cover the pair and the valid
+two-kit order, including BOM/CRLF and LF. Master-order repairs and missing-master/cycle refusals remain tested.
+
+**PC timing unresolved:** the PC helper reports index 0A for the rads kit during the game, with the original order,
+and the reordered file after exit. The launcher's fixer runs *before* launch. Reproducing its output does not prove
+it wrote that particular post-session snapshot. `BRIDGE_OFF_RESTORED` is not a string in this source tree. Compare
+the PC chain's actual commands/heads, launcher output and snapshots before attributing the observed timing.
+
+**Save interpretation:** in the supplied snapshots Mission and NewGame do not move. MapMarkers moves behind two
+active kits; the unticked bridge contributes no active load slot. Each kit moves ahead of one active plugin
+(MapMarkers). A subsequent launch that uses the reordered list therefore has changed runtime indices for markers
+and kits. A file rewrite during an already-running session does not establish that session's runtime indices at
+save time: the reported console index is the available runtime evidence. This fix writes only Plugins.txt, not
+plugin records, names or local record IDs. Existing save compatibility, including reload with the restored order,
+is **NOT_RUN** here; neither corruption nor safe reload is established from the disk diff alone.
+
+Owner test-list line: **Keep one ride-along kit installed until the preservation fix is reviewed, integrated and
+the PC confirms a byte-equal two-kit session; two simultaneous kits are not cleared yet.**

@@ -277,6 +277,121 @@ Uninstall:
 
 **Log:** `Documents\My Games\Starfield\SFSE\Logs\FO4SFPipboyMenu.log`. `SFSE::Init` opens it, named after the plugin.
 
+## World surface (FAL-250)
+
+One question: **can the movie (b) shows as a centred overlay be drawn on a surface in the world**, a mesh you can
+walk around? Spec: FAL-248 document `wrist-pipboy`, section 4. Not this probe: the worn Pip-Boy, the arm raise, the
+camera, input, power armor, the data channel.
+
+`World=1` next to `Stage=2` adds two things, in `src/world.cpp`. With `World=0` (as shipped) none of it runs and the
+log is #704's. It runs only after every check above passed (runtime 1.16.244.0, the Address Library file, the IMenu
+ids, vtables and RTTI), and it adds no id and no hook. Its first line, after `step=ready`, is `step=world_config
+world_key= world_menu= world_movie=`, or one `refuse step=world` line and the overlay probe runs alone.
+
+- **Census.** When our menu registers, every menu name the UI has registered (`step=census_registered`), then one
+  `step=census_registered_done ... leads=` line: the names holding `test`, `dynamic`, `textur`, `geo`, `terminal`,
+  `kiosk`, `cockpit`, `screen`, `monitor`, `display`, `watch`, `slate` or `3d`. Then every menu whose movie SFSE's
+  own `IMenu::LoadMovie` hook reports, once per name and flag set: `step=census_movie menu= result= class= flags=
+  movie= depth= lead=`. `result=1` means the menu holds a movie after the engine's loader returned (SFSE's hook does
+  not pass the return value on). `class` is the decorated name the menu's RTTI gives (`outside_image` for ours: its
+  vtable is our copy). This is the flag dump the candidate is chosen from; libxse leaves the flag bits unnamed.
+- **World candidate.** `WorldKey` (F8) sends show, then hide, to `WorldMenu`, one vanilla menu named from the census,
+  with `step=world_toggle` and, 750 ms later, `step=world_state` (open, expected, and the menu's class, flags and
+  movie). Each time that menu loads a movie: `step=world_load_movie menu= result= movie_file=`. Its movie comes from
+  the probe archive only: `python scripts/ui/make_pipboy_probe.py twin <exp folder> Interface/<file>` writes our movie
+  again, byte for byte (label included), at that vanilla path; `WorldMovie` names it in the log.
+  `pipboy_probe_install.py` packs a twin with the movie and refuses one that is not byte for byte the movie.
+  `Starfield - Interface.ba2` is never changed.
+
+What it reads: the UI's menu map (libxse `UI::menuMap`, the table #704's `IsMenuRegistered` already reads), each
+menu's name, flags and movie (libxse's IMenu layout, which #704 uses), and the RTTI locator before a vtable, each
+address inside Starfield.exe's image first. What it calls: what the overlay key calls (`UI::IsMenuOpen`,
+`UIMessageQueue::AddMessage`), and one `BSFixedString` for the candidate's name.
+
+### Candidates, in order: stop at the first the census makes declarable
+
+| # | Candidate | In this build | Declarable when |
+| --- | --- | --- | --- |
+| 1 | ~~vanilla `testmenus_dynamictexturedgeo`~~ dropped | | the PC read the file (10 Nov): a 4.9 kB renderer test of shapes with one name, `Scene`, not a movie on an object |
+| 2 | a vanilla terminal, kiosk or cockpit screen (first `TerminalMenu`, `GenesisTerminalMenu`, then `DataSlateMenu` with `WorldMenu=`) | use the object in the game, or the key; a twin at the screen's movie path | `step=census_movie` lists the menu that opens with that screen |
+| 3 | one throwaway NIF/material in the probe plugin | not built | (1) and (2) give no hook; it needs a dump of a vanilla material first |
+
+Two **hypotheses** the pictures settle: a vanilla menu loads `Interface/<its name>.swf` or `.gfx`, as ours loads
+`Interface/FO4SF_PipboyMenu.swf` (names in the notes fit: `hudmenu.gfx`, `monoclemenu.swf`; the PC's interface list
+names the real file); and the probe archive wins over `Starfield - Interface.ba2` for the same path. A twin under a
+`.gfx` name keeps the SWF header. A menu whose own `LoadMovie` never reaches `IMenu::LoadMovie` is not in the census.
+
+### Job card (FAL-250)
+
+The build, install and uninstall of (b). Two passes; the game is closed between them. No step needs a save of its
+own; load one that starts next to a terminal (a ship's cockpit nearby helps).
+
+**Pass 1, the census and the overlay control** (no twin):
+
+1. Plugin ini: `Stage=2`, `World=1`, `WorldMenu=` and `WorldMovie=` empty. Stage and install as (b).
+2. Load the save; wait until in control.
+3. Overlay control: F10, screenshot, F10.
+4. F8 once: `refuse step=world_toggle n=1 reason=no_world_menu` (census only).
+5. Use the terminal: activate it, wait for its screen, leave it. If there is a ship: sit in the pilot seat, stand up.
+6. Quit. Report, names only: `leads=`, every `step=census_movie` line with `lead=1`, the terminal's and the
+   cockpit's `step=census_movie` lines, and the PC's `Starfield - Interface.ba2` list filtered for those names (file
+   names, nothing of their content).
+7. Pick the candidate by the table above.
+
+**Pass 2, the world candidate** (same build):
+
+1. Uninstall pass 1's archive. `make_pipboy_probe.py stage <exp folder>`, then `make_pipboy_probe.py twin <exp
+   folder> Interface/<the candidate's file>`; install.
+2. Plugin ini: `WorldMovie=Interface/<that file>`; candidate 1 also `WorldMenu=<its name>`.
+3. Load the same save. Overlay control again: F10, screenshot, F10.
+4. Candidate 1: F8 (show). Candidate 2: use the terminal or sit in the seat.
+5. Screenshot the surface, then a second one after moving the camera: walk round it, or put something in front of
+   it.
+6. Negative: F8 again (hide), or leave the terminal or the seat. Screenshot the same surface.
+7. Quit; uninstall; compare with the receipts.
+
+### PASS (FAL-250): all three, no crash
+
+1. **Overlay control.** The (b) PASS: `step=load_movie ... stage=b result=1`, the green card centred, the label.
+2. **World candidate.** The overlay is closed (the last `step=state ... open=0`); the candidate loaded a movie
+   (`step=world_load_movie menu=<name> result=1 movie_file=<twin>`, or for a screen its `step=census_movie ...
+   result=1`); the screenshot shows `FO4SF PIP-BOY PROBE` on a surface in the world: foreshortened with it, hidden by
+   what is in front of it, moving or leaving the frame as the camera moves.
+3. **Negative.** After the hide, the surface no longer shows our card (it was the movie, not a baked texture).
+
+### Inconclusive (do not call these PASS)
+
+- The card is still a screen overlay: no perspective, nothing in the world hides it.
+- A picture like ours without the label, or no `result=1` line for the candidate: not our movie.
+- Vanilla art on the surface: the twin did not reach the menu (path, `.gfx` header or archive order); re-check the
+  path in the interface list.
+- No second view (camera moved, or something in front).
+- A hang or a crash before both views: the last line names the step.
+- Any method that changes `Starfield - Interface.ba2`: it would not prove our movie.
+
+**A useful FAIL:** the overlay control passes and the world path is refused with a named step, for example
+`refuse step=world_toggle ... reason=not_registered` for every candidate name, or the census shows that the
+terminal's menu is a screen overlay. Then the wrist goes to the flat fallback (#704's overlay), unless candidate 3
+finds a material that names a render target.
+
+### What each world line means
+
+| Line | Meaning | Next |
+| --- | --- | --- |
+| `refuse step=world reason=needs_movie_stage` | `World=1` without the movie stage | `Stage=2` |
+| `refuse step=world reason=key` | `WorldKey` is 0, above 0xFE, or the menu's key | fix the ini |
+| `refuse step=world reason=world_menu` | `WorldMenu` has a character other than letters, digits and `_` | copy the name from the census |
+| `refuse step=world reason=world_menu_is_ours` | `WorldMenu` names the overlay control | a vanilla name |
+| `refuse step=world reason=world_movie` | `WorldMovie` has a character other than letters, digits and `_ . / \ -` | copy the twin's path |
+| `refuse step=world_key_thread` | the key thread could not start | report |
+| `refuse step=world_toggle n=<n> reason=no_world_menu` | census only, `WorldMenu` empty | expected in pass 1 |
+| `refuse step=world_toggle n=<n> menu=<name> reason=not_registered` | the UI has no menu by that name; nothing was sent | a named FAIL for that candidate |
+| `refuse step=world_toggle n=<n> menu=<name> reason=no_ui_or_queue` | pressed before the UI existed | press again once in play |
+| `step=world_state ... match=no` | the candidate did not open or close as asked | read the census lines around it |
+| `step=world_load_movie ... result=0` | the candidate loaded no movie | the twin's path or header is not what it loads |
+| no `step=census_movie` line at all | SFSE gave no menu interface | report the SFSE version |
+| `step=census_movie_full` | 256 menu and flag pairs listed | the first 256 are in the log |
+
 ## Job card
 
 Load a save, wait until in control, then press the key ten times, about two seconds apart: five opens and five closes.
