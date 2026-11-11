@@ -133,8 +133,10 @@ def is_flat(grid, r, c, radius):
 
 
 def connections_raw(raw):
-    """Eight raw u16 border heights for an SFBK FNAM: SW, S, SE, E, NE, N, NW, W (row 0 = south). Only the first
-    one (SW corner) matches vanilla blocks (3 of 3 checked); the meaning of the other seven is unresolved."""
+    """Eight raw u16 heights SW, S, SE, E, NE, N, NW, W (row 0 = south), as the first exp2 build wrote them to SFBK
+    FNAM. Superseded: that 8-value reading of FNAM is refuted. Vanilla FNAM holds one raw u16 per BTD cell
+    (DNAM.x * DNAM.y values in all 1,730 vanilla SFBK with an FNAM), usually the cell's SW-corner sample; PR #64's
+    builder writes that form and no longer uses this function. Kept only to reproduce the first exp2 staging."""
     h = np.asarray(raw)
     r, c = h.shape[0] - 1, h.shape[1] - 1
     return [int(h[0, 0]), int(h[0, c // 2]), int(h[0, c]), int(h[r // 2, c]),

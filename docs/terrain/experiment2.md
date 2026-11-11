@@ -12,6 +12,22 @@ Author: Claude, 2026-10-11. Branch `claude/terrain-exp2` (built on `claude/terra
 Labels: **verified** = measured here, number given; **supported** = supported hypothesis; **unresolved** = not known.
 Offline checks are not in-game acceptance.
 
+> **In-game update (2026-10-11, unattended runner; evidence in `C:\Modding\testqueue\terrain_*`).** Label added:
+> **refuted** = contradicted by a measurement. This experiment as staged here (loose BTD, no planet registration)
+> **cannot show the Commonwealth heights** and was not run:
+> - loose files are disabled on this install (`Starfield.ini` has `sResourceDataDirsFinal=STRINGS\`), so a loose BTD
+>   is never read (**verified**);
+> - a worldspace's own BTD only applies to an overlay **activated** on a planet (PNDT `CNAM`); unregistered plugin
+>   worldspaces show procedural planet ground, they do not fall through (**verified**, experiment 1: World01 and
+>   World02 read identical heights 4.18 / 11.86 / 15.98 m);
+> - activation merges the cells at a whole-cell offset plus a Z offset (vanilla LC172World -500 / -2300 m, Z -3.62 m;
+>   exp2b -1200 / -2700 m), so hypothesis H below is **refuted** in its absolute form (see "What it tests").
+>
+> Its successor exp2b (PR #64: Mars registration, BTD packed in the plugin's BA2) read a flat -116.00 m, the BTD's
+> minimum (raw 0), at all 14 probes (`terrain_exp2b`). Cause, as a **supported hypothesis** with a rerun pending: the
+> BTD was zlib-compressed inside the BA2, while all 2,112 vanilla BTDs are stored; `exp_install.py` now packs with
+> `-compression=None` (branch `claude/test-queue`). Summary of all runs: [architecture.md](architecture.md) (PR #57).
+
 ## What it tests
 Experiment 1 ([architecture.md](architecture.md), section 5) asks whether a plugin worldspace loads its own BTD at
 all, by record path or by name, and at what height scale, using flat test pads. Experiment 2 is the next step on
@@ -21,12 +37,20 @@ the same mechanism: **the real Fallout 4 terrain around the Red Rocket truck sto
 1. Does a large real-terrain BTD (27.6 MB, 841 cells) load and render like the 5 x 5 test BTD?
 2. Hypothesis **H**: BTD height = world z in metres, and FO4 positions and heights convert at 70 units per metre
    (the repo's object scale). Then a player dropped at FO4 vertex (x, y) / 70 lands at FO4 height / 70.
+   **Refuted in this absolute form** (in game, 2026-10-11): an activated overlay is merged at a whole-cell XY offset
+   plus a Z offset (vanilla LC172World: -500 / -2300 m, Z -3.62 m under Relative alignment). Only the relative form
+   can hold: heights measured against an anchor in the overlay's own frame, which is how exp2b measures. On vanilla
+   LC172World that form matched the BTD within 0.02 m in the authored cell (**verified**). Whether Absolute alignment
+   (`INAM` 1, exp2b) removes the offsets is **unresolved**.
 3. Grid rule (supported, from PR #57): the BTD's south-west sample is n // 2 cells west and south of the world
-   origin, with 100 m cells, 128 samples per cell and row 0 at the south edge.
+   origin, with 100 m cells, 128 samples per cell and row 0 at the south edge. In game this can hold only in the
+   overlay's own frame (see 2).
 4. Are there steps at the LOD0 block borders (Starfield 100 m cells) or at FO4 cell borders?
 
-It is built so that it works **whichever BTD lookup experiment 1 finds**. The SFBK `ANAM` record path and the
+It was built so that it works **whichever BTD lookup experiment 1 finds**. The SFBK `ANAM` record path and the
 worldspace EditorID name both lead to `Data\TERRAIN\FO4CW_Commonwealth.btd`, as for experiment 1's `FO4TX_World01`.
+In game neither lookup is used without a planet registration (**verified**), so this staging needs exp2b's Mars
+plugin and a packed BTD.
 
 ## Staged files (`C:\Modding\staging\terrain_exp2`, outside the repo)
 
@@ -41,8 +65,9 @@ worldspace EditorID name both lead to `Data\TERRAIN\FO4CW_Commonwealth.btd`, as 
 | `preview.png` | 270,403 | heightmap with the BTD cell grid and the check points (north up) |
 
 The layout fits `scripts/game/exp_install.py` (branch `claude/test-queue`). That tool activates only the first
-`.esm` and copies the `Data\` tree, here a single BTD. `plan.json` and the other top-level files are not copied
-into the game.
+`.esm` and copied the `Data\` tree, here a single BTD, as loose files. Loose files are not read on this install
+(**verified**), so the installer now packs the tree into `<plugin> - Main.ba2` (`--pack`, stored with
+`-compression=None`). `plan.json` and the other top-level files are not copied into the game.
 
 ## Grid and coverage
 - Region that must have real heights: the PR #56 patch (FO4 cells x -18..-17, y 18..19, which is
@@ -52,7 +77,8 @@ into the game.
   The smallest n that does is **n = 29** (`terrain_grid.choose_n`). With n = 29:
   - the samples run from -1400.00 to 1499.22 m on both axes;
   - Starfield cells **-14..14** (841);
-  - this is within the vanilla maximum of 100 x 100 cells.
+  - this is within the vanilla maximum of 100 x 100 cells for a BTD, but about twice (per side) the largest BTD
+    behind a vanilla overlay, 14 x 14 (NewAtlantis, SettleWaggonerFarm; QA raw walk on PR #57). Untested size.
 - FO4 cells read: **x -24..25, y -24..25 (2,500 cells)**. That is every FO4 cell under the BTD footprint, so the
   whole BTD holds real Commonwealth heights.
   - The minimum for the region alone would be x -24..-11, y 12..25 (196 cells). The other ~75% of the BTD would
@@ -66,6 +92,8 @@ into the game.
 - FO4 seams in the cells read (**verified**): 4,900 neighbour pairs, of which 42 vertices do not match. The worst is
   152 units (2.2 m), between cells (-15,-1) and (-14,-1), about 1.4 km from Red Rocket. The merged grid takes the
   south/west cell's copy.
+- DLC overrides are not applied: `DLCRobot.esm` changes LAND in FO4 cell (-1, 5) by up to 32 units (0.46 m), inside
+  this footprint but far from the check points (QA review on PR #56).
 - Heights -114.46..140.67 m. The header range is -116..142 m, so the **16-bit quantisation step is 3.937 mm**.
 
 ## Ground texture
@@ -164,28 +192,38 @@ Details:
         --out <queue dir> --plugins FO4TerrainExp2.esm
     python scripts/game/testqueue.py run --queue <queue dir>
 
-- The runner COCs to `FO4CW_RedRocketSpawn`.
+- The runner COCs to `FO4CW_RedRocketSpawn` (`coc <exterior cell EditorID>` works in game; `cow`,
+  `coc <worldspace>` and `player.moveto <non-persistent ref>` do not, **verified**).
 - For each point it teleports to (x, y, 150), waits, and reads `player.getpos`.
 - It reports PASS when every point is within 0.5 m and within 2 m horizontally.
+  - As planned this judged absolute z, which the merge offset rules out (H, above). The runner on
+    `claude/test-queue` now shifts the points by the measured merge offset and judges heights relative to it; for
+    exp2b it falls back to the arrival point, because our anchor reads its unmerged local position.
+  - PASS/FAIL cannot decide the grid rule: the 0.5 m tolerance is larger than every point's half-sample
+    `shift sens.` (0.09-0.21 m). Judge the rule from the raw numbers, with the expectation evaluated at the read
+    (x, y), not the planned one (on LC172World one probe landed 0.49 m from its planned x).
 - It records a screenshot at `beyond`.
 
-**By hand:** `C:\Modding\staging\terrain_exp2\README.txt`. In short:
-1. Install the esm and the BTD.
-2. `tgm`, then `coc FO4CW_RedRocketSpawn`, then `player.getpos z`, which should give about 105.14.
-3. For each point: `player.setpos x/y/z`, land, then `player.getpos z`.
-4. Look past x = -1400 m.
+**By hand:** `C:\Modding\staging\terrain_exp2\README.txt`. In short (as planned; see the notes):
+1. Install the esm and the BTD. In game this needs the BTD in `FO4TerrainExp2 - Main.ba2`, stored uncompressed
+   (loose files are not read), and the planet registration plugin from exp2b (PR #64).
+2. `tgm`, then `coc FO4CW_RedRocketSpawn`, then `player.getpos z`, which should give about 105.14 (in game: plus
+   the overlay's Z offset, and x/y shifted by the whole-cell merge offset).
+3. For each point: `player.setpos x/y/z`, land, then `player.getpos z` (shift x/y by the merge offset).
+4. Look past x = -1400 m (overlay frame).
 
 ## Reading the result
 
 | Observation | Meaning |
 |---|---|
-| All points within 0.5 m | Real terrain loads; H and the grid rule hold. Next: the Red Rocket statics (below) |
+| All points within 0.5 m (relative to the overlay's offsets) | Real terrain loads; the relative form of H holds (the grid rule needs the raw numbers, see Running it). Next: the Red Rocket statics (below) |
 | All off by one constant | vertical offset (a world height origin or the SFBK alignment fields `HNAM`/`INAM`) |
 | Heights scaled (read / expect constant) | Height mapping differs: x8 is fo76utils' FIXME scale, 0.7 would mean 100 units per metre |
 | Slope points off by up to their `shift sens.`, flat points right | half-sample grid shift: sample centres, not corners |
 | One seam pair differs, the rest pass | LOD0 block stitching (seam_sf) or FO4 border handling (seam_fo4) |
-| Fell through (NOTERRAIN) | The BTD did not load. Compare with experiment 1: size (27.6 MB, 29 cells), `SmallWorld` with 841 cells, or the lookup path |
-| Experiment 1 passes only with the Mars registration | Add the same `PNDT` entry for `FO4CW_Commonwealth` (an `FO4TerrainExp1_Mars.esm` copy) |
+| Fell through (NOTERRAIN) | The BTD did not load. Compare with experiment 1: size (27.6 MB, 29 cells), `SmallWorld` with 841 cells, or the lookup path. **Not what the game does:** an unregistered worldspace gets procedural planet ground, with a loose or a packed BTD (**verified**) |
+| Flat at the BTD minimum (raw 0) everywhere | Registered, but the BTD's blocks were not decoded. Seen in exp2b (-116.00 m at all 14 probes); supported hypothesis: compressed BTD in the BA2 |
+| Experiment 1 passes only with the Mars registration | Add the same `PNDT` entry for `FO4CW_Commonwealth` (an `FO4TerrainExp1_Mars.esm` copy). In game the registration is always required (**verified**); exp2b adds it |
 
 ## Next step: Red Rocket exterior statics in this worldspace
 
@@ -215,8 +253,11 @@ Details:
   (PR #56), and 105.1429 m against the decoded BTD's 105.1434 m.
 
 ## Unknowns
-1. Everything in game: whether it loads, H, the grid rule, seams, what lies beyond the edge. Experiment 1 comes first.
-2. Whether `SmallWorld` (copied from the 5 x 5 template) limits a 29 x 29 world, and whether all 841 empty cells are
+1. Everything in game: whether our BTD is used at all once registered (exp2b came out flat at raw 0; rerun with a
+   stored BTD pending), the relative form of H under Absolute alignment, the grid rule, seams, what lies beyond the
+   edge. Answered: registration is required and loose BTDs are not read (**verified**, experiment 1).
+2. Whether `SmallWorld` (copied from the 5 x 5 template) limits a 29 x 29 world (twice the largest activated vanilla
+   overlay per side, 14 x 14), and whether all 841 empty cells are
    needed. In vanilla akilacity, 55 of its 81 BTD cells hold references (`SfInspect wcells`); whether the
    other 26 have empty CELL records was not checked.
 3. ~~The meaning of `FNAM` entries 2-8~~ (resolved: one value per cell, see overlay-records.md); the alignment

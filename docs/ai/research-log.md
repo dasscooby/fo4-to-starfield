@@ -1080,6 +1080,13 @@ supported hypothesis / unresolved. Older research lives in docs/JOURNAL.md and d
   - **Unresolved**: `FNAM[1..7]`, whether `SmallWorld` or 841 empty cells matter, FO4's triangle split, and cliff
     accuracy at a 0.78 m grid.
   - Next (plan): an exterior exporter for the Red Rocket statics. Fo4Export is interior-only.
+- Update (in game, 2026-10-11; `C:\Modding\testqueue\terrain_*`): this staging (loose BTD, no registration) cannot
+  show the heights: loose files are not read on this install and a BTD only applies to an overlay activated on a
+  planet (both **verified**, experiment 1). H is **refuted** in its absolute form (activation adds a whole-cell XY
+  offset and a Z offset; vanilla LC172World -500 / -2300 m, Z -3.62 m); its relative form matched vanilla
+  LC172World within 0.02 m. The successor exp2b (PR #64) read a flat -116.00 m (raw 0) at all 14 probes; the cause,
+  a compressed BTD in the BA2, is a **supported hypothesis**, rerun pending. `FNAM[1..7]` is moot: FNAM is one value
+  per BTD cell (PR #64).
 
 ## 2026-10-11 Claude: Starfield terrain architecture
 - Question: how can native Starfield terrain carry the exact Commonwealth geography (S5 / WP-12)?
