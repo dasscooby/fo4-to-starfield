@@ -1,10 +1,10 @@
 """FO4SFPipboyMenu's stage (d), the STAT page (FAL-272): the movie make_probe_swf.py --page writes (read back by the
 module's own reader and checked for layout), the stager and the installer's stage check, and the plugin's page code as
-text: the names, line count, width and characters agree with the movie; the one new id is checked against SFSE's
-address and only at stage (d); every form is typed by RTTI before a field of it is read; the only call into the game
-is the checked GetActorValue slot; the reads run on the main thread and the writes on the menu's; the menu-stack read
-is gone. Also the owner's card: at most eight steps, no console and no log in them. No compiler here: the PC build is
-the compile check."""
+text: the names, line count, width and characters agree with the movie; the two new ids are checked against SFSE's
+addresses and only at stage (d); every form is typed by RTTI before a field of it is read; the only calls into the
+game are the checked GetActorValue slot and the engine's lookup by form id; the reads run on the main thread and the
+writes on the menu's; the menu-stack read is gone. Also the owner's card: at most eight steps, no console and no log
+in them. No compiler here: the PC build is the compile check."""
 import hashlib
 import os
 import re
@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,9 +23,11 @@ import make_probe_swf as swf  # noqa: E402
 import pipboy_probe_install as ppi  # noqa: E402
 
 TWIPS = swf.TWIPS
-# the movies of #711's head, which test C passed with (FAL-216, e7925e00): --page must not change them
-CHANNEL_SHA256 = "a02394df07ce7f8de66beb191fcc130aec454d3d2ab78ac0a6f9989209d6de81"
-STAGE_B_SHA256 = "f2e3ebbea97bdf5ae99f7c1758dc9d5d116865fe91bc77c10a1c34979cd5359a"
+# the uncompressed bodies of the movies of #711's head, which test C passed with (FAL-216, e7925e00): --page must not
+# change them. The body, not the CWS file: zlib builds differ in their compressed bytes (the PC's Python 3.14 with
+# zlib-ng gives other ones), the body is what the game reads
+CHANNEL_BODY_SHA256 = "e67efdc416028b4e8a4a3c7b9a8d39cdbb4a3b99a536d55322a90ca92527c188"
+STAGE_B_BODY_SHA256 = "62906d68d012e37ca2f336a715a9ae8d116d3e99a29b8f08eb597ea7541d715f"
 SCRIPT = os.path.join(ROOT, "scripts", "ui", "make_probe_swf.py")
 
 
@@ -57,8 +60,10 @@ class PageMovieTests(unittest.TestCase):
     places = [t for t in tags if t["name"] == "PlaceObject2"]
 
     def test_channel_and_stage_b_movies_are_unchanged(self):
-        self.assertEqual(hashlib.sha256(swf.movie_bytes(channel=True)).hexdigest(), CHANNEL_SHA256)
-        self.assertEqual(hashlib.sha256(swf.movie_bytes()).hexdigest(), STAGE_B_SHA256)
+        for kw, digest in (({"channel": True}, CHANNEL_BODY_SHA256), ({}, STAGE_B_BODY_SHA256)):
+            data = swf.movie_bytes(**kw)
+            self.assertEqual(hashlib.sha256(zlib.decompress(data[8:])).hexdigest(), digest, kw)
+            self.assertEqual(swf.movie_bytes(compressed=False, **kw)[8:], zlib.decompress(data[8:]), kw)
 
     def test_deterministic_and_not_with_channel(self):
         self.assertEqual(swf.movie_bytes(page=True), swf.movie_bytes(page=True))
@@ -202,15 +207,19 @@ class PagePluginTests(unittest.TestCase):
         self.assertIn("a_text.substr(0, kPageColumns)", page_text)
         self.assertIn("kPageChars.find(up) != std::string_view::npos ? up : '?'", page_text)
 
-    def test_one_new_id_checked_against_sfse_and_only_at_stage_d(self):
+    def test_two_new_ids_checked_against_sfse_and_only_at_stage_d(self):
         self.assertIn('{ "TESDataHandler.Singleton", 937572, "libxse, equal to SFSE\'s" },', self.main)
+        self.assertIn('{ "TESForm.LookupByID", 47401, "libxse, equal to SFSE\'s" },', self.main)
+        self.assertIn("kDataHandlerSingleton = kIdCountC,\n\t\tkLookupById,\n\t\tkIdCount", self.main)
+        self.assertIn("constexpr std::uint32_t kLookupByIdRva = 0x5DE3B0;", self.main)
         self.assertIn("kIdCountC,", self.main)
         self.assertIn("kDataHandlerSingleton = kIdCountC,", self.main)
         self.assertIn("std::size_t IdCount() { return g_stage == 4 ? kIdCount : g_stage == 3 ? kIdCountC : kIdCountB; }",
                       self.main)
         self.assertIn("constexpr std::uint32_t kDataHandlerRva = 0x5FD9B28;", self.main)
         check = function(self.main, "bool CheckPageIds()")
-        self.assertIn("if (g_rva[kDataHandlerSingleton] != kDataHandlerRva) {", check)
+        self.assertIn("std::pair{ kDataHandlerSingleton, kDataHandlerRva }, std::pair{ kLookupById, kLookupByIdRva }", check)
+        self.assertIn("if (g_rva[id] != rva) {", check)
         self.assertIn('return Refuse("page_ids"', check)
         self.assertIn("(g_stage >= 3 && !CheckChannelIds()) || (g_stage == 4 && !CheckPageIds())", self.main)
         # libxse and SFSE 0.2.21 agree on the list layout and the two types
@@ -219,11 +228,20 @@ class PagePluginTests(unittest.TestCase):
             self.assertIn(line, self.main)
 
     def test_every_form_is_typed_before_it_is_read(self):
-        scan = function(self.main, "bool ScanForms(")
-        self.assertLess(scan.index("if (!IsType(form, a_type, type)) {"), scan.index("Peek(form + a_editorIdAt, entry)"))
+        edid = function(self.main, "std::string EditorIdOf(")
+        self.assertLess(edid.index("!IsType(a_form, a_type, type)"), edid.index("Peek(a_form + a_editorIdAt, entry)"))
+        find = function(self.main, "void FindForms()")
+        for line in ('EditorIdOf(form, "TESGlobal@@", kGlobalEditorIdAt)', 'EditorIdOf(form, "ActorValueInfo@@", kAvifEditorIdAt)',
+                     "for (std::uint32_t id = 1; id < kCoreFormIds; ++id) {", "((i + 1) << 24) | kRadsLocalId",
+                     "0xFE000000u | ((i - 0xFD) << 12) | kRadsLocalId"):
+            self.assertIn(line, find, line)
+        self.assertNotIn("ScanForms", self.main)
         page_scan = function(self.main, "void PageScan()")
-        self.assertLess(page_scan.index("g_forms.strings = CheckStrings();"), page_scan.index("ScanForms("))
-        self.assertIn("if (!g_forms.strings || !handler) {", page_scan)
+        self.assertLess(page_scan.index("g_forms.strings = CheckStrings();"), page_scan.index("FindForms();"))
+        self.assertIn("if (g_forms.strings) {", page_scan)
+        self.assertIn("LogFormArrays(handler);", page_scan)
+        layout = function(self.main, "void LogFormArrays(")
+        self.assertIn("Peek(a_handler + kFormArraysAt + i * kFormArrayBytes, q)", layout)
         for name, tail in (("std::uintptr_t DataHandler()", "TESDataHandler@@"), ("std::string LevelText()", "TESNPC@@"),
                            ("std::pair<std::string, std::string> PlaceText()", "TESObjectCELL@@")):
             body = function(self.main, name)
@@ -240,8 +258,10 @@ class PagePluginTests(unittest.TestCase):
         strings = function(self.main, "bool CheckStrings()")
         self.assertIn("SameText(read, kMenuName)", strings)
 
-    def test_the_only_call_into_the_game_is_the_checked_slot(self):
+    def test_the_only_calls_into_the_game_are_the_checked_ones(self):
         self.assertEqual(self.page.count("reinterpret_cast<GetActorValue_t>"), 1)
+        self.assertEqual(self.page.count("reinterpret_cast<LookupById_t>(Address(kLookupById))"), 1)
+        self.assertEqual(self.main.count("FormById("), 4)                       # the definition and FindForms' three
         self.assertNotIn("REL::Relocation", self.page)
         self.assertNotIn("REL::ID", self.page)
         value = function(self.main, "std::string ActorValueText(")
@@ -307,7 +327,7 @@ class PagePluginTests(unittest.TestCase):
         for line in ("refuse step=page_ids", "refuse step=page what=strings", "what=get_actor_value",
                      "step=page_unknown what=", "step=page ... fields=0/8"):
             self.assertIn(line, self.readme, line)
-        self.assertIn(f"{16 + 13 + 1} `step=id` lines", self.readme)
+        self.assertIn(f"{16 + 13 + 2} `step=id` lines", self.readme)
 
     def test_owner_card(self):
         owner = self.card[:self.card.index("## For the PC helper")]
