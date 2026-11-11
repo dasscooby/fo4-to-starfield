@@ -5,7 +5,7 @@ question first: **can a value of our own hold rads, lower maximum health, and be
 needs hang from the same value pattern. Verified on the PC, untested in play: Starfield.esm has `ENV_*` hazards, hazard
 spells and effects, `AFFL_*` affliction values and addiction effects; nothing is named mutation. Research rows R1 to R4,
 C1 to C3, V1 to V5 (docs/research/framework/engine-mechanics-notes).
-Task: FAL-213. Status: **run in game three times (b9ad9081, 41d3f968, 5e6ae1bc); the crash is fixed, the effect did not move the value; this head tries an instant, non-recovering effect.**
+Task: FAL-213. Status: **run in game five times; the crash is fixed; our spell has not yet moved the value; this head keeps Detrimental, flags the value damage-is-positive and mirrors RadAway (the fifth session's reading).**
 
 ## What the first game session found (head b9ad9081, owner PC, 10 Nov 20:49 and 20:58 UTC)
 
@@ -87,7 +87,7 @@ other flag with the template). RadAway's item template prefers a vanilla medicin
 clamp. Untested in play. The `Detrimental` clearing is the sign rule (owner PC's disassembly reading): `DamageHealthContact`
 presumably carries it (Health lost 40 with magnitude +40), so without clearing it ours would be negative.
 
-### The one flag bit that differs from the template (9bc3ec25, owner PC's read-back)
+### The one flag bit that differs from the template (9bc3ec25, owner PC's read-back; **superseded by the fifth session below: Detrimental is now kept**)
 
 The staged effect's DATA words 24 to 26 read `00000003 00000101 09013F80`; the template `DamageHealthContact` has `09053F80`.
 The difference is the bit `0x00040000` of word 26, the bit `0x4` of the upper half (`0x0905` against `0x0901`). In Mutagen's
@@ -100,6 +100,37 @@ exactly one of the effect's `Detrimental` and the actor value's "damage is posit
 by its +40 magnitude, which fits `Detrimental` set on a value without the other flag; our value (`AVFL 00000400`) lacks
 the second, so with `Detrimental` kept the spell would give -100 and the value would stay at 0; cleared it should give +100.
 If stage 20 shows a negative sign, set `Detrimental` again and flag the AVIF damage-is-positive instead.
+
+## The fifth session (head c5412b0c): the last difference was Detrimental
+
+Owner PC run, no crash. **Verified in the game log:** our SPEL was byte for byte `DamageHealthSpell` in `SPIT` and `ETYP`, and our
+MGEF equalled `DamageHealthContact` except the actor value (word 14) and the **cleared Detrimental bit**; the vanilla spell
+(stage 50) took 40 off Health and kept it off; **ours still moved nothing** (stages 20 and 30 forced to 100 and 300); RadAway
+(stage 40) again read -59,700 (300 x -200 in the 3 s settle, then -59,900); the new clamp worked (Health stayed 205).
+The owner PC's reading (**untested; it fits all five sessions**): in this engine a Detrimental value modifier with no
+`Recover` is *damage* that lands once and stays; a non-Detrimental one is a *buff for its duration*, which with duration 0 is
+applied and taken back at once. An effect on an ingestible is a third behaviour (kept and repeated every update).
+This head changes exactly what that reading says to change, and nothing else:
+1. **`Detrimental` is kept** on our effect (the template's flags are kept untouched; our MGEF now differs from
+   `DamageHealthContact` in word 14 only). `check` compares every flag with the template.
+2. **The value is flagged "damage is positive"** (`AVFL` bit 26, `0x04000000`, Mutagen `DamageIsPositive`, Fallout 4's own way of
+   declaring Rads; the AVIF now reads `DefaultToZero | DamageIsPositive`). By the sign rule the owner PC read from the engine
+   (negate when exactly one of the effect's Detrimental and the value's bit 26 is set), Detrimental + bit 26 is **no
+   negation: +100 stays +100**. With bit 26 left clear the same effect would give -100; the raw read at stage 20 (`settled`,
+   before any force) shows whichever sign it is.
+3. **RadAway is the mirror**: its own effect, `FO4SF_RadAwayEffect`, a copy of a vanilla *restore Health* effect (value
+   modifier on Health, **not Detrimental**, an entry of duration 0 in a vanilla ingestible; found by search, or named with
+   `--template-aid`), pointed at our value, at **+200**. By the same rule a non-Detrimental +200 on a damage-is-positive value
+   becomes -200 on the number. The ingestible shell is that vanilla item's, not ShipRepairKit's. If the search finds no such
+   item the writer falls back to the old shell sharing the spell's effect at -200 (`RadAway shares the spell's effect` in the
+   build line); **that fallback is not covered by a test** (the synthetic Starfield.esm always has a restore item).
+4. Stage 50 and the clamp stay.
+If stage 20 then reads 100 **without the script's force** (`fix ... forced=false`), the base is settled: rads is damage on a
+value that counts up, as in Fallout 4. If it still reads 0, the remaining suspect is that a value modifier from a spell does not
+act on a plugin's own AVIF at all, and the script-owned route is the base (a script effect that calls `ModValue`, or an item
+that calls the script). The plugin now holds two MGEFs (the spell's and RadAway's); the brief's "one effect" held until here.
+Still not shown: that the route lowers **maximum** Health (it lowers the current value), and that RadAway's `EquipItem` consumes the
+item.
 
 ## Second control: a vanilla instant effect (stage 50)
 

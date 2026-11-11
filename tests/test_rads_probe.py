@@ -58,7 +58,7 @@ class ScriptTests(unittest.TestCase):
         from fo4sf.rads import probe_log
         self.assertIn(f"float PenaltyPerRad = {probe_log.PENALTY}", PSC)
         self.assertIn(f"float ControlDelta = {probe_log.CONTROL_DELTA}", PSC)
-        self.assertIn("SpellMagnitude = 100f, RadAwayMagnitude = -200f", TOOL_SRC)
+        self.assertIn("SpellMagnitude = 100f, RadAwayMagnitude = -200f, RadAwayMirrorMagnitude = 200f", TOOL_SRC)
 
     def test_the_calls_under_test_are_made(self):
         self.assertEqual(PSC.count("RadsSpell.Cast(p, p)"), 3)            # once at stage 20, twice at stage 30
@@ -190,12 +190,12 @@ class StageTests(unittest.TestCase):
         self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
         self.assertIn("masters [Starfield.esm]", check.stdout)
         self.assertIn("AVIF FO4SF_Rads", check.stdout)
-        self.assertIn("type Variable default 0 min 0 max 1000 flags DefaultToZero", check.stdout)
+        self.assertIn("type Variable default 0 min 0 max 1000 flags DefaultToZero, DamageIsPositive", check.stdout)
         self.assertIn("archetype ValueModifier actor value (DATA word 14) 000800:FO4SFRadsProbe.esm association Null", check.stdout)
         self.assertIn("SPEL FO4SF_RadsSpell", check.stdout)
         self.assertIn("1 effect(s) at 100", check.stdout)
         self.assertIn('ALCH FO4SF_RadAway 000803:FO4SFRadsProbe.esm "RadAway"', check.stdout)
-        self.assertIn("1 effect(s) at -200", check.stdout)
+        self.assertIn("1 effect(s) at 200", check.stdout)               # the restore pattern: +200 on a damage-is-positive value
         self.assertIn("QUST FO4SF_RadsProbeQuest flags StartGameEnabled stages [10,20,30,40,50]", check.stdout)
         self.assertIn("(4 properties)", check.stdout)
         self.assertIn("property HealthAV = 00A02D:Starfield.esm", check.stdout)
@@ -204,7 +204,7 @@ class StageTests(unittest.TestCase):
         out = self.root / "b1b"
         self.assertEqual(self.run_tool("build", self.master, out).returncode, 0)
         check = self.run_tool("check", out / PLUGIN, self.master).stdout
-        self.assertIn("records: MagicEffect 1, Spell 1, Ingestible 1, Quest 1, ActorValueInformation 1", check)
+        self.assertIn("records: MagicEffect 2, Spell 1, Ingestible 1, Quest 1, ActorValueInformation 1", check)
 
     def test_the_plugin_adds_records_and_overrides_none(self):
         """Raw bytes: every record carries load index 1 (our own plugin; Starfield.esm is master 0), no hazard record."""
@@ -229,7 +229,7 @@ class StageTests(unittest.TestCase):
                 i += 24 + size
         walk(data, 0, len(data))
         self.assertTrue(ids and all(f >> 24 == 1 for f in ids), [hex(f) for f in ids if f >> 24 != 1])
-        self.assertEqual(kinds, {b"TES4": 1, b"AVIF": 1, b"MGEF": 1, b"SPEL": 1, b"ALCH": 1, b"QUST": 1})
+        self.assertEqual(kinds, {b"TES4": 1, b"AVIF": 1, b"MGEF": 2, b"SPEL": 1, b"ALCH": 1, b"QUST": 1})
         self.assertNotIn(b"HAZD", kinds)
 
     def test_the_effect_spell_and_radaway_are_copies_of_vanilla_records(self):
@@ -239,7 +239,7 @@ class StageTests(unittest.TestCase):
         proc = self.run_tool("build", self.master, out)
         self.assertIn("templates (preferred): SPEL DamageHealthSpell", proc.stdout)
         self.assertIn("MGEF SynthValueEffect", proc.stdout)
-        self.assertIn("ALCH SynthAid", proc.stdout)
+        self.assertIn("ALCH SynthRestoreHealthAid", proc.stdout)
         data = (out / PLUGIN).read_bytes()
         subs = {}
 
@@ -303,16 +303,42 @@ class StageTests(unittest.TestCase):
         self.assertRegex(PSC, r"if rads < 0\.0\n(?:.*\n)*?\s+p\.SetValue\(RadsAV, 0\.0\)\n\s+rads = 0\.0\n\s+clamped = true")
         self.assertIn('" clamped=" + clamped', PSC)
 
-    def test_the_effect_is_instant_and_does_not_recover(self):
-        """Third session: a timed, recovering template effect with duration 0 applies and undoes its change at once.
-        The synthetic template is Detrimental + Recover (no NoDuration); the kit's effect must be NoDuration only."""
+    def test_the_sign_pair_detrimental_effect_and_a_damage_is_positive_value(self):
+        """Fifth session: the rads effect keeps its template's Detrimental bit and the value carries "damage is positive"
+        (AVFL bit 26 = 0x04000000), so the engine's sign rule (negate when exactly one is set) leaves +100 as +100;
+        RadAway's own effect is the restore pattern (not Detrimental), +200, which the rule turns into a fall of 200."""
         out = self.root / "b2y"
         self.assertEqual(self.run_tool("build", self.master, out).returncode, 0)
         check = self.run_tool("check", out / PLUGIN, self.master)
         self.assertEqual(check.returncode, 0, check.stdout)
-        self.assertRegex(check.stdout, r"MGEF FO4SF_RadsEffect .* flags NoDuration\n")
-        self.assertNotIn("Recover", check.stdout)
-        self.assertNotIn("Detrimental", check.stdout)
+        self.assertRegex(check.stdout, r"MGEF FO4SF_RadsEffect .* flags Detrimental, NoDuration\n")
+        self.assertRegex(check.stdout, r"MGEF FO4SF_RadAwayEffect .* flags NoDuration, HideInUI\n")
+        self.assertIn("flags DefaultToZero, DamageIsPositive", check.stdout)
+        self.assertIn("RadAway MGEF SynthRestoreHealthEffect", check.stdout)
+        data = (out / PLUGIN).read_bytes()
+        j = data.index(b"AVFL") + 6
+        self.assertEqual(struct.unpack_from("<I", data, j)[0], 0x04000400)      # DefaultToZero | bit 26
+        # raw: both MGEFs carry our AVIF in word 14; the first has the Detrimental bit in word 26, the second does not
+        pos, words = 0, []
+        while True:
+            k = data.find(b"DATA", pos)
+            if k < 0:
+                break
+            n = struct.unpack_from("<H", data, k + 4)[0]
+            if n == 142 or n == 136:
+                words.append(struct.unpack_from(f"<{n // 4}I", data, k + 6))
+            pos = k + 6
+        self.assertEqual(len(words), 2, words)
+        for w in words:
+            self.assertEqual(w[14], 0x01000800)
+
+    def test_a_restore_template_that_is_detrimental_is_not_picked_by_search(self):
+        """The search wants a Health value modifier that is not Detrimental with duration 0: the synthetic SynthAid (whose
+        effect is Detrimental and on another value) is passed over, SynthRestoreHealthAid is taken."""
+        out = self.root / "b2y2"
+        proc = self.run_tool("build", self.master, out)
+        self.assertIn("ALCH SynthRestoreHealthAid", proc.stdout)
+        self.assertNotIn("ALCH SynthAid", proc.stdout)
 
     def test_the_second_control_spell_is_a_fifth_property_only_when_named(self):
         out = self.root / "b2z"
@@ -346,7 +372,7 @@ class StageTests(unittest.TestCase):
         self.assertIn("SecondActorValue, DATA word 14) is not FO4SF_Rads", bad.stdout)
 
     def test_the_no_template_effect_is_not_detrimental_either(self):
-        self.assertNotRegex(TOOL_SRC, r"NoDuration \| MagicEffect\.Flag\.NoArea \| MagicEffect\.Flag\.Detrimental")
+        self.assertRegex(TOOL_SRC, r"Flag\.Detrimental \| MagicEffect\.Flag\.NoDuration \| MagicEffect\.Flag\.NoArea")
 
     def test_a_named_template_is_used_and_an_unknown_one_is_refused(self):
         out = self.root / "b2u"

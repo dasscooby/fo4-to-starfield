@@ -8,7 +8,7 @@ Scriptname FO4SF_RadsProbeQuest extends Quest
              is not zero (SetValue 50, read) and back to 0 (SetValue 0, read): does our own actor value take a number
    stage 20  rads to 100     (the spell, once: effect +100)
    stage 30  rads to 300     (the spell, twice: +200)
-   stage 40  RadAway         (AddItem + EquipItem: effect -200, so 100 left)
+   stage 40  RadAway         (AddItem + EquipItem: its effect should lower the value by 200, so 100 left)
    stage 50  the SECOND CONTROL: a vanilla spell (property ControlSpell, named when the plugin is built) is cast on the player
              and Health read before and 3 s after. Tells "our effect is wrong" from "Cast from a quest script applies no value
              modifier at all". Not run when the property is None.
