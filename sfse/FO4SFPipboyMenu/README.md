@@ -462,7 +462,7 @@ Take a screenshot while the menu is open after the fifth press, and one after th
    `TIME` minutes move while the page is open, `HEALTH` after damage, `CELL` after the player crosses a cell or a door,
    `POSITION` and `DAYS PASSED` on tab 2. The controls (console, PC helper only): `player.getav health`,
    `player.getav carryweight`, `player.getlevel`, `player.getpos x` (`getglobalvalue gamehour` answers "not found for parameter Global" in
-   this console; the console control for the time is open; TIME is checked by its minutes moving).
+   this console; use `getglobalvalue 00000039` for days passed and `00000038` for the hour, PC run 11 Nov; TIME's minutes also move).
 4. **NEXT TAB:** each click logs `step=click button=tab` and the next `step=page` shows the other tab (`tab=1` and
    `TAB 2 OF 2: DATA`, then back).
 5. **CLOSE:** `step=click button=close`, `step=close ... by=button was_open=1 sent=hide`, `step=state ... open=0

@@ -66,7 +66,7 @@ of `docs/spikes/pipboy-channel-bridge-session.md`, sections 1 to 3, with these c
 | Page | Rows | Control |
 | --- | --- | --- |
 | STAT / STATUS | HEALTH, LEVEL, EXPERIENCE, CARRY WEIGHT MAX, RADS | `player.getav health`, `player.getlevel`, `player.getav experience`, `player.getav carryweight`, `player.getav FO4SF_Rads` (only with the rads probe) |
-| STAT / STATUS | CELL, WORLD, TIME | where the player stands; TIME's minutes move while the Pip-Boy is open. No console control yet: `getglobalvalue gamehour` answers "not found for parameter Global", and the right form is open (not findable offline) |
+| STAT / STATUS | CELL, WORLD, TIME | where the player stands; TIME's minutes move while the Pip-Boy is open. Console: `getglobalvalue 00000039` (days passed; `00000038` is the hour); by name the console refuses both (PC run, 11 Nov, 0393cbe3) |
 | STAT / SPECIAL | STRENGTH to LUCK | `player.getav strength`, `player.getav perception`, `player.getav endurance`, `player.getav charisma`, `player.getav intelligence`, `player.getav agility`, `player.getav luck` |
 | DATA / KIT TEST | ROW n OF 30, KEY MOVES, CLICK MOVES | none: no game value |
 
