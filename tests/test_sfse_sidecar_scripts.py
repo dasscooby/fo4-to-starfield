@@ -48,9 +48,9 @@ class CompilerRouteTests(unittest.TestCase):
         body = lambda text: text[text.index("param("):]
         mine = body(self.build).replace("FOCCSidecar", "X").replace("bEnabled=0", "Stage=0")
         theirs = body(pipboy).replace("FO4SFPipboyMenu", "X")
-        mine = mine.replace("$sources = @('xmake.lua', 'src\\main.cpp', 'src\\pch.h', 'codec.h', 'runtime_dir.h', 'sha256.h', 'sha256.cpp', 'X.ini')",
-                            "$sources = @('xmake.lua', 'src\\main.cpp', 'src\\pch.h', 'X.ini')")
-        mine = mine.replace("plugin_version = '0.3.0'", "plugin_version = '0.1.0'")
+        mine = mine.replace("$sources = @('xmake.lua', 'src\\main.cpp', 'src\\pch.h', 'codec.h', 'sha256.h', 'sha256.cpp', 'X.ini')",
+                            "$sources = @('xmake.lua', 'src\\main.cpp', 'src\\pch.h', 'src\\world.cpp', 'src\\world.h', 'X.ini')")  # FAL-250 adds world.*
+        mine = mine.replace("plugin_version = '0.2.0'", "plugin_version = '0.1.0'")
         self.assertEqual(mine, theirs)
         self.assertIn("$PinnedLib = '9d090c4c521f4f2c1aa00bb05923c380d47ae596'", self.build)
         self.assertIn("$PinnedShared = '9fbb74d628134ab4ea3a3cf5c0ed3f7eeabbd01d'", self.build)
@@ -75,7 +75,7 @@ class LibxsePluginTests(unittest.TestCase):
     def test_the_folder_holds_the_libxse_plugin_and_not_the_old_one(self):
         files = sorted(p.relative_to(PLUGIN).as_posix() for p in PLUGIN.rglob("*") if p.is_file())
         self.assertEqual(files, ["FOCCSidecar.ini", "README.md", "build.ps1", "check_toolchain.ps1", "codec.h",
-                                 "fetch_pluginapi.ps1", "runtime_dir.h", "sha256.cpp", "sha256.h", "src/main.cpp", "src/pch.h",
+                                 "fetch_pluginapi.ps1", "sha256.cpp", "sha256.h", "src/main.cpp", "src/pch.h",
                                  "xmake.lua"])
         self.assertIn('includes("lib/commonlibsf")', self.xmake)
         self.assertIn('add_rules("commonlibsf.plugin", {', self.xmake)
@@ -90,12 +90,12 @@ class LibxsePluginTests(unittest.TestCase):
         self.assertIn("constexpr REL::Version  kRuntime{ 1, 16, 244, 0 };", self.main)
         guard = load.index('Refuse("version"')
         off = load.index('REX::INFO("step=off')
-        folder = load.index("if (!RuntimeFolder(dir)) {")
+        folder = load.index("create_directories(g_sidecars, ec)")
         listen = load.index("RegisterListener(&OnMessage)")
         self.assertTrue(guard < off < folder < listen)
         self.assertEqual(load.count("return true;"), 5)                                   # loaded either way, the log tells
-        for step in ('Refuse("version"', 'Refuse("runtime_dir"', 'Refuse("listen"'):
-            self.assertIn(step, self.main)
+        for step in ('Refuse("version"', 'Refuse("folder"', 'Refuse("listen"'):
+            self.assertIn(step, load)
             self.assertIn("refuse step=" + step.split('"')[1], self.readme)
         self.assertIn('REX::ERROR("refuse step={} {}", a_step, a_what);', self.main)
 
