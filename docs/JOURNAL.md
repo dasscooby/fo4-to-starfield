@@ -2837,3 +2837,14 @@ The day's results that this journal did not yet hold, all on the owner's test PC
   a note naming the replacement or the proof: 20 pull requests (5 that add nothing to main, 15 replaced by merged
   work) and 30 issues. Kept open: 83 older pull requests that hold work not on main, 13 experiments and status notes
   that nothing replaces, and every issue with work left. Nothing was deleted; every branch is kept.
+
+## 2026-11-11 — Codex / Lone: FAL-274 Tests catalog foundation
+
+Paperclip Ubuntu OptiPlex; isolated codex/fal274-launcher-tests, based on main
+5d497862 after #711 merged. Added the read-only five-kit catalog and bounded owner-card
+reader, a standalone owner card derived from FAL-224, and recovery inspection/dispatch
+for Pip-Boy, radiation and power armor receipts. Missing recovery installers refuse
+before mutations. Tests use synthetic local stages, receipts and plugin lists only.
+Focused catalog/recovery/GUI checks and guard results are recorded on the draft PR.
+No installed kit, game, Windows UI or source game asset was touched. UI and no-build
+installer actions follow in the next source slice; independent review remains required.
