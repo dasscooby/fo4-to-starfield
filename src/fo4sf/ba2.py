@@ -171,6 +171,17 @@ class Ba2:
             for e in ranked
         ]
 
+    def by_extension(self) -> dict:
+        """Count entries by file extension (lowercase, without dot). Useful for conversion planning
+        (how many .nif, .dds, .bgsm, etc.). Empty or no-extension names are counted under ''."""
+        from collections import Counter
+        counts = Counter()
+        for e in self.entries:
+            name = e.name.lower().rsplit("\\", 1)[-1]
+            ext = name.rsplit(".", 1)[-1] if "." in name else ""
+            counts[ext] += 1
+        return dict(counts)
+
     @staticmethod
     def _norm(n: str) -> str:
         return n.replace("/", "\\").lower().lstrip("\\")
