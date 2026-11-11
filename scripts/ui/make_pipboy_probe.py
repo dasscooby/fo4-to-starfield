@@ -58,8 +58,8 @@ KIT_CARD = """Pip-Boy page kit
 4. Press E twice, then D, then hold S for three seconds: KIT TEST scrolls and stops at TEST ROW 30.
 5. Click one TEST ROW line, then click MAP at the top, and say whether both clicks worked.
 6. Press Q until the bracket is back on STAT, then click SPECIAL, and say whether Q and the click worked.
-7. Press Tab once, then Esc once: say what the game did on each; if Esc opened the game's menu, close it with Esc.
-8. Click CLOSE, then press F10 twice, two seconds apart: say whether it reopened on SPECIAL, then closed.
+7. Press Tab, then F10 and Esc: say whether each put the Pip-Boy away with no game menu; then Esc again opens that menu.
+8. Click CLOSE (F10 first if it is away), then F10 twice, two seconds apart: say whether it reopened on SPECIAL.
 """
 
 

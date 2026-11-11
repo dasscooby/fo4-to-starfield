@@ -30,6 +30,7 @@ IDS_C = [("Main.Singleton", 883591), ("PlayerCharacter.Singleton", 922868), ("Co
          ("GFx.Value.Invoke", 169750)]
 IDS_VM = [("GameVM.Singleton", 937585), ("GameVM.RTTI", 865426), ("BSScript.Internal.VirtualMachine.RTTI", 870795)]
 IDS_D = [("TESDataHandler.Singleton", 937572), ("TESForm.LookupByID", 47401)]
+IDS_HOLD = [("MenuControls.Singleton", 938076), ("MenuControls.RTTI", 864851), ("MenuOpenHandler.RTTI", 864856)]
 SFSE_RVAS = [("kValueAddRef", "0x3352400"), ("kValueRelease", "0x33524A0"), ("kValueGetMember", "0x33528A0"),
              ("kValueSetMember", "0x3352C90"), ("kValueInvoke", "0x33530B0")]
 
@@ -49,7 +50,7 @@ class ChannelPluginTests(unittest.TestCase):
 
     def test_the_ids_in_order_and_stages_a_and_b_read_only_theirs(self):
         found = re.findall(r'\{ "([A-Za-z0-9_.]+)", (\d+), "', self.main)
-        self.assertEqual([(n, int(i)) for n, i in found], IDS_B + IDS_C + IDS_VM + IDS_D)
+        self.assertEqual([(n, int(i)) for n, i in found], IDS_B + IDS_C + IDS_VM + IDS_D + IDS_HOLD)   # kHoldIds: FAL-404
         enum = self.main[self.main.index("kUISingleton,"):self.main.index("kIdCount\n")]
         self.assertIn("kIsMovieLoaded,\n\t\tkIdCountB,", enum)
         self.assertIn("kMainSingleton = kIdCountB,", enum)

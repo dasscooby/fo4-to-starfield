@@ -9,6 +9,7 @@ behind it. The keys:
 - **W** and **S** (or the up and down arrows) move the bright bar up and down a list. Hold them to scroll.
 - **A** and **D** (or the left and right arrows) change the small tab under the big ones.
 - **Q** and **E** change the big tab at the top.
+- **Tab** or **Esc** puts the Pip-Boy away, as F10 does.
 
 The game draws its own small pointer for the mouse, starting in the middle of the screen. Clicking a tab or a row works
 like the keys.
@@ -23,7 +24,7 @@ like the keys.
 | 4 | Press **E** twice, then **D**. Then hold **S** for about three seconds. | The bracket is on DATA and KIT TEST is bright. Thirty TEST ROW lines scroll while S is held. A small arrow shows when more rows are below or above, and the right side says ROW n OF 30. | Did it scroll? Did it stop at TEST ROW 30? |
 | 5 | With the mouse, click one TEST ROW line. Then click the word **MAP** at the top. | The clicked line gets the bar. Then the MAP page: THE MAP WAITS FOR THE MAP TRACK. | Did both clicks work? |
 | 6 | Press **Q** until the bracket is back on STAT. Then click the word **SPECIAL**. | STAT, then the SPECIAL rows again. | Did Q and the click work? |
-| 7 | Press **Tab** once and wait two seconds. Then press **Esc** once and wait. | Tab should change nothing on the Pip-Boy. Esc may open the game's own menu. If it does, close that menu with Esc. | What did the game do on Tab, and on Esc? Is the Pip-Boy still open? |
+| 7 | Press **Tab** once and wait two seconds. Press **F10**, then **Esc** once and wait. Then, with the Pip-Boy away, press **Esc** once more. | Tab puts the Pip-Boy away and no game menu opens. F10 brings it back, and Esc puts it away the same way. The last Esc opens the game's own menu, as it always does: close that menu with Esc. | Did Tab and Esc each put the Pip-Boy away? Did a game menu open on either? Did the last Esc open the game's menu? |
 | 8 | Click **CLOSE** (if the Pip-Boy is gone, press **F10** first). Then press **F10** twice, about two seconds apart. | The Pip-Boy closes. Then it opens again on SPECIAL, where you left it, and closes. | Did CLOSE work? Did it come back on SPECIAL? |
 
 **Report:**
@@ -43,7 +44,8 @@ of `docs/spikes/pipboy-channel-bridge-session.md`, sections 1 to 3, with these c
 
 1. **Build** only `sfse\FO4SFPipboyMenu`, into a new staging folder. Run the tests
    `python -m unittest tests.test_make_probe_swf tests.test_make_pipboy_probe tests.test_pipboy_probe_install
-   tests.test_pipboy_menu_channel tests.test_pipboy_stat_page tests.test_pipboy_kit`, then `python scripts\guard.py`.
+   tests.test_pipboy_menu_channel tests.test_pipboy_stat_page tests.test_pipboy_kit tests.test_pipboy_close_keys`, then
+   `python scripts\guard.py`.
    Post the dll's sha256.
 2. **Stage** with `--kit`: `python scripts\ui\make_pipboy_probe.py stage $exp --kit`, then `check` on the plugin file: `python scripts\ui\make_pipboy_probe.py check $exp\FO4SFPipboyProbe.esm`.
    `python scripts\ui\make_pipboy_kit.py --check` prints the seven pages, and `make_probe_swf.py --read` on the movie
@@ -52,8 +54,9 @@ of `docs/spikes/pipboy-channel-bridge-session.md`, sections 1 to 3, with these c
    neither packed nor installed).
 3. **Install** (game closed, receipts first): the dll and the Address Library file, as in section 3 of that card; no
    FOCCPing or FOCCSidecar. The ini goes too, from this checkout, with `Stage=5` (`-replace '^Stage=0','Stage=5'`).
-   Its pages are the ones the movie was staged from. Expect `Stage=5`, `PageFlagSets=0x9`, `SnapshotKey=0x7A` and
-   `KitUp=0x26,0x57`. Then run `pipboy_probe_install.py install --dir $exp --starfield $sf`.
+   Its pages are the ones the movie was staged from. Expect `Stage=5`, `PageFlagSets=0x9`, `SnapshotKey=0x7A`,
+   `KitUp=0x26,0x57`, `CloseKeys=0x09,0x1B` and `HoldMenuKeys=1`. Then run `pipboy_probe_install.py install --dir $exp
+   --starfield $sf`.
 4. **Session:** launch through `sfse_loader.exe`, load a throwaway save, and hand over to the owner. No save is made.
    After the owner's step 8, press F11 once with the Pip-Boy open, then close it. Open the console for the controls
    below, then quit to desktop.
@@ -87,12 +90,15 @@ Post whole:
 - any `refuse` or `step=page_unknown` line;
 - every `step=kit` line with `missing` above 0 or `match` below `changed`;
 - the first `step=kit_click` line;
-- the `step=snapshot` lines around the owner's Tab and Esc (the F11 one included).
+- the `step=close_keys`, `step=hold_id`, `step=hold_ids`, `step=hold_target`, `step=hold` and `step=close ...
+  by=key` lines, and the `step=snapshot` lines around the owner's Tab and Esc (the F11 one included).
 
 **PASS:**
 
 - every STATUS and SPECIAL row shows a value (RADS may say `NOT INSTALLED`), and SPECIAL matches the console;
 - the bar moves and scrolls on keys and on clicks, and tabs and sub-tabs change on keys and on clicks;
-- CLOSE and F10 work, and the Pip-Boy reopens where it was left.
+- CLOSE and F10 work, and the Pip-Boy reopens where it was left;
+- Tab and Esc each put the Pip-Boy away with no game menu over it, and the last Esc opens the game's menu (README
+  "PASS at (e)", step 7).
 
-What Tab, Esc and the other keys did in the game is a finding for the next card, not a pass or a fail.
+What the other keys did in the game is a finding for the next card, not a pass or a fail.
