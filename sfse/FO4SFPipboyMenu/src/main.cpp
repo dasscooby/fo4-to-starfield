@@ -131,7 +131,7 @@ namespace
 	constexpr std::size_t   kContextsAt = 0x2A8;             // libxse RE::ControlMap::activeInputContexts (16-byte items)
 	constexpr std::size_t   kPositionAt = 0x80 + 0x0C;       // libxse RE::TESObjectREFR::data (0x80), OBJ_REFR::location
 	constexpr std::size_t   kMaxListed = 16;                 // contexts listed per snapshot
-	constexpr std::size_t   kMaxFlagSets = 4;
+	constexpr std::size_t   kMaxFlagSets = 16;   // FAL-414: a flag sweep (one set per open) needs more than four
 	constexpr std::size_t   kGameVmImplAt = 0xE0;            // libxse RE::GameVM::impl (BSTSmartPointer<IVirtualMachine>)
 	constexpr std::size_t   kDispatchStaticCallSlot = 0x2F;  // libxse IVirtualMachine::DispatchStaticCall
 	constexpr std::size_t   kMaxName = 64;                   // ClickCall: each of the script's and function's names
@@ -192,6 +192,22 @@ namespace
 	constexpr std::size_t   kKitHintColumns = 72;            // HINT_COLUMNS
 	constexpr std::uint32_t kKitVersion = 1;                 // KIT_VERSION
 	constexpr std::size_t   kKitTestRows = 30;               // the kit_test list
+	constexpr std::size_t   kInventoryListAt = 0xA0;         // libxse RE::TESObjectREFR::inventoryList (BSGuarded: the pointer first)
+	constexpr std::size_t   kInventoryDataAt = 0x28;         // libxse RE::BGSInventoryList::data, BSTArray<BGSInventoryItem>
+	constexpr std::size_t   kInventoryItemSize = 0x28;       // libxse sizeof(RE::BGSInventoryItem)
+	constexpr std::size_t   kItemStacksAt = 0x10;            // libxse RE::BGSInventoryItem::stacks, BSTArray<Stack>
+	constexpr std::size_t   kItemFlagsAt = 0x20;             // libxse RE::BGSInventoryItem::flags (bits 0-2: the equip slot)
+	constexpr std::size_t   kStackSize = 0x10;               // libxse sizeof(RE::BGSInventoryItem::Stack)
+	constexpr std::size_t   kStackCountAt = 0x08;            // a u32: the PC's step=kit_inventory read 01000000 here (11 Nov)
+	constexpr std::size_t   kKitMaxItems = 512;              // the inventory list's rows, at most
+	constexpr std::size_t   kFileCollectionAt = 0x1580;      // libxse RE::TESDataHandler::compiledFileCollection
+	constexpr std::size_t   kFileNameAt = 0x38;              // libxse RE::TESFile::fileName, char[260]
+	constexpr std::size_t   kFileNameSize = 260;
+	constexpr std::size_t   kFileCompileIndexAt = 0x1B7;     // libxse RE::TESFile::compileIndex
+	constexpr std::size_t   kFileIndexAt = 0x218;            // libxse RE::TESFile::fileIndex: full u8, medium u8, small u16
+	constexpr std::size_t   kKitMaxFiles = 4096;             // a file list's entries, at most
+	constexpr std::size_t   kQuestFlagsAt = 0x10C;           // libxse RE::TESQuest QUEST_DATA flags, u16 (bits: the PC's log)
+	constexpr std::size_t   kQuestBytesAt = 0x100;           // the quest's bytes logged once (flags and stage among them)
 	constexpr std::string_view kKitChars = " !#%&'()*+,-./0123456789:;<=>?ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_";   // KIT_FONT
 	constexpr auto          kKitTitle = "fo4sfTitle";        // NAMES
 	constexpr auto          kKitHeader = "fo4sfHeaderInfo";
@@ -218,7 +234,7 @@ namespace
 	// VALUE_PROVIDERS and LIST_PROVIDERS; av:<hex> is the actor value of that form id
 	constexpr std::array<std::string_view, 10> kKitValues{ "health", "level", "xp", "carry_max", "rads", "cell", "world",
 		"time", "days", "position" };
-	constexpr std::array<std::string_view, 1> kKitLists{ "kit_test" };
+	constexpr std::array<std::string_view, 3> kKitLists{ "kit_test", "inventory", "quests" };
 	constexpr std::string_view kKitActorValue = "av:";
 	// the menus a main-thread snapshot asks the engine about (IsMenuRegistered, IsMenuOpen); only Console is named by
 	// libxse, the rest are guesses, and the first snapshot logs which of them are registered
@@ -348,6 +364,15 @@ namespace
 	};
 	static_assert(sizeof(PrimaryVtable) == (1 + kSlots) * sizeof(std::uintptr_t));   // no padding: locator is slots[-1]
 
+	// FAL-414: the BSInputEventUser vtable copy (subobject 0x10, ten slots; the locator again one slot before it)
+	constexpr std::size_t kInputSlots = 10;
+	struct InputVtable
+	{
+		std::uintptr_t                          locator;
+		std::array<std::uintptr_t, kInputSlots> slots;
+	};
+	static_assert(sizeof(InputVtable) == (1 + kInputSlots) * sizeof(std::uintptr_t));
+
 	// INI (FO4SFPipboyMenu.ini next to the dll)
 	int           g_stage = 0;      // 0 off, 1 = (a), 2 = (b), 3 = (c), 4 = (d), 5 = (e)
 	std::uint32_t g_key = 0x79;     // F10
@@ -358,6 +383,14 @@ namespace
 	std::size_t                              g_imageSize = 0;
 	std::array<std::uint32_t, kIdCount>      g_rva{};
 	PrimaryVtable                            g_vtbl{};
+	InputVtable                              g_inputVtbl{};
+	bool (*g_engineShouldHandle)(void*, const void*) = nullptr;   // input vtable [01], called with this = menu + 0x10
+	void (*g_engineOnButton)(void*, const void*) = nullptr;       // input vtable [08]
+	std::array<std::uint32_t, 4>             g_cancelCodes{ 0x1B, 0x09, 0, 0 };   // INI CancelCodes: Esc, Tab (Windows virtual-key codes: the PC's game run, #738)
+	std::size_t                              g_cancelCount = 2;
+	std::atomic<bool>                        g_cancelHeld{ false };    // a Tab or Esc press already closed the menu, not yet released
+	std::atomic<bool>                        g_cancelNow{ false };     // Tab or Esc heard while open: the key thread closes the menu
+	std::atomic<std::uint32_t>               g_cancelLogged{ 0 };
 	Ctor_t                                   g_ctor = nullptr;
 	Dtor_t                                   g_engineDtor = nullptr;
 	LoadMovie_t                              g_engineLoadMovie = nullptr;
@@ -615,6 +648,38 @@ namespace
 		return out + "]";
 	}
 
+	// FAL-414 diagnostic, main thread, on the snapshot key: each known menu the UI has open, with its flags and the four
+	// unnamed IMenu words at +0xC4..+0xD0 (read with Peek), so a run with our menu, the data menu and the pause menu open
+	// shows what a real menu asks the control map for
+	void LogOpenMenuDetails()
+	{
+		auto* ui = RE::UI::GetSingleton();
+		if (!ui) {
+			return;
+		}
+		static const auto* const names = [] {
+			auto* list = new std::vector<RE::BSFixedString>();
+			for (const auto* name : kKnownMenus) {
+				list->emplace_back(name);
+			}
+			return list;
+		}();
+		for (std::size_t i = 0; i < names->size(); ++i) {
+			const auto& name = (*names)[i];
+			if (!ui->IsMenuRegistered(name) || !ui->IsMenuOpen(name)) {
+				continue;
+			}
+			const auto menu = ui->GetMenu(name);
+			const auto at = reinterpret_cast<std::uintptr_t>(menu.get());
+			std::uint32_t flags = 0;
+			std::array<std::uint32_t, 4> words{};
+			const bool ok = at && Peek(at + 0xC0, flags) && Peek(at + 0xC4, words);
+			REX::INFO("step=menu_detail name={} menu={} {}", kKnownMenus[i], Hex(at),
+				ok ? std::format("flags={} c4={} c8={} cc={} d0={}", Hex(flags), Hex(words[0]), Hex(words[1]), Hex(words[2]), Hex(words[3])) :
+				     std::string("unreadable"));
+		}
+	}
+
 	// pause state and who holds input, on whichever thread calls it (a_main: the main thread, where menus= is read)
 	void Snapshot(std::string_view a_tag, bool a_main = false)
 	{
@@ -624,6 +689,9 @@ namespace
 		const auto contexts = ReadContexts();
 		REX::INFO("step=snapshot n={} tag={} paused={} menus={} contexts={} expected_open={}", n, a_tag, paused, menus,
 			contexts, g_expectOpen.load());
+		if (a_main && a_tag == "key") {
+			LogOpenMenuDetails();
+		}
 	}
 
 	bool ReadPosition(std::array<float, 3>& a_xyz)
@@ -945,6 +1013,14 @@ namespace
 			++matches;
 		}
 		return matches == 1 ? found : std::nullopt;
+	}
+
+	// a plugin file's complete type: TESFile, or a type with TESFile as its base at +0. The data handler's file lists
+	// hold TESPackedFile objects (FAL-437: the PC read every loaded file's vtable at RVA 0x4b29b80, RTTI
+	// TESPackedFile, its bases itself and TESFile, both at +0), which a plain IsType(file, "TESFile@@") refuses
+	bool IsFileType(const ObjectType& a_type)
+	{
+		return a_type.offset == 0 && (NameIs(a_type.name, "TESFile@@") || BaseOffset(a_type, "TESFile@@") == 0u);
 	}
 
 	// the subobject at a_offset is a base of the object's complete type: its vtable's locator names that same
@@ -1544,6 +1620,8 @@ namespace
 		std::string                                    title = "FO4SF PIP-BOY";
 		std::string                                    header;   // a value provider, or ""
 		std::string                                    hints;
+		std::string                                    missionFile;   // Mission=: our mission's plugin file, or ""
+		std::uint32_t                                  missionId = 0;   // and its form's local id in that file
 		std::vector<KitPage>                           pages;
 		std::vector<std::string>                       tabs;     // in the order of their first page
 		std::array<std::vector<std::size_t>, kKitTabs> subs;     // each tab's pages, in order
@@ -1661,6 +1739,39 @@ namespace
 		return true;
 	}
 
+	// parse_kit's check_mission: <plugin file>|<local id, 1 to 6 hex digits, not zero>; the file 1 to 64 characters
+	// (letters, digits, space _ - .) ending .esm, .esp or .esl
+	bool KitMission(std::string_view a_text)
+	{
+		const auto bar = a_text.find('|');
+		if (bar == std::string_view::npos || a_text.find('|', bar + 1) != std::string_view::npos) {
+			return false;
+		}
+		const auto file = KitTrim(a_text.substr(0, bar));
+		const auto hex = KitTrim(a_text.substr(bar + 1));
+		const auto lower = [](std::string_view a_s) {
+			std::string out(a_s);
+			std::ranges::transform(out, out.begin(), [](unsigned char a_c) { return static_cast<char>(std::tolower(a_c)); });
+			return out;
+		};
+		const auto fileChar = [](char a_c) {
+			return std::isalnum(static_cast<unsigned char>(a_c)) != 0 || std::string_view(" _-.").find(a_c) != std::string_view::npos;
+		};
+		const auto ext = file.size() > 4 ? lower(file.substr(file.size() - 4)) : std::string{};
+		if (file.size() > 64 || (ext != ".esm" && ext != ".esp" && ext != ".esl") || !std::ranges::all_of(file, fileChar) ||
+			hex.empty() || hex.size() > 6 ||
+			!std::ranges::all_of(hex, [](char a_c) { return std::isxdigit(static_cast<unsigned char>(a_c)) != 0; })) {
+			return false;
+		}
+		const auto id = static_cast<std::uint32_t>(std::strtoul(std::string(hex).c_str(), nullptr, 16));
+		if (!id) {
+			return false;
+		}
+		g_kit.missionFile = file;
+		g_kit.missionId = id;
+		return true;
+	}
+
 	std::string KitSignature()   // make_pipboy_kit.py signature(): the movie's fo4sfKitId
 	{
 		std::string tabs;
@@ -1740,6 +1851,8 @@ namespace
 					g_kit.header = value;
 				} else if (key == "Hints" && KitLabel(value, kKitHintColumns)) {
 					g_kit.hints = value;
+				} else if (key == "Mission" && g_kit.missionFile.empty() && KitMission(value)) {
+					// KitMission kept it
 				} else {
 					return KitRefuse(n, std::format("kit_key key={}", key));
 				}
@@ -1959,8 +2072,247 @@ namespace
 		return rows;
 	}
 
+	// a_len bytes as hex, a comma every 8, for the log; "unreadable" if the read faults
+	std::string KitBytes(std::uintptr_t a_at, std::size_t a_len)
+	{
+		std::array<std::uint8_t, 0x40> bytes{};
+		if (!a_at || a_len > bytes.size() || !Peek(a_at, bytes.data(), a_len)) {
+			return "unreadable";
+		}
+		std::string hex;
+		for (std::size_t i = 0; i < a_len; ++i) {
+			hex += std::format("{}{:02x}", i && i % 8 == 0 ? "," : "", bytes[i]);
+		}
+		return hex;
+	}
+
+	// the inventory list (FAL-426; README, "Stage (e)", lists): the player's BGSInventoryList by its RTTI, each item's
+	// name and count (the sum of its stacks), sorted by name. Reads only, guarded, no lock taken: a torn read shows ?
+	// and never faults. The first read logs the list and its first item's and stack's bytes once (step=kit_inventory),
+	// which settles kStackCountAt on the PC; a list not read is one row and one step=page_unknown what=inventory line
+	std::vector<KitRow> KitInventoryRows()
+	{
+		static bool logged = false;
+		const auto  unread = [](std::string_view a_why, const std::string& a_detail) {
+			Unknown("inventory", std::format("reason={} {}", a_why, a_detail));
+			return std::vector<KitRow>{ { "INVENTORY NOT READ", "", { { "REASON", std::string(a_why) } } } };
+		};
+		if (!CheckSingleton("PlayerCharacter", kPlayerSingleton, kPlayerRtti, g_playerOk)) {
+			return unread("no_player", "");
+		}
+		const auto     player = Singleton(kPlayerSingleton);
+		std::uintptr_t list = 0;
+		ObjectType     listType;
+		if (!Peek(player + kInventoryListAt, list) || !IsType(list, "BGSInventoryList@@", listType)) {
+			return unread("list_type", std::format("list={} type={}", Hex(list), listType.name.empty() ? "unreadable" : listType.name));
+		}
+		ArrayHead items{};
+		if (!Peek(list + kInventoryDataAt, items) || items.size > items.capacity || items.size > kKitMaxItems ||
+			(items.size && !items.data)) {
+			return unread("items", std::format("size={} capacity={} data={}", items.size, items.capacity, Hex(items.data)));
+		}
+		if (!logged) {
+			logged = true;
+			ArrayHead first{};
+			const bool stacked = items.size && Peek(items.data + kItemStacksAt, first) && first.size;
+			REX::INFO("step=kit_inventory list={} type={} size={} capacity={} first_item={} first_stack={}", Hex(list),
+				listType.name, items.size, items.capacity, items.size ? KitBytes(items.data, kInventoryItemSize) : "none",
+				stacked ? KitBytes(first.data, kStackSize) : "none");
+		}
+		std::vector<KitRow> rows;
+		for (std::uint32_t i = 0; i < items.size; ++i) {
+			const auto     item = items.data + i * kInventoryItemSize;
+			std::uintptr_t object = 0;
+			ObjectType     type;
+			if (!Peek(item, object) || !TypeOf(object, type) || !BaseOffset(type, "TESBoundObject@@")) {
+				rows.push_back({ "?", "?", { { "ITEM", std::to_string(i + 1) }, { "OBJECT", Hex(object) } } });
+				continue;
+			}
+			std::uint32_t  formId = 0;
+			std::uintptr_t entry = 0;
+			std::string    name;
+			Peek(object + kFormIdAt, formId);
+			const auto at = BaseOffset(type, "TESFullName@@");
+			if (!at || !CheckSubobject(object, type, *at) || !Peek(object + *at + kFullNameAt, entry) ||
+				!ReadPoolString(entry, name) || name.empty()) {
+				name = std::format("{:08X}", formId);   // no name read: its form id
+			}
+			ArrayHead     stacks{};
+			std::uint64_t count = 0;
+			bool          counted = Peek(item + kItemStacksAt, stacks) && stacks.size <= stacks.capacity &&
+			                        stacks.size <= kKitMaxItems && (!stacks.size || stacks.data);
+			for (std::uint32_t s = 0; counted && s < stacks.size; ++s) {
+				std::uint32_t n = 0;
+				counted = Peek(stacks.data + s * kStackSize + kStackCountAt, n);
+				count += n;
+			}
+			std::uint32_t flags = 0;
+			const bool    equipped = Peek(item + kItemFlagsAt, flags) && (flags & 0x7);
+			rows.push_back({ name, counted ? std::to_string(count) : "?",
+				{ { "FORM", std::format("{:08X}", formId) }, { "TYPE", ShortName(type.name) },
+					{ "STACKS", counted ? std::to_string(stacks.size) : "?" }, { "EQUIPPED", equipped ? "YES" : "NO" } } });
+		}
+		std::ranges::stable_sort(rows, {}, &KitRow::name);
+		if (rows.empty()) {
+			rows.push_back({ "NO ITEMS", "", {} });
+		}
+		return rows;
+	}
+
+	// a plugin file's form: its TESFile by name in the data handler's compiled file collection (libxse 9d090c4: files,
+	// smallFiles, mediumFiles at +0x00, +0x10, +0x20, each a BSTArray<TESFile*>; a file accepted by its RTTI as
+	// IsFileType), then the form id that file gives a_localId (full: the compile index, then fileIndex's full byte;
+	// small FE + 12 bits; medium FD + 16 bits), accepted only if the engine's lookup gives a form of RTTI type a_type.
+	// a_detail logs the file and every id tried; files skipped for their type are counted, and logged once
+	// (step=kit_file), so a miss is never silent
+	std::uint32_t KitFileForm(std::string_view a_file, std::uint32_t a_localId, std::string_view a_type, std::string& a_detail)
+	{
+		static bool skipLogged = false;
+		std::size_t skipped = 0;
+		std::string skippedType;
+		const auto  logSkipped = [&] {
+			if (skipped && !skipLogged) {
+				skipLogged = true;
+				REX::INFO("step=kit_file file={} skipped={} type={} (not a TESFile at +0)", a_file, skipped, skippedType);
+			}
+		};
+		const auto handler = Singleton(kDataHandlerSingleton);
+		ObjectType type;
+		if (!IsType(handler, "TESDataHandler@@", type)) {
+			a_detail = "reason=data_handler";
+			return 0;
+		}
+		for (std::size_t kind = 0; kind < 3; ++kind) {   // full, small, medium
+			ArrayHead files{};
+			if (!Peek(handler + kFileCollectionAt + kind * 0x10, files) || files.size > files.capacity ||
+				files.size > kKitMaxFiles || (files.size && !files.data)) {
+				a_detail = std::format("reason=files kind={} size={} capacity={}", kind, files.size, files.capacity);
+				logSkipped();
+				return 0;
+			}
+			for (std::uint32_t i = 0; i < files.size; ++i) {
+				std::uintptr_t                  file = 0;
+				ObjectType                      fileType;
+				std::array<char, kFileNameSize> name{};
+				if (!Peek(files.data + i * sizeof(std::uintptr_t), file) || !file) {
+					continue;
+				}
+				if (!TypeOf(file, fileType) || !IsFileType(fileType)) {
+					if (!skipped++) {
+						skippedType = fileType.name.empty() ? "unread" : ShortName(fileType.name);
+					}
+					continue;
+				}
+				if (!Peek(file + kFileNameAt, name.data(), name.size()) ||
+					!SameText(std::string_view(name.data(), strnlen(name.data(), name.size())), a_file)) {
+					continue;
+				}
+				std::uint8_t                compile = 0;
+				std::array<std::uint8_t, 4> index{};
+				Peek(file + kFileCompileIndexAt, compile);
+				Peek(file + kFileIndexAt, index.data(), index.size());
+				const std::uint32_t smallIndex = index[2] | (index[3] << 8);
+				std::vector<std::uint32_t> ids;
+				if (kind == 0) {
+					ids = { (std::uint32_t{ compile } << 24) | (a_localId & 0xFFFFFF), (std::uint32_t{ index[0] } << 24) | (a_localId & 0xFFFFFF) };
+				} else if (kind == 1) {
+					ids = { 0xFE000000u | ((smallIndex & 0xFFF) << 12) | (a_localId & 0xFFF) };
+				} else {
+					ids = { 0xFD000000u | (std::uint32_t{ index[1] } << 16) | (a_localId & 0xFFFF) };
+				}
+				a_detail = std::format("file_kind={} file={} file_type={} compile_index={:02x} file_index={}", kind, Hex(file),
+					ShortName(fileType.name), compile, KitBytes(file + kFileIndexAt, 4));
+				logSkipped();
+				for (const auto id : ids) {
+					ObjectType formType;
+					const auto form = FormById(id);
+					a_detail += std::format(" tried={:08X}:{}", id, form && TypeOf(form, formType) ? ShortName(formType.name) : "none");
+					if (IsType(form, a_type, formType)) {
+						return id;
+					}
+				}
+				return 0;
+			}
+		}
+		a_detail = std::format("reason=file_not_loaded skipped={}", skipped);
+		logSkipped();
+		return 0;
+	}
+
+	// the quest list (FAL-431; README, "Stage (e)", lists): our mission first, the quest [Kit] Mission= names, by its
+	// file and local id (KitFileForm), accepted by its RTTI (TESQuest); its name (TESFullName, at +0x40 in Starfield's
+	// RTTI) and its QUEST_DATA flags as read (u16 at +0x10C, the running and completed bits not named until the PC's
+	// log does). The first read logs the quest's bytes from +0x100 once (step=kit_quest), where the flags and the
+	// current stage are; the stage shows ? until then. Starfield's own quests are not listed yet
+	std::vector<KitRow> KitQuestRows()
+	{
+		static std::uint32_t formId = 0;
+		static bool          logged = false;
+		const auto           unread = [](std::string_view a_why, const std::string& a_detail) {
+			Unknown("quests", std::format("reason={} {}", a_why, a_detail));
+			return std::vector<KitRow>{ { "QUESTS NOT READ", "", { { "REASON", std::string(a_why) } } } };
+		};
+		if (g_kit.missionFile.empty()) {
+			return unread("no_mission", "");
+		}
+		std::string detail;
+		if (!formId) {
+			formId = KitFileForm(g_kit.missionFile, g_kit.missionId, "TESQuest@@", detail);
+		}
+		const auto quest = formId ? FormById(formId) : 0;
+		ObjectType type;
+		if (!IsType(quest, "TESQuest@@", type)) {
+			if (!logged) {
+				logged = true;
+				REX::INFO("step=kit_quest mission={}|{:X} found=no {}", g_kit.missionFile, g_kit.missionId, detail);
+			}
+			formId = 0;
+			return unread("mission_not_found", std::format("mission={}|{:X}", g_kit.missionFile, g_kit.missionId));
+		}
+		std::string    name;   // its TESFullName as the inventory reads one, else its form id
+		std::uintptr_t entry = 0;
+		const auto     at = BaseOffset(type, "TESFullName@@");
+		if (!at || !CheckSubobject(quest, type, *at) || !Peek(quest + *at + kFullNameAt, entry) || !ReadPoolString(entry, name) ||
+			name.empty()) {
+			name = std::format("{:08X}", formId);
+		}
+		std::uint16_t flags = 0;
+		const bool    flagged = Peek(quest + kQuestFlagsAt, flags);
+		if (!logged) {
+			logged = true;
+			REX::INFO("step=kit_quest mission={}|{:X} found=yes form={:08X} quest={} type={} full_name_at={} name=\"{}\" flags={} "
+				"bytes100={} {}", g_kit.missionFile, g_kit.missionId, formId, Hex(quest), type.name, at ? Hex(*at) : "none", name,
+				flagged ? std::format("{:04x}", flags) : "unreadable", KitBytes(quest + kQuestBytesAt, 0x40), detail);
+		}
+		std::string file = g_kit.missionFile;
+		std::ranges::transform(file, file.begin(), [](unsigned char a_c) { return static_cast<char>(std::toupper(a_c)); });
+		return { { name, "", { { "FORM", std::format("{:08X}", formId) }, { "FILE", file },
+			{ "FLAGS", flagged ? std::format("{:04X}", flags) : "?" }, { "STAGE", "?" } } } };
+	}
+
+	// a_text in lines of at most a_columns, each broken after its last space, '_', '-', '/' or '|' when the rest does
+	// not fit, else cut at a_columns (FAL-437: MISSION_NOT_FOUND read MISSION_NOT_FOUN / D)
+	std::vector<std::string> KitWrap(std::string_view a_text, std::size_t a_columns)
+	{
+		std::vector<std::string> lines;
+		while (!a_text.empty()) {
+			auto cut = std::min(a_text.size(), a_columns);
+			if (cut < a_text.size()) {
+				const auto at = a_text.substr(0, cut).find_last_of(" _-/|");
+				if (at != std::string_view::npos && at > 0) {
+					cut = at + 1;
+				}
+			}
+			const auto line = a_text.substr(0, cut);
+			lines.emplace_back(line.substr(0, line.find_last_not_of(' ') + 1));
+			a_text.remove_prefix(cut);
+			a_text.remove_prefix(std::min(a_text.find_first_not_of(' '), a_text.size()));
+		}
+		return lines;
+	}
+
 	// the selected row's value rows: a label and its value right-aligned, or, for a value longer than its column,
-	// the label alone and the value on the lines below across both columns
+	// the label alone and the value on the lines below, left-aligned in the label column (KitWrap)
 	void KitInfoLines(const std::vector<std::pair<std::string, std::string>>& a_info, KitScreen& a_screen)
 	{
 		constexpr auto width = kKitInfoLabelColumns + kKitInfoValueColumns;
@@ -1976,10 +2328,12 @@ namespace
 				continue;
 			}
 			++line;
-			for (std::size_t at = 0; at < text.size() && line < kKitRows; at += width, ++line) {
-				const auto part = std::string_view(text).substr(at, width);
-				a_screen.infoLabels[line] = std::string(part.substr(0, kKitInfoLabelColumns));
-				a_screen.infoValues[line] = part.size() > kKitInfoLabelColumns ? std::string(part.substr(kKitInfoLabelColumns)) : "";
+			for (const auto& part : KitWrap(text, kKitInfoLabelColumns)) {
+				if (line == kKitRows) {
+					break;
+				}
+				a_screen.infoLabels[line] = part;
+				a_screen.infoValues[line++] = "";
 			}
 		}
 	}
@@ -2005,6 +2359,10 @@ namespace
 			}
 		} else if (page.list == "kit_test") {
 			rows = KitTestRows(state);
+		} else if (page.list == "inventory") {
+			rows = KitInventoryRows();
+		} else if (page.list == "quests") {
+			rows = KitQuestRows();
 		} else {
 			for (const auto& line : page.notice) {
 				rows.push_back({ line, "", {} });
@@ -2493,6 +2851,75 @@ namespace
 
 	// the creator UI calls on kShow. The engine passes uninitialised storage for a Scaleform::Ptr<IMenu> (MSVC's hidden
 	// return slot); the menu pointer is written there owning the constructor's reference, as the engine's own creators do
+	// FAL-414: the menu's own cancel handling. Both input slots are called with this = menu + 0x10 (BSInputEventUser).
+	// A keyboard button whose id is in CancelCodes (or whose user event is "Cancel"), while the menu is open, is ours:
+	// [01] says we handle it, [08] marks it kStop (the pause menu's ShouldHandleEvent refuses a stopped event) and, on the
+	// press (value > 0, heldDownSecs == 0), asks the key thread to close the menu. Everything else goes to the engine's.
+	struct CancelLook
+	{
+		bool          mine = false;
+		bool          press = false;
+		std::uint32_t code = 0;
+	};
+
+	CancelLook LookAtEvent(const void* a_event, bool a_log)
+	{
+		CancelLook look;
+		if (!a_event || !g_open) {
+			return look;
+		}
+		const auto* base = static_cast<const RE::InputEvent*>(a_event);
+		if (base->eventType != RE::InputEvent::EventType::kButton || base->deviceType != RE::InputEvent::DeviceType::kKeyboard) {
+			return look;
+		}
+		const auto* button = static_cast<const RE::ButtonEvent*>(a_event);
+		look.code = static_cast<std::uint32_t>(button->idCode);
+		const std::string_view user = button->strUserEvent.c_str() ? std::string_view(button->strUserEvent.c_str()) : std::string_view{};
+		bool cancel = user == "Cancel";
+		for (std::size_t i = 0; i < g_cancelCount; ++i) {
+			cancel = cancel || look.code == g_cancelCodes[i];
+		}
+		look.mine = cancel;
+		look.press = button->value > 0.0f && button->heldDownSecs == 0.0f;
+		if (a_log && g_cancelLogged.load() < 40 && (cancel || look.press)) {   // the first presses: which id and user event the game sends
+			++g_cancelLogged;
+			REX::INFO("step=input id={} user_event=\"{}\" value={} held={} status={} cancel={}", Hex(look.code), user, button->value,
+				button->heldDownSecs, static_cast<std::uint32_t>(base->status), cancel ? 1 : 0);
+		}
+		return look;
+	}
+
+	bool a_eventValueIsRelease(const void* a_event)
+	{
+		return static_cast<const RE::ButtonEvent*>(a_event)->value == 0.0f;
+	}
+
+	bool MenuShouldHandleEvent(void* a_input, const void* a_event)
+	{
+		const auto look = LookAtEvent(a_event, false);
+		if (look.mine && static_cast<const RE::InputEvent*>(a_event)->status != RE::InputEvent::Status::kStop) {
+			return true;
+		}
+		return g_engineShouldHandle(a_input, a_event);
+	}
+
+	void MenuOnButtonEvent(void* a_input, const void* a_event)
+	{
+		const auto look = LookAtEvent(a_event, true);
+		if (!look.mine) {
+			g_engineOnButton(a_input, a_event);
+			return;
+		}
+		const_cast<RE::InputEvent*>(static_cast<const RE::InputEvent*>(a_event))->status = RE::InputEvent::Status::kStop;
+		// the game sends one press as several events (held=0, 0.009, 0.017, ...): close on the first only, and
+		// not again until a release (value == 0) has been seen
+		if (look.press && !g_cancelHeld.exchange(true)) {
+			g_cancelNow = true;
+		} else if (a_eventValueIsRelease(a_event)) {
+			g_cancelHeld = false;
+		}
+	}
+
 	RE::Scaleform::Ptr<RE::IMenu>* Create(RE::Scaleform::Ptr<RE::IMenu>* a_out)
 	{
 		const auto n = ++g_created;
@@ -2510,6 +2937,9 @@ namespace
 		auto*      refs = reinterpret_cast<volatile std::uint32_t*>(base + 0x08);   // Scaleform RefCountImplCore
 		const auto ctorRefs = *refs;
 		*reinterpret_cast<std::uintptr_t*>(base) = reinterpret_cast<std::uintptr_t>(g_vtbl.slots.data());
+		if (g_stage >= 4) {
+			*reinterpret_cast<std::uintptr_t*>(base + 0x10) = reinterpret_cast<std::uintptr_t>(g_inputVtbl.slots.data());
+		}
 		// what the engine's dynamic_cast reads on our object: the locator one slot before its primary vtable
 		const auto rtti = *reinterpret_cast<const std::uintptr_t*>(*reinterpret_cast<const std::uintptr_t*>(base) - 8) ==
 		                  *reinterpret_cast<const std::uintptr_t*>(Address(kVtblPrimary) - 8);
@@ -2753,6 +3183,20 @@ namespace
 		g_vtbl.slots[0x05] = reinterpret_cast<std::uintptr_t>(&MenuGetViewScaleMode);
 		g_vtbl.slots[0x06] = reinterpret_cast<std::uintptr_t>(&MenuLoadMovie);
 		g_vtbl.slots[0x08] = reinterpret_cast<std::uintptr_t>(&MenuProcessMessage);
+		if (g_stage >= 4) {   // FAL-414: copy the input vtable, replace [01] ShouldHandleEvent and [08] OnButtonEvent
+			const auto* input = reinterpret_cast<const std::uintptr_t*>(Address(kVtblInput));
+			g_inputVtbl.locator = *reinterpret_cast<const std::uintptr_t*>(Address(kVtblInput) - 8);   // checked by CheckVtable
+			std::copy_n(input, kInputSlots, g_inputVtbl.slots.begin());
+			if (!InImage(input[1], 1) || !InImage(input[8], 1)) {
+				return Refuse("slots", "what=input_vtable reason=slot_outside_image");
+			}
+			g_engineShouldHandle = reinterpret_cast<decltype(g_engineShouldHandle)>(input[1]);
+			g_engineOnButton = reinterpret_cast<decltype(g_engineOnButton)>(input[8]);
+			g_inputVtbl.slots[1] = reinterpret_cast<std::uintptr_t>(&MenuShouldHandleEvent);
+			g_inputVtbl.slots[8] = reinterpret_cast<std::uintptr_t>(&MenuOnButtonEvent);
+			REX::INFO("step=input_vtable replaced=0x01,0x08 should_handle={} on_button={} cancel_codes={}", Hex(input[1] - g_base),
+				Hex(input[8] - g_base), g_cancelCount);
+		}
 		if (g_stage == 1) {
 			g_vtbl.slots[0x0A] = reinterpret_cast<std::uintptr_t>(&MenuIsMovieLoaded);
 		}
@@ -2772,6 +3216,7 @@ namespace
 			return;
 		}
 		const bool open = ui->IsMenuOpen(MenuName());
+		g_cancelHeld = false;   // FAL-414: a release heard while the page was closed must not keep the gate shut
 		if (g_stage == 4 && !open) {
 			PageCollect();   // the page's text before the show
 		}
@@ -2784,7 +3229,7 @@ namespace
 	}
 
 	// stage d: the CLOSE button, heard on the menu's thread, closes the menu here, on the main thread, as F10 does
-	void Close(std::uint32_t a_n)
+	void Close(std::uint32_t a_n, const char* a_by = "button")
 	{
 		auto* ui = RE::UI::GetSingleton();
 		auto* queue = RE::UIMessageQueue::GetSingleton();
@@ -2793,11 +3238,12 @@ namespace
 			return;
 		}
 		const bool open = ui->IsMenuOpen(MenuName());
+		g_cancelHeld = false;   // FAL-414: every close clears the cancel gate
 		g_expectOpen = 0;
 		if (open) {
 			queue->AddMessage(MenuName(), RE::UI_MESSAGE_TYPE::kHide);
 		}
-		REX::INFO("step=close n={} by=button was_open={} sent={}", a_n, open ? 1 : 0, open ? "hide" : "none");
+		REX::INFO("step=close n={} by={} was_open={} sent={}", a_n, a_by, open ? 1 : 0, open ? "hide" : "none");
 	}
 
 	void CheckState(std::uint32_t a_n)
@@ -2875,6 +3321,12 @@ namespace
 				if (g_closeNow.exchange(false)) {
 					const auto n = ++presses;
 					g_task->AddTask([n]() { Close(n); });
+					REX::W32::Sleep(750);
+					g_task->AddTask([n]() { CheckState(n); });
+				}
+				if (g_cancelNow.exchange(false)) {   // Tab or Esc heard by our input handler (FAL-414)
+					const auto n = ++presses;
+					g_task->AddTask([n]() { Close(n, "cancel"); });
 					REX::W32::Sleep(750);
 					g_task->AddTask([n]() { CheckState(n); });
 				}
@@ -2989,7 +3441,7 @@ namespace
 	// (k - 1) mod count
 	void ReadFlagSets(const std::filesystem::path& a_ini, const wchar_t* a_key, const wchar_t* a_default)
 	{
-		std::array<wchar_t, 128> text{};
+		std::array<wchar_t, 256> text{};
 		REX::W32::GetPrivateProfileStringW(L"FO4SFPipboyMenu", a_key, a_default, text.data(),
 			static_cast<std::uint32_t>(text.size()), a_ini.c_str());
 		const wchar_t* at = text.data();
@@ -3020,6 +3472,13 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	g_key = ReadNumber(ini, L"Key", 0x79);
 	g_flags = ReadNumber(ini, L"Flags", 0);
 	g_keepAlive = ReadNumber(ini, L"KeepAlive", 1) != 0;
+	// FAL-414: up to four keyboard ids that close the menu while it is open (0 = unused)
+	g_cancelCodes = { ReadNumber(ini, L"CancelCode1", 0x1B), ReadNumber(ini, L"CancelCode2", 0x09), ReadNumber(ini, L"CancelCode3", 0),
+		ReadNumber(ini, L"CancelCode4", 0) };
+	g_cancelCount = 4;
+	while (g_cancelCount && g_cancelCodes[g_cancelCount - 1] == 0) {
+		--g_cancelCount;
+	}
 	const auto runtime = a_sfse->RuntimeVersion();
 	REX::INFO("step=load runtime={} stage={} key={} flags={} keep_alive={}", runtime.string(), g_stage, Hex(g_key),
 		Hex(g_flags), g_keepAlive ? 1 : 0);
@@ -3034,7 +3493,7 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	if (g_stage >= 3) {
 		g_snapshotKey = ReadNumber(ini, L"SnapshotKey", 0x7A);
 		if (g_stage >= 4) {   // (d) and (e)
-			ReadFlagSets(ini, L"PageFlagSets", L"0x9");
+			ReadFlagSets(ini, L"PageFlagSets", L"0x19");   // FAL-414: bit 4 (0x10) puts StopContextProcessing (78) on the control map stack, so Tab arrives as Cancel
 		} else {
 			ReadFlagSets(ini, L"FlagSets", L"0x0,0x8,0x9");
 			clickCall = ReadText(ini, L"ClickCall");

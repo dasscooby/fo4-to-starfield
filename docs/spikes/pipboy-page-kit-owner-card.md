@@ -23,7 +23,7 @@ like the keys.
 | 4 | Press **E** twice, then **D**. Then hold **S** for about three seconds. | The bracket is on DATA and KIT TEST is bright. Thirty TEST ROW lines scroll while S is held. A small arrow shows when more rows are below or above, and the right side says ROW n OF 30. | Did it scroll? Did it stop at TEST ROW 30? |
 | 5 | With the mouse, click one TEST ROW line. Then click the word **MAP** at the top. | The clicked line gets the bar. Then the MAP page: THE MAP WAITS FOR THE MAP TRACK. | Did both clicks work? |
 | 6 | Press **Q** until the bracket is back on STAT. Then click the word **SPECIAL**. | STAT, then the SPECIAL rows again. | Did Q and the click work? |
-| 7 | Press **Tab** once and wait two seconds. Then press **Esc** once and wait. | Tab should change nothing on the Pip-Boy. Esc may open the game's own menu. If it does, close that menu with Esc. | What did the game do on Tab, and on Esc? Is the Pip-Boy still open? |
+| 7 | With the Pip-Boy open, press **Tab** once and wait two seconds. Open it again with F10, press **Esc** once and wait. Then press F10, and last the CLOSE button, each time with the Pip-Boy open. | Tab and Esc should each close the Pip-Boy and the game's own menu should NOT appear (FAL-414). F10 and CLOSE still close it. With the Pip-Boy closed, Tab and Esc do what they do in the unmodded game. | Did the game's menu appear on Tab or on Esc? Did the Pip-Boy close each time? |
 | 8 | Click **CLOSE** (if the Pip-Boy is gone, press **F10** first). Then press **F10** twice, about two seconds apart. | The Pip-Boy closes. Then it opens again on SPECIAL, where you left it, and closes. | Did CLOSE work? Did it come back on SPECIAL? |
 
 **Report:**
@@ -52,7 +52,7 @@ of `docs/spikes/pipboy-channel-bridge-session.md`, sections 1 to 3, with these c
    neither packed nor installed).
 3. **Install** (game closed, receipts first): the dll and the Address Library file, as in section 3 of that card; no
    FOCCPing or FOCCSidecar. The ini goes too, from this checkout, with `Stage=5` (`-replace '^Stage=0','Stage=5'`).
-   Its pages are the ones the movie was staged from. Expect `Stage=5`, `PageFlagSets=0x9`, `SnapshotKey=0x7A` and
+   Its pages are the ones the movie was staged from. Expect `Stage=5`, `PageFlagSets=0x19`, `SnapshotKey=0x7A` and
    `KitUp=0x26,0x57`. Then run `pipboy_probe_install.py install --dir $exp --starfield $sf`.
 4. **Session:** launch through `sfse_loader.exe`, load a throwaway save, and hand over to the owner. No save is made.
    After the owner's step 8, press F11 once with the Pip-Boy open, then close it. Open the console for the controls

@@ -27,7 +27,7 @@ and logs every step. The stage is picked by `Stage` in `FO4SFPipboyMenu.ini`:
 | --- | --- |
 | `src/main.cpp` | the plugin: version guard, checks before use, the menu object, the key thread |
 | `src/pch.h` | precompiled header (libxse's game headers and SFSE layer) |
-| `FO4SFPipboyMenu.ini` | `Stage`, `Key` (default `0x79`, F10), `Flags` (0), `KeepAlive` (1); stage (c): `FlagSets` (`0x0,0x8,0x9`), `SnapshotKey` (`0x7A`, F11), `ClickCall` (empty: off); stages (d) and (e): `PageFlagSets` (`0x9`); stage (e): `KitUp` to `KitNextTab`, and the pages (`[Kit]`, `[Page <TAB>/<SUB>]`) |
+| `FO4SFPipboyMenu.ini` | `Stage`, `Key` (default `0x79`, F10), `Flags` (0), `KeepAlive` (1); stage (c): `FlagSets` (`0x0,0x8,0x9`), `SnapshotKey` (`0x7A`, F11), `ClickCall` (empty: off); stages (d) and (e): `PageFlagSets` (`0x19`); stages (d), (e): `CancelCode1` to `CancelCode4` (`0x1B`, `0x09`: Esc and Tab as Windows virtual-key codes, as the PC's game run logged them); stage (e): `KitUp` to `KitNextTab`, and the pages (`[Kit]`, `[Page <TAB>/<SUB>]`) |
 | `xmake.lua`, `build.ps1` | the PC build: FOCCPing's build path (`docs/spikes/combined-core-probes.md`, B0-2) |
 | `scripts/ui/make_probe_swf.py` | writes the stage (b) movie, with `--channel` the stage (c) one and with `--page` the stage (d) one (pure Python; tests `tests/test_make_probe_swf.py`, `tests/test_pipboy_stat_page.py`) |
 | `scripts/ui/make_pipboy_kit.py` | the page kit (stage (e)): reads and checks the pages of the ini (`--check`) and writes the kit's movie for them (pure Python, on `make_probe_swf.py`; tests `tests/test_pipboy_kit.py`) |
@@ -212,7 +212,7 @@ How it runs, the channel's way:
   button=close n=<k>`). The key thread then sends an update at once (NEXT TAB), or closes the menu on the main thread
   as F10 does (CLOSE: `step=close n=<k> by=button was_open=1 sent=hide`, then `step=state n=<k> open=0 expected=0
   match=yes`; a close counts as a press in the `n` of these lines).
-- **Flags:** `PageFlagSets` (default `0x9`, the set at which test C's clicks reached our menu) cycles per open like
+- **Flags:** `PageFlagSets` (default `0x19` since FAL-414: `0x9`, the set at which test C's clicks reached our menu, plus bit 4 (`0x10`), which puts StopContextProcessing (78) on the control map's stack so Tab arrives as Cancel; PC sweep at 14176a5e: bit 1 `0x2` pauses the game, bit 8 `0x100` blanks the world, bits 6, 9, 10, 18, 25, 27 showed nothing; the game does not pause at `0x19`, whether it should is the owner's call) cycles per open like
   `FlagSets`. DATA's `GAME PAUSED` is the pause byte, live: at `e7925e00` no set paused the game.
 
 Where each value comes from, and what is checked before it is used:
@@ -248,8 +248,10 @@ animation. This stage is the baseline. A page is a few lines of data; adding one
 
 **The movie** (`scripts/ui/make_pipboy_kit.py`, staged with `make_pipboy_probe.py stage <exp> --kit` under the same name
 `Interface/FO4SF_PipboyMenu.swf`) has no code. It draws one dark screen in one phosphor colour (`--color RRGGBB`,
-default `1AFF80`); the screen, the dim text and the footer boxes are derived from that one colour. Its font is stage
-(d)'s 5 x 7 table plus `[ ] < > * ;`. The plugin finds each part by name and changes only `text` and `visible`:
+default `1AFF80`); the screen, the dim text, the footer boxes, the frames and the scan lines are derived from that one
+colour. The Fallout 4 look, first cut (FAL-431, shapes only): the screen's frame with cut corners, scan lines (2 px every
+6 px, also inside each hit area so a click on one still names the area), the filled selection bar and a frame round the
+value rows. Its font is stage (d)'s 5 x 7 table plus `[ ] < > * ;`. The plugin finds each part by name and changes only `text` and `visible`:
 
 | Part | Names | What the plugin does |
 | --- | --- | --- |
@@ -285,9 +287,11 @@ row value is longer than 8 characters shows that value after its label, in the l
 | --- | --- |
 | STAT / STATUS | rows: health, level, experience, carry weight max, rads, cell, world, time; footer HP, LEVEL, XP |
 | STAT / SPECIAL | rows: Strength to Luck, `av:2C2` to `av:2C8` (Starfield.esm keeps Fallout 4's ids); the same footer |
-| INV / ITEMS, DATA / QUESTS | notices: the inventory list and the quest list (our mission first) come in the next pull request |
+| INV / ITEMS | `List=inventory`: the player's items, name and count, sorted by name (FAL-426) |
+| DATA / QUESTS | `List=quests`: our mission first, the quest `[Kit] Mission=` names (FAL-431) |
 | DATA / KIT TEST | `List=kit_test`: thirty rows to scroll, select and click |
-| MAP / WORLD, RADIO / STATIONS | notices: each waits for its own track (the map track, the radio) |
+| MAP / WORLD | rows: world, cell, position, time, days passed (FAL-426: the map's first content; the drawn map waits for the map track) |
+| RADIO / STATIONS | notice: waits for its own track (the radio) |
 
 **Value providers.** Every value is read on the main thread, with stage (d)'s reads and two calls only. When one
 cannot be read it prints `?`, and its reason is logged once as `step=page_unknown what=<value> reason=<r>`.
@@ -303,8 +307,14 @@ cannot be read it prints `?`, and its reason is logged once as `step=page_unknow
 | `position` | the player's position, whole units | `what=position reason=no_player` |
 | `av:<hex>` | the player's `GetActorValue` with the `ActorValueInfo` form of that form id. The form is looked up once by its id and accepted by its RTTI type, with stage (d)'s `AcceptById`, logged as `step=kit_av av:<id>:form=<0 or 1>:type=<rtti>:...:<used or refused>` | `what=av:<hex> reason=no_such_actor_value` |
 
-Lists: `kit_test` (thirty rows, no read of the game). The inventory and the quests come next, as `inventory` and
-`quests`.
+Lists: `kit_test` (thirty rows, no read of the game), `inventory` (FAL-426) and `quests` (FAL-431). `[Kit]
+Mission=<plugin file>|<local id hex>` names our mission (`FO4SFMission.esm|800`, `FO4SF_Min00` "When Freedom Calls",
+the PC's read of the installed plugin); a wrong one refuses the kit as any wrong line does.
+
+| List | Reads (libxse 9d090c4's layouts, each to be confirmed by the PC's log) | When it cannot |
+| --- | --- | --- |
+| `inventory` | the player's `TESObjectREFR::inventoryList` at `+0xA0`, accepted by its RTTI type `BGSInventoryList`; its `data` array at `+0x28` (at most 512 items); each `BGSInventoryItem` (`0x28` bytes): the object at `+0x00` (an RTTI `TESBoundObject`, its `TESFullName`, else its form id), the stacks at `+0x10` (each `0x10` bytes, the count the u32 at `+0x08`: the PC's `step=kit_inventory` read `01000000` there, 11 Nov; libxse's comment says `+0x10`, which its own size contradicts), the equip flags at `+0x20`. Rows sorted by name; the value rows: FORM, TYPE, STACKS, EQUIPPED. The first read logs `step=kit_inventory list=<addr> type=<rtti> size=<n> capacity=<n> first_item=<40 bytes> first_stack=<16 bytes>` once, which settles the count's offset | one row `INVENTORY NOT READ` and `what=inventory reason=no_player`, `list_type list=<addr> type=<rtti>` or `items size=<n> capacity=<n> data=<addr>`; an item whose object is not a bound object shows `?` |
+| `quests` | our mission: its `TESFile` by name in the data handler's `compiledFileCollection` at `+0x1580` (`files`, `smallFiles`, `mediumFiles`, each accepted by its RTTI type as `TESFile` or a type with `TESFile` as its base at `+0`: the game's lists hold `TESPackedFile`, FAL-437; the name at `+0x38`; files skipped for their type are counted and logged once, `step=kit_file file=<file> skipped=<n> type=<rtti>`), the form id that file gives the local id (full: `compileIndex` `+0x1B7`, then `fileIndex` `+0x218`; small `FE` + 12 bits; medium `FD` + 16 bits) through the engine's lookup, accepted only as an RTTI `TESQuest`; its name (`TESFullName`, `+0x40` in Starfield's RTTI) and its flags (u16 at `+0x10C`, shown raw as FLAGS). The value rows: FORM, FILE, FLAGS, STAGE (`?` until the PC names the stage's offset). The first read logs `step=kit_quest mission=<file>|<id> found=yes form=<id> quest=<addr> type=<rtti> name="<name>" flags=<hex> bytes100=<64 bytes> file_kind=<n> ... tried=<id>:<type>` once (or `found=no` and what was tried, `reason=file_not_loaded skipped=<n>` when no file matched). Starfield's own quests are not listed yet | one row `QUESTS NOT READ` and `what=quests reason=no_mission` or `mission_not_found mission=<file>\|<id>` |
 
 **How it runs.** The pattern is stage (d)'s:
 
@@ -352,8 +362,8 @@ and the report). Tab is not bound by default for that reason; `KitNextTab=0x45,0
 - what the keys do in the game at `0x9`;
 - how the layout looks at the PC's resolution (ShowAll keeps the 16:9 stage).
 
-**The look (part 3, next):** scan lines, a slight glow, the list highlight, and a better font. The colour is already
-one setting. The planned route for the font and the Vault Boy pictures:
+**The look (part 3):** the frame, the scan lines, the filled bar and the value rows' frame are in (FAL-431, first cut);
+a slight glow and a better font come next. The colour is already one setting. The planned route for the font and the Vault Boy pictures:
 
 - **Font:** ours, generated like this one. Nothing from either game goes into Git, the kit runs with or without
   Fallout 4 installed, and the tests stay byte-exact.
@@ -606,7 +616,28 @@ Take a screenshot while the menu is open after the fifth press, and one after th
    moved=1`, and `name=fo4sfTab3` or `fo4sfTabHit3` `action=tab` for MAP.
 6. **CLOSE:** `step=click button=close`, `step=close ... sent=hide` and `step=state ... match=yes`. F10 then opens the
    page where it was left.
-7. The owner's report of what Tab and Esc did is a finding, not a pass or a fail.
+7. **Tab and Esc (FAL-414, the menu's own cancel handling):** with the page open, each of Tab and Esc logs
+   `step=input id=<hex> user_event="<name>" value=1 held=0 status=0 cancel=1`, then `step=close n=<k> by=cancel
+   was_open=1 sent=hide` and `step=state n=<k> open=0 expected=0 match=yes`; the game's pause menu does not appear.
+   `step=input_vtable replaced=0x01,0x08 ...` follows `step=ready`. F10 and CLOSE still close it (`by=button`). With
+   the page closed, Tab and Esc are the unmodded game's. If the pause menu still comes up, post the `step=input`
+   lines (the ids and user events the game sends; `cancel=0` on a Tab or Esc press means `CancelCode1` to
+   `CancelCode4` in the ini do not match: put the logged `id=` there) and what you saw.
+
+### Tab and Esc close the page (FAL-414)
+
+At stages (d) and (e) the menu copies the ten-slot BSInputEventUser vtable (subobject 0x10 of IMenu, RVA 0x4d7e950 in
+1.16.244, checked by `CheckVtable`) and replaces [01] ShouldHandleEvent and [08] OnButtonEvent (both called with
+`this = menu + 0x10`). While the page is open, a keyboard button whose id is in `CancelCode1..4` or whose user event is
+`Cancel` is ours: [01] says so, [08] sets the event's `status = kStop` (the other menus' [01] refuses a stopped event)
+and, on the press (`value > 0`, `heldDownSecs == 0`), the key thread closes the menu as CLOSE does (`by=cancel`).
+Everything else goes to the engine's own slots. One press arrives as several events (`held=0`, `0.009`, `0.017`): only
+the first closes the menu, and the next close waits for a release (the gate is cleared at every open and close, since a release can be heard while the page is closed). PC game run of c1d1d899: Esc (`id=0x1b
+user_event="Cancel"`) is taken and the pause menu does not open; Tab (`id=0x9 user_event="DataMenu"`) closed the page but
+the game's data menu still opened at flag set `0x9`, since `kStop` does not stop its opener; at `0x19` Tab arrives as `Cancel`, the stack is `contexts=[0,1,78,13]` and no data menu opens (PC run, #738). Diagnostic for that: the snapshot key (F11) also
+logs `step=menu_detail name=<menu> menu=<addr> flags=... c4=... c8=... cc=... d0=...` for every known menu that is open,
+and every snapshot already logs the ControlMap's active input context ids (`contexts=`); run it with our page, the data
+menu and the pause menu open.
 
 ### What each failure line means
 

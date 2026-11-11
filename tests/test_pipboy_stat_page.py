@@ -297,7 +297,8 @@ class PagePluginTests(unittest.TestCase):
     def test_the_only_calls_into_the_game_are_the_checked_ones(self):
         self.assertEqual(self.page.count("reinterpret_cast<GetActorValue_t>"), 1)
         self.assertEqual(self.page.count("reinterpret_cast<LookupById_t>(Address(kLookupById))"), 1)
-        self.assertEqual(self.main.count("FormById("), 4)                    # the definition, AcceptById, FindForms' two
+        self.assertEqual(self.main.count("FormById("), 6)                    # the definition, AcceptById, FindForms' two
+        # and the kit's quest list's two (FAL-431, test_pipboy_kit's test_nothing_new_is_called_in_the_game)
         self.assertNotIn("REL::Relocation", self.page)
         self.assertNotIn("REL::ID", self.page)
         value = function(self.main, "std::string ActorValueText(")
@@ -354,9 +355,9 @@ class PagePluginTests(unittest.TestCase):
         self.assertIn('"step=menu_names registered={} not_registered={}"', menus)
 
     def test_ini_readme_and_flags(self):
-        self.assertIn("\nPageFlagSets=0x9\n", self.ini)
+        self.assertIn("\nPageFlagSets=0x19\n", self.ini)
         self.assertIn("; 4 = stage (d): the STAT page", self.ini)
-        self.assertIn('ReadFlagSets(ini, L"PageFlagSets", L"0x9");', self.main)
+        self.assertIn('ReadFlagSets(ini, L"PageFlagSets", L"0x19");', self.main)
         self.assertIn("if (g_stage < 1 || g_stage > 5) {", self.main)                 # (e), FAL-301
         self.assertIn("### PASS at (d), `Stage=4`", self.readme)
         self.assertIn("## Stage (d): the STAT page (FAL-272)", self.readme)
