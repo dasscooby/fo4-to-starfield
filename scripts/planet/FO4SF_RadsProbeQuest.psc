@@ -8,12 +8,13 @@ Scriptname FO4SF_RadsProbeQuest extends Quest
              is not zero (SetValue 50, read) and back to 0 (SetValue 0, read): does our own actor value take a number
    stage 20  rads to 100     (the spell, once: effect +100)
    stage 30  rads to 300     (the spell, twice: +200)
-   stage 40  RadAway         (AddItem + EquipItem: effect -200, so 100 left)
+   stage 40  RadAway         (AddItem + EquipItem: its effect should lower the value by 200, so 100 left)
    stage 50  the SECOND CONTROL: a vanilla spell (property ControlSpell, named when the plugin is built) is cast on the player
              and Health read before and 3 s after. Tells "our effect is wrong" from "Cast from a quest script applies no value
              modifier at all". Not run when the property is None.
- After the effect has had 3 s the script reads the value, FORCES the step's number with SetValue when the effect did not
- give it (logged fix forced=true, so the route is still tested), then applies the ROUTE: a permanent modifier on Health
+ After the effect has had 3 s the script reads the value, FORCES the step's number when the effect did not give it, by the
+ difference (Actor.ModValue of want minus have; SetValue only when ModValue is not declared; logged fix forced=true how=<call>,
+ so the route is still tested), then applies the ROUTE: a permanent modifier on Health
  of minus one tenth of the rads (ModValue on the difference to what it applied before), and reads again 3 s later.
  Each reading logs our value, the player's health (GetValue), its base value and maximum when the game declares those,
  and the ids of the active magic effects on the player (to see whether Starfield's own radiation acts in our world).
@@ -151,6 +152,14 @@ Function Control(Actor p)
     Trace("control av=" + Id(HealthAV) + " delta=" + ControlDelta + " called=" + called + " before=" + before + " after=" + after + " restored=" + restored + " undone=" + back)
 EndFunction
 
+bool Function ModRads(Actor p, float delta)
+    {Our value moved by delta with Actor.ModValue; false when the game declares no such call (then the caller falls back to SetValue).}
+    bool ok = false
+;OPT Actor.ModValue     p.ModValue(RadsAV, delta)
+;OPT Actor.ModValue     ok = true
+    return ok
+EndFunction
+
 Function ApplyRoute(Actor p)
     float rads = p.GetValue(RadsAV)
     bool clamped = false
@@ -253,11 +262,18 @@ Function Step30(Actor p)
     StartTimer(SETTLE_S, TIMER_SETTLE + 30)
 EndFunction
 
+float RadsBefore40 = 0.0
+
 Function Step40(Actor p)
     Trace("step stage=40 call=EquipItem expect=100")
+    RadsBefore40 = p.GetValue(RadsAV)
     Reading("before", 40)
     p.AddItem(RadAway, 1, true)
+    ; Seventh session: RadAway moved nothing and the log could not say whether the item was used up. The count after AddItem and
+    ; after the settle time separates "not consumed" from "consumed, effect inert".
+    Trace("item stage=40 when=added count=" + p.GetItemCount(RadAway))
     p.EquipItem(RadAway, false, true)
+    Trace("item stage=40 when=now count=" + p.GetItemCount(RadAway))
     Reading("now", 40)
     StartTimer(SETTLE_S, TIMER_SETTLE + 40)
 EndFunction
@@ -266,11 +282,36 @@ Function Settle(int stage)
     {The effect has had its time: read, force the step's value when the effect did not give it, apply the route, read.}
     Actor p = Game.GetPlayer()
     Reading("settled", stage)
+    if stage == 40
+        Trace("item stage=40 when=settled count=" + p.GetItemCount(RadAway))
+    endif
     float want = Expected(stage)
     float have = p.GetValue(RadsAV)
+    if stage == 40
+        ; Eighth session: the item is consumed and its effect is inert on our value. RadAway's route is therefore the script:
+        ; when the item's own effect left the value where it was, take 200 off with ModValue, clamped at 0 (the sign rule and the
+        ; call are proven by the force). item_had is the item's own result, before this; the reader judges the item on it.
+        float itemHad = have
+        float dRad = -200.0
+        if have + dRad < 0.0
+            dRad = 0.0 - have
+        endif
+        bool moved = false
+        if have == RadsBefore40
+            moved = ModRads(p, dRad)
+        endif
+        Trace("radaway stage=40 item_had=" + itemHad + " before=" + RadsBefore40 + " route=script applied=" + moved + " delta=" + dRad + " now=" + p.GetValue(RadsAV))
+        have = p.GetValue(RadsAV)
+    endif
     if have != want
-        p.SetValue(RadsAV, want)
-        Trace("fix stage=" + stage + " forced=true want=" + want + " had=" + have + " now=" + p.GetValue(RadsAV))
+        ; Sixth session: SetValue wrote the base while the cast's change sat apart from it (300 stored, SetValue 100 read 400). A
+        ; correction by the difference reaches want whichever of the two the call moves; SetValue only when there is no ModValue.
+        string how = "ModValue"
+        if !ModRads(p, want - have)
+            how = "SetValue"
+            p.SetValue(RadsAV, want)
+        endif
+        Trace("fix stage=" + stage + " forced=true want=" + want + " had=" + have + " now=" + p.GetValue(RadsAV) + " how=" + how)
     else
         Trace("fix stage=" + stage + " forced=false want=" + want + " had=" + have + " now=" + have)
     endif

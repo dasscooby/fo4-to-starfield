@@ -244,17 +244,51 @@ class VerdictTests(unittest.TestCase):
         self.assertEqual(s["radaway"], "not run")
         self.assertEqual(s["route"][20], "no readings")
 
-    def test_the_source_falls_back_to_base_then_health_and_says_so(self):
+    def test_without_a_maximum_the_route_is_judged_on_current_health_and_base_is_only_named(self):
+        """Sixth session: GetValueMax is not declared; base stays 200 while the route lowers current Health."""
         lines = [x.replace(" max=", " zz=") if " state " in x else x for x in good_log()]
         lines = [x.replace(" base=na", " base=200.0") if " state " in x else x for x in lines]
-        # base stays 200 while the script's route moved the modifier: base unchanged reads as no change, named as such
-        s = pl.summarize(lines)
-        self.assertEqual(s["maxsource"], "base")
-        self.assertIn("base unchanged at 200", s["route"][20])
-        nobase = [x.replace(" max=", " zz=") if " state " in x else x for x in good_log()]
-        s2 = pl.summarize(nobase)
-        self.assertEqual(s2["maxsource"], "health")
-        self.assertTrue(any("current health" in p for p in s2["problems"]))
+        lines = [x.replace("health=200.0", "health=205.0") if " state stage=10" in x else x for x in lines]
+        # health follows the route: 205 at stage 10, then -10, -30, -10 from there (what the script's route does)
+        out = []
+        for x in lines:
+            if " state stage=20" in x or " state stage=40" in x:
+                x = x.replace("health=200.0", "health=195.0")
+            elif " state stage=30" in x:
+                x = x.replace("health=200.0", "health=175.0")
+            out.append(x)
+        s = pl.summarize(out)
+        self.assertEqual(s["maxsource"], "health")
+        self.assertIn("health 205 to 195 (-10, expected -10 at 100 rads)", s["route"][20])
+        self.assertIn("health 205 to 175 (-30, expected -30 at 300 rads)", s["route"][30])
+        self.assertTrue(any("not the maximum" in p and "base read 200 throughout" in p for p in s["problems"]))
+        self.assertFalse(any("base unchanged" in v for v in s["route"].values()))
+
+    def test_the_item_count_separates_consumed_from_not(self):
+        base = good_log()
+        def with_items(added, settled):
+            out = []
+            for x in base:
+                out.append(x)
+                if " step stage=40" in x:
+                    out.append(x.split("step")[0] + f"item stage=40 when=added count={added} end=true")
+            out.append(base[0].split("init")[0] + f"item stage=40 when=settled count={settled} end=true")
+            return out
+        self.assertIn("item count 1 to 0: consumed", pl.summarize(with_items(1, 0))["radaway"])
+        self.assertIn("item count 1 to 1: NOT consumed", pl.summarize(with_items(1, 1))["radaway"])
+        self.assertNotIn("item count", pl.summarize(base)["radaway"])
+
+    def test_the_script_route_is_reported_apart_from_the_items_own_effect(self):
+        base = good_log()
+        pre = base[0].split("init")[0]
+        out = list(base)
+        out.append(pre + "radaway stage=40 item_had=300 before=300 route=script applied=true delta=-200 now=100 end=true")
+        r = pl.summarize(out)["radaway"]
+        self.assertIn("the item's own effect did not move the value (still 300)", r)
+        self.assertIn("script route (ModValue -200) took it to 100", r)
+        self.assertNotIn(", not ", r)
+        out[-1] = out[-1].replace("now=100", "now=150")
+        self.assertIn(", not 100", pl.summarize(out)["radaway"])
 
     def test_extra_effect_ids_are_named(self):
         lines = [x.replace("rads=100.0 health=200.0 base=na max=190.0 applied=-10 fx=none", "rads=100.0 health=200.0 base=na max=190.0 applied=-10 fx=-1234") for x in good_log()]

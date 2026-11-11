@@ -269,9 +269,11 @@ def stage(a):
         json.dump(plan, f, indent=1)
     with open(os.path.join(out, "README.txt"), "w", encoding="utf-8") as f:
         f.write(f"""Rads probe ({datetime.date.today().isoformat()}). docs/research/rads-probe.md
-{PLUGIN} (sha256 {plan['outputs'][PLUGIN]}): AVIF FO4SF_Rads ({a.type}, default 0, 0 to 1000), MGEF FO4SF_RadsEffect (value
-modifier on it), SPEL FO4SF_RadsSpell (+100), ALCH FO4SF_RadAway "RadAway" (-200), QUST FO4SF_RadsProbeQuest (start game
-enabled, stages 10 / 20 / 30 / 40, four properties: our AVIF, Starfield's {a.health}, the spell, RadAway), ALCH FO4SF_RadDose
+{PLUGIN} (sha256 {plan['outputs'][PLUGIN]}): AVIF FO4SF_Rads ({a.type}, default 0, 0 to 1000, DefaultToZero | DamageIsPositive),
+MGEF FO4SF_RadsEffect (a copy of a vanilla damage effect on our value, flags kept), SPEL FO4SF_RadsSpell (+100), ALCH
+FO4SF_RadAway "RadAway" (a vanilla medicine's shell; with a restore effect found, its own MGEF FO4SF_RadAwayEffect at +200,
+else the shared effect at -200: see plan.json "templates"), QUST FO4SF_RadsProbeQuest (start game enabled, stages 10 / 20 / 30
+/ 40 / 50, four properties: our AVIF, Starfield's {a.health}, the spell, RadAway; a fifth, ControlSpell, with --control-spell), ALCH FO4SF_RadDose
 "Rad Dose" (+100), QUST FO4SF_RadsHandQuest (by hand: no console, gives 3 RadAway and 3 Rad Dose, shows every rads change on
 screen; script {HAND_SCRIPT}). Master
 Starfield.esm only; adds records, overrides none. Checked against Starfield.esm {before}. Re-stage after a game update.

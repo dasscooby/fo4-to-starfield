@@ -16,8 +16,9 @@ control line. With the control read, three things are judged on the log alone:
   effect  stage 20 and 30: did the spell's effect raise our value to the step's number without help (fix forced=false)
   route   the maximum health of stage 10 (final) against stages 20, 30 and 40 (final): did it fall by a tenth of the rads
   RadAway stage 40: did the consumable lower our value to the step's number without help, and did the route give back
-Maximum health is the "max" reading when the game declares one, else "base", else "health" (the current value, so a hit
-taken during the session reads as a change: the report names the source). The log cannot say what the screen shows.
+Maximum health is the "max" reading when the game declares one, else "health" (the current value, so a hit taken during
+the session reads as a change: the report names the source and says it is not the maximum). The base is never used: the
+route moves the current value and the base stays put (sixth session); the base readings are only listed in a note. The log cannot say what the screen shows.
 Active effect ids are listed per stage; ids that were not there at stage 10 are named, as the way to see whether
 Starfield's own radiation acts in our world (the log cannot say which id is radiation: the owner looks them up).
 """
@@ -25,7 +26,7 @@ import re
 
 LINE = re.compile(r"FO4SFRADS rt=(?P<rt>[-+\d.eE]+) (?P<event>\w+)(?P<rest>.*)$", re.IGNORECASE)
 TOKEN = re.compile(r"(\w+)=(\S*)")
-EVENTS = ("init", "start", "step", "state", "control", "set", "fix", "route", "vcontrol")
+EVENTS = ("init", "start", "step", "state", "control", "set", "fix", "route", "vcontrol", "item", "radaway")
 WRITE_TEST = 50.0         # the script's WriteTest: stage 10 writes this to our value and reads it
 ID_KEYS = {"quest", "rads_av", "health_av", "spell", "radaway", "av"}
 WHENS = ("start", "before", "now", "settled", "routed", "final")
@@ -136,8 +137,9 @@ def control_check(ctl):
 
 
 def max_health(s):
-    """(value, source) of one state line: max, else base, else health (the current value), else (None, None)."""
-    for k in ("max", "base", "health"):
+    """(value, source) of one state line: max, else health (the current value), else (None, None). The base is not used:
+    the route moves the current value (sixth session: base stayed 200 while health read 195, 175, 165) and the report says so."""
+    for k in ("max", "health"):
         if num(s.get(k)):
             return s[k], k
     return None, None
@@ -174,8 +176,22 @@ def judge(events):
                 res = f"moved it to {fmt(have)}, not {fmt(want)}; the script forced it"
         if stage == 40:
             rad = res
+            ra = next((e for e in events if e["event"] == "radaway"), None)
+            if ra is not None and num(ra.get("item_had")) and num(ra.get("before")) and "before" in st:
+                ih, b0 = ra["item_had"], ra["before"]
+                item = ("did not move the value (still " + fmt(ih) + ")") if abs(ih - b0) <= EPS else f"moved it from {fmt(b0)} to {fmt(ih)}"
+                if ra.get("applied") is True:
+                    rad = f"the item's own effect {item}; the script route (ModValue {fmt(ra.get('delta'))}) took it to {fmt(ra.get('now'))}"
+                    if num(ra.get("now")) and abs(ra["now"] - EXPECT[40]) > EPS:
+                        rad += f", not {fmt(EXPECT[40])}"
+                else:
+                    rad = f"the item's own effect {item}; the script route was not applied"
         else:
             eff[stage] = res
+    items = {e.get("when"): e.get("count") for e in events if e["event"] == "item" and e.get("stage") == 40}
+    if rad not in ("not run", "no readings") and num(items.get("added")) and num(items.get("settled")):
+        a, z = items["added"], items["settled"]
+        rad += (f"; item count {fmt(a)} to {fmt(z)}: consumed" if z < a else f"; item count {fmt(a)} to {fmt(z)}: NOT consumed")
     # the route: maximum health at the end of each stage against stage 10's
     base_s = states.get(10, {}).get("final") or states.get(10, {}).get("routed")
     base, src = max_health(base_s) if base_s else (None, None)
@@ -291,7 +307,9 @@ def summarize(lines, run=-1):
     if all(isinstance(s.get("fx"), str) and s.get("fx") == "na" for s in states if "fx" in s) and states:
         out["problems"].append("the game gave no list of active effects (fx na): Starfield's own radiation cannot be seen")
     if src == "health":
-        out["problems"].append("no maximum or base reading for Health (both na): the route is judged on the current health")
+        bases = sorted({s["base"] for s in states if num(s.get("base"))})
+        out["problems"].append("no maximum reading for Health (GetValueMax is not declared): the route is judged on current Health, not the maximum"
+                               + (f"; base read {', '.join(fmt(b) for b in bases)} throughout" if bases else ""))
     if any(num(x.get("rads")) and x["rads"] < 0 for x in states):
         out["problems"].append("our value read below zero (the AVIF minimum is not enforced for an effect's change): an effect applied more than once per cast")
     if any(e.get("clamped") is True for e in r if e["event"] == "route"):

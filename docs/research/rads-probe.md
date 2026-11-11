@@ -5,7 +5,7 @@ question first: **can a value of our own hold rads, lower maximum health, and be
 needs hang from the same value pattern. Verified on the PC, untested in play: Starfield.esm has `ENV_*` hazards, hazard
 spells and effects, `AFFL_*` affliction values and addiction effects; nothing is named mutation. Research rows R1 to R4,
 C1 to C3, V1 to V5 (docs/research/framework/engine-mechanics-notes).
-Task: FAL-213. Status: **run in game three times (b9ad9081, 41d3f968, 5e6ae1bc); the crash is fixed, the effect did not move the value; this head tries an instant, non-recovering effect.**
+Task: FAL-213. Status: **run in game five times; the crash is fixed; our spell has not yet moved the value; this head keeps Detrimental, flags the value damage-is-positive and builds RadAway as a mirror when a restore effect is found (an ingestible's or, on the real file, a spell's), else as the old shared -200 fallback.**
 
 ## What the first game session found (head b9ad9081, owner PC, 10 Nov 20:49 and 20:58 UTC)
 
@@ -87,7 +87,7 @@ other flag with the template). RadAway's item template prefers a vanilla medicin
 clamp. Untested in play. The `Detrimental` clearing is the sign rule (owner PC's disassembly reading): `DamageHealthContact`
 presumably carries it (Health lost 40 with magnitude +40), so without clearing it ours would be negative.
 
-### The one flag bit that differs from the template (9bc3ec25, owner PC's read-back)
+### The one flag bit that differs from the template (9bc3ec25, owner PC's read-back; **superseded by the fifth session below: Detrimental is now kept**)
 
 The staged effect's DATA words 24 to 26 read `00000003 00000101 09013F80`; the template `DamageHealthContact` has `09053F80`.
 The difference is the bit `0x00040000` of word 26, the bit `0x4` of the upper half (`0x0905` against `0x0901`). In Mutagen's
@@ -100,6 +100,88 @@ exactly one of the effect's `Detrimental` and the actor value's "damage is posit
 by its +40 magnitude, which fits `Detrimental` set on a value without the other flag; our value (`AVFL 00000400`) lacks
 the second, so with `Detrimental` kept the spell would give -100 and the value would stay at 0; cleared it should give +100.
 If stage 20 shows a negative sign, set `Detrimental` again and flag the AVIF damage-is-positive instead.
+
+## The fifth session (head c5412b0c): the last difference was Detrimental
+
+Owner PC run, no crash. **Verified in the game log:** our SPEL was byte for byte `DamageHealthSpell` in `SPIT` and `ETYP`, and our
+MGEF equalled `DamageHealthContact` except the actor value (word 14) and the **cleared Detrimental bit**; the vanilla spell
+(stage 50) took 40 off Health and kept it off; **ours still moved nothing** (stages 20 and 30 forced to 100 and 300); RadAway
+(stage 40) again read -59,700 (300 x -200 in the 3 s settle, then -59,900); the new clamp worked (Health stayed 205).
+The owner PC's reading (**untested; it fits all five sessions**): in this engine a Detrimental value modifier with no
+`Recover` is *damage* that lands once and stays; a non-Detrimental one is a *buff for its duration*, which with duration 0 is
+applied and taken back at once. An effect on an ingestible is a third behaviour (kept and repeated every update).
+This head changes exactly what that reading says to change, and nothing else:
+1. **`Detrimental` is kept** on our effect (the template's flags are kept untouched; our MGEF now differs from
+   `DamageHealthContact` in the actor value (word 14) and in what `CopyEffect` clears on purpose: resist, skill and third values, keywords,
+   conditions, the script and the counter effects, with the archetype rebuilt as a plain value modifier; the owner PC's read-back of the
+   staged DATA, not of those other fields, is what showed word 14 and the flag bit). `check` compares every flag with the template.
+2. **The value is flagged "damage is positive"** (`AVFL` bit 26, `0x04000000`, Mutagen `DamageIsPositive`, Fallout 4's own way of
+   declaring Rads; the AVIF now reads `DefaultToZero | DamageIsPositive`). By the sign rule the owner PC read from the engine
+   (negate when exactly one of the effect's Detrimental and the value's bit 26 is set), Detrimental + bit 26 is **no
+   negation: +100 stays +100**. With bit 26 left clear the same effect would give -100; the raw read at stage 20 (`settled`,
+   before any force) shows whichever sign it is.
+3. **RadAway is the mirror**: its own effect, `FO4SF_RadAwayEffect`, a copy of a vanilla *restore Health* effect (value
+   modifier on Health, **not Detrimental**, an entry of duration 0 in a vanilla ingestible; found by search, or named with
+   `--template-aid`), pointed at our value, at **+200**. By the same rule a non-Detrimental +200 on a damage-is-positive value
+   becomes -200 on the number. At head 9cba25ad the search looked at ingestibles only; the owner PC's build on the real
+   Starfield.esm then took the **fallback** (the real file has one Health ingestible, `ShipRepairKit`, entry duration 10): one
+   MGEF, RadAway at -200 in the ShipRepairKit shell, so stage 40 would not have tested the mirror (found in review FAL-318).
+   This head also takes the restore effect from a **spell** when no ingestible has one (`Dueling_RestoreHealth_Spell`
+   001E1171 first), copies it into RadAway's own effect, and tests the three paths (ingestible, spell, fallback) on three
+   synthetic masters. **Not confirmed on the real file**: that the spell path finds a match there.
+4. Stage 50 and the clamp stay.
+If stage 20 then reads 100 **without the script's force** (`fix ... forced=false`), the base is settled: rads is damage on a
+value that counts up, as in Fallout 4. If it still reads 0, the remaining suspect is that a value modifier from a spell does not
+act on a plugin's own AVIF at all, and the script-owned route is the base (a script effect that calls `ModValue`, or an item
+that calls the script). With the mirror the plugin holds two MGEFs (the spell's and RadAway's); the brief's "one effect" held until here. With the fallback
+it holds one.
+Still not shown: that the route lowers **maximum** Health (it lowers the current value), and that RadAway's `EquipItem` consumes the
+item.
+
+## The sixth session (head 9cba25ad): the spell moves the value
+
+Owner PC run on the real Starfield.esm with `--control-spell DamageHealthSpell`. **Verified in the game log:** stage 20 read
+**rads 100** and stage 30 **rads 300** three seconds after the casts, **with no force** (`forced=false`); the route then lowered
+current Health 205 to 195 and 175 (`applied` -10, -30); stage 50's vanilla spell took Health 165 to 125. So a value of our own
+**takes a spell's change and holds it**; this is the base's first answer. **Which of the two changes did it is not separated**:
+the effect's `Detrimental` bit was kept and the value flagged `DamageIsPositive` in the same head.
+RadAway (stage 40) did **nothing** on that head: the real file took the fallback (old shell, shared Detrimental effect, -200), and
+a negative magnitude on a Detrimental effect moved nothing. The head after it (6925a548) builds the mirror from a spell's restore
+effect instead; **not yet run in the game**.
+Two faults of the script and the reader, found in the same table and fixed in this head:
+* **The force was wrong:** `fix stage=40 forced=true want=100 had=300 now=400`. **Arithmetic reading, untested:** `SetValue`
+  writes the base while the cast's change is kept apart from it, so the value read 100 + the 300 already stored. At stage 10 the
+  stored part was 0, which is why `SetValue 50` read back 50. The force is now a **difference** (`ModValue(want - have)`),
+  which reaches the number whichever of the two the call moves; `SetValue` only when `ModValue` is not declared. The `fix`
+  line says `how=ModValue` or `how=SetValue`.
+* **The reader's "base unchanged at 200" was misleading:** the route lowers **current** Health (195, 175, 165) and the base never
+  moves. With no maximum reading (`GetValueMax` is not declared) the reader now judges the route on current Health, names that
+  in a note ("not the maximum") and lists the base readings.
+Still not shown: that the route lowers **maximum** Health, that RadAway lowers the value, and an active-effect list (`fx` is `NA`).
+
+## The seventh session (head bc2e8a57): the force works, RadAway still moves nothing
+
+**Verified in the game log (owner PC):** spell 100 and 300 unforced again; the force by difference took 300 to 100
+(`how=ModValue`) and the route followed back up (Health 175 to 195); the vanilla control worked. RadAway with the mirror effect
+(`FO4SF_RadAwayEffect`, not Detrimental, +200) left rads at 300. Across sessions: old shell with a non-Detrimental shared effect
+applied about once a frame (-59,700); shared Detrimental effect at -200 did nothing; mirror at +200 did nothing.
+**Unresolved:** whether `EquipItem` used the item up at all (the probe did not log the count). This head adds
+`item stage=40 when=added|now|settled count=N`; the reader appends `item count a to b: consumed|NOT consumed` to the stage 40
+line, so "not consumed" and "consumed, effect inert" separate in one run. **Not taken yet:** a script effect or a quest-handled
+use (`ModValue(-200)`, remove one), which would make RadAway work whatever the effect does; and a RadAway spell cast from the
+script as a control beside the item. Both are named in Claude's note and left for the result of this run.
+
+## The eighth session (head 216667ed): RadAway is consumed and its effect is inert
+
+**Verified in the game log (owner PC):** `item` counts 1, 0, 0 (`EquipItem` uses the item up at once); rads stayed 300 through the
+3 s settle; the force (`how=ModValue`) then took it to 100. So the item is used and a non-Detrimental +200 effect from an ingestible
+changes nothing on our value, while `ModValue` and a Detrimental duration-0 spell do move it. **Unresolved:** whether the effect
+is inert on our value in general or only as delivered by an ingestible (needs the restore effect cast as a spell; **not built**,
+it needs a writer change).
+**Route taken (head after this one):** RadAway's use ends in the script. In stage 40, when the item's own effect left the value
+where it was, the script applies `ModValue` of -200 (clamped at 0). The `radaway` line logs `item_had` (the item's own result),
+`applied`, `delta` and `now`; the reader says "the item's own effect did not move the value (still 300); the script route (ModValue -200)
+took it to 100". This is **not the pure effect**: the item's effect stays a research line. Not run in the game.
 
 ## Second control: a vanilla instant effect (stage 50)
 
@@ -130,14 +212,22 @@ planet probe is read or changed (a test pins both records byte for byte).
 `FO4SFRadsProbe.esm`, master Starfield.esm only, adds records and overrides none. No hazard record: no writer exists.
 
 * AVIF `FO4SF_Rads` "Rads": our own actor value on the pattern of the seven S.P.E.C.I.A.L. values in
-  `dotnet/NewGame/Program.cs` (name, abbreviation, type, default, min, max, flags). Default 0, 0 to 1000, flag
-  DefaultToZero. Type `Variable` (the one open choice: `stage --type DerivedAttribute` or `Resource` writes another, and
+  `dotnet/NewGame/Program.cs` (name, abbreviation, type, default, min, max, flags). Default 0, 0 to 1000, flags
+  `DefaultToZero | DamageIsPositive` (since the fifth session). Type `Variable` (the one open choice: `stage --type DerivedAttribute` or `Resource` writes another, and
   `check` follows the same option).
-* MGEF `FO4SF_RadsEffect`: archetype ValueModifier on `FO4SF_Rads`, FireAndForget, Self, instant (no duration). **One
-  effect for both directions**: the magnitude is in the effect entry, so the spell uses it at +100 and RadAway at -200.
-* SPEL `FO4SF_RadsSpell`: one entry, +100.
-* ALCH `FO4SF_RadAway` "RadAway" (Medicine): one entry, -200. No model, sound or keywords (not needed to test the value).
-* QUST `FO4SF_RadsProbeQuest`: start game enabled, stages 10 / 20 / 30 / 40, script with four properties: `RadsAV` (ours),
+* MGEF `FO4SF_RadsEffect`: a copy of the vanilla `DamageHealthContact`, the actor value (DATA word 14) changed to ours and its
+  own flags kept (`Detrimental` included), archetype ValueModifier, association empty. The spell uses it at +100.
+* SPEL `FO4SF_RadsSpell`: a copy of the vanilla `DamageHealthSpell`, one entry, +100.
+* ALCH `FO4SF_RadAway` "RadAway" (Medicine): the shell of a vanilla medicine (on the real Starfield.esm `ShipRepairKit`), one
+  entry. **Two shapes**, chosen at build time and printed in the build's `templates` line and in `plan.json`:
+  *mirror*: its own effect `FO4SF_RadAwayEffect`, a copy of a vanilla restore-Health effect (not Detrimental, entry duration 0) found on
+  an ingestible or, when no ingestible has one, on a spell (`Dueling_RestoreHealth_Spell` on the real file; `--restore-spell`
+  names another), pointed at our value, at **+200** (the plugin holds two MGEF); *fallback* (no restore effect anywhere): the
+  rads effect shared, at **-200** (one MGEF). The real Starfield.esm has one Health ingestible only (`ShipRepairKit`, entry
+  duration 10), so the ingestible search never matches there; whether the spell search does is **not confirmed offline** (the
+  owner PC's scan names `Dueling_RestoreHealth_Spell` 001E1171, which this build looks for by that editor id first). The
+  fallback is covered by a test since this head. No sound or keywords (not needed to test the value).
+* QUST `FO4SF_RadsProbeQuest`: start game enabled, stages 10 / 20 / 30 / 40 / 50, script with four properties: `RadsAV` (ours),
   `HealthAV` (Starfield.esm's `Health` AVIF, found by EditorID; `stage --health <edid>` names another), `RadsSpell`,
   `RadAway`. Properties are fine here: there are no cells and no references, so nothing is made persistent.
 
@@ -180,8 +270,8 @@ is optional too: if it does not exist, the control fails and the session is **IN
 `Actor.SetValue/GetValue` with an own AVIF and `AddItem/EquipItem` were compiled on the PC by the new game script.
 
 Per step: *before*, *now* (right after the call), *settled* (3 s later, the effect has had its time), a `fix` line (was the
-step's number there, or did the script **force** it with `SetValue`, `forced=true`, so that the route is still tested when the
-effect does nothing), a `route` line, *routed*, and *final* 3 s later. Each line ends `end=true`; a line without it was cut.
+step's number there, or did the script **force** it, `forced=true`, by the difference with `ModValue` (`how=ModValue`; `SetValue` only
+when `ModValue` is not declared), so that the route is still tested when the effect does nothing), a `route` line, *routed*, and *final* 3 s later. Each line ends `end=true`; a line without it was cut.
 The log is `My Games\Starfield\Logs\Script\User\FO4SFRadsProbe.0.log`, under `OneDrive\Documents` on the owner's PC (the reader tries that first, then `Documents`; `--file` names it).
 
 **Offline tests** use a synthetic Starfield.esm (with synthetic template records), a fake compiler and fake base sources. The Mutagen shapes of the MGEF archetype (the actor value sits in
@@ -200,8 +290,8 @@ Otherwise `CONTROL OK` and:
 
 * effect: each of stage 20 and 30 "gave N without help", "did not move the value (...); the script forced it" or "moved it
   to X, not N; the script forced it"; RadAway likewise.
-* route: the maximum health (the `max` reading, else `base`, else `health`; the source is named and `health` is only the
-  current value) at the end of stage 10 against the ends of stages 20, 30 and 40: moved by the expected tenth of the rads,
+* route: the maximum health (the `max` reading, else `health`; the source is named, `health` is only the current value and the
+  report says so; the base is not used, only listed in a note) at the end of stage 10 against the ends of stages 20, 30 and 40: moved by the expected tenth of the rads,
   unchanged, or by another amount.
 * active effect ids at a stage that were not there at stage 10 are listed. The log cannot say which id is radiation:
   the owner looks the ids up. Exit 0 when the control held, 1 when inconclusive, 2 with no log.
