@@ -8,7 +8,8 @@ usage: python scripts/ui/make_pipboy_kit.py --out <file.swf> [--ini <FO4SFPipboy
 A page is a section of the plugin's own ini, read by this script (to draw the main tabs) and by the plugin at load (to
 fill them); adding or changing a page is an edit of that file and a re-stage, no new code and no new movie by hand:
 
-  [Kit]                     Title=<text>, Header=<value> (the title bar's right side), Hints=<text> (the key hints)
+  [Kit]                     Title=<text>, Header=<value> (the title bar's right side), Hints=<text> (the key hints),
+                            Mission=<plugin file>|<local id hex> (our mission, the first row of List=quests)
   [Page <TAB>/<SUB>]        one page: the main tab it sits under and its sub-tab, in the order the sections come; then
                             exactly one of
     Row=<label>|<value>       a row of the list, its value from a value provider (any number, scrolled 16 at a time)
@@ -19,13 +20,15 @@ fill them); adding or changing a page is an edit of that file and a re-stage, no
     Hint=<text>               the key hints on this page instead of [Kit]'s
 
 Values (VALUE_PROVIDERS): health, level, xp, carry_max, rads, cell, world, time, days, position, and av:<hex>, any
-actor value by its form id (Starfield.esm's are 00 + the id: av:2C2 is Strength). Lists (LIST_PROVIDERS): kit_test.
+actor value by its form id (Starfield.esm's are 00 + the id: av:2C2 is Strength). Lists (LIST_PROVIDERS): kit_test,
+inventory (the player's items, FAL-426), quests (our mission first, the quest Mission= names, FAL-431).
 Every label is upper case in KIT_FONT's characters and fits its field; the plugin refuses the whole file otherwise
 (`refuse step=pages line=<n> reason=<r>`), as --check does here.
 
 The movie is make_probe_swf.py's kind (CWS, SWF 12, the ActionScript 3 flag, no code, its own 5 x 7 font): a dark screen
 in one phosphor colour (--color; every other colour is derived from it), and named children the plugin finds with
-getChildByName and changes through `text` and `visible` only:
+getChildByName and changes through `text` and `visible` only. The Fallout 4 look (FAL-431, a first cut, shapes only):
+the screen's frame with cut corners, faint scan lines, the filled selection bar and a frame round the value rows.
   title bar     fo4sfTitle, fo4sfHeaderInfo
   main tabs     fo4sfTab<i> (the label), fo4sfTabMark<i> (the bracket around it), fo4sfTabHit<i>
   sub-tabs      fo4sfSub<i> (bright, the shown one), fo4sfSubDim<i> (the others), fo4sfSubHit<i>, 5 slots
@@ -80,6 +83,9 @@ HINT_Y = 972
 HINT_BAND = (960, 62)                    # the dark band under the screen that holds the hints: y, height
 CLOSE_BOX = (1528, 964, 200, 56)         # the CLOSE button, on that band at the screen's right edge
 LINE = 3                                 # the width of every drawn line
+CORNER = 12                              # the screen frame's cut corners (a multiple of LINE)
+SCAN_PITCH, SCAN_H = 6, 2                # the scan lines: SCAN_H px every SCAN_PITCH px from the screen's top
+INFO_FRAME_GAP = 6                       # the value rows' frame, this far outside their fields (and ROW_Y - 8 above)
 
 # the columns of each field: what the plugin may write into it (KitText), the generator's fields fit them
 TITLE_COLUMNS = 42
@@ -105,7 +111,7 @@ NAMES = {
 }
 
 VALUE_PROVIDERS = ("health", "level", "xp", "carry_max", "rads", "cell", "world", "time", "days", "position")
-LIST_PROVIDERS = ("kit_test",)
+LIST_PROVIDERS = ("kit_test", "inventory", "quests")
 AV_PREFIX = "av:"
 PIPBOY_GREEN = swf.PIPBOY_GREEN
 
@@ -136,6 +142,19 @@ def check_value(spec, line):
     raise KitError(f"line {line}: value {spec!r} is not a value provider ({', '.join(VALUE_PROVIDERS)}, av:<hex>)")
 
 
+def check_mission(value, line):
+    """<plugin file>|<local id: 1 to 6 hex digits, not zero>; the file 1 to 64 characters (letters, digits, space _ - .)
+    ending .esm, .esp or .esl. The plugin's KitMission reads the same."""
+    if value.count("|") != 1:
+        raise KitError(f"line {line}: Mission needs <plugin file>|<local id hex>")
+    file, local = (part.strip(" \t") for part in value.split("|"))
+    if not re.fullmatch(r"[A-Za-z0-9 _.\-]{1,60}\.(?i:esm|esp|esl)", file):
+        raise KitError(f"line {line}: Mission's file {file!r} is not a plugin file name")
+    if not re.fullmatch(r"[0-9A-Fa-f]{1,6}", local) or not int(local, 16):
+        raise KitError(f"line {line}: Mission's local id {local!r} is not 1 to 6 hex digits, not zero")
+    return {"file": file, "local_id": int(local, 16)}
+
+
 def _cell(value, line, columns, what):
     if value.count("|") != 1:
         raise KitError(f"line {line}: {what} needs <label>|<value>")
@@ -146,7 +165,7 @@ def _cell(value, line, columns, what):
 def parse_kit(text):
     """The [Kit] section and the [Page <TAB>/<SUB>] sections of the ini, checked; other sections are skipped. The
     plugin's ReadKit (main.cpp) reads the same grammar with the same checks."""
-    kit = {"title": "FO4SF PIP-BOY", "header": "", "hints": "", "pages": []}
+    kit = {"title": "FO4SF PIP-BOY", "header": "", "hints": "", "mission": None, "pages": []}
     section = None
     page = None
     for n, raw in enumerate(text.splitlines(), 1):
@@ -186,8 +205,10 @@ def parse_kit(text):
                 kit["header"] = check_value(value, n)
             elif key == "Hints":
                 kit["hints"] = _fits(value, HINT_COLUMNS, "hints", n)
+            elif key == "Mission" and kit["mission"] is None:
+                kit["mission"] = check_mission(value, n)
             else:
-                raise KitError(f"line {n}: [Kit] has no key {key!r} (Title, Header, Hints)")
+                raise KitError(f"line {n}: [Kit] has no key {key!r} (Title, Header, Hints, Mission once)")
             continue
         if key == "Row":
             if len(page["rows"]) == MAX_PAGE_ROWS:
@@ -257,11 +278,12 @@ def packed(t):
 
 
 def palette(color):
-    """Every colour of the kit from the one phosphor colour: the screen, the dim text, the footer's boxes."""
+    """Every colour of the kit from the one phosphor colour: the screen, the dim text, the footer's boxes, the frames
+    and the scan lines."""
     if not 0 <= color <= 0xFFFFFF:
         raise KitError("the colour is RRGGBB")
     return {"ink": color, "screen": packed(scale(color, 0.07)), "dim": packed(scale(color, 0.45)),
-            "box": packed(scale(color, 0.22))}
+            "box": packed(scale(color, 0.22)), "frame": packed(scale(color, 0.60)), "scan": packed(scale(color, 0.11))}
 
 
 # ------------------------------------------------------------------------------------------------ the movie
@@ -278,6 +300,29 @@ def text_box(x, y, columns, px, height=None):
 
 def rx(x, y, w, h):
     return x * TWIPS, y * TWIPS, w * TWIPS, h * TWIPS
+
+
+def scan_lines(box):
+    """The scan lines across a box (twips): SCAN_H px every SCAN_PITCH px, counted from the screen's top so the lines
+    of every box meet those of the screen behind it."""
+    x, y, w, h = box
+    top, pitch = SCREEN[1] * TWIPS, SCAN_PITCH * TWIPS
+    first = top + -(-(y - top) // pitch) * pitch
+    return [(x, ly, w, min(SCAN_H * TWIPS, y + h - ly)) for ly in range(first, y + h, pitch)]
+
+
+def frame(x, y, w, h, corner=0):
+    """A LINE-wide frame round a box (px), as boxes that do not overlap; with corner, each corner cut by a diagonal
+    of corner / LINE squares."""
+    side = max(corner, LINE)
+    out = [rx(x + corner, y, w - 2 * corner, LINE), rx(x + corner, y + h - LINE, w - 2 * corner, LINE),
+           rx(x, y + side, LINE, h - 2 * side), rx(x + w - LINE, y + side, LINE, h - 2 * side)]
+    steps = corner // LINE
+    for k in range(steps):
+        dx, dy = (steps - 1 - k) * LINE, k * LINE
+        out += [rx(x + dx, y + dy, LINE, LINE), rx(x + w - LINE - dx, y + dy, LINE, LINE),
+                rx(x + dx, y + h - LINE - dy, LINE, LINE), rx(x + w - LINE - dx, y + h - LINE - dy, LINE, LINE)]
+    return out
 
 
 def layout(kit):
@@ -328,10 +373,15 @@ def layout(kit):
         out[f"foot_box{i}"] = rx(cx, FOOTER_Y, cell_w, FOOTER_H)
         out[f"foot{i}"] = text_box(cx + (cell_w - int(FOOTER_COLUMNS * advance(TEXT_PX)) - 4) // 2, FOOTER_Y + 4,
                                    FOOTER_COLUMNS, TEXT_PX, ROW_PITCH)
+    out["frame"] = frame(sx, sy, sw, sh, CORNER)
+    out["scan"] = scan_lines(rx(sx + LINE, sy + LINE, sw - 2 * LINE, sh - 2 * LINE))
+    info_top = ROW_Y - 8
+    out["info_frame"] = frame(info_x - INFO_FRAME_GAP, info_top, right + INFO_FRAME_GAP - (info_x - INFO_FRAME_GAP),
+                              ROW_Y + ROWS * ROW_PITCH + 4 - info_top)
     out["hint_band"] = rx(sx, HINT_BAND[0], sw, HINT_BAND[1])
     out["hints"] = text_box(left, HINT_Y, HINT_COLUMNS, HINT_PX)
     out["close"] = rx(*CLOSE_BOX)
-    out["kit_id"] = text_box(left, FOOTER_Y + FOOTER_H + 2, len(signature(kit)), ID_PX, ID_PX + 4)
+    out["kit_id"] = text_box(left, FOOTER_Y + FOOTER_H + 1, len(signature(kit)), ID_PX, ID_PX)   # above the frame
     return out
 
 
@@ -352,12 +402,17 @@ class _Movie:
                            swf.place_object2(char_id, self.depth))
         self.depth += 1
 
-    def shape(self, boxes, rgb, name=None):
+    def shape(self, boxes, rgb, name=None, lines=None):
         """A shape of filled boxes, placed as it is, or with a name inside a sprite of its own (a shape is not an
-        InteractiveObject: it has no name to click and no `visible` the plugin sets)."""
+        InteractiveObject: it has no name to click and no `visible` the plugin sets). lines: (boxes, rgb) of a second
+        shape in the same sprite, the scan lines over a hit area (a click on them still names the sprite)."""
         shape_id = self.define(lambda i: swf.define_shape3(i, list(boxes), rgb))
         if name:
-            sprite_id = self.define(lambda i: swf.define_sprite(i, [swf.place_object2(shape_id, 1)]))
+            inner = [swf.place_object2(shape_id, 1)]
+            if lines:
+                line_id = self.define(lambda i: swf.define_shape3(i, list(lines[0]), lines[1]))
+                inner.append(swf.place_object2(line_id, 2))
+            sprite_id = self.define(lambda i: swf.define_sprite(i, inner))
             self.place(sprite_id, name)
         else:
             self.place(shape_id)
@@ -376,15 +431,18 @@ def kit_movie_bytes(kit, color=PIPBOY_GREEN, compressed=True):
     n = NAMES
     font_id = m.define(lambda i: swf.define_font3(i, KIT_FONT))
     m.shape([lay["screen"]], c["screen"])
+    m.shape(lay["scan"], c["scan"])
+    m.shape(lay["frame"], c["frame"])
     m.shape([lay["hint_band"]], c["screen"])
     m.shape([lay[f"foot_box{i}"] for i in range(FOOTER)], c["box"])
     m.shape([lay["underline"]], c["ink"])
+    m.shape(lay["info_frame"], c["frame"])
     for i in range(len(tabs)):                                                      # under everything: the hit areas
-        m.shape([lay[f"tab_hit{i}"]], c["screen"], f"{n['tab_hit']}{i}")
+        m.shape([lay[f"tab_hit{i}"]], c["screen"], f"{n['tab_hit']}{i}", (scan_lines(lay[f"tab_hit{i}"]), c["scan"]))
     for i in range(SUBS):
-        m.shape([lay[f"sub_hit{i}"]], c["screen"], f"{n['sub_hit']}{i}")
+        m.shape([lay[f"sub_hit{i}"]], c["screen"], f"{n['sub_hit']}{i}", (scan_lines(lay[f"sub_hit{i}"]), c["scan"]))
     for i in range(ROWS):
-        m.shape([lay[f"row_hit{i}"]], c["screen"], f"{n['row_hit']}{i}")
+        m.shape([lay[f"row_hit{i}"]], c["screen"], f"{n['row_hit']}{i}", (scan_lines(lay[f"row_hit{i}"]), c["scan"]))
     for i in range(ROWS):
         m.shape([lay[f"bar{i}"]], c["ink"], f"{n['bar']}{i}")
     for i in range(len(tabs)):
@@ -462,7 +520,8 @@ def main(argv=None):
             raise KitError(f"--color {a.color!r} is not RRGGBB")
         if a.check:
             kit = read_kit(a.ini)
-            print(json.dumps({"signature": signature(kit), "tabs": tabs_of(kit), "pages": kit["pages"]}, indent=1))
+            print(json.dumps({"signature": signature(kit), "tabs": tabs_of(kit), "mission": kit["mission"],
+                              "pages": kit["pages"]}, indent=1))
             return 0
         if not a.out:
             ap.error("--out or --check is needed")

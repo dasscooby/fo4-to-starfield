@@ -74,9 +74,12 @@ class KitPagesTests(unittest.TestCase):
                                    ("CHARISMA", "av:2C5"), ("INTELLIGENCE", "av:2C6"), ("AGILITY", "av:2C7"),
                                    ("LUCK", "av:2C8")])
         self.assertEqual(pages[("DATA", "KIT TEST")]["list"], "kit_test")
-        for placeholder in (("INV", "ITEMS"), ("DATA", "QUESTS"), ("MAP", "WORLD"), ("RADIO", "STATIONS")):
-            self.assertTrue(pages[placeholder]["notice"], placeholder)   # named, and saying what it waits for
-        self.assertIn("MAP TRACK", " ".join(pages[("MAP", "WORLD")]["notice"]))
+        self.assertEqual(pages[("INV", "ITEMS")]["list"], "inventory")   # FAL-426: the first real list
+        self.assertEqual(pages[("DATA", "QUESTS")]["list"], "quests")    # FAL-431: our mission first
+        self.assertEqual(self.k["mission"], {"file": "FO4SFMission.esm", "local_id": 0x800})   # FO4SF_Min00
+        self.assertEqual([value for _, value in pages[("MAP", "WORLD")]["rows"]],   # the map's first content, no picture
+                         ["world", "cell", "position", "time", "days"])
+        self.assertTrue(pages[("RADIO", "STATIONS")]["notice"])   # named, and saying what it waits for
         self.assertEqual(self.k["header"], "time")
         self.assertEqual(kit.signature(self.k), "FO4SF KIT 1 16 STAT,INV,DATA,MAP,RADIO")
 
@@ -129,7 +132,14 @@ class KitPagesTests(unittest.TestCase):
             "row label too long": "[Page T/S]\nRow=" + "A" * 34 + "|health\n",
             "row character": "[Page T/S]\nRow=A\"B|health\n",
             "unknown value": "[Page T/S]\nRow=A|inventory\n",
-            "unknown list": "[Page T/S]\nList=inventory\n",
+            "unknown list": "[Page T/S]\nList=radio\n",
+            "mission without bar": "[Kit]\nMission=FO4SFMission.esm 800\n" + PAGE,
+            "mission twice": "[Kit]\nMission=A.esm|800\nMission=A.esm|800\n" + PAGE,
+            "mission not a plugin": "[Kit]\nMission=FO4SFMission.txt|800\n" + PAGE,
+            "mission id zero": "[Kit]\nMission=A.esm|0\n" + PAGE,
+            "mission id too long": "[Kit]\nMission=A.esm|1234567\n" + PAGE,
+            "mission id not hex": "[Kit]\nMission=A.esm|80G\n" + PAGE,
+            "mission file character": "[Kit]\nMission=A|B.esm|800\n" + PAGE,
             "two lists": "[Page T/S]\nList=kit_test\nList=kit_test\n",
             "two kinds": PAGE + "Notice=X\n",
             "no kind": "[Page T/S]\nFooter=HP|health\n",
@@ -145,6 +155,14 @@ class KitPagesTests(unittest.TestCase):
         for why, text in bad.items():
             with self.assertRaises(kit.KitError, msg=why):
                 kit.parse_kit(text)
+
+    def test_mission(self):
+        for good, out in (("FO4SFMission.esm|800", ("FO4SFMission.esm", 0x800)), ("a b_c-d.ESL|fffFFF", ("a b_c-d.ESL", 0xFFFFFF)),
+                          (" X.esp | 1 ", ("X.esp", 1)), ("A" * 60 + ".esm|800", ("A" * 60 + ".esm", 0x800))):
+            self.assertEqual(kit.check_mission(good, 1), {"file": out[0], "local_id": out[1]}, good)
+        for bad in ("A" * 61 + ".esm|800", ".esm|800", "A.esm|", "|800", "A/B.esm|800", "A.esm|-1"):
+            with self.assertRaises(kit.KitError, msg=bad):
+                kit.check_mission(bad, 1)
 
     def test_limits_are_inclusive(self):
         text = "[Kit]\nTitle=" + "T" * 42 + "\nHints=" + "H" * 72 + "\n"
@@ -350,6 +368,42 @@ class KitMovieTests(unittest.TestCase):
         with self.assertRaises(kit.KitError):
             kit.palette(0x1000000)
 
+    def test_fallout_4_look(self):
+        """FAL-431's first cut: the screen's frame with cut corners, scan lines (inside each hit area too, so a click on
+        one still names the area), a frame round the value rows; shapes only, every colour from the one setting."""
+        c = kit.palette(kit.PIPBOY_GREEN)
+        self.assertEqual((c["frame"], c["scan"]), (kit.packed(kit.scale(0x1AFF80, 0.60)), kit.packed(kit.scale(0x1AFF80, 0.11))))
+        screen = self.lay["screen"]
+        fields = [box_of(t["bounds"]) for t in self.named.values() if t["name"] == "DefineEditText"]
+        for key in ("frame", "scan", "info_frame"):
+            boxes = self.lay[key]
+            for i, a in enumerate(boxes):
+                self.assertTrue(inside(a, screen), (key, a))
+                for b in boxes[i + 1:]:
+                    self.assertFalse(overlap(a, b), (key, a, b))                # one shape: no box over another
+        for a in self.lay["frame"] + self.lay["info_frame"]:
+            for f in fields:
+                self.assertFalse(overlap(a, f), a)                              # no frame over any text
+        self.assertEqual(len(self.lay["frame"]), 4 + 4 * (kit.CORNER // kit.LINE))
+        pitch = kit.SCAN_PITCH * TWIPS
+        self.assertTrue(all((y - screen[1]) % pitch == 0 for _, y, _, _ in self.lay["scan"]))
+        drawn = {}
+        for t in self.movie["tags"]:
+            if t["name"] == "DefineShape3":
+                drawn.setdefault((t["fills"][0][0] << 16) | (t["fills"][0][1] << 8) | t["fills"][0][2], []).append(t)
+        self.assertEqual(len(drawn[c["frame"]]), 2)                             # the screen's frame and the info box's
+        n = kit.NAMES
+        hits = [f"{n['tab_hit']}{i}" for i in range(len(kit.tabs_of(self.k)))] + \
+               [f"{n['sub_hit']}{i}" for i in range(kit.SUBS)] + [f"{n['row_hit']}{i}" for i in range(kit.ROWS)]
+        for name in hits:
+            inner = [x for x in self.named[name]["tags"] if x["name"] == "PlaceObject2"]
+            self.assertEqual(len(inner), 2, name)                               # the screen's colour, then its lines
+            lines = self.by_id[inner[1]["character"]]
+            self.assertEqual((lines["fills"][0][0] << 16) | (lines["fills"][0][1] << 8) | lines["fills"][0][2], c["scan"])
+        for i in range(kit.ROWS):                                               # the selection bar: filled, in the ink
+            bar = self.named[f"{n['bar']}{i}"]
+            self.assertEqual(len([x for x in bar["tags"] if x["name"] == "PlaceObject2"]), 1)
+
     def test_another_ini_draws_its_own_tabs(self):
         k = kit.parse_kit("[Page ONE/A]\nRow=X|health\n[Page TWO/B]\nNotice=WAIT\n[Page ONE/C]\nList=kit_test\n")
         _, _, _, places, named = built(k)
@@ -484,6 +538,11 @@ class KitPluginTests(unittest.TestCase):
                       "if (g_kit.tabs.size() == kKitTabs) {", "if (subs.size() == kKitSubs) {",
                       'return KitRefuse(n, "no_pages");'):
             self.assertIn(check, read, check)
+        self.assertIn('key == "Mission" && g_kit.missionFile.empty() && KitMission(value)', read)
+        mission = function(self.main, "bool KitMission(")
+        for check in ('ext != ".esm" && ext != ".esp" && ext != ".esl"', "file.size() > 64", "hex.size() > 6",
+                      'std::string_view(" _-.")', "if (!id) {"):
+            self.assertIn(check, mission, check)
         cell = function(self.main, "bool KitCellOf(")
         self.assertIn("a_text.find('|', bar + 1) != std::string_view::npos", cell)
         value = function(self.main, "bool KitValueName(")
@@ -534,13 +593,87 @@ class KitPluginTests(unittest.TestCase):
         self.assertNotIn("REL::Relocation", self.section)
         self.assertNotIn("REL::ID", self.section)
         self.assertNotIn("reinterpret_cast<", self.section)
-        self.assertNotIn("FormById(", self.section)
-        self.assertEqual(self.main.count("FormById("), 4)                     # stage d's: the definition and three
+        self.assertEqual(self.main.count("FormById("), 6)                     # stage d's four and the quest list's two
+        files = function(self.main, "std::uint32_t KitFileForm(")              # FAL-431: our mission, by its file
+        quests = function(self.main, "std::vector<KitRow> KitQuestRows(")
+        self.assertEqual((files.count("FormById("), quests.count("FormById(")), (1, 1))
+        self.assertEqual(self.section.count("FormById("), 2)
+        self.assertIn("if (IsType(form, a_type, formType)) {", files)        # only a form of the asked RTTI type
+        self.assertIn('if (!IsType(quest, "TESQuest@@", type)) {', quests)
         self.assertEqual(self.main.count("reinterpret_cast<GetActorValue_t>"), 1)
         actor = function(self.main, "std::uintptr_t KitActorValue(")
         self.assertIn('AcceptById(a_id, "av", "ActorValueInfo@@", kAvifEditorIdAt, form)', actor)
         self.assertIn("g_kitActorValues.emplace(a_id, form);", actor)        # once per id
         self.assertIn("return ActorValueText(a_spec, KitActorValue(id));", function(self.main, "std::string KitValueRead("))
+
+    def test_a_packed_file_is_a_file(self):
+        """FAL-437: the game's file lists hold TESPackedFile (vtable RVA 0x4b29b80; RTTI bases TESPackedFile and TESFile,
+        both at +0), so `IsType(file, "TESFile@@")` refused every file and b385808d logged `found=no
+        reason=file_not_loaded`. IsFileType accepts TESFile, or a type with TESFile as its base at +0 (BaseOffset); a file
+        skipped for its type is counted and logged once. Checked as text, and by a Python model of IsFileType."""
+        is_file = function(self.main, "bool IsFileType(")
+        self.assertIn('return a_type.offset == 0 && (NameIs(a_type.name, "TESFile@@") || BaseOffset(a_type, "TESFile@@") == 0u);',
+                      is_file)
+        files = function(self.main, "std::uint32_t KitFileForm(")
+        self.assertNotIn('"TESFile@@"', files)
+        self.assertIn("if (!TypeOf(file, fileType) || !IsFileType(fileType)) {", files)
+        skip = files[files.index("if (!TypeOf(file, fileType) || !IsFileType(fileType)) {"):files.index("kFileNameAt")]
+        self.assertIn("if (!skipped++) {", skip)                                # the count, and the first type skipped
+        self.assertIn("continue;", skip)
+        self.assertIn('REX::INFO("step=kit_file file={} skipped={} type={} (not a TESFile at +0)"', files)
+        self.assertIn("if (skipped && !skipLogged) {", files)                   # once
+        self.assertEqual(files.count("logSkipped();"), 3)                       # found, file list unread, not loaded
+        self.assertIn('a_detail = std::format("reason=file_not_loaded skipped={}", skipped);', files)
+        self.assertIn("file_type={}", files)
+        hierarchy = function(self.main, "std::optional<std::uint32_t> BaseOffset(")
+        self.assertIn("return matches == 1 ? found : std::nullopt;", hierarchy)
+
+        def base_offset(bases, tail):   # BaseOffset: one non-virtual base of that name, else none
+            found = [mdisp for name, mdisp, pdisp in bases if name == tail]
+            if len(found) != 1 or any(p != -1 for n, _, p in bases if n == tail):
+                return None
+            return found[0]
+
+        def is_file_type(name, offset, bases):
+            return offset == 0 and (name == "TESFile" or base_offset(bases, "TESFile") == 0)
+
+        packed = [("TESPackedFile", 0, -1), ("TESFile", 0, -1)]                 # as the PC read it
+        self.assertTrue(is_file_type("TESPackedFile", 0, packed))
+        self.assertTrue(is_file_type("TESFile", 0, [("TESFile", 0, -1)]))
+        self.assertFalse(is_file_type("TESPackedFile", 0x10, packed))           # not the complete object
+        self.assertFalse(is_file_type("Other", 0, [("Other", 0, -1), ("TESFile", 0x10, -1)]))
+        self.assertFalse(is_file_type("Other", 0, [("Other", 0, -1), ("TESFile", 0, 8)]))   # virtual
+        self.assertFalse(is_file_type("TESForm", 0, [("TESForm", 0, -1)]))
+
+    def test_a_long_info_value_wraps_after_a_word(self):
+        """FAL-437: MISSION_NOT_FOUND showed as MISSION_NOT_FOUN / D, its last letter in the right-aligned value
+        column. A long value now takes the lines below its label, in the label column, broken after a word (KitWrap)."""
+        wrap = function(self.main, "std::vector<std::string> KitWrap(")
+        self.assertIn('find_last_of(" _-/|")', wrap)
+        self.assertIn("cut = at + 1;", wrap)
+        info = function(self.main, "void KitInfoLines(")
+        self.assertIn("for (const auto& part : KitWrap(text, kKitInfoLabelColumns)) {", info)
+        self.assertIn('a_screen.infoValues[line++] = "";', info)
+        self.assertNotIn("part.substr(kKitInfoLabelColumns)", info)
+
+        def kit_wrap(text, columns):   # KitWrap, line for line
+            lines = []
+            while text:
+                cut = min(len(text), columns)
+                if cut < len(text):
+                    at = max(text[:cut].rfind(c) for c in " _-/|")
+                    if at > 0:
+                        cut = at + 1
+                lines.append(text[:cut].rstrip(" "))
+                text = text[cut:].lstrip(" ")
+            return lines
+
+        columns = kit.INFO_LABEL_COLUMNS
+        self.assertEqual(kit_wrap("MISSION_NOT_FOUND", columns), ["MISSION_NOT_", "FOUND"])
+        self.assertEqual(kit_wrap("FO4SFMISSION.ESM", columns), ["FO4SFMISSION.ESM"])   # exactly one line
+        self.assertEqual(kit_wrap("A" * 20, columns), ["A" * 16, "A" * 4])
+        self.assertEqual(kit_wrap("QUESTS NOT READ AT ALL", columns), ["QUESTS NOT READ", "AT ALL"])
+        self.assertTrue(all(len(line) <= columns for line in kit_wrap("X" * 30 + " Y_Z", columns)))
 
     def test_time_and_days_only_at_the_checked_value_offset(self):
         # stage d's ReadTime at the offset FindGlobalValue found (libxse's +0x40 read -3.5924 at a156037c)
@@ -638,7 +771,9 @@ class KitPluginTests(unittest.TestCase):
 
     def test_every_literal_on_the_kit_is_in_its_font(self):
         bodies = "".join(function(self.main, f) for f in ("void KitCollect()", "std::string KitValueRead(",
-                                                          "std::vector<KitRow> KitTestRows("))
+                                                          "std::vector<KitRow> KitTestRows(",
+                                                          "std::vector<KitRow> KitInventoryRows(",
+                                                          "std::vector<KitRow> KitQuestRows("))
         texts = [t for t in re.findall(r'"([^"]*)"', bodies) if t and t == t.upper()]
         self.assertGreaterEqual(len(texts), 8)
         for text in texts:
