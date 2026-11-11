@@ -1,3 +1,5 @@
+> **Historical (October 2026):** the first outside review and its findings. To review or contribute now, read [ai/for-ai-reviewers.md](ai/for-ai-reviewers.md).
+
 # External reviews
 
 Outside reviewers (people or other AI agents) can review this repo through GitHub. Findings arrive as an issue labelled

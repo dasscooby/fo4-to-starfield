@@ -2757,3 +2757,83 @@ or coming within 20 m of him before the fight starts it (`found preston`),
 and once the fight is on every loaded living raider is put into combat. Only
 FO4SF_Min00Quest.pex changes. Offline only (playtest row 44,
 docs/mission/when-freedom-calls.md); the in-game check is the next mission run.
+
+## 2026-11-10 — Codex / Lone, FAL-247 item 5: interrupted-install recovery
+
+**Offline tested**, synthetic files only; Windows/game acceptance **NOT_RUN**. A shared
+launcher gate reads the known installer journals before Play can edit settings or start
+anything. Incomplete, cleanup-pending and completed-but-unretired rollback journals block
+Play; unreadable journals fail closed. Healthy receipts with a pending future Plugins.txt
+restore are accepted. The window exposes **Recover install**; `launcher.py recover-install`
+previews the same action, and `--apply` invokes the existing guarded uninstallers. A partial
+or externally edited plugin list is first backed up and read back, then restored from the
+same profile's recorded pre-install bytes. Backup/write/installer failures retain recovery
+state. Healthy dependent installs are refused before rollback. Source and bounded PC
+recipe: `docs/ai/launcher-recovery.md`; exact head and test receipts live on FAL-247.
+
+## 2026-11-10: The front page rewritten; the day's results in one place
+
+The owner asked (10 Nov, about 22:32 UTC) for the front page to show what is new and what is going on, with the goal
+cleaned up and the old information out of the way. README.md now opens with the goal, then what is new, the current
+stage as a small table, what already works, and what comes next; every status carries one label (seen in game with its
+date, offline tests only, or not started). The old section "Where it stands (3 November 2026)" moved word for word to
+[history/readme-status-2026-11-03.md](history/readme-status-2026-11-03.md). A short index of the docs is new
+([docs/README.md](README.md)), and six older top-level pages in docs/ carry a one-line banner saying what they were and where the
+current information is; none was moved or renamed. The roadmap gains the stage's scope and the Pip-Boy decision.
+
+The day's results that this journal did not yet hold, all on the owner's test PC (times UTC):
+
+- **Pip-Boy, step one: in-game verified.** Our plugin `FO4SFPipboyMenu` registers its own menu and shows its own movie
+  file: at 20:02 (the menu with no movie) and 20:06 (with our movie), ten toggles each (five opens, five closes), each
+  matched in the plugin's log; our test card was on screen in the second run (#704, merged 21:01; picture `media/pipboy-menu-probe-1110.jpg`). With no flags set, the menu neither pauses the game
+  nor takes input.
+- **Pip-Boy, step two: the data channel is in-game verified; the rest is offline tested.** Draft #711 at `e7925e00`:
+  all three plugins build and their 71 tests pass on the test PC (22:02). Three sessions, 22:52 to 23:06, no save made.
+  *Text in:* the menu's text field shows the player's position and follows it while the player walks (X 1.5 to -6.7);
+  the console's `getpos` after the close equals the last line to 0.1. *Click out:* with flag set 0x9, two clicks on
+  the menu's button gave two `step=click` lines and the text then read `CLICKS 2`; five clicks beside the button at
+  0x9 added none (picture `media/pipboy-data-channel-1110.jpg`). *Who holds input:* at 0x0 there is no pointer and the
+  game keeps mouse and keys; at 0x8 the pointer shows, but W still walks and a click still goes to the game; at 0x9
+  the menu holds the mouse and the movement keys. No flag set pauses the game. The game draws its own pointer, which
+  starts at the screen centre and moves only with relative mouse movement: the first two sessions missed the button
+  for that reason. Open finding: the plugin's snapshot of the open-menu list reads empty even inside the game's own
+  pause menu. Not run: the script-to-plugin ping and the save sidecar (they need saves).
+- **Pip-Boy on the wrist, first probe: offline tested.** Draft #717 (57 tests): a census of the game's menus and one
+  candidate menu served our movie from the probe's own archive. Read from the game's files the same evening: the
+  interface file `testmenus_dynamictexturedgeo.swf`, the first lead, is a 5 kB renderer test (shapes only), not a
+  movie on an object; the executable does name a `ScaleformToTextureRenderPass`. Not built on Windows, not run.
+- **Pip-Boy decision** (the owner, about 21:31): it sits on the wrist, as in Fallout 4; the flat menu is the base and
+  the fallback.
+- **Preston and Codsworth: in-game verified.** Preston is put at the museum door and held, and the mission completes
+  when the player comes within 3 m (10:05 to 10:12, the record is in `mission/when-freedom-calls.md`); Codsworth is put at
+  his Sanctuary spot and held when the player comes near (about 14:32; the keeper moved him from 189 m away onto his
+  spot and held him, picture `media/codsworth-sanctuary-held-1110.jpg`). Both are stand-ins: Starfield bodies under
+  their Fallout 4 names. #692 and #697. Not tested: save and reload while
+  held, the walk back, a new game.
+- **Map: a storage test failed in game.** The terrain core's storage test (open pull request #707, not merged) crashed the game 32 s after
+  travel to Red Rocket with its add-on plugin installed; the same trip without it is fine. Fix in progress. Marker icon
+  types from one table (#703, merged): offline tested.
+- **Radiation base: half in-game verified.** Draft #709: our own "Rads" value stores a number and gives it back (21:00
+  and 22:10). Raising it through a spell crashed the game both times. The crash record read at 22:20 points to the effect
+  record written without the value it should change (unverified hypothesis until the fixed build runs).
+- **Power armor: offline tested.** Draft #708, a test plugin and script; 47 tests pass on the test PC. The game's own
+  script sources and data still have a power armor entry call and furniture type. Not run in the game.
+- **Launcher: offline tested.** The interrupted-install recovery (#713, entry above) passes its 17 Windows tests on the
+  test PC; the window with real installed files is not tried. A notice when script logging is off (#695) is on main.
+- **Survey for the stage** (read only, nothing changed in the game): Starfield has outpost and workshop functions and
+  menus, character-generation functions, map-marker and fast-travel functions, more than 70 environmental hazard records and
+  affliction values, and nothing named mutation.
+- **Script compile count: offline tested, one sample.** Draft #710 at `94a7ae03`, run as its card says, gave rates
+  that cannot be used: it named scripts in sub-folders by bare file name (all 182 failed on the name), and it ran the
+  compiler inside Fallout 4's own script sources, so the 119 that "compiled" were compiled against Fallout 4's base
+  scripts. The same 301 scripts compiled again from an empty folder, with Starfield's sources ahead of Fallout 4's:
+  139 of 201 logic scripts and 97 of 100 scene and topic scripts compile unchanged. The largest group of failures (29)
+  is one name clash: a script named `REScript` exists in both games and Starfield's is found first; 317 script names
+  exist in both. Event signatures that changed (`OnEffectStart` and others) are the next group. This was a helper
+  script on the test PC, not the reviewed tool, and compiling says the names exist, not that the script works.
+- **The repository page sorted** (the owner's request, the same message as the front page): every open pull request
+  was merged into main in a scratch tree, and 118 older pull requests and 109 older issues were read against main by
+  one reader and, where the reader said "replaced" or "done", by a second one who tried to refute it. Closed, each with
+  a note naming the replacement or the proof: 20 pull requests (5 that add nothing to main, 15 replaced by merged
+  work) and 30 issues. Kept open: 83 older pull requests that hold work not on main, 13 experiments and status notes
+  that nothing replaces, and every issue with work left. Nothing was deleted; every branch is kept.
