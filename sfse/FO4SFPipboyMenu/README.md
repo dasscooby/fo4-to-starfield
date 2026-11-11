@@ -163,7 +163,7 @@ How it runs, the channel's way:
 
 - **Main thread** (SFSE's task, in `Toggle` before each kShow and in `SendUpdate` before each kUpdate, so about twice
   a second while open): `PageCollect` reads every value and formats both tabs under a lock. All reads of the game and
-  the one call into it (`GetActorValue`) happen here.
+  the two calls into it (`LookupByID` at the first open, `GetActorValue`) happen here.
 - **Menu's thread** (our `ProcessMessage`): kShow sets tab 1, adds our two `FunctionHandler`s as the buttons'
   `"click"` listeners (once per movie, `step=listen name=<button> ... added=1`) and writes the tab; every kUpdate writes
   it again and reads each field back (`step=page n=<k> ... fields=8/8 set=8 match=8 text="<all eight lines>"`, for
