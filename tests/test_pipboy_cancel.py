@@ -22,11 +22,17 @@ class PipboyCancelTest(unittest.TestCase):
         self.assertIn('Close(n, "cancel")', self.src)
         self.assertIn('by={} was_open', self.src)
 
-    def test_ini_cancel_codes_default_to_esc_and_tab(self):
+    def test_ini_cancel_codes_default_to_esc_and_tab_virtual_keys(self):
         codes = dict(re.findall(r"^(CancelCode\d)=(\S+)", self.ini, re.M))
-        self.assertEqual(codes, {"CancelCode1": "0x01", "CancelCode2": "0x0F", "CancelCode3": "0", "CancelCode4": "0"})
-        for key, default in (("CancelCode1", "0x01"), ("CancelCode2", "0x0F")):
+        self.assertEqual(codes, {"CancelCode1": "0x1B", "CancelCode2": "0x09", "CancelCode3": "0", "CancelCode4": "0"})
+        for key, default in (("CancelCode1", "0x1B"), ("CancelCode2", "0x09")):
             self.assertIn(f'L"{key}", {default}', self.src)
+
+
+    def test_one_close_per_press_and_menu_detail_diagnostic(self):
+        self.assertIn("g_cancelHeld.exchange(true)", self.src)
+        self.assertIn("step=menu_detail", self.src)
+        self.assertIn('a_tag == "key"', self.src)
 
 
 if __name__ == "__main__":

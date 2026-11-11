@@ -370,8 +370,9 @@ namespace
 	InputVtable                              g_inputVtbl{};
 	bool (*g_engineShouldHandle)(void*, const void*) = nullptr;   // input vtable [01], called with this = menu + 0x10
 	void (*g_engineOnButton)(void*, const void*) = nullptr;       // input vtable [08]
-	std::array<std::uint32_t, 4>             g_cancelCodes{ 0x01, 0x0F, 0, 0 };   // INI CancelCodes: Esc, Tab (DirectInput scan codes)
+	std::array<std::uint32_t, 4>             g_cancelCodes{ 0x1B, 0x09, 0, 0 };   // INI CancelCodes: Esc, Tab (Windows virtual-key codes: the PC's game run, #738)
 	std::size_t                              g_cancelCount = 2;
+	std::atomic<bool>                        g_cancelHeld{ false };    // a Tab or Esc press already closed the menu, not yet released
 	std::atomic<bool>                        g_cancelNow{ false };     // Tab or Esc heard while open: the key thread closes the menu
 	std::atomic<std::uint32_t>               g_cancelLogged{ 0 };
 	Ctor_t                                   g_ctor = nullptr;
@@ -640,6 +641,41 @@ namespace
 		const auto contexts = ReadContexts();
 		REX::INFO("step=snapshot n={} tag={} paused={} menus={} contexts={} expected_open={}", n, a_tag, paused, menus,
 			contexts, g_expectOpen.load());
+		if (a_main && a_tag == "key") {
+			LogOpenMenuDetails();
+		}
+	}
+
+	// FAL-414 diagnostic, main thread, on the snapshot key: each known menu the UI has open, with its flags and the four
+	// unnamed IMenu words at +0xC4..+0xD0 (read with Peek), so a run with our menu, the data menu and the pause menu open
+	// shows what a real menu asks the control map for
+	void LogOpenMenuDetails()
+	{
+		auto* ui = RE::UI::GetSingleton();
+		if (!ui) {
+			return;
+		}
+		static const auto* const names = [] {
+			auto* list = new std::vector<RE::BSFixedString>();
+			for (const auto* name : kKnownMenus) {
+				list->emplace_back(name);
+			}
+			return list;
+		}();
+		for (std::size_t i = 0; i < names->size(); ++i) {
+			const auto& name = (*names)[i];
+			if (!ui->IsMenuRegistered(name) || !ui->IsMenuOpen(name)) {
+				continue;
+			}
+			const auto menu = ui->GetMenu(name);
+			const auto at = reinterpret_cast<std::uintptr_t>(menu.get());
+			std::uint32_t flags = 0;
+			std::array<std::uint32_t, 4> words{};
+			const bool ok = at && Peek(at + 0xC0, flags) && Peek(at + 0xC4, words);
+			REX::INFO("step=menu_detail name={} menu={} {}", kKnownMenus[i], Hex(at),
+				ok ? std::format("flags={} c4={} c8={} cc={} d0={}", Hex(flags), Hex(words[0]), Hex(words[1]), Hex(words[2]), Hex(words[3])) :
+				     std::string("unreadable"));
+		}
 	}
 
 	bool ReadPosition(std::array<float, 3>& a_xyz)
@@ -2547,6 +2583,11 @@ namespace
 		return look;
 	}
 
+	bool a_eventValueIsRelease(const void* a_event)
+	{
+		return static_cast<const RE::ButtonEvent*>(a_event)->value == 0.0f;
+	}
+
 	bool MenuShouldHandleEvent(void* a_input, const void* a_event)
 	{
 		const auto look = LookAtEvent(a_event, false);
@@ -2564,8 +2605,12 @@ namespace
 			return;
 		}
 		const_cast<RE::InputEvent*>(static_cast<const RE::InputEvent*>(a_event))->status = RE::InputEvent::Status::kStop;
-		if (look.press) {
+		// the game sends one press as several events (held=0, 0.009, 0.017, ...): close on the first only, and
+		// not again until a release (value == 0) has been seen
+		if (look.press && !g_cancelHeld.exchange(true)) {
 			g_cancelNow = true;
+		} else if (a_eventValueIsRelease(a_event)) {
+			g_cancelHeld = false;
 		}
 	}
 
@@ -3120,7 +3165,7 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	g_flags = ReadNumber(ini, L"Flags", 0);
 	g_keepAlive = ReadNumber(ini, L"KeepAlive", 1) != 0;
 	// FAL-414: up to four keyboard ids that close the menu while it is open (0 = unused)
-	g_cancelCodes = { ReadNumber(ini, L"CancelCode1", 0x01), ReadNumber(ini, L"CancelCode2", 0x0F), ReadNumber(ini, L"CancelCode3", 0),
+	g_cancelCodes = { ReadNumber(ini, L"CancelCode1", 0x1B), ReadNumber(ini, L"CancelCode2", 0x09), ReadNumber(ini, L"CancelCode3", 0),
 		ReadNumber(ini, L"CancelCode4", 0) };
 	g_cancelCount = 4;
 	while (g_cancelCount && g_cancelCodes[g_cancelCount - 1] == 0) {

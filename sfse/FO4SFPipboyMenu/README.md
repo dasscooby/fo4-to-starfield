@@ -27,7 +27,7 @@ and logs every step. The stage is picked by `Stage` in `FO4SFPipboyMenu.ini`:
 | --- | --- |
 | `src/main.cpp` | the plugin: version guard, checks before use, the menu object, the key thread |
 | `src/pch.h` | precompiled header (libxse's game headers and SFSE layer) |
-| `FO4SFPipboyMenu.ini` | `Stage`, `Key` (default `0x79`, F10), `Flags` (0), `KeepAlive` (1); stage (c): `FlagSets` (`0x0,0x8,0x9`), `SnapshotKey` (`0x7A`, F11), `ClickCall` (empty: off); stages (d) and (e): `PageFlagSets` (`0x9`); stages (d), (e): `CancelCode1` to `CancelCode4` (`0x01`, `0x0F`: Esc and Tab as DirectInput scan codes, an assumption the first `step=input` line checks); stage (e): `KitUp` to `KitNextTab`, and the pages (`[Kit]`, `[Page <TAB>/<SUB>]`) |
+| `FO4SFPipboyMenu.ini` | `Stage`, `Key` (default `0x79`, F10), `Flags` (0), `KeepAlive` (1); stage (c): `FlagSets` (`0x0,0x8,0x9`), `SnapshotKey` (`0x7A`, F11), `ClickCall` (empty: off); stages (d) and (e): `PageFlagSets` (`0x9`); stages (d), (e): `CancelCode1` to `CancelCode4` (`0x1B`, `0x09`: Esc and Tab as Windows virtual-key codes, as the PC's game run logged them); stage (e): `KitUp` to `KitNextTab`, and the pages (`[Kit]`, `[Page <TAB>/<SUB>]`) |
 | `xmake.lua`, `build.ps1` | the PC build: FOCCPing's build path (`docs/spikes/combined-core-probes.md`, B0-2) |
 | `scripts/ui/make_probe_swf.py` | writes the stage (b) movie, with `--channel` the stage (c) one and with `--page` the stage (d) one (pure Python; tests `tests/test_make_probe_swf.py`, `tests/test_pipboy_stat_page.py`) |
 | `scripts/ui/make_pipboy_kit.py` | the page kit (stage (e)): reads and checks the pages of the ini (`--check`) and writes the kit's movie for them (pure Python, on `make_probe_swf.py`; tests `tests/test_pipboy_kit.py`) |
@@ -621,8 +621,13 @@ At stages (d) and (e) the menu copies the ten-slot BSInputEventUser vtable (subo
 `this = menu + 0x10`). While the page is open, a keyboard button whose id is in `CancelCode1..4` or whose user event is
 `Cancel` is ours: [01] says so, [08] sets the event's `status = kStop` (the other menus' [01] refuses a stopped event)
 and, on the press (`value > 0`, `heldDownSecs == 0`), the key thread closes the menu as CLOSE does (`by=cancel`).
-Everything else goes to the engine's own slots. Not known from the disk: whether the pause menu's opener honours
-`kStop`; the game run answers it.
+Everything else goes to the engine's own slots. One press arrives as several events (`held=0`, `0.009`, `0.017`): only
+the first closes the menu, and the next close waits for a release. PC game run of c1d1d899: Esc (`id=0x1b
+user_event="Cancel"`) is taken and the pause menu does not open; Tab (`id=0x9 user_event="DataMenu"`) closes the page but
+the game's data menu still opens, since `kStop` does not stop its opener. Diagnostic for that: the snapshot key (F11) also
+logs `step=menu_detail name=<menu> menu=<addr> flags=... c4=... c8=... cc=... d0=...` for every known menu that is open,
+and every snapshot already logs the ControlMap's active input context ids (`contexts=`); run it with our page, the data
+menu and the pause menu open.
 
 ### What each failure line means
 
