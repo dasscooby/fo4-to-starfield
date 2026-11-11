@@ -32,8 +32,10 @@ NOT_HINGED_RE = re.compile(r"vault|elevator|garage|gate|hatch|slid", re.I)   # s
 # a rig and are left out (listed in the manifest). If the rig fails it stays the solid static it was, never passable.
 OWN_RIG_ALIASES = {"vltgeardoor01.nif": {"Stage2": "Open"}}
 # Collision for the same doors (PC read of VltGearDoor01, 11 Nov): the deck rides b_WalkWay01Base / b_WalkWay03Base / b_Ramp;
+# floor = {bone regex: model-space height of the visible floor plane, node pose, metres: 0.92 / 0.96 / ramp 0.84-0.85};
 # the Front/Rear rod bones carry only hanger rods and get no body.
-OWN_RIG_COLLISION = {"vltgeardoor01.nif": {"floor": [r"^b_walkway0[13]base$", r"^b_ramp$"], "skip": [r"(front|rear)0\d"]}}
+OWN_RIG_COLLISION = {"vltgeardoor01.nif": {"floor": {r"^b_walkway01base$": 0.92, r"^b_walkway03base$": 0.96, r"^b_ramp$": 0.85},
+                                           "skip": [r"(front|rear)0\d"]}}
 LOAD_DOOR_RE = re.compile(r"door[^\\/]*load[^\\/]*\.nif$|load[^\\/]*door[^\\/]*\.nif$", re.I)
 # BSLightingShaderProperty flags1 bit 15 (nif.xml Fallout4ShaderPropertyFlags1 "Refraction"): heat shimmer over fires and
 # machines, water streams in sinks and fountains. FO4 draws such a shape as a screen-space distortion; its texture set holds

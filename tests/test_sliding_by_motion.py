@@ -87,27 +87,50 @@ class CollisionRulesTests(unittest.TestCase):
     def test_skip_and_floor_rules_by_bone_name(self):
         door, boxes = self.build(None)
         self.assertEqual(door["moving_bodies"], 2)
-        fitted = max(h[2] for _, h in boxes)
         door, boxes = self.build({"skip": ["^PanelA$"]})
         self.assertEqual(door["moving_bodies"], 1)
         self.assertEqual(len(boxes), 1)
-        door, boxes = self.build({"floor": ["^PanelA$", "^PanelB$"]})
+        door, boxes = self.build({"floor": {"^PanelA$": 0.5, "^PanelB$": 0.5}})
         self.assertEqual(door["moving_bodies"], 2)
-        self.assertTrue(all(abs(h[2] - convert_static.FLOOR_THICKNESS / 2) < 1e-6 or h[2] == convert_static.sfcollision.MIN_LEAF_HALF
-                            for _, h in boxes), boxes)
-        self.assertLess(max(h[2] for _, h in boxes), fitted)
+        for centre, half in boxes:                                        # unturned bones: z from 0.4 to 0.5
+            self.assertAlmostEqual(centre[2], 0.45, places=5)
+            self.assertAlmostEqual(half[2], max(convert_static.sfcollision.MIN_LEAF_HALF, 0.05), places=5)
+
+    def test_a_floor_plate_is_cut_along_model_up_on_a_turned_bone(self):
+        """Claude's finding on 9d4cfb01 (real VltGearDoor01): deck bones are turned (local x -> model -z, y -> +x,
+        z -> -y), so cutting the box at the bone's z made a wall along model y. Plate here: same turn, 4.9 x 2.1 m deck."""
+        r = (0, 1, 0,  0, 0, -1,  -1, 0, 0)               # model = R * local: local x -> -z, y -> +x, z -> -y
+        world = ((0.0, 0.0, 0.0), r, 1.0)
+        model_pts = [(-7.1, 0.23, 0.9), (-2.2, 2.32, 2.35), (-2.2, 0.23, 0.9), (-7.1, 2.32, 2.35)]
+        inv = lambda p: (-p[2], p[0], -p[1])                # R^T p
+        local = [inv(p) for p in model_pts]
+        lo, hi = convert_static._floor_box(local, world, 0.92)
+        corners = [(x, y, z) for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])]
+        back = [convert_static._apply(world, c) for c in corners]
+        for k, (want_lo, want_hi) in enumerate(((-7.1, -2.2), (0.23, 2.32), (0.82, 0.92))):
+            self.assertAlmostEqual(min(p[k] for p in back), want_lo, places=6)
+            self.assertAlmostEqual(max(p[k] for p in back), want_hi, places=6)
+        t, sc = (1.0, 2.0, 3.0), 2.0                        # an offset, scaled bone: same plate in model space
+        world2 = (t, r, sc)
+        local2 = [inv(tuple((p[k] - t[k]) / sc for k in range(3))) for p in model_pts]
+        lo, hi = convert_static._floor_box(local2, world2, 0.92)
+        back = [convert_static._apply(world2, (x, y, z)) for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])]
+        self.assertAlmostEqual(min(p[2] for p in back), 0.82, places=6)
+        self.assertAlmostEqual(max(p[2] for p in back), 0.92, places=6)
+        self.assertAlmostEqual(max(p[1] for p in back) - min(p[1] for p in back), 2.32 - 0.23, places=6)
 
     def test_the_vault_walkway_rules_pick_the_deck_and_the_rods(self):
         from fo4sf import pipeline
         rules = pipeline.OWN_RIG_COLLISION["vltgeardoor01.nif"]
-        floor = lambda n: convert_static._collision_rule(rules, n, "floor")   # noqa: E731
+        floor = lambda n: convert_static._floor_top(rules, n)                # noqa: E731
         skip = lambda n: convert_static._collision_rule(rules, n, "skip")     # noqa: E731
+        self.assertEqual([floor(n) for n in ("b_WalkWay01Base", "b_WalkWay03Base", "b_Ramp")], [0.92, 0.96, 0.85])
         for n in ("b_WalkWay01Base", "b_WalkWay03Base", "b_Ramp"):
-            self.assertTrue(floor(n) and not skip(n), n)
+            self.assertFalse(skip(n), n)
         for n in ("b_WalkWay01Front01", "b_WalkWay03Rear03", "b_WalkWay01Rear01"):
-            self.assertTrue(skip(n) and not floor(n), n)
+            self.assertTrue(skip(n) and floor(n) is None, n)
         for n in ("b_WalkWay01", "b_Walkway02", "GearDoor"):
-            self.assertFalse(floor(n) or skip(n), n)
+            self.assertFalse(floor(n) is not None or skip(n), n)
 
 
 class SkinnedPanelTests(unittest.TestCase):
