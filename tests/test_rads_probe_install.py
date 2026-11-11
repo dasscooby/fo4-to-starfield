@@ -53,6 +53,10 @@ def stage(d):
     return d
 
 
+PIPBOY_RECORD = "FO4SFPipboyProbe.install.json"                       # scripts/ui/pipboy_probe_install.py RECORD (branch fal301)
+PIPBOY_RECORD_BODY = b'{"complete": true, "plugins": ["FO4SFPipboyProbe.esm"], "files": {"FO4SFPipboyProbe.esm": "x"}}'
+
+
 class RadsProbeInstallTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -63,6 +67,7 @@ class RadsProbeInstallTests(unittest.TestCase):
         write(os.path.join(self.data, "Starfield.esm"), STARFIELD)
         write(os.path.join(self.data, exp_install.RECORD), EXP_RECORD)
         write(os.path.join(self.data, planet_probe_install.RECORD), PLANET_RECORD)
+        write(os.path.join(self.data, PIPBOY_RECORD), PIPBOY_RECORD_BODY)        # the Pip-Boy page kit installed beside (FAL-273)
         self.staged = stage(os.path.join(root, "rads_probe"))
         local = os.path.join(root, "local")
         self.plugins = os.path.join(local, "Starfield", "Plugins.txt")
@@ -97,7 +102,7 @@ class RadsProbeInstallTests(unittest.TestCase):
             return f.read()
 
     def test_the_record_is_its_own(self):
-        self.assertNotIn(pai.RECORD, (exp_install.RECORD, planet_probe_install.RECORD))
+        self.assertNotIn(pai.RECORD, (exp_install.RECORD, planet_probe_install.RECORD, PIPBOY_RECORD))
         self.assertEqual(pai.RECORD, "FO4SFRadsProbe.install.json")
 
     def test_install_rides_along_and_uninstall_restores(self):
@@ -111,6 +116,7 @@ class RadsProbeInstallTests(unittest.TestCase):
         self.assertTrue(json.loads(self.read(pai.RECORD))["complete"])
         self.assertEqual(self.read(exp_install.RECORD), EXP_RECORD)               # the core's record, untouched
         self.assertEqual(self.read(planet_probe_install.RECORD), PLANET_RECORD)   # the planet probe's, untouched
+        self.assertEqual(self.read(PIPBOY_RECORD), PIPBOY_RECORD_BODY)           # the Pip-Boy page kit's, untouched
 
         code, out = self.run_main("status")
         self.assertEqual(code, 0)
@@ -126,6 +132,7 @@ class RadsProbeInstallTests(unittest.TestCase):
         self.assertEqual(self.lines(), ["# header", "*FO4Port.esm", "*FO4TerrainCore.esm"])
         self.assertEqual(self.read(exp_install.RECORD), EXP_RECORD)
         self.assertEqual(self.read(planet_probe_install.RECORD), PLANET_RECORD)
+        self.assertEqual(self.read(PIPBOY_RECORD), PIPBOY_RECORD_BODY)           # the Pip-Boy page kit's, untouched
 
     def test_a_changed_stage_is_refused(self):
         with open(os.path.join(self.staged, PLUGIN), "ab") as f:

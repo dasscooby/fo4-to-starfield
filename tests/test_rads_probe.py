@@ -42,9 +42,13 @@ class HandScriptTests(unittest.TestCase):
         self.assertIn('return "Rads " + (p.GetValue(RadsAV) as int) + ", " + MaxText(p)', HAND_PSC)
         self.assertIn('"max health "', HAND_PSC)
         # the change path: a different value than the last one shown is applied to the route and said
-        self.assertRegex(HAND_PSC, r"if rads != LastRads\n\s+ApplyRoute\(p\)\n\s+Say\(Describe\(p\)\)")
-        # the failure path says so on screen and sets the value
-        self.assertIn('" used: the effect left rads at "', HAND_PSC)
+        self.assertRegex(HAND_PSC, r"if rads != LastRads\n\s+ApplyRoute\(p\)\n\s+Say\(UsedPrefix\(\) \+ Describe\(p\)\)")
+        # the failure path is in the log only (owner's words, PC 11 Nov): one plain line per use, whole numbers, the sentence is not shown
+        self.assertNotIn('Say(UsedWhat + " used: the effect left rads at "', HAND_PSC)
+        self.assertIn('note=effect left a wrong number', HAND_PSC)
+        self.assertIn('Shown + " used. "', HAND_PSC)
+        self.assertIn('(p.GetValue(HealthAV) as int)', HAND_PSC)               # no ".000000" on screen
+        self.assertNotIn('"health " + p.GetValue(HealthAV)', HAND_PSC)
         self.assertIn("ModRads(p, WantRads - have)", HAND_PSC)
         self.assertIn("p.SetValue(RadsAV, WantRads)", HAND_PSC)       # only when ModValue is not declared
 
@@ -70,8 +74,12 @@ class HandScriptTests(unittest.TestCase):
         self.assertLess(poll.index("p.SetValue(RadsAV, Clamp(rads))"), poll.index("if Settling\n        ; an item was just used"))
 
     def test_no_console_is_needed_the_items_come_with_the_quest(self):
-        self.assertIn("p.AddItem(RadAway, GiveCount, true)", HAND_PSC)
-        self.assertIn("p.AddItem(RadDose, GiveCount, true)", HAND_PSC)
+        # OnInit ran twice 0.18 s apart on the PC: the kit tops up to GiveCount, it never adds GiveCount again
+        self.assertIn("p.AddItem(RadAway, GiveCount - haveAway, true)", HAND_PSC)
+        self.assertIn("p.AddItem(RadDose, GiveCount - haveDose, true)", HAND_PSC)
+        self.assertNotIn("p.AddItem(RadAway, GiveCount, true)", HAND_PSC)
+        init = HAND_PSC.split("Event OnInit()")[1].split("EndEvent")[0]
+        self.assertIn("if gave", init)                                     # a second run says nothing
         self.assertIn("int GiveCount = 3", HAND_PSC)
         self.assertNotIn("GetStageDone", HAND_PSC)               # no stage numbers
 

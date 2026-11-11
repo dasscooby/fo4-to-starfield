@@ -43,6 +43,7 @@ bool Settling = false
 float WantRads = 0.0
 string UsedWhat = ""
 float LastUseRT = 0.0       ; real time of the latest use: the settle waits SETTLE_S after it
+string Shown = ""           ; the item(s) of the latest settled use, put before the next change shown, then cleared
 
 ; ---------------------------------------------------------------- init
 
@@ -50,13 +51,26 @@ Event OnInit()
     Debug.OpenUserLog(LogName)
     Actor p = Game.GetPlayer()
     Trace("init quest=" + GetFormID() + " rads=" + p.GetValue(RadsAV) + " dose=" + Id(RadDose) + " radaway=" + Id(RadAway))
-    p.AddItem(RadAway, GiveCount, true)
-    p.AddItem(RadDose, GiveCount, true)
+    ; OnInit ran twice 0.18 s apart on the PC (FAL-273): top up to GiveCount of each instead of adding GiveCount, so a second run
+    ; hands out nothing and says nothing
+    int haveAway = p.GetItemCount(RadAway)
+    int haveDose = p.GetItemCount(RadDose)
+    bool gave = false
+    if haveAway < GiveCount
+        p.AddItem(RadAway, GiveCount - haveAway, true)
+        gave = true
+    endif
+    if haveDose < GiveCount
+        p.AddItem(RadDose, GiveCount - haveDose, true)
+        gave = true
+    endif
     LastRads = p.GetValue(RadsAV)
     LastDose = p.GetItemCount(RadDose)
     LastAway = p.GetItemCount(RadAway)
-    Say("Rads kit: " + GiveCount + " RadAway and " + GiveCount + " Rad Dose added. Use a Rad Dose to raise rads, a RadAway to lower them.")
-    Say(Describe(p))
+    if gave
+        Say("Rads kit: " + GiveCount + " RadAway and " + GiveCount + " Rad Dose added. Use a Rad Dose to raise rads, a RadAway to lower them.")
+        Say(Describe(p))
+    endif
     StartTimer(POLL_S, TIMER_POLL)
 EndEvent
 
@@ -86,8 +100,8 @@ EndFunction
 
 string Function MaxText(Actor p)
     {"max health N" when the game has a maximum reading, else "health N" (the current value, said so).}
-    string s = "health " + p.GetValue(HealthAV)
-;OPT Actor.GetValueMax     s = "max health " + p.GetValueMax(HealthAV)
+    string s = "health " + (p.GetValue(HealthAV) as int)
+;OPT Actor.GetValueMax     s = "max health " + (p.GetValueMax(HealthAV) as int)
     return s
 EndFunction
 
@@ -124,6 +138,16 @@ Function ApplyRoute(Actor p)
         endif
     endif
     Trace("route rads=" + rads + " want=" + want + " delta=" + delta + " applied=" + Applied + " ok=" + ok)
+EndFunction
+
+string Function UsedPrefix()
+    {"Rad Dose used. " (or the items of the latest use) before the next line shown, once.}
+    string s = ""
+    if Shown != ""
+        s = Shown + " used. "
+        Shown = ""
+    endif
+    return s
 EndFunction
 
 float Function Clamp(float v)
@@ -193,7 +217,7 @@ Function Poll()
     endif
     if rads != LastRads
         ApplyRoute(p)
-        Say(Describe(p))
+        Say(UsedPrefix() + Describe(p))
         LastRads = rads
     endif
 EndFunction
@@ -211,13 +235,18 @@ Function Settle()
     if have == WantRads
         Trace("settle used=" + UsedWhat + " ok=true want=" + WantRads + " had=" + have)
     else
-        Say(UsedWhat + " used: the effect left rads at " + (have as int) + ", expected " + (WantRads as int) + ". Setting " + (WantRads as int))
-        Trace("settle used=" + UsedWhat + " ok=false want=" + WantRads + " had=" + have)
+        ; the owner sees one plain line per use (the next Poll says it); the diagnostic goes to the log only
+        Trace("settle used=" + UsedWhat + " ok=false want=" + WantRads + " had=" + have + " note=effect left a wrong number")
         ; Ninth session of the probe (FAL-213): a correction by the difference reaches the number; SetValue wrote the base apart
         ; from the stored change of a cast (300 stored, SetValue 100 read 400). SetValue only when ModValue is not declared.
         if !ModRads(p, WantRads - have)
             p.SetValue(RadsAV, WantRads)
         endif
         Trace("settle fix want=" + WantRads + " now=" + p.GetValue(RadsAV))
+    endif
+    Shown = UsedWhat
+    if p.GetValue(RadsAV) == LastRads
+        ; no change for the next Poll to say (a RadAway at 0): say the use now, once
+        Say(UsedPrefix() + Describe(p))
     endif
 EndFunction
