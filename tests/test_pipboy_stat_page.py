@@ -3,8 +3,10 @@ module's own reader and checked for layout), the stager and the installer's stag
 text: the names, line count, width and characters agree with the movie; the two new ids are checked against SFSE's
 addresses and only at stage (d); every form is typed by RTTI before a field of it is read; the only calls into the
 game are the checked GetActorValue slot and the engine's lookup by form id; the reads run on the main thread and the
-writes on the menu's; the menu-stack read is gone. Also the owner's card: at most eight steps, no console and no log
-in them. No compiler here: the PC build is the compile check."""
+writes on the menu's; the menu-stack read is gone; the time is shown only at a value offset found and range-checked.
+Also the owner's card: at most eight steps, no console and no log in them, and its plain-text copy beside the staged
+plugin in the launcher's format (a title, then 1. to 8., one line each). No
+compiler here: the PC build is the compile check."""
 import hashlib
 import os
 import re
@@ -167,6 +169,27 @@ class PageStageTests(unittest.TestCase):
                 self.assertEqual(f.read(), swf.movie_bytes(page=True))
             mpp.check(esm)
             self.assertEqual(ppi.stage_problems(tmp), [])
+            self.assertEqual(sorted(os.listdir(tmp)), ["Data", "FO4SFPipboyProbe.esm", "owner-card.txt"])
+            with open(os.path.join(tmp, "owner-card.txt"), "rb") as f:
+                self.assertEqual(f.read().decode("utf-8"), mpp.PAGE_CARD)
+            mpp.stage(tmp, channel=True)                         # no page, no card: a stale one would mislead
+            self.assertNotIn("owner-card.txt", os.listdir(tmp))
+
+    def test_owner_card_txt_is_the_launchers_format(self):
+        # docs/ai/launcher-tests.md (FAL-274): UTF-8, at most 16 KiB, a title, then one to eight steps "1. " to "8. "
+        raw = mpp.PAGE_CARD.encode("utf-8")
+        self.assertLessEqual(len(raw), 16384)
+        self.assertFalse(any(ord(c) < 32 and c not in "\r\n\t" for c in mpp.PAGE_CARD))
+        lines = [line.strip() for line in mpp.PAGE_CARD.splitlines() if line.strip()]
+        self.assertEqual(len(lines), 9)
+        self.assertNotRegex(lines[0], r"^\d+\.")
+        for i, line in enumerate(lines[1:], 1):
+            self.assertRegex(line, rf"^{i}\. \S")
+        steps = "\n".join(lines[1:]).lower()
+        for word in ("console", "log", "save", "install", "`", "*", "#"):
+            self.assertNotIn(word, steps, word)
+        for seen in ("F10", "NEXT TAB", "CLOSE", "TIME"):
+            self.assertIn(seen, mpp.PAGE_CARD, seen)
 
     def test_stage_cli_page_and_channel_exclude_each_other(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -340,7 +363,27 @@ class PagePluginTests(unittest.TestCase):
         for line in ("refuse step=page_ids", "refuse step=page what=strings", "what=get_actor_value",
                      "step=page_unknown what=", "step=page ... fields=0/8"):
             self.assertIn(line, self.readme, line)
-        self.assertIn(f"{16 + 13 + 2} `step=id` lines", self.readme)
+        self.assertIn(f"{16 + 16 + 2} `step=id` lines", self.readme)
+
+    def test_the_time_only_at_a_checked_value_offset(self):
+        # libxse's TESGlobal::value at +0x40 read GameDaysPassed -3.5924 at a156037c (PC run, 11 Nov): no fixed offset
+        self.assertNotIn("kGlobalValueAt", self.main)
+        read = function(self.main, "bool ReadTime(")
+        for check in ("!a_at", "a_hour < 0.0f || a_hour >= 24.0f || a_days <= 0.0f || a_days >= kMaxDays",
+                      "std::fmod(a_days, 1.0f) * 24.0f - a_hour", "std::min(apart, 24.0f - apart) * 60.0f <= kGlobalMinutes"):
+            self.assertIn(check, read, check)
+        find = function(self.main, "void FindGlobalValue()")
+        self.assertLess(find.index("GlobalBytes(g_forms.gameHour), GlobalBytes(g_forms.gameDaysPassed)"),
+                        find.index("for (std::size_t at = kGlobalBytesAt;"))
+        self.assertIn("at < kGlobalBytesAt + kGlobalBytes; at += 4", find)
+        self.assertIn("if (ReadTime(at, hour, days)) {", find)
+        self.assertIn("if (!ReadTime(g_forms.globalValueAt, hour, days)) {", function(self.main, "std::string TimeText()"))
+        collect = function(self.main, "void PageCollect()")
+        self.assertIn("const bool           haveDays = ReadTime(g_forms.globalValueAt, hour, days);", collect)
+        self.assertLess(collect.index("PageScan();"), collect.index("FindGlobalValue();"))
+        self.assertIn("constexpr std::size_t   kGlobalBytesAt = 0x28;", self.main)
+        self.assertIn("constexpr std::size_t   kGlobalBytes = 0x20;", self.main)
+        self.assertIn("`step=page_globals from=0x28", self.readme)
 
     def test_owner_card(self):
         owner = self.card[:self.card.index("## For the PC helper")]
