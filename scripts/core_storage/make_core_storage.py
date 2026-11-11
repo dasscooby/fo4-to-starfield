@@ -4,7 +4,8 @@ usage:
   python scripts/core_storage/make_core_storage.py stage --core <installed FO4TerrainCore.esm> --out <NEW folder>
         [--starfield <game dir>] [--sf <Starfield.esm>] [--compiler <PapyrusCompiler.exe>] [--content-resources <zip>]
         [--variant topcell|full|persist-only|temp-only|cell-only|world-only]
-      1. dotnet/CoreStorage build: the plugin (a persistent and a temporary XMarker in the core's FO4Core_RedRocketSpawn,
+      1. dotnet/CoreStorage build: the plugin (a persistent XMarker in an override of the core world's persistent cell and a
+         temporary one in the core's FO4Core_RedRocketSpawn; --variant full is run 3's layout, persistent group under the cell,
          a quest with no properties);
       2. the Papyrus compile of FO4SF_CoreStorageQuest.psc (base sources from the Creation Kit's ContentResources.zip, as
          scripts/bridge/make_bridge.py), the .pex into <out>/Data/Scripts;
@@ -95,7 +96,7 @@ def stage(a):
         json.dump(plan, f, indent=1)
     with open(os.path.join(out, "README.txt"), "w", encoding="utf-8") as f:
         f.write(f"""Core storage probe (FAL-208), variant {a.variant}. {PLUGIN} (build {plugin_sha[:8]}), masters Starfield.esm + FO4TerrainCore.esm.
-FO4SF_CS_P (0x800, persistent) and FO4SF_CS_T (0x801, temporary): XMarkers in {SPAWN_CELL}, at its COC marker + 4 / 8 m east.
+FO4SF_CS_P (0x800, persistent; variant {a.variant}: world persistent cell for topcell) and FO4SF_CS_T (0x801, temporary, in {SPAWN_CELL}): XMarkers at its COC marker + 4 / 8 m east.
 Install (game closed), after the core: python scripts\\core_storage\\core_storage_install.py install --dir "{out}" --starfield <game>
 In game: coc {SPAWN_CELL} with the roofs on screen; stay 75 s; the user log {LOG} holds FO4SFCS lines 2, 10, 30 and 60 s
 after the arrival. CS_T not found: cell not loaded (not a failure). CS_T found and CS_P with the player: PASS.

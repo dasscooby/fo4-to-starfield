@@ -10,12 +10,13 @@ Reader (`src/fo4sf/planet/probe_log.py`): T7 not loaded while T5 is also not loa
 the reader takes the complete init line (every form present), not the empty one (run 2's false "init" PROBLEM).
 
 Plugin `FO4SFCoreStorage.esm` (`dotnet/CoreStorage`, masters `Starfield.esm` + the installed `FO4TerrainCore.esm`):
-an override of the core world holding only the override of CELL `FO4Core_RedRocketSpawn` (the world's SubCells are not
-cleared), with
+an override of the core world holding the override of CELL `FO4Core_RedRocketSpawn` (the world's SubCells are not
+cleared) and, in the default build (`--variant topcell`, FAL-273), an override of the world's persistent cell; `--variant full` is
+run 3's layout (no persistent cell, CS_P under the spawn cell), which crashed the game. With
 
 | Local id | Record | Where | Position |
 |---|---|---|---|
-| `0x800` | REFR `FO4SF_CS_P`, XMarker `00003B`, flag `0x400` | the spawn cell's Persistent group | COC marker + (4, 0, 0) |
+| `0x800` | REFR `FO4SF_CS_P`, XMarker `00003B`, flag `0x400` | the world's persistent cell, its Persistent group (`topcell`, default); the spawn cell's Persistent group (`full`, run 3, crashed) | COC marker + (4, 0, 0) |
 | `0x801` | REFR `FO4SF_CS_T`, XMarker `00003B` | the spawn cell's Temporary group | COC marker + (8, 0, 0) |
 | `0x802` | QUST `FO4SF_CoreStorageProbe`, start game enabled, no stages, script `FO4SF_CoreStorageQuest`, no properties | | |
 
@@ -23,7 +24,7 @@ The script finds both references with `Game.GetFormFromFile` (a property would m
 `FO4SFCS rt=...` lines 2, 10, 30 and 60 s after each arrival to `FO4SFCoreStorage.0.log`.
 
 Offline: `python scripts/core_storage/make_core_storage.py stage --core <installed FO4TerrainCore.esm> --out <new folder>`
-builds, compiles the script, runs `CoreStorage check` (CS_P in the cell's Persistent, CS_T in its Temporary, the cell's
+builds, compiles the script, runs `CoreStorage check` (CS_P in the world's persistent cell, CS_T in the spawn cell's Temporary, the cell's
 FormKey the core's own, masters exact) and writes plan.json. Install: `scripts/core_storage/core_storage_install.py`.
 No plugin bytes enter Git. `tests/test_core_storage.py` runs the tool on a synthetic core.
 

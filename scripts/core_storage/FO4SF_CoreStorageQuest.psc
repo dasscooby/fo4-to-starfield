@@ -2,8 +2,9 @@ Scriptname FO4SF_CoreStorageQuest extends Quest
 {The core storage probe (fo4-to-starfield, FAL-208; dotnet/CoreStorage). Attached to QUST FO4SF_CoreStorageProbe (0x802 of
  FO4SFCoreStorage.esm: start game enabled, no stages, NO properties). Every form is found with Game.GetFormFromFile at
  the moment it is read, because a script property would make a temporary reference persistent and spoil the test.
- CS_P (0x800) is a persistent XMarker in the persistent group of the core's spawn cell FO4Core_RedRocketSpawn, CS_T (0x801)
- a temporary one in its temporary group. The script watches the player once a second; each arrival (another worldspace,
+ CS_P (0x800) is a persistent XMarker in an override of the core world's PERSISTENT cell (default build, variant topcell; the
+ layout of run 3, a persistent group under the spawn cell, is variant full and crashed the game), CS_T (0x801) a temporary one
+ in the temporary group of the core's spawn cell FO4Core_RedRocketSpawn. The script watches the player once a second; each arrival (another worldspace,
  another interior cell, or a jump of more than 500 m) gets four readings, 2, 10, 30 and 60 s later: the player and each
  of the two references. One line per finding in the user log "FO4SFCoreStorage"
  (My Games\Starfield\Logs\Script\User\FO4SFCoreStorage.0.log), in the fixed form
@@ -15,7 +16,7 @@ Scriptname FO4SF_CoreStorageQuest extends Quest
 
 string LogName = "FO4SFCoreStorage"
 string Plugin = "FO4SFCoreStorage.esm"
-int PersistentId = 0x800    ; REFR FO4SF_CS_P: persistent XMarker in the spawn cell's persistent group (marker + 4 m)
+int PersistentId = 0x800    ; REFR FO4SF_CS_P: persistent XMarker in the world's persistent cell (topcell) or the spawn cell's persistent group (full) (marker + 4 m)
 int TemporaryId = 0x801     ; REFR FO4SF_CS_T: temporary XMarker in the spawn cell's temporary group (marker + 8 m)
 
 int TIMER_POLL = 1
