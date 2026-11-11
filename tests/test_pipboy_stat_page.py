@@ -355,9 +355,9 @@ class PagePluginTests(unittest.TestCase):
         self.assertIn('"step=menu_names registered={} not_registered={}"', menus)
 
     def test_ini_readme_and_flags(self):
-        self.assertIn("\nPageFlagSets=0x9\n", self.ini)
+        self.assertIn("\nPageFlagSets=0x19\n", self.ini)
         self.assertIn("; 4 = stage (d): the STAT page", self.ini)
-        self.assertIn('ReadFlagSets(ini, L"PageFlagSets", L"0x9");', self.main)
+        self.assertIn('ReadFlagSets(ini, L"PageFlagSets", L"0x19");', self.main)
         self.assertIn("if (g_stage < 1 || g_stage > 5) {", self.main)                 # (e), FAL-301
         self.assertIn("### PASS at (d), `Stage=4`", self.readme)
         self.assertIn("## Stage (d): the STAT page (FAL-272)", self.readme)

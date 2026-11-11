@@ -695,10 +695,10 @@ class KitPluginTests(unittest.TestCase):
         self.assertIn("if (g_stage < 1 || g_stage > 5) {", self.main)
         self.assertIn('g_stage == 5 ? "e" : g_stage == 4 ? "d" : "c"', self.main)
         self.assertIn('g_stage == 3 ? "c" : g_stage == 4 ? "d" : "e"', self.main)
-        self.assertIn("if (g_stage >= 4) {   // (d) and (e)\n\t\t\tReadFlagSets(ini, L\"PageFlagSets\", L\"0x9\");",
+        self.assertIn("if (g_stage >= 4) {   // (d) and (e)\n\t\t\tReadFlagSets(ini, L\"PageFlagSets\", L\"0x19\");",
                       self.main)
         self.assertIn("; 5 = stage (e): the page kit", self.ini)
-        self.assertIn("\nPageFlagSets=0x9\n", self.ini)
+        self.assertIn("\nPageFlagSets=0x19\n", self.ini)
 
     def test_every_literal_on_the_kit_is_in_its_font(self):
         bodies = "".join(function(self.main, f) for f in ("void KitCollect()", "std::string KitValueRead(",
