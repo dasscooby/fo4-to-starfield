@@ -26,7 +26,7 @@ import re
 
 LINE = re.compile(r"FO4SFRADS rt=(?P<rt>[-+\d.eE]+) (?P<event>\w+)(?P<rest>.*)$", re.IGNORECASE)
 TOKEN = re.compile(r"(\w+)=(\S*)")
-EVENTS = ("init", "start", "step", "state", "control", "set", "fix", "route", "vcontrol")
+EVENTS = ("init", "start", "step", "state", "control", "set", "fix", "route", "vcontrol", "item")
 WRITE_TEST = 50.0         # the script's WriteTest: stage 10 writes this to our value and reads it
 ID_KEYS = {"quest", "rads_av", "health_av", "spell", "radaway", "av"}
 WHENS = ("start", "before", "now", "settled", "routed", "final")
@@ -178,6 +178,10 @@ def judge(events):
             rad = res
         else:
             eff[stage] = res
+    items = {e.get("when"): e.get("count") for e in events if e["event"] == "item" and e.get("stage") == 40}
+    if rad not in ("not run", "no readings") and num(items.get("added")) and num(items.get("settled")):
+        a, z = items["added"], items["settled"]
+        rad += (f"; item count {fmt(a)} to {fmt(z)}: consumed" if z < a else f"; item count {fmt(a)} to {fmt(z)}: NOT consumed")
     # the route: maximum health at the end of each stage against stage 10's
     base_s = states.get(10, {}).get("final") or states.get(10, {}).get("routed")
     base, src = max_health(base_s) if base_s else (None, None)

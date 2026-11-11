@@ -266,7 +266,11 @@ Function Step40(Actor p)
     Trace("step stage=40 call=EquipItem expect=100")
     Reading("before", 40)
     p.AddItem(RadAway, 1, true)
+    ; Seventh session: RadAway moved nothing and the log could not say whether the item was used up. The count after AddItem and
+    ; after the settle time separates "not consumed" from "consumed, effect inert".
+    Trace("item stage=40 when=added count=" + p.GetItemCount(RadAway))
     p.EquipItem(RadAway, false, true)
+    Trace("item stage=40 when=now count=" + p.GetItemCount(RadAway))
     Reading("now", 40)
     StartTimer(SETTLE_S, TIMER_SETTLE + 40)
 EndFunction
@@ -275,6 +279,9 @@ Function Settle(int stage)
     {The effect has had its time: read, force the step's value when the effect did not give it, apply the route, read.}
     Actor p = Game.GetPlayer()
     Reading("settled", stage)
+    if stage == 40
+        Trace("item stage=40 when=settled count=" + p.GetItemCount(RadAway))
+    endif
     float want = Expected(stage)
     float have = p.GetValue(RadsAV)
     if have != want

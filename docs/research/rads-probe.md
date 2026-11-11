@@ -159,6 +159,18 @@ Two faults of the script and the reader, found in the same table and fixed in th
   in a note ("not the maximum") and lists the base readings.
 Still not shown: that the route lowers **maximum** Health, that RadAway lowers the value, and an active-effect list (`fx` is `NA`).
 
+## The seventh session (head bc2e8a57): the force works, RadAway still moves nothing
+
+**Verified in the game log (owner PC):** spell 100 and 300 unforced again; the force by difference took 300 to 100
+(`how=ModValue`) and the route followed back up (Health 175 to 195); the vanilla control worked. RadAway with the mirror effect
+(`FO4SF_RadAwayEffect`, not Detrimental, +200) left rads at 300. Across sessions: old shell with a non-Detrimental shared effect
+applied about once a frame (-59,700); shared Detrimental effect at -200 did nothing; mirror at +200 did nothing.
+**Unresolved:** whether `EquipItem` used the item up at all (the probe did not log the count). This head adds
+`item stage=40 when=added|now|settled count=N`; the reader appends `item count a to b: consumed|NOT consumed` to the stage 40
+line, so "not consumed" and "consumed, effect inert" separate in one run. **Not taken yet:** a script effect or a quest-handled
+use (`ModValue(-200)`, remove one), which would make RadAway work whatever the effect does; and a RadAway spell cast from the
+script as a control beside the item. Both are named in Claude's note and left for the result of this run.
+
 ## Second control: a vanilla instant effect (stage 50)
 
 Asked by the owner PC so one session separates "our effect is wrong" from "Cast on the player from a quest script applies no

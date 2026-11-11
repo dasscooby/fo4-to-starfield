@@ -264,6 +264,20 @@ class VerdictTests(unittest.TestCase):
         self.assertTrue(any("not the maximum" in p and "base read 200 throughout" in p for p in s["problems"]))
         self.assertFalse(any("base unchanged" in v for v in s["route"].values()))
 
+    def test_the_item_count_separates_consumed_from_not(self):
+        base = good_log()
+        def with_items(added, settled):
+            out = []
+            for x in base:
+                out.append(x)
+                if " step stage=40" in x:
+                    out.append(x.split("step")[0] + f"item stage=40 when=added count={added} end=true")
+            out.append(base[0].split("init")[0] + f"item stage=40 when=settled count={settled} end=true")
+            return out
+        self.assertIn("item count 1 to 0: consumed", pl.summarize(with_items(1, 0))["radaway"])
+        self.assertIn("item count 1 to 1: NOT consumed", pl.summarize(with_items(1, 1))["radaway"])
+        self.assertNotIn("item count", pl.summarize(base)["radaway"])
+
     def test_extra_effect_ids_are_named(self):
         lines = [x.replace("rads=100.0 health=200.0 base=na max=190.0 applied=-10 fx=none", "rads=100.0 health=200.0 base=na max=190.0 applied=-10 fx=-1234") for x in good_log()]
         s = pl.summarize(lines)
