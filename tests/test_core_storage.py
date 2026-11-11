@@ -3,6 +3,7 @@ FO4TerrainCore.esm whose world holds the spawn cell FO4Core_RedRocketSpawn and a
 persistent and one temporary XMarker in the spawn cell's own groups, the exact masters, the cell the core's own."""
 from pathlib import Path
 import json
+import os
 import re
 import shutil
 import struct
@@ -73,18 +74,66 @@ class CoreStorageTests(unittest.TestCase):
     def run_tool(cls, *argv):
         return subprocess.run([cls.dotnet, str(cls.tool), *map(str, argv)], capture_output=True, text=True)
 
-    def built(self, name="plugin"):
+    def built(self, name="plugin", variant=None):
         out = self.root / name
-        proc = self.run_tool("build", "--sf", self.sf, "--core", self.core, "--out", out)
+        proc = self.run_tool("build", "--sf", self.sf, "--core", self.core, "--out", out, *(["--variant", variant] if variant else []))
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         return out / "FO4SFCoreStorage.esm"
 
-    def check(self, plugin):
-        return self.run_tool("check", plugin, "--sf", self.sf, "--core", self.core)
+    def check(self, plugin, variant=None):
+        return self.run_tool("check", plugin, "--sf", self.sf, "--core", self.core, *(["--variant", variant] if variant else []))
+
+    def test_the_default_is_toponly_the_persistent_cell_override_and_no_exterior_cell(self):
+        """FAL-273 / PC ladder 11 Nov (c394bce3): the exterior CELL override alone crashed the game 28 s after arrival (and moved coc to
+        the origin cell); world-only survived. The default therefore has no CELL record of the core's exterior at all."""
+        plugin = self.built("plugin-toponly")
+        proc = self.check(plugin)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("variant toponly", proc.stdout)
+        recs = walk(plugin)
+        self.assertEqual(sorted(v[0] for v in recs.values()), [b"CELL", b"QUST", b"REFR", b"WRLD"])        # the persistent cell only
+        sig, flags, kind, cell, _ = recs[0x800]
+        self.assertEqual((sig, flags & 0xC00, kind, cell & 0xFFFFFF), (b"REFR", 0x400, PERSISTENT_CHILDREN, 0x900))
+        self.assertNotIn(0x801, recs)
+        self.assertNotIn(0x901, {k for k in recs})                                                           # the spawn cell is not written
+        wrong = self.check(plugin, "topcell")                                                                  # checked as topcell: refused
+        self.assertEqual(wrong.returncode, 1, wrong.stdout)
+
+    def test_the_variant_topcell_keeps_the_spawn_cell_override_for_cs_t(self):
+        """FAL-273 (#707): the layout of every Starfield world (PC scan: 0 of 18,300 exterior cells of Starfield.esm have a
+        persistent group; 431 groups sit under the worlds' persistent cells): CS_P in an override of the core world's
+        persistent cell, CS_T in the spawn cell's temporary group, no persistent group under any exterior cell."""
+        plugin = self.built("plugin-top", "topcell")
+        proc = self.check(plugin, "topcell")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertIn("variant topcell", proc.stdout)
+        recs = walk(plugin)
+        top_cell, spawn_cell = 0x900, 0x901
+        sig, flags, kind, cell, _ = recs[0x800]
+        self.assertEqual((sig, flags & 0xC00, kind, cell & 0xFFFFFF), (b"REFR", 0x400, PERSISTENT_CHILDREN, top_cell))
+        sig, flags, kind, cell, _ = recs[0x801]
+        self.assertEqual((sig, flags & 0xC00, kind, cell & 0xFFFFFF), (b"REFR", 0, TEMPORARY_CHILDREN, spawn_cell))
+        self.assertEqual(sorted(v[0] for v in recs.values()), [b"CELL", b"CELL", b"QUST", b"REFR", b"REFR", b"WRLD"])
+        self.assertEqual({k for k, v in recs.items() if v[4] == 1}, {0x803, 0x900, 0x901})
+        # no type 8 group has an exterior cell for a parent: its enclosing cell is the world's persistent cell
+        self.assertEqual(self.run_tool("build", "--sf", self.sf, "--core", self.core, "--out", self.root / "plugin-top2", "--variant", "topcell").returncode, 0)
+        self.assertEqual((self.root / "plugin-top2" / "FO4SFCoreStorage.esm").read_bytes(), plugin.read_bytes())
+
+    def test_the_variant_full_is_the_layout_that_crashed_run_3(self):
+        out = self.root / "plugin-crash-layout"
+        self.assertEqual(self.run_tool("build", "--sf", self.sf, "--core", self.core, "--out", out, "--variant", "full").returncode, 0)
+        plugin = out / "FO4SFCoreStorage.esm"
+        recs = walk(plugin)
+        sig, flags, kind, cell, _ = recs[0x800]
+        self.assertEqual((sig, flags & 0xC00, kind, cell & 0xFFFFFF), (b"REFR", 0x400, PERSISTENT_CHILDREN, 0x901))   # under the exterior cell
+        self.assertEqual({k for k, v in recs.items() if v[4] == 1}, {0x803, 0x901})
+        self.assertEqual(self.run_tool("check", plugin, "--sf", self.sf, "--core", self.core, "--variant", "full").returncode, 0)
 
     def test_each_reference_is_in_its_own_group_of_the_core_spawn_cell(self):
-        plugin = self.built()
-        proc = self.check(plugin)
+        out = self.root / "plugin-full"
+        self.assertEqual(self.run_tool("build", "--sf", self.sf, "--core", self.core, "--out", out, "--variant", "full").returncode, 0)
+        plugin = out / "FO4SFCoreStorage.esm"
+        proc = self.run_tool("check", plugin, "--sf", self.sf, "--core", self.core, "--variant", "full")
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertEqual(masters(plugin), ["Starfield.esm", "FO4TerrainCore.esm"])
         recs = walk(plugin)
@@ -100,9 +149,72 @@ class CoreStorageTests(unittest.TestCase):
         self.assertIn("(-981.257, 1146.514, 107.143)", proc.stdout)                        # marker + 8 m
 
     def test_the_world_override_keeps_its_cell_and_nothing_else(self):
-        proc = self.check(self.built("plugin-cells"))
+        proc = self.check(self.built("plugin-cells", "topcell"), "topcell")
         self.assertNotIn("SyntheticOtherCell", proc.stdout)
-        self.assertIn("records: Worldspace 1, Cell 1, PlacedObject 2, Quest 1", proc.stdout)
+        self.assertIn("records: Worldspace 1, Cell 2, PlacedObject 2, Quest 1", proc.stdout)        # the persistent cell and the spawn cell
+
+    def test_every_variant_writes_its_part_and_keeps_the_same_masters(self):
+        """FAL-273 (#707): one game run per variant; the variants differ in the cell's references and the cell, nothing else."""
+        want = {"toponly": {b"WRLD", b"CELL", b"REFR", b"QUST"}, "topcell": {b"WRLD", b"CELL", b"REFR", b"QUST"}, "full": {b"WRLD", b"CELL", b"REFR", b"QUST"}, "persist-only": {b"WRLD", b"CELL", b"REFR", b"QUST"},
+                "temp-only": {b"WRLD", b"CELL", b"REFR", b"QUST"}, "cell-only": {b"WRLD", b"CELL", b"QUST"}, "world-only": {b"WRLD", b"QUST"}}
+        for v, sigs in want.items():
+            out = self.root / f"variant-{v}"
+            proc = self.run_tool("build", "--sf", self.sf, "--core", self.core, "--out", out, "--variant", v)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            plugin = out / "FO4SFCoreStorage.esm"
+            self.assertEqual(masters(plugin), ["Starfield.esm", "FO4TerrainCore.esm"], v)
+            self.assertEqual({x[0] for x in walk(plugin).values()}, sigs, v)
+            self.assertEqual(self.run_tool("check", plugin, "--sf", self.sf, "--core", self.core, "--variant", v).returncode, 0, v)
+        recs = walk(self.root / "variant-persist-only" / "FO4SFCoreStorage.esm")
+        self.assertEqual(recs[0x800][2], PERSISTENT_CHILDREN)
+        self.assertNotIn(0x801, recs)
+        recs = walk(self.root / "variant-temp-only" / "FO4SFCoreStorage.esm")
+        self.assertEqual(recs[0x801][2], TEMPORARY_CHILDREN)
+        self.assertNotIn(0x800, recs)
+
+    def test_check_follows_the_variant_and_refuses_another_one(self):
+        plugin = self.root / "variant-cell-only" / "FO4SFCoreStorage.esm"
+        if not plugin.exists():
+            self.test_every_variant_writes_its_part_and_keeps_the_same_masters()
+        wrong = self.run_tool("check", plugin, "--sf", self.sf, "--core", self.core, "--variant", "full")             # checked as the full plugin
+        self.assertEqual(wrong.returncode, 1, wrong.stdout)
+        self.assertIn("does not hold exactly FO4SF_CS_P", wrong.stdout)
+        bad = self.run_tool("build", "--sf", self.sf, "--core", self.core, "--out", self.root / "variant-bad", "--variant", "nonsense")
+        self.assertEqual(bad.returncode, 1)
+        self.assertIn("is not one of toponly, topcell, full, persist-only, temp-only, cell-only, world-only", bad.stderr)
+
+    def test_the_run_instructions_follow_the_variant(self):
+        """FAL-330 finding: the README of a toponly stage must not ask for CS_T found or 75 s, and must name the arrival cell."""
+        top = make_core_storage.run_instructions("toponly")
+        self.assertIn("80 s", top)
+        self.assertIn("..000DAF", top)
+        self.assertIn("..001340", top)
+        self.assertIn("CS_T reads not found in this variant, by design", top)
+        self.assertNotIn("75 s", top)
+        self.assertNotIn("CS_T found and CS_P", top)
+        for v in make_core_storage.VARIANTS:
+            self.assertNotIn("75 s", make_core_storage.run_instructions(v), v)
+            self.assertIn("80 s", make_core_storage.run_instructions(v), v)
+        for v in ("topcell", "full", "persist-only", "temp-only", "cell-only"):     # the ones with the exterior cell override
+            self.assertIn("CONTROL variant " + v, make_core_storage.run_instructions(v))
+        self.assertNotIn("CONTROL", top)
+        self.assertIn("CONTROL variant world-only", make_core_storage.run_instructions("world-only"))
+        self.assertNotIn("spawn cell override", make_core_storage.run_instructions("world-only"))
+
+    def test_the_stage_names_the_variant(self):
+        self.assertIn("--variant", (ROOT / "scripts" / "core_storage" / "make_core_storage.py").read_text(encoding="utf-8"))
+        self.assertEqual(make_core_storage.VARIANTS, ("toponly", "topcell", "full", "persist-only", "temp-only", "cell-only", "world-only"))
+
+    def test_the_twin_dump_shows_the_override_beside_the_core_cell(self):
+        import twin_dump
+        plugin = self.built("plugin-twin", "topcell")
+        lines, summary = twin_dump.report(str(plugin), str(self.core))
+        text = "\n".join(lines)
+        self.assertIn("override records of the core in the plugin: [('WRLD', '000803'), ('CELL', '000900'), ('CELL', '000901')]", text)
+        self.assertIn("children, core:     cell temporary children: REFR x1", text)
+        self.assertIn("children, override: cell temporary children: REFR x1", text)                 # CS_T only: CS_P is in the persistent cell
+        self.assertEqual(summary, ["WRLD 000803: no difference in header or subrecords", "CELL 000900: no difference in header or subrecords",
+                                   "CELL 000901: no difference in header or subrecords"])
 
     def test_check_refuses_a_plugin_built_against_another_core(self):
         # a plugin built against another core: the same tool refuses it (the cell id is the core's own)
@@ -236,6 +348,99 @@ class InstallPreflightTests(unittest.TestCase):
                 (stage / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
                 core_storage_install.install(args)
                 inst.assert_called_once()
+
+
+class PersistentCellConflictTests(unittest.TestCase):
+    """FAL-314: the topcell build overrides the core world's persistent cell, as FO4SFMission.esm and FO4SFCombinedProbe.esm do."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.txt = os.path.join(self.tmp.name, "Plugins.txt")
+
+    def plugins(self, *lines):
+        with open(self.txt, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+
+    def test_active_mission_or_combined_probe_is_refused_for_topcell(self):
+        for other in ("FO4SFMission.esm", "FO4SFCombinedProbe.esm"):
+            self.plugins("# comment", "*FO4TerrainCore.esm", f"*{other}")
+            problems = make_core_storage.persistent_cell_conflicts({"variant": "topcell"}, self.txt)
+            self.assertEqual(len(problems), 1, problems)
+            self.assertIn(other, problems[0])
+            self.assertIn("two plugins never override it together", problems[0])
+
+    def test_an_unticked_one_or_another_variant_or_no_file_is_fine(self):
+        self.plugins("FO4SFMission.esm", "*FO4TerrainCore.esm")                         # listed, not active
+        self.assertEqual(make_core_storage.persistent_cell_conflicts({"variant": "topcell"}, self.txt), [])
+        self.plugins("*FO4SFMission.esm")
+        for variant in ("full", "cell-only", "temp-only", "world-only"):
+            self.assertEqual(make_core_storage.persistent_cell_conflicts({"variant": variant}, self.txt), [])
+        self.assertEqual(make_core_storage.persistent_cell_conflicts({}, self.txt), [])  # an old stage: run 3's layout
+        self.assertEqual(make_core_storage.persistent_cell_conflicts({"variant": "topcell"}, self.txt + ".none"), [])
+
+    def test_the_installer_never_runs_beside_an_active_overrider_and_rolls_nothing(self):
+        import core_storage_install
+        from types import SimpleNamespace
+        from unittest import mock
+        d = Path(self.tmp.name)
+        stage, game = d / "stage", d / "game"
+        (stage / "Data").mkdir(parents=True)
+        (game / "Data").mkdir(parents=True)
+        (stage / make_core_storage.PLUGIN).write_bytes(b"plugin")
+        core = game / "Data" / "FO4TerrainCore.esm"
+        core.write_bytes(b"core")
+        plan = {"kind": "core-storage-probe", "plugin": make_core_storage.PLUGIN, "plugins": [make_core_storage.PLUGIN], "variant": "topcell",
+                "inputs": {"core": {"sha256": make_core_storage.sha256(str(core))}},
+                "outputs": {make_core_storage.PLUGIN: make_core_storage.sha256(str(stage / make_core_storage.PLUGIN))}}
+        (stage / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
+        self.plugins("*FO4SFCombinedProbe.esm")
+        args = SimpleNamespace(dir=str(stage), starfield=str(game))
+        with mock.patch.object(core_storage_install.exp_install, "plugins_txt", return_value=self.txt), \
+                mock.patch.object(core_storage_install, "installer") as inst:
+            with self.assertRaises(SystemExit) as cm:
+                core_storage_install.install(args)
+            self.assertIn("FO4SFCombinedProbe.esm is active", str(cm.exception))
+            inst.assert_not_called()
+            self.plugins("*FO4TerrainCore.esm")                                          # the overrider ticked off: it runs
+            core_storage_install.install(args)
+            inst.assert_called_once()
+
+    def test_a_hold_on_the_mission_or_the_bridge_is_tolerated_any_other_hold_still_refuses(self):
+        """Claude, FAL-273: topcell installed neither beside the mission nor with the mission held off (refuse_while_held)."""
+        import core_storage_install as csi
+        from unittest import mock
+        data = os.path.join(self.tmp.name, "Data")
+        os.makedirs(data)
+
+        def hold(*names):
+            return mock.patch.object(csi.exp_install, "held_off", return_value={n.casefold() for n in names})
+        with hold("FO4SFMission.esm", csi.exp_install.BRIDGE_PLUGIN):
+            csi.refuse_while_held_except_conflicts(data, "x")                              # no exit
+        with hold("FO4SFCombinedProbe.esm"):
+            csi.refuse_while_held_except_conflicts(data, "x")
+        with hold("FO4SFMission.esm", "FO4TerrainCore.esm"):
+            with self.assertRaises(SystemExit) as cm:
+                csi.refuse_while_held_except_conflicts(data, "core storage probe not installed")
+            self.assertIn("FO4terraincore.esm".casefold(), str(cm.exception).casefold())
+            self.assertNotIn("fo4sfmission.esm", str(cm.exception).casefold().split("(")[1])   # only the other one is named
+        with mock.patch.object(csi.exp_install, "held_off", side_effect=ValueError("unreadable")):
+            with self.assertRaises(SystemExit):
+                csi.refuse_while_held_except_conflicts(data, "x")
+
+    def test_the_relaxed_check_is_in_force_only_while_this_installers_main_runs(self):
+        import core_storage_install as csi
+        from unittest import mock
+        original = csi.exp_install.refuse_while_held
+        seen = []
+        with mock.patch.object(csi.exp_install, "main", side_effect=lambda argv: seen.append(csi.exp_install.refuse_while_held) or 0):
+            csi.installer(["status"])
+        self.assertIs(seen[0], csi.refuse_while_held_except_conflicts)
+        self.assertIs(csi.exp_install.refuse_while_held, original)                            # restored: other installers are unchanged
+        self.assertIsNot(original, csi.refuse_while_held_except_conflicts)
+
+    def test_the_stage_records_its_variant_for_the_installer(self):
+        self.assertIn('"variant": a.variant', (ROOT / "scripts" / "core_storage" / "make_core_storage.py").read_text(encoding="utf-8"))
 
 
 class ScriptTests(unittest.TestCase):

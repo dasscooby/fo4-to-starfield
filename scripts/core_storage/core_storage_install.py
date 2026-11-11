@@ -24,14 +24,35 @@ import make_core_storage  # noqa: E402
 RECORD = "FO4SFCoreStorage.install.json"
 
 
+def tolerated_hold():
+    """The plugins whose plugin_toggle.py hold this probe accepts: the ones whose persistent-cell override it conflicts with, and
+    the bridge (the state the topcell test wants: the mission held off, FAL-273). Any other held plugin still refuses."""
+    return {n.casefold() for n in make_core_storage.PERSISTENT_CELL_OVERRIDERS} | {exp_install.BRIDGE_PLUGIN.casefold()}
+
+
+def refuse_while_held_except_conflicts(data, what, _original=exp_install.refuse_while_held):
+    """exp_install.refuse_while_held with the hold on the conflicting plugins and the bridge allowed (FAL-273: topcell could be
+    installed neither beside the mission nor with the mission held off). A hold on anything else, or an unreadable hold, refuses."""
+    try:
+        held = exp_install.held_off(data)
+    except (OSError, ValueError) as error:
+        sys.exit(f"{what}: {error}")
+    other = sorted(held - tolerated_hold())
+    if other:
+        sys.exit(f"{what}: plugins held off by plugin_toggle.py ({', '.join(other)}) that this probe does not conflict with; "
+                 f"run plugin_toggle.py on first")
+
+
 def installer(argv):
-    """exp_install.py's main on this tool's own record."""
-    saved = exp_install.RECORD
+    """exp_install.py's main on this tool's own record, and with its hold check relaxed as above."""
+    saved, saved_hold = exp_install.RECORD, exp_install.refuse_while_held
     exp_install.RECORD = RECORD
+    exp_install.refuse_while_held = refuse_while_held_except_conflicts
     try:
         return exp_install.main(argv)
     finally:
         exp_install.RECORD = saved
+        exp_install.refuse_while_held = saved_hold
 
 
 def install(a):
@@ -40,6 +61,11 @@ def install(a):
     if problems:
         sys.exit("core storage probe not installed: the stage does not match its plan.json (re-stage): " + "; ".join(problems))
     problems = make_core_storage.core_pin_problems(plan, os.path.join(a.starfield, "Data"))
+    if problems:
+        sys.exit("core storage probe not installed: " + "; ".join(problems))
+    # Plugins.txt is only read for a stage that overrides the core world's persistent cell (a stage without a variant is run 3's)
+    problems = (make_core_storage.persistent_cell_conflicts(plan, exp_install.plugins_txt())
+                if plan.get("variant", "full") in make_core_storage.PERSISTENT_CELL_VARIANTS else [])
     if problems:
         sys.exit("core storage probe not installed: " + "; ".join(problems))
     names = sorted(n for n in os.listdir(d) if n.lower().endswith(".esm"))

@@ -3,7 +3,9 @@
 usage:
   python scripts/core_storage/make_core_storage.py stage --core <installed FO4TerrainCore.esm> --out <NEW folder>
         [--starfield <game dir>] [--sf <Starfield.esm>] [--compiler <PapyrusCompiler.exe>] [--content-resources <zip>]
-      1. dotnet/CoreStorage build: the plugin (a persistent and a temporary XMarker in the core's FO4Core_RedRocketSpawn,
+        [--variant toponly|topcell|full|persist-only|temp-only|cell-only|world-only]
+      1. dotnet/CoreStorage build: the plugin (a persistent XMarker in an override of the core world's persistent cell and a
+         temporary one in the core's FO4Core_RedRocketSpawn; --variant full is run 3's layout, persistent group under the cell,
          a quest with no properties);
       2. the Papyrus compile of FO4SF_CoreStorageQuest.psc (base sources from the Creation Kit's ContentResources.zip, as
          scripts/bridge/make_bridge.py), the .pex into <out>/Data/Scripts;
@@ -32,6 +34,7 @@ SPAWN_CELL = "FO4Core_RedRocketSpawn"
 IDS = {"cs_p": 0x800, "cs_t": 0x801, "quest": 0x802}
 IMPORTS = ("Actor", "Cell", "Debug", "Form", "Game", "ObjectReference", "Quest", "ScriptObject", "Utility", "WorldSpace")
 TOOL = os.path.join(REPO, "dotnet", "CoreStorage")
+VARIANTS = ("toponly", "topcell", "full", "persist-only", "temp-only", "cell-only", "world-only")     # dotnet/CoreStorage --variant (FAL-273, #707)
 
 
 def sha256(path):
@@ -46,6 +49,24 @@ def tool_cmd(*argv):
     return ["dotnet", "run", "-c", "Release", "--project", TOOL, "--", *argv]
 
 
+def run_instructions(variant):
+    """The README's \"in game\" and reading text for a variant (FAL-330 finding: it must follow the PC ladder of 11 Nov, FAL-273).
+    toponly (the default) has no exterior cell record and no CS_T; the others carry the spawn cell override, which crashed."""
+    if variant == "world-only":
+        return (f"CONTROL variant world-only: the world override alone, no cell, no reference (it survived 80 s on the PC, 11 Nov). In game: coc {SPAWN_CELL};\n"
+                f"stay 80 s; the user log {LOG} holds FO4SFCS lines 2, 10, 30 and 60 s after the arrival. Expected: arrival in cell ..000DAF, still running\n"
+                f"after 80 s, CS_P and CS_T both not found (nothing is written for them).\n")
+    if variant == "toponly":
+        return (f"In game: coc {SPAWN_CELL}; stay 80 s; the user log {LOG} holds FO4SFCS lines 2, 10, 30 and 60 s after the arrival.\n"
+                f"PASS = the arrival line (arrive n=2) names cell ..000DAF at about x=-2189 y=-1553 (NOT cell ..001340 at 50, 50), the game\n"
+                f"is still running after 80 s, and CS_P reads found=True, with the player. CS_T reads not found in this variant, by design\n"
+                f"(no spawn cell override, no temporary reference): that is not a failure. Arrival in ..001340, or a crash (0xC0000005 at\n"
+                f"SF+0x41efd6), is a FAIL; keep the crash folder.\n")
+    return (f"CONTROL variant {variant}: it carries the spawn cell override ({SPAWN_CELL}), which crashed the game 28 s after arrival on the PC\n"
+            f"(FAL-273, 11 Nov) and moves the arrival to cell ..001340; run it only to repeat that. In game: coc {SPAWN_CELL}; stay 80 s;\n"
+            f"the user log {LOG} holds FO4SFCS lines 2, 10, 30 and 60 s after the arrival. A crash at SF+0x41efd6 is the expected result.\n")
+
+
 def stage(a):
     import make_bridge  # noqa: E402  (run, the default tool paths)
     import zipfile
@@ -57,7 +78,7 @@ def stage(a):
     sf = a.sf or os.path.join(a.starfield, "Data", "Starfield.esm")
     compiler = a.compiler or os.path.join(a.starfield, "Tools", "Papyrus Compiler", "PapyrusCompiler.exe")
     zip_path = a.content_resources or os.path.join(a.starfield, "Tools", "ContentResources.zip")
-    built = make_bridge.run(tool_cmd("build", "--sf", sf, "--core", a.core, "--out", out, "--plugin", PLUGIN))
+    built = make_bridge.run(tool_cmd("build", "--sf", sf, "--core", a.core, "--out", out, "--plugin", PLUGIN, "--variant", a.variant))
     src = os.path.join(work, "Source")
     os.makedirs(src, exist_ok=True)
     want = {f"Scripts/Source/{n}.psc" for n in IMPORTS} | {"Scripts/Source/Starfield_Papyrus_Flags.flg"}
@@ -76,13 +97,13 @@ def stage(a):
     pex = os.path.join(pex_dir, SCRIPT + ".pex")
     if "Compilation succeeded" not in text or not os.path.exists(pex):
         sys.exit(f"the Papyrus compile did not produce {SCRIPT}.pex")
-    check = make_bridge.run(tool_cmd("check", os.path.join(out, PLUGIN), "--sf", sf, "--core", a.core))
+    check = make_bridge.run(tool_cmd("check", os.path.join(out, PLUGIN), "--sf", sf, "--core", a.core, "--variant", a.variant))
     with open(os.path.join(out, "offline_check.txt"), "w", encoding="utf-8") as f:
         f.write(built + check)
     shutil.copy(os.path.join(HERE, SCRIPT + ".psc"), os.path.join(out, SCRIPT + ".psc"))
     plugin_sha = sha256(os.path.join(out, PLUGIN))
     plan = {"kind": "core-storage-probe", "plugin": PLUGIN, "plugins": [PLUGIN], "build_id": plugin_sha[:8],
-            "plugin_sha256": plugin_sha, "spawn_cell": SPAWN_CELL, "script": SCRIPT, "ids": IDS,
+            "plugin_sha256": plugin_sha, "variant": a.variant, "spawn_cell": SPAWN_CELL, "script": SCRIPT, "ids": IDS,
             "log": LOG, "log_prefix": PREFIX, "readings_s": [2, 10, 30, 60],
             "inputs": {"core": {"sha256": sha256(a.core)},
                        "starfield_esm": {"sha256": sha256(sf) if os.path.exists(sf) else None},
@@ -92,13 +113,10 @@ def stage(a):
     with open(os.path.join(out, "plan.json"), "w", encoding="utf-8") as f:
         json.dump(plan, f, indent=1)
     with open(os.path.join(out, "README.txt"), "w", encoding="utf-8") as f:
-        f.write(f"""Core storage probe (FAL-208). {PLUGIN} (build {plugin_sha[:8]}), masters Starfield.esm + FO4TerrainCore.esm.
-FO4SF_CS_P (0x800, persistent) and FO4SF_CS_T (0x801, temporary): XMarkers in {SPAWN_CELL}, at its COC marker + 4 / 8 m east.
+        f.write(f"""Core storage probe (FAL-208), variant {a.variant}. {PLUGIN} (build {plugin_sha[:8]}), masters Starfield.esm + FO4TerrainCore.esm.
+FO4SF_CS_P (0x800, persistent; variant {a.variant}: world persistent cell for toponly / topcell) and FO4SF_CS_T (0x801, temporary, in {SPAWN_CELL}): XMarkers at its COC marker + 4 / 8 m east.
 Install (game closed), after the core: python scripts\\core_storage\\core_storage_install.py install --dir "{out}" --starfield <game>
-In game: coc {SPAWN_CELL} with the roofs on screen; stay 75 s; the user log {LOG} holds FO4SFCS lines 2, 10, 30 and 60 s
-after the arrival. CS_T not found: cell not loaded (not a failure). CS_T found and CS_P with the player: PASS.
-CS_T found and CS_P left behind or not found: FAIL.
-Uninstall (game closed): python scripts\\core_storage\\core_storage_install.py uninstall --starfield <game>
+{run_instructions(a.variant)}Uninstall (game closed): python scripts\\core_storage\\core_storage_install.py uninstall --starfield <game>
 """)
     print(f"staged {out}: {PLUGIN} ({plugin_sha[:8]}), Data/Scripts/{SCRIPT}.pex, offline_check.txt, plan.json, README.txt")
 
@@ -139,6 +157,32 @@ def core_pin_problems(plan, data_dir):
     return []
 
 
+# plugins that override the core world's PERSISTENT cell: two plugins never override it together (FAL-273, FAL-314 finding)
+PERSISTENT_CELL_OVERRIDERS = ("FO4SFMission.esm", "FO4SFCombinedProbe.esm")
+# variants that write that override (a stage without a variant key is run 3's, "full": no override)
+PERSISTENT_CELL_VARIANTS = ("toponly", "topcell")
+
+
+def active_plugins(plugins_txt_path):
+    """Lower-cased names of the plugins ticked ("*Name") in a Plugins.txt, [] when there is no file."""
+    if not os.path.exists(plugins_txt_path):
+        return []
+    with open(plugins_txt_path, "rb") as f:
+        raw = f.read()
+    text = raw.decode("utf-8-sig", errors="replace")
+    return [line.strip()[1:].strip().lower() for line in text.splitlines() if line.strip().startswith("*")]
+
+
+def persistent_cell_conflicts(plan, plugins_txt_path):
+    """Problems when this stage overrides the core world's persistent cell and another plugin that does is active."""
+    if plan.get("variant", "full") not in PERSISTENT_CELL_VARIANTS:
+        return []
+    ticked = set(active_plugins(plugins_txt_path))
+    return [f"{name} is active in Plugins.txt and also overrides the core world's persistent cell: two plugins never "
+            "override it together (untick it, or stage --variant full / cell-only for this probe)"
+            for name in PERSISTENT_CELL_OVERRIDERS if name.lower() in ticked]
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -149,6 +193,8 @@ def main(argv=None):
     s.add_argument("--sf", default="", help="Starfield.esm (default <starfield>\\Data\\Starfield.esm)")
     s.add_argument("--compiler", default="", help="default <starfield>\\Tools\\Papyrus Compiler\\PapyrusCompiler.exe")
     s.add_argument("--content-resources", default="", help="default <starfield>\\Tools\\ContentResources.zip")
+    s.add_argument("--variant", default="toponly", choices=VARIANTS,
+                   help="which part of the override is written (the crash of #707: one game run per variant)")
     a = ap.parse_args(argv)
     stage(a)
 
