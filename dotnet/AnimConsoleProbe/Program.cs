@@ -66,7 +66,7 @@ static class AnimConsoleProbe
     // the layout (scripts/newgame/FO4SF_AnimConsoleQuest.psc carries the same quest id)
     const uint QuestId = 0x800;
     const string QuestEdid = "FO4SF_AnimConsoleQuest", Script = "FO4SF_AnimConsoleQuest";
-    static readonly ushort[] Stages = { 10, 20, 21, 22, 23, 24, 25, 26, 27, 28, 30, 40, 60 };
+    static readonly ushort[] Stages = { 10, 11, 20, 21, 22, 23, 24, 25, 26, 27, 28, 30, 31, 32, 40, 60 };
 
     static FormKey Own(uint id) => new(Plugin, id);
 
