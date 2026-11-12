@@ -244,7 +244,7 @@ Event OnTimer(int aiTimerID)
     elseif aiTimerID >= TIMER_SIT
         SitTick(aiTimerID - TIMER_SIT)
     elseif aiTimerID >= TIMER_SAFETY
-        Guard(aiTimerID - TIMER_SAFETY)
+        SafetyClose(aiTimerID - TIMER_SAFETY)
     endif
 EndEvent
 
@@ -377,7 +377,7 @@ Function EndUse(string why)
     Trace("end why=" + why + " use=" + CurIdx + " t=" + SinceUse())
 EndFunction
 
-Function Guard(int idx)
+Function SafetyClose(int idx)
     {15 s after the use began, whatever happened: layer released; a player still not at sit state 0 gets Activate once more (the
      game's own way out, MQ101Script) and the recheck follows.}
     if idx != CurIdx

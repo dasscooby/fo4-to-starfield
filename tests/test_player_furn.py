@@ -23,6 +23,13 @@ import make_player_furn as mpf  # noqa: E402
 PSC = (ROOT / "scripts" / "newgame" / "FO4SF_PlayerFurnQuest.psc").read_text(encoding="utf-8")
 TOOL_SRC = (ROOT / "dotnet" / "PlayerFurn" / "Program.cs").read_text(encoding="utf-8")
 PLUGIN = "FO4SFPlayerFurn.esm"
+# Papyrus keywords of Starfield's compiler: none may be used as a function, variable or parameter name ("Guard" was one: the real
+# compiler refused FO4SF_PlayerFurnQuest.psc(247,8) at 3e758a59)
+RESERVED = {"as", "auto", "autoreadonly", "betaonly", "bool", "conditional", "const", "customevent", "debugonly", "else", "elseif",
+            "endevent", "endfunction", "endgroup", "endguard", "endif", "endproperty", "endstate", "endstruct", "endwhile", "event",
+            "extends", "false", "float", "function", "global", "group", "guard", "if", "import", "int", "is", "length", "lockguard",
+            "native", "new", "none", "parent", "property", "return", "scriptname", "self", "state", "string", "struct", "trycatch",
+            "tryguard", "true", "var", "variant", "while"}
 # the code: everything after the header doc block (the doc names what the kit must not do)
 CODE = PSC[PSC.index("; ----------------------------------------------------------------"):]
 TYPES = {"race", "cell", "form", "actor", "quest", "furniture", "keyword", "spell", "game", "debug", "utility", "int", "float",
@@ -96,17 +103,17 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("Hold.Delete()", rel)                                   # the layer is deleted, not only enabled
         self.assertIn("Hold = None", rel)
         self.assertIn("if Hold != None", rel)                                 # safe to repeat
-        self.assertIn('ReleaseHold("timer")', body("Guard"))
+        self.assertIn('ReleaseHold("timer")', body("SafetyClose"))
         self.assertIn('ReleaseHold("stage60")', body("Cleanup"))
         self.assertIn("ReleaseHold(why)", body("EndUse"))
         self.assertIn('EndUse("getup")', PSC)                                 # Actor.OnGetUp
         self.assertIn('EndUse("exit")', PSC)                                  # ObjectReference.OnExitFurniture
         # the timer releases BEFORE it tries to leave the furniture
-        g = body("Guard")
+        g = body("SafetyClose")
         self.assertLess(g.index('ReleaseHold("timer")'), g.index("FurnRef.Activate(p, false)"))
 
     def test_the_exit_activate_only_when_the_sit_state_is_not_zero_and_the_recheck_disables(self):
-        g = body("Guard")
+        g = body("SafetyClose")
         self.assertIn("int s = p.GetSitState()", g)
         self.assertIn("if s != 0 && FurnRef != None", g)
         self.assertIn('Say("EXIT ACTIVATE sit=" + s)', g)
@@ -167,6 +174,15 @@ class ScriptTests(unittest.TestCase):
         decl = re.findall(r"^\s*(?:[A-Za-z:]+(?:\[\])?)\s+(\w+)\s*(?:=|$)", PSC, re.M)
         params = [p for m in re.findall(r"(?:Function|Event)\s+[\w.]+\(([^)]*)\)", PSC) for p in re.findall(r"\s(\w+)\s*(?:,|$)", " " + m)]
         self.assertEqual([n for n in decl + params if n.lower() in TYPES], [])
+
+    def test_no_function_variable_or_parameter_is_a_papyrus_reserved_word(self):
+        code = "\n".join(l.split(";")[0] if not l.startswith(";OPT") else l.split(" ", 2)[2] if l.count(" ") >= 2 else "" for l in PSC.splitlines())
+        funcs = re.findall(r"^\s*(?:[\w\[\]]+\s+)?Function\s+(\w+)\(", code, re.M | re.I)
+        calls = re.findall(r"^\s*(\w+)\(", code, re.M)
+        decl = re.findall(r"^\s*(?:int|float|bool|string|[A-Z]\w+)(?:\[\])?\s+(\w+)\s*(?:=|$)", code, re.M)
+        params = [p for m in re.findall(r"(?:Function|Event)\s+[\w.]+\(([^)]*)\)", code) for p in re.findall(r"\s(\w+)\s*(?:,|$)", " " + m)]
+        self.assertEqual(sorted({n for n in funcs + calls + decl + params if n.lower() in RESERVED}), [])
+        self.assertNotIn("Function Guard(", PSC)
 
     def test_the_required_list_has_every_native_called_outside_an_optional_line(self):
         for base, names in {"Actor": ["PlaceAtMe", "GetSitState"], "ObjectReference": ["Activate", "Disable"],
@@ -265,6 +281,13 @@ if any("Spawned[i].Delete()" in l for l in text.splitlines() if not l.startswith
 if any("Event Actor.OnSit" in l for l in text.splitlines() if not l.startswith(";")):
     print("%s.psc(2,1): error: the OnSit handler does not match the fake compiler" % name)
     sys.exit(1)
+import re
+for n, l in enumerate(text.splitlines(), 1):
+    if l.lstrip().startswith(";"):
+        continue
+    for m in re.finditer(r"(?:^\\s*(?:\\w+(?:\\[\\])?\\s+)?Function\\s+|^\\s*)(guard|endguard|tryguard|lockguard)\\s*\\(", l, re.I):
+        print("%s.psc(%d,8): mismatched input '%s' expecting ENDIF" % (name, n, m.group(1)))
+        sys.exit(1)
 os.makedirs(out, exist_ok=True)
 open(os.path.join(out, name + ".pex"), "wb").write(text.encode())
 print("Compilation succeeded.")
@@ -402,6 +425,18 @@ class StageTests(unittest.TestCase):
         self.assertNotIn(mpf.BOOL_LINE, text)
         self.assertIn('    return "void"', text)
         self.assertFalse(json.loads((out / "plan.json").read_text())["register_returns_bool"])
+
+    def test_the_fake_compiler_refuses_a_reserved_word_as_a_function_name(self):
+        z = self.root / "cr5.zip"
+        fake_sources(z)
+        bad = self.root / "bad"
+        bad.mkdir()
+        psc = bad / "x.psc"
+        psc.write_text("Scriptname x extends Quest\nFunction Guard(int i)\nEndFunction\n")
+        r = subprocess.run([sys.executable, str(fake_compiler(self.root)), str(psc), "-o=" + str(bad / "o")] if os.name != "nt" else
+                           [str(fake_compiler(self.root)), str(psc), "-o=" + str(bad / "o")], capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("mismatched input 'Guard'", r.stdout)
 
     def test_a_missing_required_native_stops_the_stage(self):
         z = self.root / "cr4.zip"
