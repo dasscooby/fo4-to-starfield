@@ -359,6 +359,14 @@ class StageTests(unittest.TestCase):
         cls.master = cls.root / "m" / "Starfield.esm"
         r = cls.run_tool("fixture", cls.root / "m")
         assert r.returncode == 0, r.stdout + r.stderr
+        # FAL-558: the default stage (~6 s of the stager's tool calls) once; the test that only reads it shares it, the one that changes
+        # it works on a copy, the ones that change the inputs stage again.
+        cls.zip = cls.root / "cr.zip"
+        fake_sources(cls.zip)
+        cls.comp = fake_compiler(cls.root)
+        cls.shared = cls.root / "staged"
+        assert mpf.main(["stage", "--out", str(cls.shared), "--starfield", str(cls.master), "--compiler", str(cls.comp),
+                         "--content-resources", str(cls.zip)]) == 0
 
     @classmethod
     def run_tool(cls, *argv):
@@ -424,12 +432,7 @@ class StageTests(unittest.TestCase):
         self.assertNotEqual(self.run_tool("check", out / PLUGIN, self.master).returncode, 0)
 
     def test_stage_with_a_fake_compiler_keeps_what_compiles_and_pins_every_file(self):
-        z = self.root / "cr.zip"
-        fake_sources(z)
-        comp = fake_compiler(self.root)
-        out = self.root / "staged"
-        code = mpf.main(["stage", "--out", str(out), "--starfield", str(self.master), "--compiler", str(comp), "--content-resources", str(z)])
-        self.assertEqual(code, 0)
+        z, comp, out = self.zip, self.comp, self.shared                                   # staged once in setUpClass
         plan = json.loads((out / "plan.json").read_text())
         self.assertEqual(plan["kind"], "player-furn-probe")
         self.assertEqual(plan["plugins"], [PLUGIN])
@@ -488,10 +491,8 @@ class StageTests(unittest.TestCase):
         self.assertFalse((self.root / "staged4").exists())
 
     def test_a_changed_stage_is_refused_by_verify(self):
-        z = self.root / "cr3.zip"
-        fake_sources(z)
         out = self.root / "staged3"
-        mpf.main(["stage", "--out", str(out), "--starfield", str(self.master), "--compiler", str(fake_compiler(self.root)), "--content-resources", str(z)])
+        shutil.copytree(self.shared, out)
         plan = json.loads((out / "plan.json").read_text())
         with open(out / PLUGIN, "ab") as f:
             f.write(b"!")
