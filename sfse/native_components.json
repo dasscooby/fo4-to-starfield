@@ -85,7 +85,7 @@
     "key_thread": "The dll could not start its key watcher.",
     "listen": "SFSE did not give the dll the interface it needs.",
     "object": "A game object the dll reads is not where or what it expects.",
-    "page": "A page read (strings, form lists or actor values) did not match what the dll expects, so that page stays off.",
+    "page": "The string reader's self-test or the player's actor-value slot did not match what the dll expects; those reads show ? and the dll keeps running. (A form-list refusal is step object.)",
     "page_ids": "An id a page needs failed its check against the game.",
     "pages": "The page kit's own check failed, so the kit stays off.",
     "register": "The game would not register our menu.",
@@ -96,6 +96,6 @@
     "version": "The game is not Starfield 1.16.244, the only version this dll runs on.",
     "world": "The world overlay probe's ini settings or movie stage are not usable, so the overlay probe runs alone.",
     "world_key_thread": "The dll could not start the world overlay's key watcher.",
-    "world_toggle": "The game's UI had no registered menu by the world overlay's name, or was not up yet, so nothing was sent."
+    "world_toggle": "No world overlay menu name is set (WorldMenu empty: census only), or the game's UI had no registered menu by that name, or was not up yet; nothing was sent."
   }
 }
