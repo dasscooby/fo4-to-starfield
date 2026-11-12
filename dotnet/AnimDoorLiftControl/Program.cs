@@ -122,7 +122,11 @@ static class Control
     static Mutagen.Bethesda.Starfield.Activator MakeControl(IDoorGetter door, IAnimationGraphComponentGetter graph, string anam)
     {
         var acti = new Mutagen.Bethesda.Starfield.Activator(Own(ControlId), Release) { EditorID = ControlEdid, Model = door.Model!.DeepCopy() };
-        acti.Components.Add(new AnimationGraphComponent { ANAM = anam, BNAM = graph.BNAM, CNAM = graph.CNAM });
+        // the door's whole graph component (BNAM, CNAM, DNAM, ENAM and anything else it carries), with only the graph (ANAM) changed: a component rebuilt
+        // from the three named fields would drop the rest (the Courier's FAL-579 hold on the generic control, the same flaw)
+        var comp = graph.DeepCopy();
+        comp.ANAM = anam;
+        acti.Components.Add(comp);
         return acti;
     }
 
@@ -134,6 +138,8 @@ static class Control
         w.WriteLine($"door_anam={graph.ANAM}");
         w.WriteLine($"door_bnam={graph.BNAM}");
         w.WriteLine($"door_cnam={graph.CNAM}");
+        w.WriteLine($"door_dnam={graph.DNAM}");
+        w.WriteLine($"door_enam={graph.ENAM}");
         w.WriteLine($"door_components={Kinds(door.Components)}");
         var l = Lift(sf);
         w.WriteLine($"lift_type={l.Type}");
@@ -228,7 +234,7 @@ static class Control
         if (a != null)
         {
             var g = a.Components.OfType<IAnimationGraphComponentGetter>().ToList();
-            Console.WriteLine($"  ACTI {a.EditorID} model {a.Model?.File} components {a.Components.Count()} graph {(g.Count == 1 ? $"ANAM {g[0].ANAM} BNAM {g[0].BNAM} CNAM {g[0].CNAM}" : $"{g.Count} graph components")}");
+            Console.WriteLine($"  ACTI {a.EditorID} model {a.Model?.File} components {a.Components.Count()} graph {(g.Count == 1 ? $"ANAM {g[0].ANAM} BNAM {g[0].BNAM} CNAM {g[0].CNAM} DNAM {g[0].DNAM ?? "none"} ENAM {g[0].ENAM ?? "none"}" : $"{g.Count} graph components")}");
             Need(a.EditorID == ControlEdid, $"the ACTI is {a.EditorID}, not {ControlEdid}");
             Need(string.Equals(a.Model?.File, door.Model?.File, StringComparison.OrdinalIgnoreCase), "the model is not the vanilla door's");
             Need(a.Components.Count() == 1 && g.Count == 1, "not exactly one component, the animation graph");
@@ -238,6 +244,8 @@ static class Control
                 Need(g[0].ANAM?.Contains(ControlGraphWord, StringComparison.OrdinalIgnoreCase) == true, $"the graph does not name {ControlGraphWord}");
                 Need(g[0].BNAM == dgraph.BNAM, $"rig is {g[0].BNAM}, not the vanilla door's {dgraph.BNAM}");
                 Need(g[0].CNAM == dgraph.CNAM, $"clip folder is {g[0].CNAM}, not the vanilla door's {dgraph.CNAM}");
+                Need(g[0].DNAM == dgraph.DNAM, $"DNAM is {g[0].DNAM ?? "none"}, not the vanilla door's {dgraph.DNAM ?? "none"}");
+                Need(g[0].ENAM == dgraph.ENAM, $"ENAM is {g[0].ENAM ?? "none"}, not the vanilla door's {dgraph.ENAM ?? "none"}");
             }
             Need(a.FormKey != door.FormKey, "the control has the vanilla form key");
         }
@@ -257,6 +265,7 @@ static class Control
         {
             ANAM = "AnimTextData\\Tables\\Graphs\\SimpleOpenClose01.agx",
             BNAM = "Architecture\\Doors\\CharacterAssets\\skeleton.rig", CNAM = "Architecture\\Doors\\Animations",
+            DNAM = "Architecture\\Doors\\DNAM-KEPT", ENAM = "Architecture\\Doors\\ENAM-KEPT",     // the real door's are unread: the fixture sets both so a drop shows
         });
         mod.Doors.Add(door);
         var lift = new Mutagen.Bethesda.Starfield.Activator(Sf(LiftId), Release) { EditorID = "ShipQuickLift1", Model = new Model { File = "Ships\\QuickLift\\QuickLift1.nif" } };

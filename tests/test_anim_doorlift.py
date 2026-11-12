@@ -173,10 +173,31 @@ class ToolTests(ToolBase):
         self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
         self.assertIn("masters [Starfield.esm]", check.stdout)
         self.assertIn("scripts [FO4SF_AnimDoorLiftQuest (0 properties)]", check.stdout)
-        flat = check.stdout.replace("\\\\", "\\")
-        self.assertIn(f"ACTI FO4SF_AnimDoorControl model Meshes/Architecture/Doors/WallA_DoorA_01.nif components 1 graph ANAM {ANAM} "
-                      f"BNAM Architecture\\Doors\\CharacterAssets\\skeleton.rig CNAM Architecture\\Doors\\Animations", flat)    # the door's model, rig and folder; our graph
+        slashed = check.stdout.replace("\\", "/")                                    # the tool prints with the OS separator (backslashes on Windows)
+        want = (f"ACTI FO4SF_AnimDoorControl model Meshes/Architecture/Doors/WallA_DoorA_01.nif components 1 graph ANAM {ANAM} "
+                f"BNAM Architecture\\Doors\\CharacterAssets\\skeleton.rig CNAM Architecture\\Doors\\Animations").replace("\\", "/")
+        self.assertIn(want, slashed)                                                   # the door's model, rig and folder; our graph
         self.assertIn("all checks pass", check.stdout)
+
+    def test_the_control_keeps_the_doors_dnam_and_enam(self):
+        """The same flaw as the Courier's FAL-579 hold on the generic control: the door's whole component is copied and only ANAM changes; check
+        fails when DNAM differs from the vanilla door's."""
+        info = mad.parse_info(self.run_tool("info", self.master).stdout)
+        self.assertEqual((info["door_dnam"], info["door_enam"]), ("Architecture\\Doors\\DNAM-KEPT", "Architecture\\Doors\\ENAM-KEPT"))
+        out = self.root / "b7"
+        self.assertEqual(self.run_tool("build", self.master, out, ANAM).returncode, 0)
+        slashed = self.run_tool("check", out / PLUGIN, self.master, ANAM).stdout.replace("\\", "/")
+        self.assertIn("DNAM Architecture/Doors/DNAM-KEPT ENAM Architecture/Doors/ENAM-KEPT", slashed)
+        other = self.root / "o2"
+        other.mkdir()
+        raw = bytearray(self.master.read_bytes())
+        i = raw.find(b"DNAM-KEPT")
+        self.assertGreater(i, 0)
+        raw[i:i + 9] = b"DNAM-DIFF"
+        (other / "Starfield.esm").write_bytes(bytes(raw))
+        proc = self.run_tool("check", out / PLUGIN, other / "Starfield.esm", ANAM)
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertIn("DNAM is ", proc.stdout)
 
     def test_the_plugin_adds_one_quest_and_one_acti_and_no_door_or_override(self):
         out = self.root / "b2"

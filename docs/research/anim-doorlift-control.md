@@ -11,6 +11,7 @@ Claude runs it for one session on the PC after the Courier's CLEAR. **Nothing he
 **Verified** = read in this tree. **Supported** = a PC report as Claude posted it, not replayed here. **Unread** = nobody has read it.
 
 ## What is built
+- The control's graph component is the vanilla door's WHOLE component (BNAM, CNAM, DNAM, ENAM and anything else it carries) with only the ANAM changed, and `check` compares them: the same flaw the Courier held on the generic control (FAL-579), fixed here the same way.
 - `dotnet/AnimDoorLiftControl` (new): `FO4SFAnimDoorLift.esm`, master `Starfield.esm` only, two records, overrides none. QUST `FO4SF_AnimDoorLiftQuest`
   (0x800, start game enabled, stages 10 20 21..24 31..36 40 60, no properties) and ACTI `FO4SF_AnimDoorControl` (0x801): a **new** activator (a DOOR is not an ACTI, so there is
   nothing to duplicate) with the model, BNAM and CNAM of the vanilla DOOR `AK_Ext_Bld_WallA_DoorA_01_Alt02` `000AA24A` (read from the `Starfield.esm` given) and ANAM
@@ -42,8 +43,8 @@ What the log cannot say: whether the door or the lift moved. That is a screensho
 
 ## Unread, and what would change this kit
 - Whether a bare ACTI with only the door's model and a graph component behaves like the door (the real DOOR's other components are printed by `info` as `door_components`, none copied).
-- Whether `genericopenclose01` takes the door's own clips (the read names clip tags `Open` and `Close`; the vanilla door's clips live on `SimpleOpenClose01`: whether the file names match is unread).
-- What `ShipQuickLift1` is (ACTI/FURN/other), whether it names `twostages` (`info` prints it at stage time), and what a disabled-then-enabled platform does.
+- Whether `genericopenclose01` takes the door's own clips. **Supported** (Claude, PC, 12 Nov 21:37 UTC, not replayed here): the vanilla door's clip folder holds exactly `open.af(x)` and `close.af(x)`, which fits the graph's clip tags `Open` and `Close` up to case; whether the engine matches them case-blind, and whether the graph plays them, is unread.
+- What `ShipQuickLift1` is (ACTI/FURN/other) and whether it names `twostages` (`info` prints it at stage time). **Supported** (same source): it carries a script (VMAD). What that script does (it may start or stop the platform itself, or ignore a placed copy) is **unread**, so a call that returns true and a platform that does not move, or a move nobody called, are both possible readings; and so is what a disabled-then-enabled platform does.
 - Whether `Stage1Transition` / `Stage2Transition` return false as the read predicts (stages 35 and 36 log it).
 - That `ObjectReference.Enable` exists as called (the compile on the PC decides; it is not an optional line).
 
