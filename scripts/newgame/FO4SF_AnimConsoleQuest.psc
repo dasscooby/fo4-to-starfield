@@ -6,12 +6,16 @@ Scriptname FO4SF_AnimConsoleQuest extends Quest
  clips and the graph component of the vanilla activator graph activatorstategraph01) answer PlayAnimation the way the vanilla
  activator did in variant A? The script spawns a copy of that base with PlaceAtMe (the override is on the base, so a spawn
  anywhere has the new model), registers for the animation events FROM it, and sends it one name per stage:
-   10      PlaceAtMe of the console base 2.5 m in front of the player (persistent), reads it, registers every event name
+   10      PlaceAtMe of the console base AheadM (1.5 m) in front of the player and UpM (1.2 m) above the player's height, turned to face
+           the player when SetAngle compiles (persistent), reads it, registers every event name
    20      registers every event name again
    21..28  one PlayAnimation name each, then 15 s of listening. Variant A: Play01 opened the vanilla activator, Play02 closed it,
            TurnOff opened, StateB_Play closed; the rest changed nothing. The names are in that order, the four that moved first.
            Which clip our console shows for each name is the result: screenshots before and after each stage
+   11      a SECOND copy 0.9 m to the player's right of the first, turned a quarter circle from it, so one shot shows the front and the side
    30      Activate(player) by script
+   31      QUIET: Play01 on both copies, no notification until the window closes (so shots every 0.3 s are not covered); 32: the same with Play02.
+           Play02 FIRST on a fresh load: set 10, then 32, and do not set 31 (stage 22 does the same on one copy with notifications)
    40      a reading of the reference now
    60      Disable and Delete the spawned reference
  One name per stage so each is its own line: set the next stage only after the 15 s window of the last one has closed (its "quiet"
@@ -35,6 +39,7 @@ string ProbePlugin = "FO4SFAnimConsole.esm"
 string BasePlugin = "FO4Port.esm"
 int BaseId = 0  ;BASE the console base's local id in FO4Port.esm (the stager writes it; 0 = not given)
 float AheadM = 1.5      ; metres in front of the player (variant D session 2 read dist 2.5007 for 2.5: the unit is metres)
+float SideM = 0.9       ; metres to the player's right for the second copy (stage 11), a guess for a clear side view
 float UpM = 1.2         ; metres above the player's own height: a guess at chest height for this model, unread
 
 ; ---------------------------------------------------------------- state
@@ -48,6 +53,10 @@ bool[] DoneList
 string[] EventNames
 string[] PlayNames
 ObjectReference TestRef = None
+ObjectReference TestRef2 = None   ; the side copy (stage 11)
+bool Quiet = false          ; true in a quiet window (stages 31, 32): Say() shows nothing until the window closes
+string QuietNote = ""        ; the PlayAnimation returns of a quiet stage, shown when its window closes
+float FirstDoneAfter = -1.0  ; seconds from the call to the first Done of the open window, -1 = none yet
 int ListenStage = 0         ; the play stage whose 15 s window is open; 0 = none (an event then is logged stage=0: outside any window)
 int WindowEvents = 0        ; events that arrived in the open window
 float LastEventRt = 0.0
@@ -57,21 +66,24 @@ float PlayRt = 0.0            ; real time of the open window's PlayAnimation / A
 
 Event OnInit()
     Debug.OpenUserLog(LogName)
-    StageList = new int[13]
-    DoneList = new bool[13]
+    StageList = new int[16]
+    DoneList = new bool[16]
     StageList[0] = 10
-    StageList[1] = 20
-    StageList[2] = 21
-    StageList[3] = 22
-    StageList[4] = 23
-    StageList[5] = 24
-    StageList[6] = 25
-    StageList[7] = 26
-    StageList[8] = 27
-    StageList[9] = 28
-    StageList[10] = 30
-    StageList[11] = 40
-    StageList[12] = 60
+    StageList[1] = 11
+    StageList[2] = 20
+    StageList[3] = 21
+    StageList[4] = 22
+    StageList[5] = 23
+    StageList[6] = 24
+    StageList[7] = 25
+    StageList[8] = 26
+    StageList[9] = 27
+    StageList[10] = 28
+    StageList[11] = 30
+    StageList[12] = 31
+    StageList[13] = 32
+    StageList[14] = 40
+    StageList[15] = 60
     PlayNames = new string[8]
     PlayNames[0] = "Play01"
     PlayNames[1] = "Play02"
@@ -122,6 +134,9 @@ Function Say(string msg)
     {The on-screen twin of a log line, for a session with script logging off (variant A ran so, 12 Nov): a short Debug.Notification
      the person at the keyboard can read. Prefixes: REG n/m (register calls that returned true), PLAY sN name ok=..., EV name wN (an
      event, w = the open window's stage, w0 = none), W sN quiet / W sN heard n (a window closed).}
+    if Quiet
+        return
+    endif
     Debug.Notification("AP " + msg)
 EndFunction
 
@@ -143,6 +158,9 @@ Event OnAnimationEvent(ObjectReference akSource, string asEventName)
     LastEventRt = now
     if ListenStage != 0
         WindowEvents += 1
+        if asEventName == "Done" && FirstDoneAfter < 0.0
+            FirstDoneAfter = after
+        endif
     endif
 EndEvent
 
@@ -155,15 +173,20 @@ string Function Reg(ObjectReference r, string n)
 EndFunction
 
 Function RegisterAll(int stage)
-    if TestRef == None
+    RegisterRef(stage, TestRef)
+    RegisterRef(stage, TestRef2)
+EndFunction
+
+Function RegisterRef(int stage, ObjectReference r)
+    if r == None
         Trace("register stage=" + stage + " ref=none (stage 10 first)")
         return
     endif
     int i = 0
     int okCount = 0
     while i < EventNames.Length
-        string res = Reg(TestRef, EventNames[i])
-        Trace("register stage=" + stage + " name=" + EventNames[i] + " ref=" + Id(TestRef) + " ok=" + res)
+        string res = Reg(r, EventNames[i])
+        Trace("register stage=" + stage + " name=" + EventNames[i] + " ref=" + Id(r) + " ok=" + res)
         if res == "true"
             okCount += 1
         endif
@@ -214,6 +237,35 @@ Function Spawn(int stage)
     RegisterAll(stage)
 EndFunction
 
+Function SpawnSide(int stage)
+    {A second copy of the console 0.9 m to the player's right of the first, turned a quarter circle from the first, for a side view.}
+    Actor p = Game.GetPlayer()
+    Form base = None
+    if BaseId != 0
+        base = Game.GetFormFromFile(BaseId, BasePlugin)
+    endif
+    if base == None || TestRef == None
+        Trace("spawnside stage=" + stage + " needs stage 10 first (base=" + Id(base) + " first=" + Id(TestRef) + ")")
+        return
+    endif
+    TestRef2 = p.PlaceAtMe(base, 1, true, false, false)
+    bool moved = false
+    bool turned = false
+;OPT ObjectReference.MoveTo     if TestRef2
+;OPT ObjectReference.MoveTo         float a = p.GetAngleZ()
+;OPT ObjectReference.MoveTo         TestRef2.MoveTo(p, AheadM * Math.Sin(a) + SideM * Math.Cos(a), AheadM * Math.Cos(a) - SideM * Math.Sin(a), UpM, false)
+;OPT ObjectReference.MoveTo         moved = true
+;OPT ObjectReference.MoveTo     endif
+;OPT ObjectReference.SetAngle     if TestRef2
+;OPT ObjectReference.SetAngle         TestRef2.SetAngle(0.0, 0.0, p.GetAngleZ() + 270.0)
+;OPT ObjectReference.SetAngle         turned = true
+;OPT ObjectReference.SetAngle     endif
+    Trace("spawnside stage=" + stage + " ref=" + Id(TestRef2) + " moved=" + moved + " turned=" + turned + " side=" + SideM)
+    Say("SIDE s" + stage + " moved=" + moved + " turned=" + turned + " side=" + SideM)
+    Reading("side", stage, TestRef2)
+    RegisterRef(stage, TestRef2)
+EndFunction
+
 ; ---------------------------------------------------------------- poll and steps
 
 Event OnTimer(int aiTimerID)
@@ -222,6 +274,10 @@ Event OnTimer(int aiTimerID)
         StartTimer(POLL_S, TIMER_POLL)
     elseif aiTimerID >= TIMER_QUIET
         int stage = aiTimerID - TIMER_QUIET
+        if Quiet
+            Quiet = false
+            Say("PLAYQ s" + stage + " ok=" + QuietNote + " firstDone=" + FirstDoneAfter)
+        endif
         if WindowEvents == 0
             Trace("quiet stage=" + stage + " seconds=" + LISTEN_S)
             Say("W s" + stage + " quiet")
@@ -250,8 +306,14 @@ EndFunction
 Function Step(int stage)
     if stage == 10
         Spawn(stage)
+    elseif stage == 11
+        SpawnSide(stage)
     elseif stage == 20
         RegisterAll(stage)
+    elseif stage == 31
+        PlayQuiet(stage, "Play01")
+    elseif stage == 32
+        PlayQuiet(stage, "Play02")
     elseif stage >= 21 && stage <= 28
         PlayOne(stage, PlayNames[stage - 21])
     elseif stage == 30
@@ -272,10 +334,34 @@ Function PlayOne(int stage, string n)
     Reading("before", stage, TestRef)
     ListenStage = stage
     WindowEvents = 0
+    FirstDoneAfter = -1.0
     PlayRt = Utility.GetCurrentRealTime()
     bool ok = TestRef.PlayAnimation(n)
     Trace("play stage=" + stage + " name=" + n + " ref=" + Id(TestRef) + " ok=" + ok)
     Say("PLAY s" + stage + " " + n + " ok=" + ok)
+    StartTimer(LISTEN_S, TIMER_QUIET + stage)
+EndFunction
+
+Function PlayQuiet(int stage, string n)
+    {Play one name on every copy that exists, with NO notification until the window closes, so shots taken every 0.3 s show the panel and
+     nothing else. The returns and the time of the first Done are shown once, when the window closes.}
+    if TestRef == None
+        Trace("playquiet stage=" + stage + " name=" + n + " ref=none (place it first)")
+        return
+    endif
+    ListenStage = stage
+    WindowEvents = 0
+    FirstDoneAfter = -1.0
+    Quiet = true
+    PlayRt = Utility.GetCurrentRealTime()
+    bool ok = TestRef.PlayAnimation(n)
+    QuietNote = "" + ok
+    Trace("playquiet stage=" + stage + " name=" + n + " ref=" + Id(TestRef) + " ok=" + ok)
+    if TestRef2
+        bool ok2 = TestRef2.PlayAnimation(n)
+        QuietNote = QuietNote + "/" + ok2
+        Trace("playquiet stage=" + stage + " name=" + n + " ref=" + Id(TestRef2) + " ok=" + ok2)
+    endif
     StartTimer(LISTEN_S, TIMER_QUIET + stage)
 EndFunction
 
@@ -301,4 +387,9 @@ Function Cleanup()
 ;OPT ObjectReference.Delete         TestRef.Delete()
     endif
     TestRef = None
+    if TestRef2
+        TestRef2.Disable(false)
+;OPT ObjectReference.Delete         TestRef2.Delete()
+    endif
+    TestRef2 = None
 EndFunction

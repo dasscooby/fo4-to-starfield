@@ -46,7 +46,7 @@ class ScriptTests(unittest.TestCase):
         ran = [int(s) for s in re.findall(r"StageList\[\d+\] = (\d+)", PSC)]
         m = re.search(r"Stages = \{ ([\d, ]+) \}", TOOL_SRC)
         self.assertEqual(ran, [int(x) for x in m.group(1).split(",")])
-        self.assertEqual(ran, [10, 20, 21, 22, 23, 24, 25, 26, 27, 28, 30, 40, 60])
+        self.assertEqual(ran, [10, 11, 20, 21, 22, 23, 24, 25, 26, 27, 28, 30, 31, 32, 40, 60])
         self.assertIn(f"StageList = new int[{len(ran)}]", PSC)
         self.assertIn('"FO4SFANIM rt="', PSC)                                  # the variant A reader reads this log too
         from fo4sf import anim_probe_log
@@ -61,7 +61,7 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("p.PlaceAtMe(base, 1, true, false, false)", PSC)
         self.assertIn("Game.GetFormFromFile(BaseId, BasePlugin)", PSC)
         self.assertNotIn("ActiId", PSC)
-        self.assertEqual(PSC.count("TestRef.PlayAnimation(n)"), 1)
+        self.assertEqual(PSC.count("TestRef.PlayAnimation(n)"), 2)       # PlayOne and PlayQuiet (the side copy is TestRef2)
 
     def test_the_play_names_start_with_the_four_that_moved_the_vanilla_activator(self):
         names = dict(re.findall(r'PlayNames\[(\d)\] = "(\w+)"', PSC))
@@ -72,7 +72,7 @@ class ScriptTests(unittest.TestCase):
     def test_every_finding_shows_on_screen_and_the_clip_time_is_logged(self):
         self.assertIn('Debug.Notification("AP " + msg)', PSC)
         self.assertIn('" after=" + after', PSC)                                      # Done's after= is the clip's length
-        self.assertEqual(PSC.count("PlayRt = Utility.GetCurrentRealTime()"), 2)      # PlayOne and ActivateOnce
+        self.assertEqual(PSC.count("PlayRt = Utility.GetCurrentRealTime()"), 3)      # PlayOne, PlayQuiet and ActivateOnce
         self.assertIn('Say("READ s" + stage + " " + when + " 3d=" + r.Is3DLoaded()', PSC)      # 3D loaded / distance / height difference on screen
         self.assertIn('" az=" + r.GetAngleZ() + " pa=" + p.GetAngleZ())', PSC)           # the copy's and the player's heading
         self.assertIn('Say("SPAWN s" + stage + " moved=" + moved + " turned=" + turned', PSC)
@@ -85,6 +85,36 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(mac.optional_names(PSC), ["ObjectReference.MoveTo", "ObjectReference.SetAngle", "ObjectReference.Delete"])
         self.assertIn(mac.probe_a.BOOL_LINE, PSC)
         self.assertNotIn(mac.probe_a.BOOL_LINE, mac.probe_a.reg_shape(PSC, False))
+
+    def test_the_quiet_stages_play_both_copies_and_say_nothing_until_the_window_closes(self):
+        quiet = PSC.split("Function PlayQuiet")[1].split("EndFunction")[0]
+        self.assertIn("Quiet = true", quiet)
+        self.assertEqual(quiet.count(".PlayAnimation(n)"), 2)                      # the first copy and the side copy
+        self.assertNotIn("Say(", quiet)                                             # no notification inside the window
+        say = PSC.split("Function Say")[1].split("EndFunction")[0]
+        self.assertRegex(say, r"if Quiet\s+return\s+endif")                          # Say is silent while Quiet
+        close = PSC.split("Event OnTimer")[1].split("EndEvent")[0]
+        self.assertLess(close.index("Quiet = false"), close.index('Say("PLAYQ s"'))   # the window closes quiet, then speaks once
+        self.assertIn('" firstDone=" + FirstDoneAfter', close)
+        self.assertIn("PlayQuiet(stage, \"Play01\")", PSC)
+        self.assertIn("PlayQuiet(stage, \"Play02\")", PSC)
+        self.assertNotIn("Quiet = true", PSC.split("Function PlayOne")[1].split("EndFunction")[0])   # the ordinary stages keep their notices
+
+    def test_the_side_copy_is_a_second_reference_turned_a_quarter_circle_and_cleaned_up(self):
+        side = PSC.split("Function SpawnSide")[1].split("EndFunction")[0]
+        self.assertIn("TestRef2 = p.PlaceAtMe(base, 1, true, false, false)", side)
+        self.assertIn("SideM * Math.Cos(a)", side)
+        self.assertIn("AheadM * Math.Cos(a) - SideM * Math.Sin(a)", side)          # to the player's right: (cos a, -sin a)
+        self.assertIn("TestRef2.SetAngle(0.0, 0.0, p.GetAngleZ() + 270.0)", side)    # 180 (facing the player) plus a quarter circle
+        self.assertIn("RegisterRef(stage, TestRef2)", side)
+        self.assertNotIn("elif", side)
+        self.assertIn("stage == 11", PSC)
+        self.assertIn("SpawnSide(stage)", PSC.split("Function Step")[1].split("EndFunction")[0])
+        cleanup = PSC.split("Function Cleanup")[1].split("EndFunction")[0]
+        self.assertIn("TestRef2.Disable(false)", cleanup)
+        self.assertIn(";OPT ObjectReference.Delete         TestRef2.Delete()", cleanup)
+        on = mac.enable(PSC, ["ObjectReference.MoveTo", "ObjectReference.SetAngle", "ObjectReference.Delete"])
+        self.assertIsNone(re.search(r"^;OPT ", on, re.M))                           # every optional line of the new function switches on with its name
 
     def test_the_base_id_is_written_once_and_a_bad_one_is_refused(self):
         on = mac.set_base_id(PSC, "0x001234")
