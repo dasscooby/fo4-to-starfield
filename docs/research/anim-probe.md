@@ -1,7 +1,6 @@
 # Animation probe, variant A (the vanilla control)
 
-Task: FAL-489 (Vault 111 exit, step 1 of the experiment in the issue document `vault111-anim-experiment`). Status: **built offline, not run in
-game** (no Starfield.esm, no ContentResources.zip, no Papyrus compiler, no game on the build box).
+Task: FAL-489 (Vault 111 exit, step 1 of the experiment in the issue document `vault111-anim-experiment`). Status: built offline (no Starfield.esm, no ContentResources.zip, no Papyrus compiler, no game on the build box); **run in game twice on the PC, 12 Nov** (reported in the section "What the two PC sessions showed" below, with its limits).
 
 ## The question
 Does `ObjectReference.PlayAnimation` work on a pure-vanilla activator in our setup, and which animation events arrive in Papyrus? If
@@ -71,14 +70,23 @@ Read it with `python scripts\newgame\make_anim_probe.py log`: verdict `EVENTS AR
 return value; `stage` compiles the script with Starfield's compiler, keeping each optional line that compiles, and keeps the register call in
 the shape the game declares (bool return, or the `;VOID` lines: the log then says `ok=void`).
 
-## Not run, unread
-Nothing here ran against the game. Unread: the Papyrus compile; whether `ObjectReference.PlayAnimation` returns a bool in Starfield (the
-precheck proves the name, not the return type; the compile is the test); whether `RegisterForAnimationEvent(ObjectReference, string)` is the
-signature (the precheck reads the declaration's return type only); whether a quest can register for events from another reference; whether
-`PlayAnimation` takes a graph event name or a clip name (stages 21 to 28 send both kinds on purpose); the stage and event lists are guesses from
-the `.agx` reads of #744/#745.
+## Before the sessions: not run, unread (as of the offline build, 12 Nov)
+At the offline build nothing had run against the game. These were unread then: the Papyrus compile; whether `ObjectReference.PlayAnimation` returns a bool in Starfield; whether `RegisterForAnimationEvent(ObjectReference, string)` is the signature; whether a quest can register for events from another reference; whether `PlayAnimation` takes a graph event name or a clip name (stages 21 to 28 send both kinds on purpose); the stage and event lists were guesses from the `.agx` reads of #744/#745. The PC reports below touch some of these; read them there, not here.
 
 ## What the two PC sessions showed (Claude, 12 Nov, reviewed heads 319b4e55 and 9865544b)
-Session 1 (no log): a spawned vanilla `001CCAC2` shows its own prompt "DISPLAY / ACTIVATE [E]"; `Play01` opens it, `Play02` closes it, `TurnOff` opens, `StateB_Play` closes, script `Activate(player)` opens; `StateA_Play`, `Trans01`, `TurnOn`, `Trans02` change nothing. Session 2 (the `AP` notices, logging still off): `REG S10 22/22 TRUE`; each `PlayAnimation` that moves it returns true and delivers three events: `Trans01`, `IsOff`, `Done` (opening) or `Trans02`, `IsOn`, `Done` (closing); script `Activate(player)` the same as opening. So the call plays, the object moves and `Done` tells the script a clip ended. Variant A passes in full.
+Source: the PC comments on #746 (session 1 at 06:15 UTC, session 2 at 06:55 UTC). A spawned reference, not a placed one, in both.
 
-Two readings of the notices, for the next session: a **false** `PlayAnimation` does show: the notice is `AP PLAY s<N> <name> ok=False` (the script says it for every call, true or false; the game prints the bool as it does for any concatenated bool, so expect `False`/`FALSE` in the capital the game picks). No `W` notice was ever caught: a later notification replaces the earlier one and the `W` line comes 15 s after the call, when the last event notices have long left the screen or a newer one has taken the place; the events themselves are the finding. A notification is not a log: use script logging for a count.
+**Session 1** (script logging off, so no user log; one screenshot before and one about 17 s after each stage). A spawned vanilla `001CCAC2` showed its own prompt "DISPLAY / ACTIVATE [E]". Object after each call: `Play01` open; `StateA_Play` open (no change); `Trans01` open (no change); `Play02` closed; `TurnOn` closed (no change); `TurnOff` open; `StateB_Play` closed; `Trans02` closed (no change); script `Activate(player)` open; disable and delete, gone. No crash, no save written.
+
+**Session 2** (script logging still off; the `AP` notices, seven screenshots per stage at about 1, 3, 6, 9, 15, 17 and 20 s):
+- `REG S10 22/22 TRUE`: all 22 register calls returned true.
+- Five play names returned true (`PLAY ... OK=TRUE` seen): `Play01`, `StateA_Play`, `Play02`, `TurnOff`, `StateB_Play`.
+- `Play01`, `Play02`, `TurnOff`, `StateB_Play` (the four that moved the object), and the script `Activate(player)` (`ACTIVATE S30`), each delivered three events and `Done`: a transition event (`Trans01` or `Trans02`), a state event (`IsOff` or `IsOn`), and `Done`. The opening ones were `Trans01`, `IsOff`, `Done`; the closing ones `Trans02`, `IsOn`, `Done`.
+- `StateA_Play` returned true and delivered `Trans01`, `IsOff`, `Done`, while the object stayed open (it was already open after `Play01`).
+- For the play names `Trans01`, `TurnOn` and `Trans02` (stages 23, 25, 28) no `PLAY` notice was seen in any of the seven shots, not even `OK=FALSE`, and no events. The screen cannot say whether those calls returned false or the notice was not shown.
+- Event times were not measured in variant A (the notices queue on screen).
+- No `W` (window closed) notice was caught in any stage, at 15, 17 or 20 s.
+
+So, read from the screen: a script's `PlayAnimation` moved the spawned vanilla object for four names, and an event `Done` followed each move. No summary stronger than that is claimed. Still unread in variant A: the script log (each call's return, every event line), event times, the three silent names, a placed reference, the `W` notice.
+
+Two readings of the notices, for the next session: a **false** `PlayAnimation` should show as a notice `AP PLAY s<N> <name> ok=False` (the script says it for every call, true or false; the game prints the bool in capitals on screen, as `OK=TRUE` in session 2). That was not seen for any name: for three names no `PLAY` notice was seen at all (above). The notices queue on screen rather than replace one another: the session 2 comment says so (that is why event times were not measured), and the PC reports up to three visible at once (relayed 12 Nov in FAL-506; the screenshots themselves are not in this repository). An earlier version of this card said a later notice replaces the earlier one; that was wrong. No `W` notice was caught in any shot. A notification is not a log: use script logging for a count and for times.
