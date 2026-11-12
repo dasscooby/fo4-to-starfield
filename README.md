@@ -37,8 +37,8 @@ Newest first.
   animations on one of Starfield's own animated objects and heard the end of each clip
   ([#746](https://github.com/fo4sf/fo4-to-starfield/pull/746)). **Seen in game, 12 Nov.** The vault's converted control
   panel plays its own clips in Starfield, and each ends at about the clip's own length; a part of the panel moves, but
-  not the part the clip is meant to move. A likely cause was found offline (the written clips have no entry for the
-  panel's root part), and a fix is under review ([#747](https://github.com/fo4sf/fo4-to-starfield/pull/747), open).
+  not the part the clip is meant to move. Offline, the written clips were found to have no entry for the panel's root
+  part; whether that is the cause is not settled, and a fix is under review ([#747](https://github.com/fo4sf/fo4-to-starfield/pull/747), open).
   **Seen in game, 12 Nov; not working yet.**
 - **11 and 12 Nov: Fallout 4 pieces in Starfield's build menu.** At the Red Rocket workbench of our converted
   Commonwealth, Starfield's build menu lists 34 Fallout 4 pieces (walls, roofs, crates, barrels and more, with the models
@@ -77,8 +77,8 @@ Newest first.
   own beside the saves. Without its setting file a plugin refuses to run and logs why. One table lists what each plugin
   needs, for the launcher to check ([#727](https://github.com/fo4sf/fo4-to-starfield/pull/727),
   [#728](https://github.com/fo4sf/fo4-to-starfield/pull/728), [#730](https://github.com/fo4sf/fo4-to-starfield/pull/730)).
-  **Seen in game, 11 Nov** (the folder and the refusals, on a build of the same native code). In the same test, the
-  plugin that keeps a small file beside each save heard no save and no load (two saves, four loads); the cause is being
+  **Seen in game, 11 Nov** (the folder and the refusals, on a build of the same native code). In a second test that
+  day, the plugin that keeps a small file beside each save heard no save and no load (two saves, four loads); the cause is being
   looked for. The launcher now keeps any valid plugin order instead of moving two of our plugins to the end
   ([#731](https://github.com/fo4sf/fo4-to-starfield/pull/731)). **Offline tests only.**
 - **10 Nov 2026: the Pip-Boy (Fallout's wrist menu), first step.** A plugin of ours adds its own menu to Starfield and
