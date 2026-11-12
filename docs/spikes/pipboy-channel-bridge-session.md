@@ -69,12 +69,16 @@ Copy-Item "D:\Modding\staging\pipboy_menu_c_$date\FO4SFPipboyMenu.dll","D:\Moddi
 Copy-Item "D:\Modding\staging\focc_ping_$date\FOCCPing.dll" $pl
 Copy-Item "D:\Modding\staging\focc_sidecar_$date\FOCCSidecar.dll","D:\Modding\staging\focc_sidecar_$date\FOCCSidecar.ini" $pl
 (Get-Content "$pl\FOCCSidecar.ini") -replace '^bEnabled=0','bEnabled=1' | Set-Content -Encoding ASCII "$pl\FOCCSidecar.ini"
+$rt = "$saves\FO4SF-Runtime"; $had_rt = Test-Path "$pl\FO4SF-Runtime.ini"   # FAL-246: the sidecar's files go here, not under Data
+if (-not $had_rt) { Set-Content -Encoding UTF8 "$pl\FO4SF-Runtime.ini" "[Runtime]`r`nDir=$rt" }
+Get-Content "$pl\FO4SF-Runtime.ini"
 Select-String -Path "$pl\FO4SFPipboyMenu.ini","$pl\FOCCSidecar.ini" -Pattern '^(Stage|bEnabled|FlagSets|SnapshotKey|ClickCall)='
 Get-FileHash -Algorithm SHA256 "$pl\*.dll"
 ```
 
 Expect `Stage=3`, `FlagSets=0x0,0x8,0x9`, `SnapshotKey=0x7A`, `ClickCall=` (empty: no click reaches a script in the
-first launch), `bEnabled=1`, and the dll hashes equal to the builds'.
+first launch), `bEnabled=1`, `FO4SF-Runtime.ini` naming `Dir=<saves folder>\FO4SF-Runtime` (if one was there already,
+it stays as it was and its `Dir` is where the sidecars go; use that as `$rt`), and the dll hashes equal to the builds'.
 Then the movie's plugin and archive, as for stage (b) (inside the `plugin_toggle.py` hold, as the FO4SFPipboyMenu
 README says):
 
@@ -176,14 +180,15 @@ Copy-Item "$(Split-Path $logs)\Papyrus.0.log" "$out\b03\"
 ## 5. Collect the rest, then uninstall (game closed)
 
 ```powershell
-Copy-Item "$pl\FOCCSidecar\focc_sidecar.log" "$out\sfse\"; Copy-Item "$pl\FOCCSidecar\sidecars" "$out\sfse\sidecars" -Recurse
+Copy-Item "$rt\logs\focc_sidecar.log" "$out\sfse\"; Copy-Item "$rt\sidecars" "$out\sfse\sidecars" -Recurse
 Get-ChildItem $saves -Filter *.sfs | Select Name,Length | ConvertTo-Json > "$out\saves.json"
 $env:PYTHONPATH = "src"; python -m fo4sf.combined.probes b0 $out; python -m fo4sf.combined.probes p1 $out
 ```
 
 Then uninstall:
 `pipboy_probe_install.py uninstall --starfield $sf`; delete `FO4SFPipboyMenu.dll`, `FO4SFPipboyMenu.ini`,
-`FOCCPing.dll`, `FOCCSidecar.dll`, `FOCCSidecar.ini` and the `FOCCSidecar\` folder from `$pl`; delete
+`FOCCPing.dll`, `FOCCSidecar.dll` and `FOCCSidecar.ini` from `$pl`, and `FO4SF-Runtime.ini` if `$had_rt` was false; leave
+`$rt` (the run-time folder beside the saves is player data); delete
 `versionlib-1-16-244-0.bin` only if `$had_bin` was false; `probe_install.py uninstall` if the B0 kit went in for this
 session. Compare with the receipts.
 
@@ -195,7 +200,7 @@ snapshot_key=0x7a click_call=none`, 32 `step=id` lines, `step=channel_ids value_
 open `step=create ... vtables=engine rtti=engine ... set=<i>`. `FOCCPing.log`: `FOCCPing v0.3.0.0`, 14 `step=id` lines,
 `step=rtti vtable=NativeFunctionBase offset=0x0 slots=0x06,0x0F,0x10,0x14,0x15 match`, `listening for PostDataLoad;
 FOCC.Ping binds then`, `step=object name=GameVM`, `step=object name=VirtualMachine`, `step=bind slot=0x1e`, `bound
-FOCC.Ping`. `FOCCSidecar.log`: `step=load runtime=1.16.244.0 ... enabled=1`, `step=listen`. Any `refuse step=` line
+FOCC.Ping`. `FOCCSidecar.log`: `step=load runtime=1.16.244.0 ... enabled=1`, `step=runtime_dir dir=<$rt>`, `step=listen`. Any `refuse step=` line
 stops that plugin's test; its README says what each one means.
 
 **C, text field in.** PASS: `step=movie_root ... root_type=.?AVMovieRoot@AS3@GFx@Scaleform@@`; at each open

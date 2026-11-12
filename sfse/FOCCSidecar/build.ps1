@@ -58,7 +58,7 @@ if (Get-Command git.exe -ErrorAction SilentlyContinue) {
   elseif ($sharedCommit -ne $PinnedShared) { "note: lib\commonlib-shared is at $sharedCommit, not the pinned $PinnedShared (recorded in build.json)" }
 }
 $src = $PSScriptRoot
-$sources = @('xmake.lua', 'src\main.cpp', 'src\pch.h', 'codec.h', 'sha256.h', 'sha256.cpp', 'FOCCSidecar.ini')
+$sources = @('xmake.lua', 'src\main.cpp', 'src\pch.h', 'codec.h', 'runtime_dir.h', 'sha256.h', 'sha256.cpp', 'FOCCSidecar.ini')
 foreach ($s in $sources) { if (-not (Test-Path (Join-Path $src $s))) { "missing $s in $src"; exit 1 } }
 if ($Sdk -and -not (Test-Path (Join-Path $Sdk 'VC\Tools\MSVC'))) { "-Sdk $Sdk has no VC\Tools\MSVC folder: xmake's --sdk takes a Visual Studio-shaped root"; exit 1 }
 
@@ -116,7 +116,7 @@ Copy-Item (Join-Path $src 'FOCCSidecar.ini') (Join-Path $Out 'FOCCSidecar.ini')
 
 $hash = { param($p) (Get-FileHash -Algorithm SHA256 $p).Hash.ToLower() }
 $record = [ordered]@{
-  plugin = 'FOCCSidecar'; plugin_version = '0.2.0'; built_at = (Get-Date).ToUniversalTime().ToString('o')
+  plugin = 'FOCCSidecar'; plugin_version = '0.3.0'; built_at = (Get-Date).ToUniversalTime().ToString('o')
   xmake = $xmakeVersion; compiler = $banner; sdk_root = $(if ($Sdk) { (Resolve-Path $Sdk).Path } else { $null })
   env_script = $(if ($Env) { (Resolve-Path $Env).Path } else { $null })
   library = [ordered]@{ path = (Resolve-Path $Lib).Path; commit = $libCommit; pinned = $PinnedLib; shared_commit = $sharedCommit; shared_pinned = $PinnedShared }
