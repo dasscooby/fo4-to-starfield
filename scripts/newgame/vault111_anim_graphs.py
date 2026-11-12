@@ -15,6 +15,16 @@ It reads three things and ties them together:
     and whether its CNAM folder holds .af / .afx files.
 It ends with the outcome table of animation-needs rev 9, filled in from what was read ("unread" where a file was not found).
 
+Second mode, `--dump-graph NAME` (repeatable): the COMPLETE structure of the named graph(s) and nothing else (no Starfield.esm, no
+models): every element of the XML in file order (tag, attributes, text), every property sheet with all its columns and all its rows
+(no filter by column name, which the report above applies), and a census of element paths. It exists because the report prints only
+the sheets whose columns look like sequences, events or states, so the transition rows of a state machine (from state, to state, the
+event that fires it) were not printed. Where the XML keeps them (a sheet, node inputs and outputs, or elements this reader does not
+know) is UNREAD by the author of this tool: the dump shows whatever is there, and marks sheets whose header names a transition word
+(from, to, source, target, trans, trigger, condition, event, next) as candidates, by name only.
+    python vault111_anim_probe.py --graphs --dump-graph genericstategraph01 --dump-graph activatorstategraph01 --out <dump.txt>
+           --data <Starfield Data> --game-archive "Starfield - Animations.ba2"
+
 usage: python vault111_anim_probe.py --graphs --out <report.txt> --data <Starfield Data>
            --game-archive "Starfield - Animations.ba2" --game-archive "Starfield - Meshes*.ba2"
            [--esm <Starfield.esm>] [--graph <name> ...] [--model <meshes path> ...] [--per-graph 12] [--default-models 2]
@@ -189,6 +199,70 @@ def row_state(row):
         if re.fullmatch(r"state ?name|state|name", re.sub(r"[_\[\]\d]", " ", h).strip().lower()) and v:
             return v
     return ""
+
+
+TRANSITION_HEADER = re.compile(r"from|\bto\b|source|target|dest|trans|trigger|condition|event|next|prev", re.I)
+DUMP_MAX_ROWS = 500          # rows printed per property sheet
+DUMP_PER_PATH = 300          # elements printed per element path (the census counts them all)
+
+
+def _element_label(el):
+    attrs = " ".join(f"{k}={v!r}" for k, v in el.attrib.items())
+    text = (el.text or "").strip()
+    return el.tag + (" " + attrs if attrs else "") + (f" = {text!r}" if text else "")
+
+
+def dump_agx(data, max_rows=DUMP_MAX_ROWS, per_path=DUMP_PER_PATH):
+    """(lines, census {element path: count}) of the whole XML of one graph in file order: every element's tag, attributes and text; a
+    property_sheet as columns + all rows (empty cells left out, their number said). Raises ET.ParseError for a file that is not XML."""
+    root = ET.fromstring(data)
+    lines, census, printed, skipped = [], {}, {}, {}
+
+    def walk(el, depth, path, quiet):
+        p = path + "/" + el.tag
+        census[p] = census.get(p, 0) + 1
+        pad = "  " * depth
+        if quiet or printed.get(p, 0) >= per_path:                 # not printed: an ancestor or this path passed its cap
+            skipped[p] = skipped.get(p, 0) + 1
+            quiet = True
+        elif el.tag != "property_sheet":
+            printed[p] = printed.get(p, 0) + 1
+            lines.append(pad + _element_label(el))
+        if el.tag == "property_sheet":
+            headers, rows = _sheet(el)
+            if not quiet:
+                printed[p] = printed.get(p, 0) + 1
+                cand = any(TRANSITION_HEADER.search(h) for h in headers)
+                lines.append(f"{pad}property_sheet {p}: {len(headers)} column(s) {headers}; {len(rows)} row(s)"
+                             + ("; a header names a transition word (by name only)" if cand else ""))
+                for ri, cells in enumerate(rows[:max_rows]):
+                    shown = [f"{h}={v!r}" for h, v in _pairs(headers, cells) if v != ""]
+                    lines.append(f"{pad}  row {ri}: " + (" | ".join(shown) if shown else "(all cells empty)")
+                                 + (f"  [{len(cells)} cell(s), {len(cells) - len(shown)} empty]" if len(shown) != len(cells) else ""))
+                if len(rows) > max_rows:
+                    lines.append(f"{pad}  ... {len(rows) - max_rows} more row(s) not printed")
+            return
+        for c in el:
+            walk(c, depth + 1, p, quiet)
+
+    walk(root, 0, "", False)
+    for p, n in sorted(skipped.items()):
+        lines.append(f"(path {p}: {n} element(s) not printed: this path or an ancestor's passed {per_path} printed; the census counts them)")
+    return lines, census
+
+
+def dump_lines(name, where, data):
+    """Report lines of one graph's complete dump (see the module doc)."""
+    out = [f"=== graph {name}  [{where}, {len(data)} bytes]  COMPLETE DUMP"]
+    try:
+        lines, census = dump_agx(data)
+    except ET.ParseError as e:
+        return out + [f"  not XML: {e}; the first bytes: {data[:80]!r}"]
+    out.append(f"  element paths, with counts ({len(census)} distinct):")
+    out += [f"    {n:6d}  {p}" for p, n in sorted(census.items())]
+    out.append("  the XML, in file order:")
+    out += ["    " + ln for ln in lines]
+    return out
 
 
 def graph_lines(name, where, data):
@@ -573,6 +647,33 @@ def run(a):
     return "\n".join(out) + "\n"
 
 
+def run_dump(a):
+    """The --dump-graph report: only the archives are read, only --out is written."""
+    out = []
+    expanded = expand_archives(a.data, a.game_archive)
+    archives = open_archives([p for _, ps in expanded for p in ps])
+    wanted = [g.lower().rsplit(".", 1)[0] if g.lower().endswith(".agx") else g.lower() for g in a.dump_graph]
+    out.append(f"vault111_anim_graphs --dump-graph (read-only; FAL-489): {', '.join(wanted)}")
+    for given, ps in expanded:
+        if not ps:
+            out.append(f"archive argument {given!r}: nothing matched under {a.data}")
+    out.append("archives: " + (", ".join(f"{os.path.basename(p)} ({ar if isinstance(ar, str) else str(len(ar.names)) + ' entries'})" for p, ar in archives) or "none given"))
+    index = graph_index(archives)
+    for g in wanted:
+        hits = index.get(g)
+        if not hits:
+            out += ["", f"=== graph {g}.agx: unread (no entry of that name in the archives read)"]
+            continue
+        archive_name, entry, arch, i = hits[0]
+        try:
+            data = arch.read(i)
+        except (ba2.Ba2Error, OSError, struct.error, ValueError) as e:
+            out += ["", f"=== graph {g}.agx: entry {entry} in {archive_name} unreadable: {e}"]
+            continue
+        out += [""] + dump_lines(g + ".agx", f"{archive_name}: {entry}" + (f"; {len(hits) - 1} more entr(ies) of that name not read" if len(hits) > 1 else ""), data)
+    return "\n".join(out) + "\n"
+
+
 def build_parser():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", required=True)
@@ -580,6 +681,7 @@ def build_parser():
     ap.add_argument("--esm")
     ap.add_argument("--game-archive", action="append", default=[], help='a Starfield archive (name in --data, * allowed), e.g. "Starfield - Animations.ba2"')
     ap.add_argument("--graph", action="append", help="a graph name (replaces the default list)")
+    ap.add_argument("--dump-graph", action="append", default=[], help="a graph name: write only the complete dump of it (repeatable; no esm, no models)")
     ap.add_argument("--model", action="append", default=[], help="a model path to read (repeatable)")
     ap.add_argument("--per-graph", type=int, default=12)
     ap.add_argument("--default-models", type=int, default=2)
@@ -588,7 +690,7 @@ def build_parser():
 
 def main(argv=None):
     a = build_parser().parse_args(argv)
-    text = run(a)
+    text = run_dump(a) if a.dump_graph else run(a)
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     with open(a.out, "w", encoding="utf-8") as f:
         f.write(text)
