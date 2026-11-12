@@ -240,6 +240,41 @@ class GraphsModeTests(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(self.tmp.name)), sorted(before[0] + ["r.txt"]))
         self.assertEqual(sorted(os.listdir(self.data)), before[1])
 
+    def test_afx_event_strings_are_printed_and_a_rig_without_cnam_lists_its_clips(self):
+        rig = "Props\\Generic\\characterassets\\skeleton.rig"
+        w = esm.PluginWriter([])
+        w.add(esm.Record("ACTI", 0x1001, [(b"EDID", esm.zbytes("Rigged"))] + comp("Stages.agx", rig) + [(b"MODL", esm.zbytes("Props\\Rigged.nif"))]))
+        with open(os.path.join(self.data, "Starfield.esm"), "wb") as f:
+            f.write(w.to_bytes())
+        self.write_archive("Starfield - Meshes01.ba2", {"Meshes\\Props\\Rigged.nif": model_nif(sequences=(), manager=False),
+                                                       "Meshes\\Props\\Generic\\animations\\PlayAnim01.af": b"af",
+                                                       "Meshes\\Props\\Generic\\animations\\PlayAnim01.afx": b"\0afx\0Trans01\0KlaxonStop\0"})
+        text = self.run_graphs()
+        self.assertIn("no CNAM; rig " + rig + ": clips under the rig's folders: 2 file(s)", text)
+        self.assertIn("Trans01 | KlaxonStop", text)
+
+    def test_a_guessed_rig_folder_clip_not_tied_to_the_graph_does_not_count_for_m1(self):
+        rig = "Props\\Generic\\characterassets\\skeleton.rig"
+        w = esm.PluginWriter([])
+        w.add(esm.Record("ACTI", 0x1001, [(b"EDID", esm.zbytes("Rigged"))] + comp("Stages.agx", rig) + [(b"MODL", esm.zbytes("Props\\Rigged.nif"))]))
+        with open(os.path.join(self.data, "Starfield.esm"), "wb") as f:
+            f.write(w.to_bytes())
+        self.write_archive("Starfield - Meshes01.ba2", {"Meshes\\Props\\Rigged.nif": model_nif(sequences=(), manager=False),
+                                                       "Meshes\\Props\\Generic\\animations\\HumanWalk.af": b"af",
+                                                       "Meshes\\Props\\Generic\\animations\\HumanWalk.afx": b"\0afx\0WalkStart\0"})
+        text = self.run_graphs()
+        self.assertIn("found beside the rig, not tied to this graph", text)
+        self.assertIn("read: NO: none of 1 model(s) read has .af/.afx in its clip folder", text)
+        # the same clips become evidence when the .afx names the graph's sequence
+        self.write_archive("Starfield - Meshes01.ba2", {"Meshes\\Props\\Rigged.nif": model_nif(sequences=(), manager=False),
+                                                       "Meshes\\Props\\Generic\\animations\\HumanWalk.af": b"af",
+                                                       "Meshes\\Props\\Generic\\animations\\HumanWalk.afx": b"\0afx\0playanim01\0"})
+        text = self.run_graphs()
+        self.assertIn("read: YES: 1 of 1 parsed model(s) have .af/.afx in their clip folder", text)
+
+    def test_the_default_list_has_the_hybrid_graph(self):
+        self.assertIn("hybridstategraph01", graphs.DEFAULT_GRAPHS)
+
     def test_the_old_probe_modes_still_parse(self):
         self.assertEqual(sys.modules["vault111_anim_probe"].DEFAULT_REFS, ("00126D", "00138B", "001616"))
 
