@@ -184,6 +184,15 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(sorted({n for n in funcs + calls + decl + params if n.lower() in RESERVED}), [])
         self.assertNotIn("Function Guard(", PSC)
 
+    def test_event_handler_parameters_are_the_games_own_declared_forms(self):
+        """The game's sources (PC read, 12 Nov): ObjectReference.OnEnterFurniture(Actor), OnExitFurniture(ObjectReference),
+        Actor.OnSit / OnGetUp(ObjectReference). A remote handler adds the sender first."""
+        for line, want in (("Event ObjectReference.OnEnterFurniture(", "(ObjectReference akSender, Actor akActionRef)"),
+                           ("Event ObjectReference.OnExitFurniture(", "(ObjectReference akSender, ObjectReference akActionRef)"),
+                           ("Event Actor.OnSit(", "(Actor akSender, ObjectReference akFurniture)"),
+                           ("Event Actor.OnGetUp(", "(Actor akSender, ObjectReference akFurniture)")):
+            self.assertIn(line + want[1:], PSC)
+
     def test_the_required_list_has_every_native_called_outside_an_optional_line(self):
         for base, names in {"Actor": ["PlaceAtMe", "GetSitState"], "ObjectReference": ["Activate", "Disable"],
                             "ScriptObject": ["RegisterForAnimationEvent", "RegisterForRemoteEvent", "StartTimer"],
@@ -201,7 +210,7 @@ BASES = {
                        "bool Function IsDisabled() native\nFunction Disable(bool f) native\nFunction Activate(ObjectReference a, bool d) native\n"
                        "Form Function GetBaseObject() native\nFunction MoveTo(ObjectReference a, float x, float y, float z, bool m) native\n"
                        "Function SetAngle(float x, float y, float z) native\nFunction Delete() native\nfloat Function GetScale() native\n"
-                       "Function SetScale(float f) native\nEvent OnEnterFurniture(ObjectReference a)\nEndEvent\nEvent OnExitFurniture(ObjectReference a)\nEndEvent\n",
+                       "Function SetScale(float f) native\nEvent OnEnterFurniture(Actor akActionRef)\nEndEvent\nEvent OnExitFurniture(ObjectReference a)\nEndEvent\n",
     "Actor": "Scriptname Actor extends ObjectReference\nint Function GetSitState() native\nEvent OnGetUp(ObjectReference f)\nEndEvent\n"
              "Event OnSit(ObjectReference f)\nEndEvent\n",
     "Game": "Scriptname Game\nActor Function GetPlayer() native global\nForm Function GetFormFromFile(int i, string p) native global\n"

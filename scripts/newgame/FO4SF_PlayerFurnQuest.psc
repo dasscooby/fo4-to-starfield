@@ -151,7 +151,7 @@ EndEvent
 ;OPT Actor.OnSit     Say("SIT t=" + SinceUse())
 ;OPT Actor.OnSit EndEvent
 
-;OPT ObjectReference.OnEnterFurniture Event ObjectReference.OnEnterFurniture(ObjectReference akSender, ObjectReference akActionRef)
+;OPT ObjectReference.OnEnterFurniture Event ObjectReference.OnEnterFurniture(ObjectReference akSender, Actor akActionRef)
 ;OPT ObjectReference.OnEnterFurniture     Inside = true
 ;OPT ObjectReference.OnEnterFurniture     Trace("event name=OnEnterFurniture furn=" + Id(akSender) + " actor=" + Id(akActionRef) + " use=" + CurIdx + " t=" + SinceUse())
 ;OPT ObjectReference.OnEnterFurniture     Say("ENTER t=" + SinceUse())
