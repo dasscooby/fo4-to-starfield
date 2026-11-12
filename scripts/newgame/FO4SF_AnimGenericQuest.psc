@@ -9,7 +9,7 @@ Scriptname FO4SF_AnimGenericQuest extends Quest
 ; once a second:
 ;   10      PlaceAtMe of the control 2.5 m in front of the player (persistent), then registers every event name
 ;   20      registers every event name again (the log shows each call's return)
-;   21..28  one PlayAnimation name each (the PLAY list below), then 15 s of listening: every event that arrives is a line, and a line
+;   21..29  one PlayAnimation name each (the PLAY list below), then 15 s of listening: every event that arrives is a line, and a line
 ;           "quiet" says none came in the last 15 s
 ;   30      Activate(player) by script
 ;   40      a reading of the reference now
@@ -18,7 +18,8 @@ Scriptname FO4SF_AnimGenericQuest extends Quest
 ; is logged with stage=<the open window's stage>, or stage=0 when no window is open. NEVER the wait form (it never returns when the graph
 ; sends no end event). Every log line that matters also shows as a notification beginning "AP " (Say), for a session with script logging off.
 ; Optional natives are lines that begin with ";OPT <Base.Name> ": scripts/newgame/make_anim_generic.py stage compiles each on its own and
-; keeps the ones that compile. ";VOID " lines are the register call's second shape (no return value). One line per finding in the user log
+; keeps the ones that compile. The PLAY list is the order the PC read from genericstategraph01's links (Claude, #755, 12 Nov 20:40 UTC): Play01..Play05
+; (the events that enter the A, B, C and D sides), then the direct StateC_Play, StateD_Play, StateC_Idle, StateD_Idle. ";VOID " lines are the register call's second shape (no return value). One line per finding in the user log
 ; "FO4SFAnimG" (My Games\Starfield\Logs\Script\User\FO4SFAnimG.0.log): FO4SFANIM rt=<real time s> <event> key=value ... end=true.
 
 ; ---------------------------------------------------------------- the layout (dotnet/AnimGenericControl/Program.cs)
@@ -48,8 +49,8 @@ float LastEventRt = 0.0
 
 Event OnInit()
     Debug.OpenUserLog(LogName)
-    StageList = new int[13]
-    DoneList = new bool[13]
+    StageList = new int[14]
+    DoneList = new bool[14]
     StageList[0] = 10
     StageList[1] = 20
     StageList[2] = 21
@@ -60,19 +61,21 @@ Event OnInit()
     StageList[7] = 26
     StageList[8] = 27
     StageList[9] = 28
-    StageList[10] = 30
-    StageList[11] = 40
-    StageList[12] = 60
-    PlayNames = new string[8]
-    PlayNames[0] = "StateA_Play"
-    PlayNames[1] = "StateB_Play"
-    PlayNames[2] = "StateC_Play"
-    PlayNames[3] = "StateD_Play"
-    PlayNames[4] = "Play01"
-    PlayNames[5] = "Play02"
-    PlayNames[6] = "Play03"
-    PlayNames[7] = "Play04"
-    EventNames = new string[20]
+    StageList[10] = 29
+    StageList[11] = 30
+    StageList[12] = 40
+    StageList[13] = 60
+    PlayNames = new string[9]
+    PlayNames[0] = "Play01"
+    PlayNames[1] = "Play02"
+    PlayNames[2] = "Play03"
+    PlayNames[3] = "Play04"
+    PlayNames[4] = "Play05"
+    PlayNames[5] = "StateC_Play"
+    PlayNames[6] = "StateD_Play"
+    PlayNames[7] = "StateC_Idle"
+    PlayNames[8] = "StateD_Idle"
+    EventNames = new string[24]
     EventNames[0] = "Trans01"
     EventNames[1] = "Done"
     EventNames[2] = "Trans02"
@@ -93,6 +96,10 @@ Event OnInit()
     EventNames[17] = "Play02"
     EventNames[18] = "Play03"
     EventNames[19] = "Play04"
+    EventNames[20] = "Play05"
+    EventNames[21] = "TurnOn"
+    EventNames[22] = "TurnOff"
+    EventNames[23] = "Opened"
     Trace("init version=" + Version + " quest=" + GetFormID() + " installed=" + Game.IsPluginInstalled(ProbePlugin) + " control=" + Id(Game.GetFormFromFile(ControlId, ProbePlugin)) + " events=" + EventNames.Length + " plays=" + PlayNames.Length)
     StartTimer(POLL_S, TIMER_POLL)
 EndEvent
@@ -230,7 +237,7 @@ Function Step(int stage)
         Spawn(stage)
     elseif stage == 20
         RegisterAll(stage)
-    elseif stage >= 21 && stage <= 28
+    elseif stage >= 21 && stage <= 29
         PlayOne(stage, PlayNames[stage - 21])
     elseif stage == 30
         ActivateOnce(stage)

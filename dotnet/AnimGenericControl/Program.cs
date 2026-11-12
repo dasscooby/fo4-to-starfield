@@ -2,7 +2,7 @@
 // the Scribe's document vault111-console-stages rev 2).
 //
 // FO4SFAnimGeneric.esm (master Starfield.esm only; adds two records, overrides none):
-//   QUST  FO4SF_AnimGenericQuest   start game enabled, stages 10 20 21..28 30 40 60, script FO4SF_AnimGenericQuest, NO properties
+//   QUST  FO4SF_AnimGenericQuest   start game enabled, stages 10 20 21..29 30 40 60, script FO4SF_AnimGenericQuest, NO properties
 //   ACTI  FO4SF_AnimGenericControl a COPY of the vanilla activator 001CCAC2 (IndIntAddonArtifactHolder01) with a new form id and editor
 //                                  id, whose animation graph component names genericstategraph01 (no vanilla record does) and whose
 //                                  CNAM folder is ours; model, rig (BNAM) and every other field are the vanilla record's
@@ -47,7 +47,7 @@ static class Control
     const uint QuestId = 0x800, ControlId = 0x801, VanillaId = 0x1CCAC2;
     const string QuestEdid = "FO4SF_AnimGenericQuest", ControlEdid = "FO4SF_AnimGenericControl", Script = "FO4SF_AnimGenericQuest";
     const string VanillaGraphWord = "activatorstategraph01", ControlGraphWord = "genericstategraph01";
-    static readonly ushort[] Stages = { 10, 20, 21, 22, 23, 24, 25, 26, 27, 28, 30, 40, 60 };
+    static readonly ushort[] Stages = { 10, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 40, 60 };
 
     static FormKey Own(uint id) => new(Plugin, id);
     static FormKey Sf(uint id) => new(SfEsm, id);

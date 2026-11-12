@@ -12,7 +12,7 @@ Probe kit only: nothing goes into the owner's install; Claude runs it for one se
 
 ## What is built
 - `dotnet/AnimGenericControl` (new): `FO4SFAnimGeneric.esm`, master `Starfield.esm` only, two records, overrides none. QUST `FO4SF_AnimGenericQuest` (0x800, start game
-  enabled, stages 10 20 21..28 30 40 60, no properties) and ACTI `FO4SF_AnimGenericControl` (0x801): a **copy** of the vanilla holder `001CCAC2`
+  enabled, stages 10 20 21..29 30 40 60, no properties) and ACTI `FO4SF_AnimGenericControl` (0x801): a **copy** of the vanilla holder `001CCAC2`
   (`IndIntAddonArtifactHolder01`; same model, same rig, every other field and component) under our form id, whose animation graph component names
   `genericstategraph01` and whose clip folder (CNAM) is ours. `001CCAC2` itself is not overridden (that would retarget every holder while the plugin is loaded).
   Commands `info`, `build`, `check`, `fixture`; `build` refuses a graph that is not `genericstategraph01` and a clip folder that is the vanilla holder's; `check`
@@ -37,19 +37,23 @@ inside an `.af` is the vanilla one is **unread**. The copied files are the game'
 |---|---|
 | 10 | `PlaceAtMe` the control 2.5 m in front of the player (persistent), register every event |
 | 20 | register every event again (each call's return is a line) |
-| 21..28 | `PlayAnimation` of `StateA_Play`, `StateB_Play`, `StateC_Play`, `StateD_Play`, `Play01`, `Play02`, `Play03`, `Play04`, then 15 s of listening |
+| 21..29 | `PlayAnimation` of `Play01`, `Play02`, `Play03`, `Play04`, `Play05`, then the direct `StateC_Play`, `StateD_Play`, `StateC_Idle`, `StateD_Idle`, one per stage, then 15 s of listening |
 | 30 | `Activate(player)` by script |
 | 40 | a reading of the reference |
 | 60 | disable and delete |
 
 Set the next stage only after the previous window has closed (its `W sN quiet` / `W sN heard n` notice). Stages are one-shot: a stage set twice runs once.
-Events registered (Scribe's list plus `Trans03`, an Exit Event of the graph's summary): `Trans01`, `Done`, `Trans02`, `Trans03`, `IsOn`, `IsOff`, `AnimFinish`, `IdleStop`,
-`StateA_Idle` .. `StateD_Play`, `Play01` .. `Play04`. Every call's return and every event with its time is a line in the user log `FO4SFAnimG`
+Events registered (the Scribe's list, `Trans03` (an Exit Event of the graph's summary), and `Play05`, `TurnOn`, `TurnOff`, `Opened`, which the real links name): `Trans01`, `Done`, `Trans02`, `Trans03`, `IsOn`, `IsOff`, `AnimFinish`, `IdleStop`,
+`StateA_Idle` .. `StateD_Play`, `Play01` .. `Play05`. Every call's return and every event with its time is a line in the user log `FO4SFAnimG`
 (`make_anim_generic.py log` reads it); every finding also shows as an `AP ...` notice, for a session with script logging off. The log cannot say whether the object moved or
 held a pose: that is a screenshot before and after each name.
 
-The call names are a **try-list**: `PlayAnimation`'s argument on this graph is **unread** (no vanilla object uses it), and so is which call enters C and D. The `--graphs --dump-graph`
-mode (PR #755) prints the graph's complete structure, including whatever transition rows the XML holds; with those the try-list can be replaced by the real calls.
+**The call order (supported, Claude's read of PR #755's dump of the real `genericstategraph01.agx` on the PC, 12 Nov 20:40 UTC; not replayed here):** the links on each state carry the
+events that enter it: `StateA_Play01` by `StateA_Play`, `Play01`, `TurnOff`, `TurnOn`; `StateB_Play01` by `StateB_Play`, `Play02`, `TurnOn`, `TurnOff`; the C side by `Play03`, `Play04`,
+`StateC_Play`, `StateC_Idle` (and `Trans01`); the D side (two nodes under a copied C name) by `Play05`, `StateD_Play`, `StateD_Idle`; the idles by `StateA_Idle`/`StateB_Idle`, `Trans01`,
+`Opened`. Conditions `StartsOff` 0/1 and `StartAltIdle` 2..10 look like a start-state variable (**unread**: whether the record can carry one; no stage option for it yet). So the calls
+are `Play01` .. `Play05`, then the direct names, one stage each. What each call DOES in the game is what the session shows; the dump says which events enter which state, not that a
+`PlayAnimation` of that name fires the link.
 
 ## Pass bar (the Scribe's, for the converted four-clip console on this graph; not a result)
 The object spawns with no crash; `PlayAnimation` true on `StateA_Play` or `Play01`; a visible A/B pose change or a hold; `Trans01` or `Done` written after a play; `StateC_Play` or

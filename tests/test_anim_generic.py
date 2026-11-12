@@ -69,7 +69,7 @@ class ScriptTests(unittest.TestCase):
         ran = [int(s) for s in re.findall(r"StageList\[\d+\] = (\d+)", PSC)]
         m = re.search(r"Stages = \{ ([\d, ]+) \}", TOOL_SRC)
         self.assertEqual(ran, [int(x) for x in m.group(1).split(",")])
-        self.assertEqual(ran, [10, 20, 21, 22, 23, 24, 25, 26, 27, 28, 30, 40, 60])
+        self.assertEqual(ran, [10, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 40, 60])
         self.assertIn('string LogName = "FO4SFAnimG"', PSC)
         self.assertTrue(mag.LOG.endswith("FO4SFAnimG.0.log"))
         self.assertIn('"FO4SFANIM rt="', PSC)
@@ -89,10 +89,13 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("masters are not exactly [Starfield.esm]", TOOL_SRC)
         self.assertIn("records of another plugin (overrides)", TOOL_SRC)    # nothing of the vanilla game is overridden
 
-    def test_each_play_stage_sends_one_name_of_the_scribes_try_list(self):
+    def test_each_play_stage_sends_one_name_in_the_order_the_pc_read_from_the_graphs_links(self):
+        """Claude, #755, 12 Nov 20:40 UTC: Play01..Play05, then the direct StateC_Play, StateD_Play, StateC_Idle, StateD_Idle; one stage per call."""
         names = re.findall(r'PlayNames\[(\d)\] = "(\w+)"', PSC)
-        self.assertEqual([n for _, n in names], ["StateA_Play", "StateB_Play", "StateC_Play", "StateD_Play", "Play01", "Play02", "Play03", "Play04"])
+        self.assertEqual([n for _, n in names], ["Play01", "Play02", "Play03", "Play04", "Play05", "StateC_Play", "StateD_Play", "StateC_Idle", "StateD_Idle"])
         self.assertIn("PlayOne(stage, PlayNames[stage - 21])", PSC)
+        self.assertIn("elseif stage >= 21 && stage <= 29", PSC)                  # nine names, stages 21..29
+        self.assertIn("PlayNames = new string[9]", PSC)
         self.assertEqual(PSC.count("TestRef.PlayAnimation(n)"), 1)
         self.assertIn("bool ok = TestRef.PlayAnimation(n)", PSC)
 
@@ -100,7 +103,7 @@ class ScriptTests(unittest.TestCase):
         events = re.findall(r'EventNames\[\d+\] = "(\w+)"', PSC)
         scribe = ["Trans01", "Done", "Trans02", "IsOn", "IsOff", "AnimFinish", "IdleStop", "StateA_Idle", "StateA_Play", "StateB_Idle", "StateB_Play",
                   "StateC_Idle", "StateC_Play", "StateD_Idle", "StateD_Play", "Play01", "Play02", "Play03", "Play04"]
-        for e in scribe + ["Trans03"]:                                     # Trans03: an Exit Event of the graph's summary (Claude, 12 Nov 20:12)
+        for e in scribe + ["Trans03", "Play05", "TurnOn", "TurnOff", "Opened"]:    # the events that enter states in the real links (Claude, 12 Nov 20:40)
             self.assertIn(e, events)
         self.assertEqual(len(events), len(set(events)))
         self.assertIn(f"new string[{len(events)}]", PSC)
