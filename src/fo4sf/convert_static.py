@@ -8,6 +8,7 @@ convention, Z-up in both. Collision, materials and skinning are not converted ye
 """
 import hashlib
 import math
+import re
 import struct
 from dataclasses import replace
 from typing import Dict, Tuple
@@ -480,7 +481,41 @@ RIGID_SKIN_TOLERANCE = 1e-3   # weight a rigid vertex may put on other bones: ha
 # (Codex on #354: 0.995 / 0.005 across two bones was accepted and drifted 5 cm from real skinning at 10 m of travel)
 
 
-def rigid_skinned_parts(src, shape, bones):
+FLOOR_THICKNESS = 0.1     # metres: a walkable deck box is this thick, reaching down from the floor plane
+
+
+def _collision_rule(rules, name, kind):
+    """True if a "skip" regex (rules["skip"]: [regex]) matches the bone name, case ignored."""
+    return bool(rules) and any(re.search(p, name, re.I) for p in rules.get(kind, ()))
+
+
+def _floor_top(rules, name):
+    """Model-space height (metres, node pose) of the floor plane for a bone matching rules["floor"] {regex: top}, else None."""
+    for pattern, top in ((rules or {}).get("floor") or {}).items():
+        if re.search(pattern, name, re.I):
+            return top
+    return None
+
+
+def _floor_box(points, world, top, thickness=FLOOR_THICKNESS):
+    """Bone-local (lo, hi) of a floor plate: the footprint of `points` (bone-local) in MODEL space, from top - thickness to
+    top in model z, cut along the model's up and not the bone's z (deck bones are turned: local x is model down), then
+    expressed back in bone space as its axis-aligned bound (exact when the bone is turned in quarter turns)."""
+    t, r, sc = world
+    model = [_apply(world, p) for p in points]
+    lo = [min(p[k] for p in model) for k in range(3)]
+    hi = [max(p[k] for p in model) for k in range(3)]
+    lo[2], hi[2] = top - thickness, top
+    corners = [(x, y, z) for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])]
+    local = [tuple((r[i] * (c[0] - t[0]) + r[3 + i] * (c[1] - t[1]) + r[6 + i] * (c[2] - t[2])) / sc for i in range(3))
+             for c in corners]                                    # R^T (c - t) / s
+    return ([min(p[k] for p in local) for k in range(3)], [max(p[k] for p in local) for k in range(3)])
+
+
+CROSS_BONE_SHARE = 0.25   # most triangles (share of the shape) that may join two bones and still be cut (VltGearDoor01 walkway: 13%)
+
+
+def rigid_skinned_parts(src, shape, bones, cross_bone_share: float = 0.0):
     """A skinned door shape whose every drawn vertex follows one bone fully, cut into one piece per bone and re-expressed
     in that bone's space so the rig carries each piece as an ordinary attachment: [(bone index, shape), ...] or None.
     Weight 1 on one bone makes skinning bone_world * skin_to_bone, so bone-local positions are skin_to_bone(stored) and a
@@ -488,7 +523,10 @@ def rigid_skinned_parts(src, shape, bones):
     Door:7 has 363 vertices on b_Door and 118 on b_Handle, none blended). A vertex putting more than
     RIGID_SKIN_TOLERANCE of its weight on other bones (a blend), two slots of one bone with different skin_to_bone (the
     weighted result is then not either bind; Codex on #354), a triangle across two bones or a bone outside the rig
-    give None."""
+    give None.
+    cross_bone_share > 0: a triangle across bones (thin hanger rods in VltGearDoor01's WalkWay01:7, 288 of 2238 triangles,
+    no blended vertex) goes whole to the bone most of its vertices follow, so the rod is off by at most its own length
+    on the other bone; more than that share of the shape's triangles across bones still gives None."""
     from . import fo4skin
     try:
         skin = fo4skin.read_skin(src, shape.block)
@@ -514,12 +552,15 @@ def rigid_skinned_parts(src, shape, bones):
         if total - per_bone[bone][0] > RIGID_SKIN_TOLERANCE * total:     # a real blend, however small: refuse
             return None
         slot_of[v] = per_bone[bone][1]
-    by_slot = {}
+    by_slot, crossing = {}, 0
     for t in shape.triangles:
-        slots = {slot_of[i] for i in t}
-        if len(slots) != 1:
-            return None
-        by_slot.setdefault(slots.pop(), []).append(t)
+        votes = [slot_of[i] for i in t]
+        if len(set(votes)) != 1:
+            crossing += 1
+            if crossing > cross_bone_share * len(shape.triangles):
+                return None
+        slot = max(dict.fromkeys(votes), key=votes.count)          # majority; a tie goes to the first vertex's bone
+        by_slot.setdefault(slot, []).append(t)
     index = {b.get("node"): i for i, b in enumerate(bones) if b.get("node") is not None}
     if any(skin.bones[k] not in index for k in by_slot):
         return None
@@ -553,7 +594,8 @@ def rigid_skinned_parts(src, shape, bones):
 def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, clip_files, unit_scale: float = UNIT_SCALE,
                            collision_template: bytes = None, leaf_physics_donor: bytes = None,
                            rest_pose_check: bool = False, aliases: dict = None,
-                           drop_skinned: bool = False) -> Tuple[Dict[str, bytes], dict]:
+                           drop_skinned: bool = False, cross_bone_share: float = 0.0,
+                           collision_rules: dict = None) -> Tuple[Dict[str, bytes], dict]:
     """FO4 door whose "Open" sequence moves geometry under more than one node (frozen_door_parts: double doors,
     shutters, sliding panel sets) -> Starfield door with its OWN rig and clips, as vanilla double doors have
     (IndIntRmSmWallMid_DoorA01: one rig bone and one clip track per leaf, one keyframed body per leaf).
@@ -571,7 +613,12 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
     (door_rig.rest_pose_issue; the sliding / lifting route, which takes every NOT_HINGED_RE door).
     aliases: door_rig.plan's sequence aliases (an animated activator converted as a door, pipeline.OWN_RIG_ALIASES).
     drop_skinned: leave skinned shapes out instead of refusing the door (a rig cannot carry them); the door entry lists
-    them under "dropped_skinned_shapes"."""
+    them under "dropped_skinned_shapes".
+    cross_bone_share: rigid_skinned_parts' allowance for triangles across two bones (0 = refuse them).
+    collision_rules: {"skip": [bone-name regex], "floor": {bone-name regex: floor height}}: a moving bone matching "skip"
+    gets no body (hanger rods would hang as an invisible bar at head height), one matching "floor" gets a FLOOR_THICKNESS
+    plate over its pieces' footprint whose top is that model-space height (a deck to stand on, not a fitted box up to the
+    rails; cut along model up, bones may be turned). Others are fitted."""
     from . import door_model, door_rig, native_door
     if collision_template is None or leaf_physics_donor is None:
         raise ValueError("multi-part door needs the box template and a keyframed donor body")
@@ -592,7 +639,7 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
     shape_name = lambda b, s: (s.name or f"Shape{b}".encode()).decode("latin-1")    # noqa: E731
     rebound = {}                         # piece key -> rig bone it rides rigidly (rigid_skinned_parts); one piece per bone
     for b, (s, m) in list(kept.items()):
-        if s.skinned and (parts := rigid_skinned_parts(src, s, plan["bones"])) is not None:
+        if s.skinned and (parts := rigid_skinned_parts(src, s, plan["bones"], cross_bone_share)) is not None:
             del kept[b]
             for k, (bone, piece) in enumerate(parts):
                 key = b if len(parts) == 1 else f"{b}.{k}"
@@ -652,8 +699,12 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
             bone_pts.setdefault(a["bone"], []).extend(pts)
     collision = {}
     for i, pts in sorted(bone_pts.items()):
+        if _collision_rule(collision_rules, bones[i]["name"], "skip"):
+            continue
         lo = [min(p[k] for p in pts) for k in range(3)]
         hi = [max(p[k] for p in pts) for k in range(3)]
+        if (top := _floor_top(collision_rules, bones[i]["name"])) is not None:
+            lo, hi = _floor_box(pts, world[i], top)
         blob = sfcollision.box_blob(collision_template, tuple((lo[k] + hi[k]) / 2 for k in range(3)),
                                     tuple(max(sfcollision.MIN_LEAF_HALF, (hi[k] - lo[k]) / 2) for k in range(3)))
         collision[bones[i]["node"]] = sfcollision.keyframed(blob, leaf_physics_donor)

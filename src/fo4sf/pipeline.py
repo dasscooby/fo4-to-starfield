@@ -31,6 +31,11 @@ NOT_HINGED_RE = re.compile(r"vault|elevator|garage|gate|hatch|slid", re.I)   # s
 # Open and Stage2 backwards as Close; the plugin writer makes it a DOOR as any rigged model. Its skinned shapes cannot ride
 # a rig and are left out (listed in the manifest). If the rig fails it stays the solid static it was, never passable.
 OWN_RIG_ALIASES = {"vltgeardoor01.nif": {"Stage2": "Open"}}
+# Collision for the same doors (PC read of VltGearDoor01, 11 Nov): the deck rides b_WalkWay01Base / b_WalkWay03Base / b_Ramp;
+# floor = {bone regex: model-space height of the visible floor plane, node pose, metres: 0.92 / 0.96 / ramp 0.84-0.85};
+# the Front/Rear rod bones carry only hanger rods and get no body.
+OWN_RIG_COLLISION = {"vltgeardoor01.nif": {"floor": {r"^b_walkway01base$": 0.92, r"^b_walkway03base$": 0.96, r"^b_ramp$": 0.85},
+                                           "skip": [r"(front|rear)0\d"]}}
 LOAD_DOOR_RE = re.compile(r"door[^\\/]*load[^\\/]*\.nif$|load[^\\/]*door[^\\/]*\.nif$", re.I)
 # BSLightingShaderProperty flags1 bit 15 (nif.xml Fallout4ShaderPropertyFlags1 "Refraction"): heat shimmer over fires and
 # machines, water streams in sinks and fountains. FO4 draws such a shape as a screen-space distortion; its texture set holds
@@ -671,6 +676,7 @@ class Converter:
                          if src.type_of(i) == "NiControllerSequence"]
             animated = any(0 <= s < len(src.strings) and src.strings[s] == b"Open" for s in seq_names)
             aliases = OWN_RIG_ALIASES.get(re.split(r"[\\/]", nif_name)[-1].lower())
+            collision_rules = OWN_RIG_COLLISION.get(re.split(r"[\\/]", nif_name)[-1].lower())
             if aliases and not any(0 <= s < len(src.strings) and src.strings[s].decode("latin-1") in aliases for s in seq_names):
                 aliases = None                           # not the model the table means (no such clip)
             anim_dll = None if nif_name.replace("/", "\\").lower() in getattr(self, "no_rig_models", ()) else self.door_anim_dll
@@ -731,7 +737,9 @@ class Converter:
                     files, res["door"] = convert_static.convert_multipart_door(
                         raw, out_name, mats, lambda plan, scale: native_door.export_files(plan, self.door_anim_dll, scale),
                         collision_template=self.collision_template, leaf_physics_donor=self.door_physics_donor,
-                        rest_pose_check=True, aliases=aliases, drop_skinned=bool(aliases))
+                        rest_pose_check=True, aliases=aliases, drop_skinned=bool(aliases),
+                        cross_bone_share=convert_static.CROSS_BONE_SHARE if aliases else 0.0,
+                        collision_rules=collision_rules)
                 except Exception as e:                   # noqa: BLE001  (falls back to the passable static door)
                     files = None
                     res.pop("door", None)

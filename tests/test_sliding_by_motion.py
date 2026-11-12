@@ -68,6 +68,71 @@ class SlidingRoutingTests(unittest.TestCase):
         multi.assert_not_called()
 
 
+class CollisionRulesTests(unittest.TestCase):
+    """VltGearDoor01 (PC read 2026-11-11): rod-only bones must not get a fitted box (an invisible bar at head height) and
+    the deck bones need a thin floor box, not a box up to the rails."""
+
+    def build(self, rules):
+        f = door_nif(sliding_panels())
+        count = len([s for s in nif.fo4_trishapes(f) if s.positions and s.triangles])
+        boxes = []
+        real = convert_static.sfcollision.box_blob
+        with patch.object(convert_static.sfcollision, "box_blob",
+                          side_effect=lambda t, c, h: boxes.append((c, h)) or real(t, c, h)):
+            _, door = convert_static.convert_multipart_door(
+                nif.serialize(f), "fo4port/ped", ["x.mat"] * count, fake_clip_files, collision_template=fake_template(),
+                leaf_physics_donor=donor(), collision_rules=rules)
+        return door, boxes
+
+    def test_skip_and_floor_rules_by_bone_name(self):
+        door, boxes = self.build(None)
+        self.assertEqual(door["moving_bodies"], 2)
+        door, boxes = self.build({"skip": ["^PanelA$"]})
+        self.assertEqual(door["moving_bodies"], 1)
+        self.assertEqual(len(boxes), 1)
+        door, boxes = self.build({"floor": {"^PanelA$": 0.5, "^PanelB$": 0.5}})
+        self.assertEqual(door["moving_bodies"], 2)
+        for centre, half in boxes:                                        # unturned bones: z from 0.4 to 0.5
+            self.assertAlmostEqual(centre[2], 0.45, places=5)
+            self.assertAlmostEqual(half[2], max(convert_static.sfcollision.MIN_LEAF_HALF, 0.05), places=5)
+
+    def test_a_floor_plate_is_cut_along_model_up_on_a_turned_bone(self):
+        """Claude's finding on 9d4cfb01 (real VltGearDoor01): deck bones are turned (local x -> model -z, y -> +x,
+        z -> -y), so cutting the box at the bone's z made a wall along model y. Plate here: same turn, 4.9 x 2.1 m deck."""
+        r = (0, 1, 0,  0, 0, -1,  -1, 0, 0)               # model = R * local: local x -> -z, y -> +x, z -> -y
+        world = ((0.0, 0.0, 0.0), r, 1.0)
+        model_pts = [(-7.1, 0.23, 0.9), (-2.2, 2.32, 2.35), (-2.2, 0.23, 0.9), (-7.1, 2.32, 2.35)]
+        inv = lambda p: (-p[2], p[0], -p[1])                # R^T p
+        local = [inv(p) for p in model_pts]
+        lo, hi = convert_static._floor_box(local, world, 0.92)
+        corners = [(x, y, z) for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])]
+        back = [convert_static._apply(world, c) for c in corners]
+        for k, (want_lo, want_hi) in enumerate(((-7.1, -2.2), (0.23, 2.32), (0.82, 0.92))):
+            self.assertAlmostEqual(min(p[k] for p in back), want_lo, places=6)
+            self.assertAlmostEqual(max(p[k] for p in back), want_hi, places=6)
+        t, sc = (1.0, 2.0, 3.0), 2.0                        # an offset, scaled bone: same plate in model space
+        world2 = (t, r, sc)
+        local2 = [inv(tuple((p[k] - t[k]) / sc for k in range(3))) for p in model_pts]
+        lo, hi = convert_static._floor_box(local2, world2, 0.92)
+        back = [convert_static._apply(world2, (x, y, z)) for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])]
+        self.assertAlmostEqual(min(p[2] for p in back), 0.82, places=6)
+        self.assertAlmostEqual(max(p[2] for p in back), 0.92, places=6)
+        self.assertAlmostEqual(max(p[1] for p in back) - min(p[1] for p in back), 2.32 - 0.23, places=6)
+
+    def test_the_vault_walkway_rules_pick_the_deck_and_the_rods(self):
+        from fo4sf import pipeline
+        rules = pipeline.OWN_RIG_COLLISION["vltgeardoor01.nif"]
+        floor = lambda n: convert_static._floor_top(rules, n)                # noqa: E731
+        skip = lambda n: convert_static._collision_rule(rules, n, "skip")     # noqa: E731
+        self.assertEqual([floor(n) for n in ("b_WalkWay01Base", "b_WalkWay03Base", "b_Ramp")], [0.92, 0.96, 0.85])
+        for n in ("b_WalkWay01Base", "b_WalkWay03Base", "b_Ramp"):
+            self.assertFalse(skip(n), n)
+        for n in ("b_WalkWay01Front01", "b_WalkWay03Rear03", "b_WalkWay01Rear01"):
+            self.assertTrue(skip(n) and floor(n) is None, n)
+        for n in ("b_WalkWay01", "b_Walkway02", "GearDoor"):
+            self.assertFalse(floor(n) is not None or skip(n), n)
+
+
 class SkinnedPanelTests(unittest.TestCase):
     """RedRPedDoor.nif's two shapes are skinned to its animated bones (PC check 2026-10-18); a shape whose vertices all
     follow one rig bone rides that bone instead of failing the door."""
@@ -143,6 +208,29 @@ class SkinnedPanelTests(unittest.TestCase):
         self.assertEqual(door["rig"], "native")
         self.assertEqual(door["rebound_skinned_pieces"], 2)
         self.assertEqual(door["moving_bodies"], 2)                       # a piece on each panel
+
+    def test_a_few_triangles_across_two_bones_are_cut_not_dropped_when_allowed(self):
+        """VltGearDoor01's WalkWay01:7 (PC dump 2026-11-11): no blended vertex, but 288 of 2238 triangles (hanger rods)
+        join two bones, so the whole shape was dropped and the walkway never drew. With an allowance each such triangle
+        goes whole to one bone; past the allowance the shape is still refused."""
+        f = door_nif(sliding_panels())
+        names = node_names(f)
+        _, shapes, read_skin = self.skinned(f, names["PanelA"], second=names["PanelB"])
+        panel = min(s.block for s in nif.fo4_trishapes(f) if s.positions)
+        with patch.object(fo4skin, "read_skin", side_effect=read_skin):
+            plan = door_rig.plan(f, placed=True)
+            shape = next(s for s in shapes(f) if s.block == panel)
+            crossing = sum(1 for t in shape.triangles if 3 in t)
+            share = crossing / len(shape.triangles)
+            self.assertGreater(crossing, 0)
+            self.assertIsNone(convert_static.rigid_skinned_parts(f, shape, plan["bones"]))
+            self.assertIsNone(convert_static.rigid_skinned_parts(f, shape, plan["bones"], share / 2))
+            parts = convert_static.rigid_skinned_parts(f, shape, plan["bones"], share)
+        self.assertEqual(sum(len(p.triangles) for _, p in parts), len(shape.triangles))   # every triangle kept
+        self.assertTrue(all(not p.skinned for _, p in parts))
+        _, door = self.convert(f, shapes, read_skin, cross_bone_share=share)
+        self.assertNotIn("dropped_skinned_shapes", door)
+        self.assertEqual(door["rig"], "native")
 
     def test_weights_split_over_slots_of_one_bone_still_count_as_rigid(self):
         f = door_nif(sliding_panels())
