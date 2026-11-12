@@ -114,6 +114,93 @@ class SlotsAndHoldsTests(unittest.TestCase):
         self.assertIsNone(ET.fromstring(d["StateA_Idle"]).find("audios"))
 
 
+def _sample(t, q, e=0.0):
+    return {"elapsed": e, "translation_source_units": list(t), "quaternion_wxyz": list(q), "scale": 1.0}
+
+
+class ToggleIdlesTests(unittest.TestCase):
+    """FAL-489 session 7: StateA_Idle = first frame of slot A's clip, StateB_Idle = its last frame, slot B starts from there."""
+    def plan(self):
+        p = door_rig.animated_identity_binds(door_rig.plan(console_nif(), placed=True, aliases=STATES, allowed=tuple(STATES.values())))
+        return anim_object.add_toggle_idles(anim_object.fill_static_tracks(p))
+
+    def test_the_two_idles_are_the_first_and_the_last_pose_of_slot_a(self):
+        plan = self.plan()
+        by = {c["name"]: c for c in plan["clips"]}
+        self.assertEqual(sorted(by), anim_object.slot_names(STATES, "toggle"))
+        a = by["StateA_Play"]
+        for name, which, label in (("StateA_Idle", 0, "first"), ("StateB_Idle", -1, "last")):
+            hold = by[name]
+            self.assertEqual((hold["hold_of"], hold["hold_frame"], hold["duration"]), ("StateA_Play", label, 0.0))
+            self.assertEqual([t["name"] for t in hold["tracks"]], [t["name"] for t in a["tracks"]])      # one track per rig bone, same order
+            for t, h in zip(a["tracks"], hold["tracks"]):
+                self.assertEqual(len(h["samples"]), 1)
+                self.assertEqual(h["samples"][0]["quaternion_wxyz"], t["samples"][which]["quaternion_wxyz"])
+                self.assertEqual(h["samples"][0]["translation_source_units"], t["samples"][which]["translation_source_units"])
+                self.assertEqual(h["samples"][0]["elapsed"], 0.0)
+        shut = [t for t in by["StateA_Idle"]["tracks"] if t["name"] == "LeafA"][0]["samples"][0]["quaternion_wxyz"]
+        opened = [t for t in by["StateB_Idle"]["tracks"] if t["name"] == "LeafA"][0]["samples"][0]["quaternion_wxyz"]
+        self.assertNotEqual(shut, opened)                                                              # a moving leaf is at its start in one and its end in the other
+
+    def test_slot_b_starts_from_the_open_pose_for_every_bone_it_leaves_standing(self):
+        """The fixture is a two-leaf door shape: both leaves move in both clips (so slot B's own data already starts at slot A's end), and the
+        root is a static filler in both (so it is held at slot A's last pose, the bind). The synthetic test below has a bone only A moves."""
+        plan = self.plan()
+        by = {c["name"]: c for c in plan["clips"]}
+        a_last = {t["name"]: t["samples"][-1] for t in by["StateA_Play"]["tracks"]}
+        b = by["StateB_Play"]
+        self.assertEqual(b["starts_from"], "StateB_Idle")
+        self.assertEqual(b["held_at_idle_pose"], ["Root"])
+        original = door_rig.animated_identity_binds(door_rig.plan(console_nif(), placed=True, aliases=STATES, allowed=tuple(STATES.values())))
+        original_b = next(c for c in anim_object.fill_static_tracks(original)["clips"] if c["name"] == "StateB_Play")
+        for t, o in zip(b["tracks"], original_b["tracks"]):
+            if t["name"] not in b["held_at_idle_pose"]:
+                self.assertEqual(t, o)                                                                  # what slot B moves is untouched
+        idle = {t["name"]: t["samples"][0] for t in by["StateB_Idle"]["tracks"]}
+        for t in b["tracks"]:
+            self.assertEqual(t["samples"][0]["quaternion_wxyz"], idle[t["name"]]["quaternion_wxyz"])    # B starts at B_Idle's pose, bone by bone
+            self.assertEqual(idle[t["name"]]["quaternion_wxyz"], a_last[t["name"]]["quaternion_wxyz"])
+
+    def test_the_native_writer_takes_the_toggle_clips_and_the_table_says_what_they_are(self):
+        plan = self.plan()
+        prepared = native_door.prepare(plan, 0.01428)
+        for name in ("StateA_Idle", "StateB_Idle"):
+            self.assertEqual({len(t["keys"]) for c in prepared["clips"] if c["name"] == name for t in c["tracks"]}, {1})
+        table = {r["name"]: r for r in anim_object.clip_table(plan, convert_static.UNIT_SCALE)}
+        self.assertEqual((table["StateA_Idle"]["hold_frame"], table["StateB_Idle"]["hold_frame"]), ("first", "last"))
+        self.assertEqual(table["StateB_Play"]["starts_from"], "StateB_Idle")
+        self.assertIsNone(table["StateA_Play"]["starts_from"])
+
+    def test_a_lone_slot_is_the_source_of_both_idles_and_a_bad_mode_is_refused(self):
+        self.assertEqual(anim_object.slot_names({"Stage1": "StateA_Play"}, "toggle"), ["StateA_Idle", "StateA_Play", "StateB_Idle"])
+        self.assertEqual(anim_object.slot_names({"Stage1": "StateA_Play"}), ["StateA_Idle", "StateA_Play"])          # the hold rule is unchanged
+        with self.assertRaisesRegex(ValueError, "not one of"):
+            anim_object.slot_names(STATES, "latch")
+        p = door_rig.animated_identity_binds(door_rig.plan(console_nif(), placed=True, aliases={"Stage1": "StateA_Play"}, allowed=("StateA_Play",)))
+        names = sorted(c["name"] for c in anim_object.add_toggle_idles(anim_object.fill_static_tracks(p))["clips"])
+        self.assertEqual(names, ["StateA_Idle", "StateA_Play", "StateB_Idle"])
+
+    def test_a_static_filler_for_a_bone_slot_a_moves_becomes_a_real_track_at_the_open_pose(self):
+        ident, turned = (1.0, 0.0, 0.0, 0.0), (0.7, 0.7, 0.0, 0.0)
+        def clip(name, lid, btn):
+            return {"name": name, "duration": 1.0, "events": [], "tracks": [
+                {"node": 1, "name": "Lid", "samples": lid, **({"static": True} if all(tuple(x["quaternion_wxyz"]) == ident for x in lid) else {})},
+                {"node": 2, "name": "Button", "samples": btn}]}
+        a = clip("StateA_Play", [_sample((0, 0, 0), ident), _sample((0, 0, 0), turned, 1.0)], [_sample((0, 0, 0), ident), _sample((0, 0, 0), ident, 1.0)])
+        a["tracks"][1]["static"] = True
+        b = clip("StateB_Play", [_sample((0, 0, 0), ident), _sample((0, 0, 0), ident, 0.6)], [_sample((0, 0, 0), ident), _sample((0, 0, -1), ident, 0.6)])
+        self.assertTrue(b["tracks"][0].get("static"))
+        out = anim_object.add_toggle_idles({"bones": [], "attachments": [], "clips": [a, b]})
+        nb = next(c for c in out["clips"] if c["name"] == "StateB_Play")
+        lid = nb["tracks"][0]
+        self.assertNotIn("static", lid)                                                                  # it is no longer identity
+        self.assertEqual([s["quaternion_wxyz"] for s in lid["samples"]], [list(turned)] * 2)
+        self.assertEqual([s["elapsed"] for s in lid["samples"]], [0.0, 0.6])
+        self.assertEqual(nb["tracks"][1], b["tracks"][1])                                                # what B moves is untouched
+        self.assertEqual(nb["held_at_idle_pose"], ["Lid"])
+        self.assertTrue(anim_object._same_pose(_sample((0, 0, 0), (0.5, 0.5, 0.5, 0.5)), _sample((0, 0, 0), (-0.5, -0.5, -0.5, -0.5))))
+
+
 class SwapSiblingsTests(unittest.TestCase):
     """FAL-489 session 6: --swap-siblings exchanges the root's two children (Lid, Button) and nothing else."""
     def base(self):
@@ -170,7 +257,8 @@ class BuilderTests(unittest.TestCase):
         def hook(plan):
             if kw.get("swap"):
                 plan = anim_object.swap_siblings(plan)
-            seen["plan"] = anim_object.add_holds(anim_object.fill_static_tracks(plan))
+            plan = anim_object.fill_static_tracks(plan)
+            seen["plan"] = anim_object.add_toggle_idles(plan) if kw.get("idles") == "toggle" else anim_object.add_holds(plan)
             return seen["plan"]
 
         def clip_files(plan, scale):

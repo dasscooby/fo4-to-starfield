@@ -261,8 +261,12 @@ def stage(a, converter=None):
     info = parse_info(run(tool + ["info", port_esm, sf_esm, "--edid", a.edid]).stdout)
     src, conv = (converter or build_converter)(a, staging)
     original, _raw = find_original(src, info["model"], a.model)
-    res = (conv.convert_anim_object(original, states, a.foley or None, swap_siblings=True) if getattr(a, "swap_siblings", False)
-           else conv.convert_anim_object(original, states, a.foley or None))
+    extra = {}
+    if getattr(a, "swap_siblings", False):
+        extra["swap_siblings"] = True
+    if getattr(a, "idles", "toggle") != "toggle":
+        extra["idles"] = a.idles
+    res = conv.convert_anim_object(original, states, a.foley or None, **extra)
     if not res.get("ok"):
         sys.exit(f"the console did not convert: {res.get('reason')} (attempt kept in {out})")
     anim = res["anim"]
@@ -317,7 +321,9 @@ def stage(a, converter=None):
     with open(os.path.join(out, "plan.json"), "w", encoding="utf-8") as f:
         json.dump(plan, f, indent=1)
     table = "\n".join(f"  {c['name']}: {c['seconds']} s ({c['frames']} frames), bones {', '.join(c['bones'])}"
-                      + (f", held from {c['hold_of']}" if c["hold_of"] else "") for c in anim["clips"])
+                      + (f", held from the {c.get('hold_frame') or 'last'} frame of {c['hold_of']}" if c["hold_of"] else "")
+                      + (f", starts from {c['starts_from']} (bones held at its pose: {', '.join(c.get('held_at_idle_pose') or []) or 'none'})"
+                         if c.get("starts_from") else "") for c in anim["clips"])
     with open(os.path.join(out, "README.txt"), "w", encoding="utf-8") as f:
         f.write(f"""Animation console probe, variant D ({datetime.date.today().isoformat()}). docs/research/anim-console-probe.md
 {PLUGIN} (sha256 {plan['outputs'][PLUGIN]}): an override of the port's console base {a.edid} (0x{info['base_id']}) with the converted model
@@ -571,6 +577,9 @@ def main(argv=None):
     s.add_argument("--states", required=True, help='FO4 sequence = Play slot, e.g. "Stage1=StateA_Play,Stage2=StateB_Play" (see `clips`)')
     s.add_argument("--foley", default="", help="a Starfield foley name for the clips' sound frames (default: none, no sound)")
     s.add_argument("--swap-siblings", action="store_true", help="EXPERIMENT (FAL-489 session 6): write the root's two children (Lid, Button) with their indices exchanged: rig, .af blocks, model nodes and attachments; nothing else changes")
+    s.add_argument("--idles", choices=("toggle", "hold"), default="toggle",
+                   help="toggle (default, FAL-489 session 7): StateA_Idle = first frame of slot A's clip, StateB_Idle = its last frame, slot B starts from there; "
+                        "hold: each Idle holds the last frame of its own Play clip (sessions 1 to 7)")
     s.add_argument("--model", default="")
     s.add_argument("--edid", default=EDID)
     i = sub.add_parser("inspect")

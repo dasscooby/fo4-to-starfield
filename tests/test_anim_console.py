@@ -201,13 +201,13 @@ class FakeConv:
     def __init__(self, staging, textures=()):
         self.staging, self.textures, self.calls = staging, textures, []
 
-    def convert_anim_object(self, name, states, foley=None, swap_siblings=False):
+    def convert_anim_object(self, name, states, foley=None, swap_siblings=False, idles="toggle"):
         self.calls.append((name, dict(states), foley))
-        self.swapped = swap_siblings
+        self.swapped, self.idles = swap_siblings, idles
         out = "fo4port/interiors/vault/props/console01_anim"
         files = {f"meshes/{out}.nif": b"nif", f"meshes/{out}/characterassets/skeleton.rig": b"rig", "geometries/ab/cd.mesh": b"mesh",
                  "materials/fo4port/x.mat": b"mat"}
-        for slot in anim_object.slot_names(states):
+        for slot in anim_object.slot_names(states, idles):
             files[f"meshes/{out}/animations/{slot}.af"] = b"af"
             files[f"meshes/{out}/animations/{slot}.afx"] = anim_object.descriptor(slot, audio=[(1, foley)] if foley and "Play" in slot else ())
         for t in self.textures:
@@ -217,11 +217,11 @@ class FakeConv:
             os.makedirs(os.path.dirname(p), exist_ok=True)
             Path(p).write_bytes(data)
         from test_anim_object import BuilderTests
-        (built, anim), plan = BuilderTests().build()                      # a real conversion of the fixture: rig, tracks, shapes, poses
+        (built, anim), plan = BuilderTests().build(idles=idles)           # a real conversion of the fixture: rig, tracks, shapes, poses
         Path(os.path.join(self.staging, *f"meshes/{out}.nif".split("/"))).write_bytes(built["meshes/fo4port/vault/console_anim.nif"])
         clips = anim_object.clip_table(plan, convert_static.UNIT_SCALE)
         return {"ok": True, "out_name": out, "anim": {**anim, "skeleton": out.replace("/", "\\") + "\\characterassets\\skeleton.rig",
-                                                      "animations": out.replace("/", "\\") + "\\animations", "clips": clips, "states": dict(states)}}
+                                                      "animations": out.replace("/", "\\") + "\\animations", "clips": clips, "states": dict(states), "idles": idles}}
 
 
 class StageTests(unittest.TestCase):
@@ -368,6 +368,10 @@ class StageTests(unittest.TestCase):
         make, holder = self.converter()
         self.assertEqual(mac.stage(self.args(self.root / "staged-sw1", swap_siblings=True), converter=make), 0)
         self.assertTrue(holder["conv"].swapped)
+        self.assertEqual(holder["conv"].idles, "toggle")                          # the idle rule is the toggle unless --idles hold is given
+        make, holder = self.converter()
+        self.assertEqual(mac.stage(self.args(self.root / "staged-sw2", idles="hold"), converter=make), 0)
+        self.assertEqual(holder["conv"].idles, "hold")
 
     def test_a_failed_conversion_and_a_bad_state_map_stop_before_anything_is_published(self):
         class Failing(FakeConv):
