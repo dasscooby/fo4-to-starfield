@@ -231,8 +231,9 @@ class ToolTests(ToolBase):
         self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
         self.assertIn("masters [Starfield.esm]", check.stdout)
         self.assertIn("scripts [FO4SF_AnimGenericQuest (0 properties)]", check.stdout)
+        slashed = check.stdout.replace("\\", "/")                      # the tool prints the model with the OS separator (backslashes on Windows)
         self.assertIn(f"ACTI FO4SF_AnimGenericControl model Meshes/Props/ArtifactHolder/ArtifactHolder01.nif components 1 graph ANAM {ANAM} "
-                      f"BNAM Props\\ArtifactHolder\\CharacterAssets\\skeleton.rig CNAM {mag.CNAM}", check.stdout)       # the vanilla model and rig, our graph and folder
+                      f"BNAM Props/ArtifactHolder/CharacterAssets/skeleton.rig CNAM {mag.CNAM}".replace("\\", "/"), slashed)       # the vanilla model and rig, our graph and folder
 
     def test_the_plugin_adds_one_quest_and_one_acti_and_overrides_none(self):
         """Raw bytes: every record carries load index 1 (our own plugin; Starfield.esm is master 0); no REFR, no CELL."""
