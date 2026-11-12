@@ -12,6 +12,7 @@ Scriptname FO4SF_PlayerFurnQuest extends Quest
    20..23  USE that furniture (20 for the one spawned by 10, 21 for 11, ...): the 15 s guard timer first, then an InputEnableLayer and
            DisablePlayerControls(), then furniture.Activate(player) as the game's own SBPowerCollectionActivatorScript does; then 15 s of
            logging with times. One furniture at a time: set the next use stage after the SAFE (or EXIT OK / STILL IN) notice of the last one
+   30..33  the same use with a scripted leave at 3 s (one Activate) instead of waiting for the 15 s close: 30 PowerCycle, 31 SecretPanel, 32 IDCardReader, 33 Heller reader
    40      a reading of every spawned reference now
    60      release the layer, Disable and Delete every spawned reference
  Guards against stranding the player (all required): (1) the 15 s timer started BEFORE the layer exists releases the layer whatever
@@ -38,6 +39,8 @@ int TIMER_POLL = 1
 int TIMER_SAFETY = 200      ; + the furniture index 0..3
 int TIMER_SIT = 210         ; + the furniture index
 int TIMER_RECHECK = 220     ; + the furniture index
+int TIMER_LEAVE = 230       ; + the furniture index: the scripted leave of the short use (stages 30..33)
+float LEAVE_S = 3.0
 float POLL_S = 1.0
 float GUARD_S = 15.0
 float SIT_S = 0.5
@@ -72,8 +75,8 @@ float TIdleStop = -1.0
 
 Event OnInit()
     Debug.OpenUserLog(LogName)
-    StageList = new int[10]
-    DoneList = new bool[10]
+    StageList = new int[14]
+    DoneList = new bool[14]
     StageList[0] = 10
     StageList[1] = 11
     StageList[2] = 12
@@ -82,8 +85,12 @@ Event OnInit()
     StageList[5] = 21
     StageList[6] = 22
     StageList[7] = 23
-    StageList[8] = 40
-    StageList[9] = 60
+    StageList[8] = 30
+    StageList[9] = 31
+    StageList[10] = 32
+    StageList[11] = 33
+    StageList[12] = 40
+    StageList[13] = 60
     FurnIds = new int[4]
     FurnIds[0] = 0x03607F       ; FURN PowerCycle
     FurnIds[1] = 0x0FEBB0       ; FURN COM_Quest_Andreja_Q01_SecretPanel
@@ -290,6 +297,8 @@ Event OnTimer(int aiTimerID)
     if aiTimerID == TIMER_POLL
         Poll()
         StartTimer(POLL_S, TIMER_POLL)
+    elseif aiTimerID >= TIMER_LEAVE
+        LeaveNow(aiTimerID - TIMER_LEAVE)
     elseif aiTimerID >= TIMER_RECHECK
         Recheck(aiTimerID - TIMER_RECHECK)
     elseif aiTimerID >= TIMER_SIT
@@ -314,7 +323,9 @@ Function Step(int stage)
     if stage >= 10 && stage <= 13
         Spawn(stage, stage - 10)
     elseif stage >= 20 && stage <= 23
-        UseFurniture(stage, stage - 20)
+        UseFurniture(stage, stage - 20, false)
+    elseif stage >= 30 && stage <= 33
+        UseFurniture(stage, stage - 30, true)
     elseif stage == 40
         ReadAll(stage)
     elseif stage == 60
@@ -346,8 +357,9 @@ EndFunction
 
 ; ---------------------------------------------------------------- the use and its guards
 
-Function UseFurniture(int stage, int idx)
-    {The guard timer FIRST, then the layer, then Activate(player). Never waits on E, never plays an animation.}
+Function UseFurniture(int stage, int idx, bool shortUse)
+    {The guard timer FIRST, then the layer, then Activate(player). Never waits on E, never plays an animation. A short use (stages 30..33)
+     also leaves by script after LEAVE_S seconds with one Activate, so a whole enter-and-leave fits in one view; the 15 s guard stays.}
     if UseOpen
         Trace("use stage=" + stage + " name=" + FurnNames[idx] + " busy=true open=" + CurIdx)
         Say("U" + stage + " BUSY: wait for SAFE")
@@ -355,8 +367,8 @@ Function UseFurniture(int stage, int idx)
     endif
     ObjectReference r = Spawned[idx]
     if r == None
-        Trace("use stage=" + stage + " name=" + FurnNames[idx] + " ref=none (set " + (stage - 10) + " first)")
-        Say("U" + stage + " no ref: set " + (stage - 10) + " first")
+        Trace("use stage=" + stage + " name=" + FurnNames[idx] + " ref=none (set " + (10 + idx) + " first)")
+        Say("U" + stage + " no ref: set " + (10 + idx) + " first")
         return
     endif
     Actor p = Game.GetPlayer()
@@ -376,6 +388,9 @@ Function UseFurniture(int stage, int idx)
     TIdleStop = -1.0
     StartTimer(GUARD_S, TIMER_SAFETY + idx)            ; the safety, started before anything that can strand the player
     StartTimer(SIT_S, TIMER_SIT + idx)
+    if shortUse
+        StartTimer(LEAVE_S, TIMER_LEAVE + idx)
+    endif
     Trace("use stage=" + stage + " name=" + FurnNames[idx] + " guard=" + GUARD_S + " sit0=" + p.GetSitState())
     if !AnimRegistered
         RegisterAnim(p)
@@ -395,6 +410,21 @@ Function UseFurniture(int stage, int idx)
     Say("ACTIVATE s" + stage)
 ;OPT Game.ForceThirdPerson     Game.ForceThirdPerson()
 ;OPT Game.ForceThirdPerson     Trace("camera forced third person")
+EndFunction
+
+Function LeaveNow(int idx)
+    {The short use's scripted leave: one Activate of the furniture, once, only while that use is still open and the player is not at sit state 0.}
+    if idx != CurIdx || !UseOpen || FurnRef == None
+        return
+    endif
+    int s = Game.GetPlayer().GetSitState()
+    Trace("leave use=" + idx + " sit=" + s + " inside=" + Inside + " t=" + SinceUse())
+    if s != 0
+        FurnRef.Activate(Game.GetPlayer(), false)
+        Say("LEAVE ACTIVATE sit=" + s + " t=" + SinceUse())
+    else
+        Say("LEAVE: sit=0 already")
+    endif
 EndFunction
 
 Function SitTick(int idx)

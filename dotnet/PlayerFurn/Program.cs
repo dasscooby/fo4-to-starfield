@@ -41,7 +41,7 @@ static class PlayerFurn
     // the layout (scripts/newgame/FO4SF_PlayerFurnQuest.psc carries the same ids)
     const uint QuestId = 0x800;
     const string QuestEdid = "FO4SF_PlayerFurnQuest", Script = "FO4SF_PlayerFurnQuest";
-    static readonly ushort[] Stages = { 10, 11, 12, 13, 20, 21, 22, 23, 40, 60 };
+    static readonly ushort[] Stages = { 10, 11, 12, 13, 20, 21, 22, 23, 30, 31, 32, 33, 40, 60 };
     // the four vanilla furniture the quest spawns, in the design's order (vault111-player-furniture rev 6, section 4)
     static readonly (uint Id, string Edid)[] Furniture =
     {

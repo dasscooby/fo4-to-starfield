@@ -55,7 +55,7 @@ class ScriptTests(unittest.TestCase):
         ran = [int(s) for s in re.findall(r"StageList\[\d+\] = (\d+)", PSC)]
         m = re.search(r"Stages = \{ ([\d, ]+) \}", TOOL_SRC)
         self.assertEqual(ran, [int(x) for x in m.group(1).split(",")])
-        self.assertEqual(ran, [10, 11, 12, 13, 20, 21, 22, 23, 40, 60])
+        self.assertEqual(ran, [10, 11, 12, 13, 20, 21, 22, 23, 30, 31, 32, 33, 40, 60])
         self.assertIn(f"StageList = new int[{len(ran)}]", PSC)
         self.assertIn(f"DoneList = new bool[{len(ran)}]", PSC)
         self.assertIn('string LogName = "FO4SFPFurn"', PSC)
@@ -73,7 +73,8 @@ class ScriptTests(unittest.TestCase):
         self.assertIn('Game.GetFormFromFile(FurnIds[idx], "Starfield.esm")', PSC)
         self.assertIn("p.PlaceAtMe(base, 1, true, false, false)", PSC)
         self.assertIn("Spawn(stage, stage - 10)", PSC)
-        self.assertIn("UseFurniture(stage, stage - 20)", PSC)
+        self.assertIn("UseFurniture(stage, stage - 20, false)", PSC)
+        self.assertIn("UseFurniture(stage, stage - 30, true)", PSC)
 
     def test_no_property_no_animation_call_and_none_of_the_things_the_design_forbids(self):
         self.assertIsNone(re.search(r"^\s*\w+(\[\])?\s+\w+\s+Auto\b", PSC, re.M | re.I))
@@ -95,7 +96,7 @@ class ScriptTests(unittest.TestCase):
         self.assertLess(disable, activate)
         self.assertEqual(CODE.count("DisablePlayerControls()"), 1)             # one place that locks the player
         self.assertIn("float GUARD_S = 15.0", PSC)
-        self.assertEqual(CODE.count(".Activate("), 2)                          # the use and the one exit activate, nothing else
+        self.assertEqual(CODE.count(".Activate("), 3)                          # the use, the one exit activate, the short use's scripted leave
 
     def test_the_layer_is_released_by_the_timer_the_end_events_and_stage_60(self):
         rel = body("ReleaseHold")
@@ -208,6 +209,18 @@ class ScriptTests(unittest.TestCase):
         self.assertIn(";OPT Game.ForceThirdPerson     Game.ForceThirdPerson()", body("UseFurniture"))
         use = body("UseFurniture")
         self.assertIn("TEnter = -1.0", use)                                 # each use starts clean
+
+    def test_the_short_use_leaves_by_script_once_and_the_15_s_guard_stays(self):
+        use = body("UseFurniture")
+        self.assertIn("if shortUse\n        StartTimer(LEAVE_S, TIMER_LEAVE + idx)", use)
+        self.assertLess(use.index("StartTimer(GUARD_S, TIMER_SAFETY + idx)"), use.index("StartTimer(LEAVE_S"))
+        self.assertIn("float LEAVE_S = 3.0", PSC)
+        leave = body("LeaveNow")
+        self.assertEqual(leave.count(".Activate("), 1)
+        self.assertIn("if s != 0", leave)
+        self.assertIn("!UseOpen", leave)
+        self.assertLess(PSC.index("aiTimerID >= TIMER_LEAVE"), PSC.index("aiTimerID >= TIMER_RECHECK"))   # largest id first
+        self.assertEqual(len(re.findall(r"TIMER_(?:SAFETY|SIT|RECHECK|LEAVE) = (\d+)", PSC)), 4)
 
     def test_the_required_list_has_every_native_called_outside_an_optional_line(self):
         for base, names in {"Actor": ["PlaceAtMe", "GetSitState"], "ObjectReference": ["Activate", "Disable"],
@@ -360,7 +373,7 @@ class StageTests(unittest.TestCase):
         check = self.run_tool("check", out / PLUGIN, self.master)
         self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
         self.assertIn("masters [Starfield.esm]", check.stdout)
-        self.assertIn("QUST FO4SF_PlayerFurnQuest flags StartGameEnabled stages [10,11,12,13,20,21,22,23,40,60] "
+        self.assertIn("QUST FO4SF_PlayerFurnQuest flags StartGameEnabled stages [10,11,12,13,20,21,22,23,30,31,32,33,40,60] "
                       "scripts [FO4SF_PlayerFurnQuest (0 properties)]", check.stdout)
 
     def test_the_plugin_adds_one_quest_and_overrides_none(self):
@@ -492,7 +505,7 @@ class CardTests(unittest.TestCase):
     def test_the_card_says_not_run_and_names_every_stage_and_outcome(self):
         self.assertIn("NOT_RUN", self.CARD)
         self.assertIn("not compiled", self.CARD.lower())
-        for s in (10, 11, 12, 13, 20, 21, 22, 23, 40, 60):
+        for s in (10, 11, 12, 13, 20, 21, 22, 23, 30, 31, 32, 33, 40, 60):
             self.assertRegex(self.CARD, rf"(\| | / ){s}( / | \|)")
         for what in ("but **no** end event", "**no pose**", "camera", "enableplayercontrols", "no saving"):
             self.assertIn(what, self.CARD.lower())

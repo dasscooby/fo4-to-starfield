@@ -27,6 +27,7 @@ The console does not know the quest by its editor id: use `setstage <index>00080
 | 11 / 12 / 13 | the same for `COM_Quest_Andreja_Q01_SecretPanel` `0FEBB0` / `NPCIDCardReader` `00A329` / `Scenes_MQ101_HellerTechReaderPickUp` `24E491` |
 | 20 | **use** the furniture spawned by 10: the 15 s guard timer first, then an input layer and `DisablePlayerControls()`, then `Activate(player)`; 15 s of timed logging |
 | 21 / 22 / 23 | the same use for the furniture spawned by 11 / 12 / 13 |
+| 30 / 31 / 32 / 33 | the same use as 20 / 21 / 22 / 23 (spawned by 10 / 11 / 12 / 13) with a **scripted leave at 3 s**: one `Activate` of the furniture (notice `LEAVE ACTIVATE sit=n t=...`), so a whole enter and leave fits in one view; the 15 s guard still follows. Use 20..23 **or** 30..33 for a furniture, not both |
 | 40 | a reading of every spawned reference (log only) and **one summary box that stays on screen** (a plain notice if the box does not compile): `PF SUMMARY <furniture>: ENTER <t> SIT <t> GETUP <t> EXIT <t> IDLECHAIRSITTING <t> ANIMATIONCOMPLETE <t> IDLESTOP <t>`, each time in seconds since the activate of the LAST use, `-` when that event did not arrive. Set 40 after the use's 15 s close; close the box with its button |
 | 60 | release the layer, disable and delete every spawned reference |
 
