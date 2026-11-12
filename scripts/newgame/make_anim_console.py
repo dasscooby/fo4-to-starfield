@@ -29,9 +29,12 @@ usage:
       It reads anim_manifest.json and the model NIF; it does not read the .rig/.af (CALUMI's files) or the game.
   python make_anim_console.py dump --stage <staged kit folder> --dll <CALUMI.Animation.dll>
       read only, offline: reads the WRITTEN skeleton.rig and every .af back through CALUMI (LoadAnimationSceneFromSFBGSFormatC) and
-      prints the rig bones in file order and, per clip, every track's position, the bone name it is filed under, its key count, and its
-      first and last rotation as angle and axis (degrees). Exit 1 when a track's bone name is not the rig bone at that index or a
-      clip's block names a bone the rig lacks. Translation values are not read (only their count): the read-back names for them are
+      prints the rig bones in file order and, per clip, every block's enumeration position, the bone name it is filed under, its key count,
+      and its first and last rotation as angle and axis (degrees). Exit 1 when a block names a bone the rig lacks, a bone has two blocks, or
+      the clips of one kit disagree about the rig. The enumeration position is what CALUMI's read-back gives (blocks in the order they
+      were added); it is NOT the rig index the writer passed to CreateAnimBlockC (nothing in this repo reads that back). So a position that
+      differs from the rig index is printed as a NOTE, and as a failure only when the clip has a block for every rig bone (then the writer's
+      own contract is block i = rig bone i). A clip with fewer blocks than bones (a door: only animated bones) is not a failure. Translation values are not read (only their count): the read-back names for them are
       not in the repo. It cannot say how the GAME applies a track.
   python make_anim_console.py log [--file <FO4SFAnimD.0.log>]
       the run's user log as one table and a verdict (src/fo4sf/anim_probe_log.py, the same reader as variant A).
@@ -354,8 +357,8 @@ def inspect_stage(a):
         man = json.load(f)
     anim = man["anim"]
     rig = anim.get("rig")
-    if not rig:
-        print("this stage's manifest has no rig table (staged by an older head): re-stage")
+    if not isinstance(rig, list) or not rig or not isinstance(rig[0], dict):          # missing, or the door manifest's "native" string
+        print("this stage's manifest has no rig table (staged by an older head, or a door's \"native\" marker): re-stage")
         return 2
     print(f"original {man['original']}  model {man['model']}  states {man['states']}")
     print("rig bones (index: name, parent, bind in m):")
@@ -485,6 +488,7 @@ def dump_stage(a, reader=None):
         elif names != rig_names:
             problems.append(f"{os.path.basename(af)}: the rig read with this clip differs from the first")
         print(f"{os.path.basename(af)} ({os.path.getsize(af)} bytes), {len(data['blocks'])} blocks:")
+        full = len(data["blocks"]) == len(names)
         for blk in data["blocks"]:
             rot = blk["rot"]
             if rot:
@@ -495,15 +499,20 @@ def dump_stage(a, reader=None):
                 shown = "no rotation keys"
             pos = blk["position"]
             rig_at = names[pos] if pos < len(names) else None
-            ok = "" if rig_at == blk["bone"] else f"  <-- rig index {pos} is {rig_at!r}"
+            ok = "" if rig_at == blk["bone"] else f"  <-- NOTE: position {pos} but the rig has {rig_at!r} at index {pos}"
             print(f"  block {pos}: bone {blk['bone']!r}, {len(rot)} rotation keys, {blk['trans_count']} translation keys; {shown}{ok}")
             if blk["bone"] not in names:
                 problems.append(f"{os.path.basename(af)}: block names {blk['bone']!r}, which the rig lacks")
-            elif rig_at != blk["bone"]:
-                problems.append(f"{os.path.basename(af)}: block at position {pos} is {blk['bone']!r}, the rig has {rig_at!r} there")
+            elif full and rig_at != blk["bone"]:
+                problems.append(f"{os.path.basename(af)}: one block per rig bone, but the block at position {pos} is {blk['bone']!r} and the rig has {rig_at!r} there")
+        seen = [blk["bone"] for blk in data["blocks"]]
+        for dup in sorted({n for n in seen if seen.count(n) > 1}):
+            problems.append(f"{os.path.basename(af)}: two blocks for {dup!r}")
+        if not full:
+            print(f"  NOTE: {len(data['blocks'])} blocks for {len(names)} rig bones; positions are not rig indices here and nothing was checked by position")
     for p in problems:
         print("FAIL  " + p)
-    print("dump: " + ("ok (positions and names agree; how the game applies a track is not read)" if not problems else f"{len(problems)} problem(s)"))
+    print("dump: " + ("ok (names are in the rig; how the game pairs a block with a bone is not read)" if not problems else f"{len(problems)} problem(s)"))
     return 0 if not problems else 1
 
 

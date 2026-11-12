@@ -436,7 +436,9 @@ class StageTests(unittest.TestCase):
             self.assertEqual(mac.main(["inspect", "--stage", str(stage_dir)]), 1)
         self.assertIn("model node order differs from rig order", buf.getvalue())
 
-    def test_dump_prints_the_written_tracks_and_catches_a_block_under_the_wrong_name(self):
+    def test_dump_checks_position_only_when_there_is_a_block_per_rig_bone(self):
+        """FAL-528 HOLD: CALUMI's read-back position is the order blocks were added, not the rig index the writer passed. A clip with fewer
+        blocks than bones (a door: only animated bones) is a NOTE, not a failure; with one block per bone the contract is block i = bone i."""
         import contextlib
         import io
         import math as m
@@ -452,35 +454,67 @@ class StageTests(unittest.TestCase):
         half = m.radians(157) / 2
         lid_turn = (m.sin(half), 0.0, 0.0, m.cos(half))                      # 157 degrees about x, as (x, y, z, w)
         ident = (0.0, 0.0, 0.0, 1.0)
+        bones = [("Root", -1), ("Lid", 0), ("Button", 0)]
 
         class Fake:
-            def __init__(self, swap):
-                self.swap = swap
+            def __init__(self, layout):
+                self.layout = layout
 
             def read(self, rig, af):
-                bones = [("Root", -1), ("Lid", 0), ("Button", 0)]
                 a = os.path.basename(str(af)).startswith("StateA")
-                turn = [(0, ident), (30, lid_turn)] if a else [(0, ident), (30, ident)]
-                lid = {"position": 1, "bone": "Lid", "rot": turn, "trans_count": 0}
-                btn = {"position": 2, "bone": "Button", "rot": [(0, ident), (30, ident)], "trans_count": 0 if a else 2}
-                if self.swap:
-                    lid["bone"], btn["bone"] = "Button", "Lid"                 # the two tracks reach each other's bone
-                return {"bones": bones, "blocks": [lid, btn]}
-        args = type("A", (), dict(stage=str(out), dll="x.dll"))()
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            self.assertEqual(mac.dump_stage(args, Fake(False)), 0)
-        text = buf.getvalue()
+                lid_rot = [(0, ident), (30, lid_turn)] if a else [(0, ident), (30, ident)]
+                blk = lambda pos, bone, rot, t=0: {"position": pos, "bone": bone, "rot": rot, "trans_count": t}   # noqa: E731
+                root = blk(0, "Root", [(0, ident), (30, ident)])
+                lid = blk(0 if self.layout == "two" else 1, "Lid", lid_rot)
+                btn = blk(1 if self.layout == "two" else 2, "Button", [(0, ident), (30, ident)], 0 if a else 2)
+                if self.layout == "two":                                       # the old layout: no root block (2 blocks, 3 bones)
+                    return {"bones": bones, "blocks": [lid, btn]}
+                if self.layout == "three":
+                    return {"bones": bones, "blocks": [root, lid, btn]}
+                if self.layout == "swapped":                                   # a block per bone, but in the wrong order
+                    return {"bones": bones, "blocks": [root, {**btn, "position": 1}, {**lid, "position": 2}]}
+                if self.layout == "dup":
+                    return {"bones": bones, "blocks": [root, lid, {**lid, "position": 2}]}
+                if self.layout == "alien":
+                    return {"bones": bones, "blocks": [root, lid, blk(2, "Handle", [(0, ident)])]}
+                raise AssertionError(self.layout)
+
+        def run(layout):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                code = mac.dump_stage(type("A", (), dict(stage=str(out), dll="x.dll"))(), Fake(layout))
+            return code, buf.getvalue()
+        code, text = run("three")
+        self.assertEqual(code, 0)
         self.assertIn("1: Lid (parent 0)", text)
         self.assertIn("block 1: bone 'Lid', 2 rotation keys", text)
-        self.assertIn("last 157.0 deg about (1.0, 0.0, 0.0)", text)             # the lid's turn, read as angle and axis
+        self.assertIn("last 157.0 deg about (1.0, 0.0, 0.0)", text)
         self.assertIn("first 0.0 deg about None", text)
+        self.assertNotIn("NOTE", text)
+        code, text = run("two")                                                  # a door-like layout: not a failure, said as a note
+        self.assertEqual(code, 0)
+        self.assertIn("NOTE: 2 blocks for 3 rig bones", text)
+        self.assertIn("NOTE: position 0 but the rig has 'Root'", text)
+        code, text = run("swapped")                                              # one block per bone but wrong order: the writer's contract broken
+        self.assertEqual(code, 1)
+        self.assertIn("one block per rig bone, but the block at position 1 is 'Button' and the rig has 'Lid' there", text)
+        code, text = run("dup")
+        self.assertEqual(code, 1)
+        self.assertIn("two blocks for 'Lid'", text)
+        code, text = run("alien")
+        self.assertEqual(code, 1)
+        self.assertIn("block names 'Handle', which the rig lacks", text)
+
+    def test_inspect_says_re_stage_for_a_manifest_whose_rig_is_a_string(self):
+        import contextlib
+        import io
+        stage_dir = self.root / "staged-old"
+        stage_dir.mkdir()
+        (stage_dir / "anim_manifest.json").write_text(json.dumps({"original": "x", "model": "a.nif", "states": {}, "anim": {"rig": "native", "clips": []}}))
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            self.assertEqual(mac.dump_stage(args, Fake(True)), 1)
-        text = buf.getvalue()
-        self.assertIn("block at position 1 is 'Button', the rig has 'Lid' there", text)
-        self.assertIn("<-- rig index 1 is 'Lid'", text)
+            self.assertEqual(mac.main(["inspect", "--stage", str(stage_dir)]), 2)
+        self.assertIn("re-stage", buf.getvalue())
 
     def test_quaternion_angle_axis_and_a_stage_without_files(self):
         import math as m
