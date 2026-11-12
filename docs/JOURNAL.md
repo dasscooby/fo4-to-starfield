@@ -2837,3 +2837,21 @@ The day's results that this journal did not yet hold, all on the owner's test PC
   a note naming the replacement or the proof: 20 pull requests (5 that add nothing to main, 15 replaced by merged
   work) and 30 issues. Kept open: 83 older pull requests that hold work not on main, 13 experiments and status notes
   that nothing replaces, and every issue with work left. Nothing was deleted; every branch is kept.
+
+## 2026-11-11: Codex / The Lone Wanderer — preserve two-kit launcher load order (FAL-354)
+
+Paperclip Ubuntu OptiPlex (`games`), synthetic files only; base `ba286735f320a80d10164e0327559bfb68202ba7`.
+The old `scripts/game/load_order.py target()` forces markers/bridge to the tail, reproducing the reported order
+when two kits follow them. `python3 -m unittest` on the new two-kit load-order and toggle-pair regressions fails
+in three subcases before the correction; the pure hold-off/on control passes. Removing the remaining group priority
+preserves any valid order while retaining master dependency repair, refusals and guarded backups.
+
+`python3 -m unittest tests.test_load_order tests.test_plugin_toggle tests.test_launcher_crashwatch -v`: 107 pass.
+Launcher CLI/GUI/syntax checks: 43 run, OK (one skip). `python3 scripts/guard.py`: OK.
+Private before/after logs: `.paperclip-evidence/fal354/` in the task workspace; no PC files committed.
+
+PC snapshot timing and save/reload remain unresolved/NOT_RUN: the supplied snapshots leave Mission in place,
+move MapMarkers behind two active kits and leave Bridge unticked. The launcher fixer runs before launch, while
+the reported console index during play reflects the old order; its reproduction alone does not attribute the
+post-session PC write. See `docs/testing/load-order.md` for interpretation and the one-kit-until-PC-validation
+test-list line. Independent exact-head QA, CI and PC session acceptance precede integration.

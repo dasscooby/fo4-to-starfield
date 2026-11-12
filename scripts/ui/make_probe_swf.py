@@ -3,7 +3,7 @@ drawn as dot-matrix blocks, written as a SWF from pure Python (no Flash tool, no
 
 usage: python scripts/ui/make_probe_swf.py --out <file.swf> [--label TEXT | --no-label] [--color RRGGBB]
                                            [--ink RRGGBB] [--width 1920] [--height 1080] [--uncompressed]
-                                           [--channel]
+                                           [--channel | --page]
        python scripts/ui/make_probe_swf.py --read <file.swf>         the header and every tag, as JSON
 
 The movie, in the shape Starfield's own menu movies have (compressed "CWS", SWF version 12, the ActionScript 3 flag in
@@ -16,10 +16,14 @@ FileAttributes; the PC's look at them with JPEXS, 10 Nov 2026), with nothing tha
 --channel (FAL-216, the plugin's Stage=3) adds, before the placements, DefineFont3 (id 3: the same 5 x 7 table as
 glyphs), DefineEditText (id 4: one read-only line in that font) and DefineSprite (id 7: a dark button with the label
 CLICK, shapes 5 and 6), placed by name as "fo4sfPosition" (depth 3) and "fo4sfButton" (depth 4); still no code.
-Without --channel the bytes are exactly stage (b)'s. No SetBackgroundColor: a menu movie draws over the game. Every
-shape's path is drawn clockwise on screen (y down) with its fill on the right of each edge (FillStyle1), the side its
-inside is on; the glyphs are drawn anticlockwise with FillStyle0. Output is deterministic: the same arguments give the
-same bytes (no time, no random). The file goes where --out says; nothing is written into the repo.
+Without --channel the bytes are exactly stage (b)'s. --page (FAL-272, the plugin's Stage=4) is the STAT page instead:
+a panel of 70 % x 76 % of the stage, DefineFont3 (id 3: the table plus PAGE_GLYPHS), a title, the tab line
+"fo4sfTab", seven lines "fo4sfLine0" to "fo4sfLine6", a hint, and two buttons "fo4sfTabButton" (NEXT TAB) and
+"fo4sfCloseButton" (CLOSE), each a sprite of the CLICK button's size; no label shape, still no code. No
+SetBackgroundColor: a menu movie draws over the game. Every shape's path is drawn clockwise on screen (y down) with its
+fill on the right of each edge (FillStyle1), the side its inside is on; the glyphs are drawn anticlockwise with
+FillStyle0. Output is deterministic: the same arguments give the same bytes (no time, no random). The file goes where
+--out says; nothing is written into the repo.
 """
 import argparse
 import json
@@ -256,18 +260,19 @@ DEFINE_EDIT_TEXT, DEFINE_SPRITE, DEFINE_FONT3 = 37, 39, 75
 TAG_NAMES.update({DEFINE_EDIT_TEXT: "DefineEditText", DEFINE_SPRITE: "DefineSprite", DEFINE_FONT3: "DefineFont3"})
 
 
-def glyph_squares(ch):
+def glyph_squares(ch, table=FONT):
     """The lit pixels of one character as squares in em units; the baseline is y 0 and the rows are above it."""
     dot = int(round(PX * DOT))
     return [(col * PX, (row - 7) * PX, dot, dot)
-            for row, bits in enumerate(FONT[ch]) for col in range(5) if bits >> (4 - col) & 1]
+            for row, bits in enumerate(table[ch]) for col in range(5) if bits >> (4 - col) & 1]
 
 
-def define_font3(font_id=FONT_ID):
-    """DefineFont3 of every character in FONT, with layout: advance six pixels, ascent seven, descent one, no
-    kerning. Wide offsets, and wide codes (DefineFont3 always has them); the code table is in ascending order."""
-    chars = sorted(FONT)
-    shapes = [square_records(glyph_squares(c), f"glyph {c!r}", glyph=True) for c in chars]
+def define_font3(font_id=FONT_ID, table=FONT):
+    """DefineFont3 of every character in `table` (FONT unless the page's), with layout: advance six pixels, ascent
+    seven, descent one, no kerning. Wide offsets, and wide codes (DefineFont3 always has them); the code table is in
+    ascending order."""
+    chars = sorted(table)
+    shapes = [square_records(glyph_squares(c, table), f"glyph {c!r}", glyph=True) for c in chars]
     offsets, at = [], 4 * (len(chars) + 1)                                             # from the offset table's start
     for s in shapes:
         offsets.append(at)
@@ -279,7 +284,7 @@ def define_font3(font_id=FONT_ID):
     body += struct.pack("<hhh", 7 * PX, PX, 0)                                          # ascent, descent, leading
     body += b"".join(struct.pack("<h", 6 * PX) for _ in chars)
     for c in chars:
-        sq = glyph_squares(c)
+        sq = glyph_squares(c, table)
         body += rect(min((x for x, _, _, _ in sq), default=0), max((x + w for x, _, w, _ in sq), default=0),
                      min((y for _, y, _, _ in sq), default=0), max((y + h for _, y, _, h in sq), default=0))
     return tag(DEFINE_FONT3, body + struct.pack("<H", 0))                               # KerningCount 0
@@ -322,22 +327,107 @@ def channel_tags(box, color, ink):
     return defs, [place_named(FIELD_ID, 3, FIELD_NAME), place_named(BUTTON_ID, 4, BUTTON_NAME)]
 
 
-def movie_bytes(width=1920, height=1080, color=PIPBOY_GREEN, ink=INK, label=LABEL, compressed=True, channel=False):
+# ------------------------------------------------------------------------------------------------ the STAT page
+# --page (FAL-272): the first page the owner uses by hand, the movie FO4SFPipboyMenu's Stage=4 fills. A larger panel
+# with a title, a tab line and PAGE_LINES lines the plugin writes twice a second, a hint, and two buttons whose clicks
+# the plugin hears: NEXT TAB shows the other set of lines, CLOSE closes the menu. Every field uses one embedded font,
+# the 5 x 7 table plus PAGE_GLYPHS (so the names of places print); the plugin writes only these characters, upper
+# case. Still no code: the plugin finds each child by its instance name, as on the channel movie.
+PAGE_GLYPHS = {
+    "'": (0x04, 0x04, 0x08, 0x00, 0x00, 0x00, 0x00), ",": (0x00, 0x00, 0x00, 0x00, 0x0C, 0x04, 0x08),
+    "(": (0x02, 0x04, 0x08, 0x08, 0x08, 0x04, 0x02), ")": (0x08, 0x04, 0x02, 0x02, 0x02, 0x04, 0x08),
+    "?": (0x0E, 0x11, 0x01, 0x02, 0x04, 0x00, 0x04), "!": (0x04, 0x04, 0x04, 0x04, 0x04, 0x00, 0x04),
+    "+": (0x00, 0x04, 0x04, 0x1F, 0x04, 0x04, 0x00), "%": (0x18, 0x19, 0x02, 0x04, 0x08, 0x13, 0x03),
+    "&": (0x0C, 0x12, 0x14, 0x08, 0x15, 0x12, 0x0D), "_": (0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1F),
+    "#": (0x0A, 0x0A, 0x1F, 0x0A, 0x1F, 0x0A, 0x0A), "=": (0x00, 0x00, 0x1F, 0x00, 0x1F, 0x00, 0x00),
+}
+PAGE_FONT = {**FONT, **PAGE_GLYPHS}
+PAGE_LINES = 7
+PAGE_TITLE = "FO4SF PIP-BOY  STAT"
+PAGE_TAB_TEXT = "TAB: WAITING FOR THE PLUGIN"
+PAGE_LINE_TEXT = "-"
+PAGE_HINT = "F10 OPENS AND CLOSES THIS PAGE"
+TAB_FIELD, LINE_FIELD = "fo4sfTab", "fo4sfLine"                # the lines are fo4sfLine0 ... fo4sfLine6
+TAB_BUTTON, CLOSE_BUTTON = "fo4sfTabButton", "fo4sfCloseButton"
+TAB_LABEL, CLOSE_LABEL = "NEXT TAB", "CLOSE"
+PAGE_ROW = FIELD_PX * 3 // 2                                    # a line's height in pixels (the field's, 1.5 em)
+PAGE_PAD = 24
+PAGE_BUTTON = (360, 90)                                         # the CLICK button's size, hit at 0x9 on the PC
+PAGE_TITLE_ID, PAGE_TAB_ID, PAGE_LINE0_ID = 4, 5, 6
+PAGE_HINT_ID = PAGE_LINE0_ID + PAGE_LINES
+TAB_RECT_ID, TAB_LABEL_ID, TAB_BUTTON_ID = PAGE_HINT_ID + 1, PAGE_HINT_ID + 2, PAGE_HINT_ID + 3
+CLOSE_RECT_ID, CLOSE_LABEL_ID, CLOSE_BUTTON_ID = PAGE_HINT_ID + 4, PAGE_HINT_ID + 5, PAGE_HINT_ID + 6
+
+
+def page_box(W, H):
+    """The page's panel in twips: 70 % x 76 % of the stage, centred."""
+    return (W - W * 7 // 10) // 2, (H - H * 19 // 25) // 2, W * 7 // 10, H * 19 // 25
+
+
+def page_columns(width=1920):
+    """How many characters one of the page's lines holds at that stage width (54 at 1920)."""
+    return (page_box(width * TWIPS, 0)[2] - 2 * PAGE_PAD * TWIPS) // (6 * FIELD_PX * TWIPS // 8)
+
+
+def page_tags(box, color, ink):
+    """The page's definitions and named placements inside the panel `box` (twips), from the top: the title, the tab
+    line, PAGE_LINES lines, then above the bottom edge the hint and the two buttons side by side."""
+    bx, by, bw, bh = box
+    pad, row = PAGE_PAD * TWIPS, PAGE_ROW * TWIPS
+    bw_, bh_ = PAGE_BUTTON[0] * TWIPS, PAGE_BUTTON[1] * TWIPS
+
+    def field(y):
+        return bx + pad, y, bw - 2 * pad, row
+
+    title_y = by + pad
+    tab_y = title_y + row + 8 * TWIPS
+    line_y = tab_y + row + 16 * TWIPS
+    button_y = by + bh - pad - bh_
+    hint_y = button_y - 16 * TWIPS - row
+    if line_y + PAGE_LINES * row > hint_y:
+        raise SwfError("the page's lines do not fit above its buttons")
+    tab_button = (bx + bw // 2 - 40 * TWIPS - bw_, button_y, bw_, bh_)
+    close_button = (bx + bw // 2 + 40 * TWIPS, button_y, bw_, bh_)
+    height = FIELD_PX * TWIPS
+    defs = define_font3(FONT_ID, PAGE_FONT)
+    defs += define_edit_text(PAGE_TITLE_ID, field(title_y), FONT_ID, height, ink, PAGE_TITLE)
+    defs += define_edit_text(PAGE_TAB_ID, field(tab_y), FONT_ID, height, ink, PAGE_TAB_TEXT)
+    for i in range(PAGE_LINES):
+        defs += define_edit_text(PAGE_LINE0_ID + i, field(line_y + i * row), FONT_ID, height, ink, PAGE_LINE_TEXT)
+    defs += define_edit_text(PAGE_HINT_ID, field(hint_y), FONT_ID, height, ink, PAGE_HINT)
+    buttons = (((TAB_RECT_ID, TAB_LABEL_ID, TAB_BUTTON_ID), TAB_LABEL, tab_button),
+               ((CLOSE_RECT_ID, CLOSE_LABEL_ID, CLOSE_BUTTON_ID), CLOSE_LABEL, close_button))
+    for (rect_id, label_id, sprite_id), label, box_ in buttons:
+        defs += define_shape3(rect_id, [box_], ink)
+        defs += define_shape3(label_id, label_squares(label, box_), color)
+        defs += define_sprite(sprite_id, [place_object2(rect_id, 1), place_object2(label_id, 2)])
+    places = [place_object2(PAGE_TITLE_ID, 2), place_named(PAGE_TAB_ID, 3, TAB_FIELD)]
+    places += [place_named(PAGE_LINE0_ID + i, 4 + i, f"{LINE_FIELD}{i}") for i in range(PAGE_LINES)]
+    places += [place_object2(PAGE_HINT_ID, 4 + PAGE_LINES), place_named(TAB_BUTTON_ID, 5 + PAGE_LINES, TAB_BUTTON),
+               place_named(CLOSE_BUTTON_ID, 6 + PAGE_LINES, CLOSE_BUTTON)]
+    return defs, places
+
+
+def movie_bytes(width=1920, height=1080, color=PIPBOY_GREEN, ink=INK, label=LABEL, compressed=True, channel=False,
+                page=False):
     """The whole movie. width/height in pixels; label None or "" for the rectangle alone; channel adds the data
-    channel's field and button (FAL-216). Without channel the bytes are stage (b)'s."""
+    channel's field and button (FAL-216). Without channel the bytes are stage (b)'s. page is the STAT page (FAL-272)
+    instead: its own panel, title and fields, no label shape."""
     if width <= 0 or height <= 0:
         raise SwfError("the stage needs a positive size")
+    if channel and page:
+        raise SwfError("--channel and --page are two different movies")
     W, H = width * TWIPS, height * TWIPS
-    box = ((W - W * 3 // 5) // 2, (H - H // 2) // 2, W * 3 // 5, H // 2)
+    box = page_box(W, H) if page else ((W - W * 3 // 5) // 2, (H - H // 2) // 2, W * 3 // 5, H // 2)
     body = rect(0, W, 0, H) + struct.pack("<HH", FRAME_RATE << 8, 1)
     body += tag(FILE_ATTRIBUTES, bytes([AS3, 0, 0, 0]))
     body += define_shape3(RECT_ID, [box], color)
     tags = [place_object2(RECT_ID, 1)]
-    if label:
+    if label and not page:
         body += define_shape3(LABEL_ID, label_squares(label, box), ink)
         tags.append(place_object2(LABEL_ID, 2))
-    if channel:
-        defs, places = channel_tags(box, color, ink)
+    if channel or page:
+        defs, places = page_tags(box, color, ink) if page else channel_tags(box, color, ink)
         body += defs
         tags += places
     body += b"".join(tags) + tag(SHOW_FRAME) + tag(END)
@@ -607,6 +697,9 @@ def main(argv=None):
     ap.add_argument("--uncompressed", action="store_true", help="FWS instead of CWS")
     ap.add_argument("--channel", action="store_true",
                     help=f"add the data channel (FAL-216): the field {FIELD_NAME!r} and the button {BUTTON_NAME!r}")
+    ap.add_argument("--page", action="store_true",
+                    help=f"the STAT page instead (FAL-272): {PAGE_LINES} lines, the buttons {TAB_BUTTON!r} and "
+                         f"{CLOSE_BUTTON!r}")
     a = ap.parse_args(argv)
     try:
         if a.read:
@@ -616,7 +709,7 @@ def main(argv=None):
             ap.error("--out or --read is needed")
         data = write_movie(a.out, width=a.width, height=a.height, color=int(a.color, 16), ink=int(a.ink, 16),
                            label=None if a.no_label else a.label, compressed=not a.uncompressed,
-                           channel=a.channel)
+                           channel=a.channel, page=a.page)
     except (SwfError, ValueError, OSError, zlib.error) as e:
         print(f"make_probe_swf: {e}", file=sys.stderr)
         return 1
