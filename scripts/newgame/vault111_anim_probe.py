@@ -24,6 +24,10 @@ PipboyGroundTake, VaultConsole, GearDoor) is reported like the listed ones, or t
 usage: python vault111_anim_probe.py --out <report.txt> [--data <Starfield Data>] [--port FO4Port.esm]
                                      [--archive <ba2> ...] [--game-archive <Starfield ba2> ...] [--fo4-data <Fallout 4 Data>] [--ref 00126D ...]
                                      [--base-edid <word> ...]
+Step 0 of the animation experiment (FAL-489): `--graphs` switches to a different, read-only report of the game's own graphs
+(.agx state tables, the ACTI/FURN that name them, their models); see vault111_anim_graphs.py for its arguments:
+    python vault111_anim_probe.py --graphs --out <report.txt> --data <Starfield Data> --game-archive "Starfield - Animations.ba2"
+                                  --game-archive "Starfield - Meshes*.ba2" [--model <meshes path> ...]
 It opens the plugin and the archives read-only and writes only --out. Nothing in the game folder changes; no install.
 By default the archives are every FO4Port*.ba2 in --data; --fo4-data adds Fallout4 - Meshes.ba2 and
 Fallout4 - Animations.ba2 (the source models and graphs), which settles whether a clip exists in the original.
@@ -478,6 +482,11 @@ def original_report(fo4, path):
 
 
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if "--graphs" in argv:
+        argv.remove("--graphs")
+        import vault111_anim_graphs
+        return vault111_anim_graphs.main(argv)
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", required=True)
     ap.add_argument("--data", default=STARFIELD)
