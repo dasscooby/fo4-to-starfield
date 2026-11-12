@@ -694,4 +694,21 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
         door["rebound_skinned_pieces"] = len(rebound)
     if aliases:
         door["sequence_aliases"] = dict(aliases)
+    if plan_hook is not None:                       # an animated object that is no door: say what became of every shape
+        bone_of = {a["shape"]: bones[a["bone"]]["name"] for a in plan["attachments"]}
+        report = []
+        for s, m in zip(shapes, material_paths):
+            name = shape_name(s.block, s)
+            keys = [k for k in bone_of if k == s.block or str(k).startswith(f"{s.block}.")]
+            if m is None:
+                fate = "left out: no material (effect shader or marker)"
+            elif name in dropped_skinned:
+                fate = "dropped: skinned, a rig cannot carry it"
+            elif keys:
+                fate = "kept"
+            else:
+                fate = "not attached"
+            report.append({"shape": name, "skinned": bool(s.skinned), "material": m, "fate": fate,
+                           "bones": sorted({bone_of[k] for k in keys})})
+        door["shapes"] = report
     return files, door

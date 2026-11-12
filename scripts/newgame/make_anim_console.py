@@ -118,6 +118,19 @@ def sequences_table(raw):
     return rows
 
 
+def sequence_motion(raw, names):
+    """{sequence: [{bone, travel_m, rotation_deg, axis}]}: what each track of each sequence does from its first to its last
+    sample (door_rig.open_motion over a plan that keeps every named sequence). A track listed in sequences_table can stand
+    still: travel 0 and 0 degrees. {} when the plan cannot be made."""
+    from fo4sf import door_rig, nif
+    try:
+        src = nif.parse(raw)
+        plan = door_rig.plan(src, placed=True, allowed=tuple(names))
+        return {n: door_rig.open_motion(plan, 0.01428, n) for n in names if any(c["name"] == n for c in plan["clips"])}
+    except (nif.NifError, KeyError, ValueError, IndexError, struct.error):
+        return {}
+
+
 def clips(a):
     from fo4sf import pipeline
     port = os.path.join(a.port_data or a.starfield_data, "FO4Port.esm")
@@ -125,8 +138,14 @@ def clips(a):
                            os.path.join(a.starfield_data, "Starfield.esm"), "--edid", a.edid]).stdout)
     name, raw = find_original(pipeline.Fo4Archives(a.fo4_data), info["model"], a.model)
     print(f"original: {name} ({len(raw)} bytes); port base {a.edid} id 0x{info['base_id']} model {info['model']}")
-    for r in sequences_table(raw):
-        print(f"  {r['name']}: {r['seconds']} s, moves {', '.join(r['bones']) or 'nothing'}; text keys: {'; '.join(r['text_keys']) or 'none'}")
+    rows = sequences_table(raw)
+    motion = sequence_motion(raw, [r["name"] for r in rows])
+    for r in rows:
+        print(f"  {r['name']}: {r['seconds']} s, tracks {', '.join(r['bones']) or 'none'}; text keys: {'; '.join(r['text_keys']) or 'none'}")
+        for m in motion.get(r["name"], []):
+            print(f"      {m['bone']}: travel {m['travel_m']} m, turns {m['rotation_deg']} deg (first to last sample)")
+        if r["name"] not in motion:
+            print("      motion: unread (the rig plan did not take this sequence)")
     return 0
 
 

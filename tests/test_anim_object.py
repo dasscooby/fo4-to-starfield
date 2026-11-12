@@ -131,8 +131,9 @@ class BuilderTests(unittest.TestCase):
                     for suffix in (".af", ".afx"):
                         out[f"{native_door.CLIP_DIR}/{c['name']}{suffix}"] = (pathlib.Path(tmp) / (c["name"] + suffix)).read_bytes()
             return out
+        mats = kw.get("mats") or ["Materials\\x.mat"] * count
         result = convert_static.convert_multipart_door(
-            nif.serialize(f), "fo4port/vault/console_anim", ["Materials\\x.mat"] * count, clip_files, collision_template=fake_template(),
+            nif.serialize(f), "fo4port/vault/console_anim", mats, clip_files, collision_template=fake_template(),
             leaf_physics_donor=donor(), aliases=STATES, drop_skinned=True, allowed=tuple(STATES.values()),
             expect_clips=anim_object.slot_names(STATES), plan_hook=hook, anim_graph=anim_object.GRAPH, motion_clip="StateA_Play")
         return result, seen["plan"]
@@ -154,6 +155,43 @@ class BuilderTests(unittest.TestCase):
         self.assertIn("meshes/fo4port/vault/console_anim.nif", files)
         self.assertEqual(set(node_names(nif.parse(files["meshes/fo4port/vault/console_anim.nif"]))) >= {"LeafA", "LeafB"}, True)
         self.assertEqual(files[base + "animations/StateA_Idle.af"], b"LeafA,LeafB|2")     # one key per track: the hold
+
+    def test_the_manifest_says_what_became_of_every_shape_and_which_track_moves(self):
+        (_, anim), plan = self.build()
+        rows = anim["shapes"]
+        self.assertEqual(len(rows), len([s for s in nif.fo4_trishapes(console_nif()) if s.positions and s.triangles]))
+        self.assertEqual({r["fate"] for r in rows}, {"kept"})
+        self.assertTrue(all(r["bones"] and r["material"] == "Materials\\x.mat" for r in rows))
+        table = {c["name"]: c for c in anim_object.clip_table(plan)}
+        play, hold = table["StateA_Play"], table["StateA_Idle"]
+        self.assertEqual(sorted(m["bone"] for m in play["motion"]), play["bones"])
+        self.assertTrue(any(m["travel_m"] != [0.0, 0.0, 0.0] or m["rotation_deg"] for m in play["motion"]))   # the leaves move
+        self.assertTrue(all(m["travel_m"] == [0.0, 0.0, 0.0] and m["rotation_deg"] == 0.0 for m in hold["motion"]))   # a hold stands still
+
+    def test_a_shape_without_a_material_is_reported_as_left_out(self):
+        f = console_nif()
+        count = len([s for s in nif.fo4_trishapes(f) if s.positions and s.triangles])
+        mats = ["Materials\\x.mat"] * count
+        mats[0] = None                                           # the glass, say: an effect shader with no material
+        (_, anim), _ = self.build(mats=mats)
+        self.assertTrue(anim["shapes"][0]["fate"].startswith("left out"))
+        self.assertEqual(anim["shapes"][0]["bones"], [])
+        self.assertEqual({r["fate"] for r in anim["shapes"][1:]}, {"kept"})
+
+    def test_a_door_manifest_has_no_shapes_entry(self):
+        f = door_nif(two_leaves())
+        count = len([s for s in nif.fo4_trishapes(f) if s.positions and s.triangles])
+
+        def clip_files(plan, scale):
+            with tempfile.TemporaryDirectory() as tmp:
+                prepared = fake_exporter(plan, "x.dll", tmp, scale)
+                out = {native_door.RIG_FILE: (pathlib.Path(tmp) / "door.rig").read_bytes()}
+                for c in prepared["clips"]:
+                    out[f"{native_door.CLIP_DIR}/{c['name']}.af"] = b"af"
+            return out
+        _, door = convert_static.convert_multipart_door(nif.serialize(f), "fo4port/d", ["a.mat"] * count, clip_files,
+                                                        collision_template=fake_template(), leaf_physics_donor=donor())
+        self.assertNotIn("shapes", door)                           # the door manifest is what it was
 
     def test_the_afx_files_name_their_own_slot_and_hold_the_sound_only_on_a_play_slot(self):
         (files, _), _ = self.build(foley=None)

@@ -103,11 +103,15 @@ def descriptors(plan, foley=None):
 
 
 def clip_table(plan, unit_scale=1.0):
-    """Rows for the stager's report and the card: name, seconds, frames, bones moved, hold_of, audio frames (no foley)."""
+    """Rows for the stager's report and the card: name, seconds, frames, bones with a track, hold_of, audio frames (no foley),
+    and per track what it does from the first to the last sample (door_rig.open_motion: travel in metres, rotation in degrees).
+    "bones" lists every track; "motion" says which of them actually move: a track can exist and stand still."""
+    from . import door_rig
     rows = []
     for clip in plan["clips"]:
         rows.append({"name": clip["name"], "seconds": round(clip["duration"], 4), "frames": round(clip["duration"] * FPS),
                      "bones": sorted(t["name"] for t in clip["tracks"]), "hold_of": clip.get("hold_of"),
+                     "motion": door_rig.open_motion(plan, unit_scale, clip["name"]),
                      "sound_keys": [round(e["elapsed"], 3) for e in clip.get("events", [])
                                     if str(e.get("text", e.get("name", ""))).lower().startswith("sound")]})
     return rows

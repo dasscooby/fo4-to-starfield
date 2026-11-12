@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
@@ -72,6 +73,7 @@ class ScriptTests(unittest.TestCase):
         self.assertIn('" after=" + after', PSC)                                      # Done's after= is the clip's length
         self.assertEqual(PSC.count("PlayRt = Utility.GetCurrentRealTime()"), 2)      # PlayOne and ActivateOnce
         self.assertIn('Say("READ s" + stage + " " + when + " 3d=" + r.Is3DLoaded()', PSC)      # 3D loaded / distance / height difference on screen
+        self.assertIn('" az=" + r.GetAngleZ() + " pa=" + p.GetAngleZ())', PSC)           # the copy's and the player's heading
         self.assertIn('Say("SPAWN s" + stage + " moved=" + moved', PSC)
         for what in ('Say("EV " + asEventName + " w" + ListenStage + " t" + after)', 'Say("PLAY s" + stage + " " + n + " ok=" + ok)',
                      'Say("W s" + stage + " quiet")', 'Say("ACTIVATE s" + stage)'):
@@ -118,6 +120,27 @@ class SequencesTableTests(unittest.TestCase):
         for r in rows:
             self.assertEqual((r["seconds"], r["bones"]), (1.0, ["LeafA", "LeafB"]))
             self.assertEqual(r["text_keys"], [])
+
+
+class ClipsCommandTests(unittest.TestCase):
+    def test_clips_prints_the_motion_of_every_track_not_only_which_bones_have_one(self):
+        import contextlib
+        import io
+        raw = nif.serialize(console_nif())
+        motion = mac.sequence_motion(raw, ["Stage1", "Stage2"])
+        self.assertEqual(sorted(motion), ["Stage1", "Stage2"])
+        self.assertEqual(sorted(m["bone"] for m in motion["Stage1"]), ["LeafA", "LeafB"])
+        self.assertEqual(mac.sequence_motion(b"not a nif", ["Stage1"]), {})
+        a = type("A", (), dict(fo4_data="fo4", port_data="", starfield_data="sf", model="", edid=mac.EDID))()
+        fake = type("S", (), {"mesh": staticmethod(lambda n: raw), "mesh_names": staticmethod(lambda p: [])})()
+        from fo4sf import pipeline
+        buf = io.StringIO()
+        with unittest.mock.patch.object(mac, "run", lambda *x, **k: type("R", (), {"stdout": "BASE_ID 0x1\nMODEL Meshes/a/console01.nif\n"})()), \
+                unittest.mock.patch.object(pipeline, "Fo4Archives", lambda d: fake), contextlib.redirect_stdout(buf):
+            self.assertEqual(mac.clips(a), 0)
+        out = buf.getvalue()
+        self.assertIn("Stage1: 1.0 s, tracks LeafA, LeafB", out)
+        self.assertRegex(out, r"LeafA: travel \[[-\d., ]+\] m, turns [-\d.]+ deg")
 
 
 class FakeSrc:
