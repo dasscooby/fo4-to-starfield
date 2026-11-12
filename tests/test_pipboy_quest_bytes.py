@@ -104,6 +104,8 @@ class PluginTests(unittest.TestCase):
         self.assertIn("`setstage <id> <n>`", card)
         self.assertIn("form id", pqb.__doc__)
         for text in (self.readme, card, pqb.__doc__):
+            self.assertIn("load index", text)
+        for text in (self.readme, card, pqb.__doc__):
             self.assertNotIn("setstage FO4SF_Min00", text)
 
     def test_the_readme_names_the_dump_and_the_helper(self):

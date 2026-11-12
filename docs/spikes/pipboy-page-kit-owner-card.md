@@ -69,7 +69,7 @@ of `docs/spikes/pipboy-channel-bridge-session.md`, sections 1 to 3, with these c
 | STAT / STATUS | CELL, WORLD, TIME | where the player stands; TIME's minutes move while the Pip-Boy is open. Console: `getglobalvalue 00000039` (days passed; `00000038` is the hour); by name the console refuses both (PC run, 11 Nov, 0393cbe3) |
 | STAT / SPECIAL | STRENGTH to LUCK | `player.getav strength`, `player.getav perception`, `player.getav endurance`, `player.getav charisma`, `player.getav intelligence`, `player.getav agility`, `player.getav luck` |
 | DATA / KIT TEST | ROW n OF 30, KEY MOVES, CLICK MOVES | none: no game value |
-| DATA / QUESTS | FORM, STAGE | `getstage <id>` and `setstage <id> <n>`, `<id>` the mission's form id as FORM shows it (`07000800` on the PC, 12 Nov); by its editor ID (`FO4SF_Min00`) the console refuses it ("not found for parameter Quest"). STAGE needs `MissionStageAt=` in `[Kit]` (README, `quests`), else `?` |
+| DATA / QUESTS | FORM, STAGE | `getstage <id>` and `setstage <id> <n>`, `<id>` the mission's form id as FORM shows it (`07000800` on the PC's load order, 12 Nov: the first two digits are the plugin's load index, so read it off FORM); by its editor ID (`FO4SF_Min00`) the console refuses it ("not found for parameter Quest"). STAGE needs `MissionStageAt=` in `[Kit]` (README, `quests`), else `?` |
 
 **What the log must show:** see `sfse/FO4SFPipboyMenu/README.md`, "PASS at (e)".
 
