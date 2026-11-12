@@ -235,6 +235,26 @@ class ToolTests(ToolBase):
         self.assertIn(f"ACTI FO4SF_AnimGenericControl model Meshes/Props/ArtifactHolder/ArtifactHolder01.nif components 1 graph ANAM {ANAM} "
                       f"BNAM Props/ArtifactHolder/CharacterAssets/skeleton.rig CNAM {mag.CNAM}".replace("\\", "/"), slashed)       # the vanilla model and rig, our graph and folder
 
+    def test_the_copy_keeps_the_vanilla_components_dnam_and_enam(self):
+        """The Courier's FAL-579 hold: the control's component was rebuilt with only ANAM, BNAM, CNAM and so dropped DNAM and ENAM. The fixture sets both;
+        the copy must carry them, and check must fail when it does not (checked against a template whose DNAM differs)."""
+        info = mag.parse_info(self.run_tool("info", self.master).stdout)
+        self.assertEqual((info["dnam"], info["enam"]), ("Props\\ArtifactHolder\\DNAM-KEPT", "Props\\ArtifactHolder\\ENAM-KEPT"))
+        out = self.root / "b7"
+        self.assertEqual(self.run_tool("build", self.master, out, ANAM, mag.CNAM).returncode, 0)
+        flat = self.run_tool("check", out / PLUGIN, self.master, ANAM, mag.CNAM).stdout.replace("\\\\", "\\")
+        self.assertIn("DNAM Props\\ArtifactHolder\\DNAM-KEPT ENAM Props\\ArtifactHolder\\ENAM-KEPT", flat)
+        other = self.root / "o2"
+        other.mkdir()
+        raw = bytearray(self.master.read_bytes())
+        i = raw.find(b"DNAM-KEPT")
+        self.assertGreater(i, 0)
+        raw[i:i + 9] = b"DNAM-DIFF"
+        (other / "Starfield.esm").write_bytes(bytes(raw))
+        proc = self.run_tool("check", out / PLUGIN, other / "Starfield.esm", ANAM, mag.CNAM)
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertIn("DNAM is ", proc.stdout)
+
     def test_the_plugin_adds_one_quest_and_one_acti_and_overrides_none(self):
         """Raw bytes: every record carries load index 1 (our own plugin; Starfield.esm is master 0); no REFR, no CELL."""
         out = self.root / "b2"

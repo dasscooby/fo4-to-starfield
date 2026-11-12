@@ -64,8 +64,9 @@ static class Control
     {
         var acti = sf.Activators.FirstOrDefault(a => a.FormKey == Sf(VanillaId))
                    ?? throw new Refusal($"no ACTI {VanillaId:X6} in Starfield.esm (the vanilla holder the control is copied from)");
-        graph = acti.Components.OfType<IAnimationGraphComponentGetter>().FirstOrDefault()
-                ?? throw new Refusal($"ACTI {VanillaId:X6} {acti.EditorID} has no animation graph component");
+        var graphs = acti.Components.OfType<IAnimationGraphComponentGetter>().ToList();
+        if (graphs.Count != 1) throw new Refusal($"ACTI {VanillaId:X6} {acti.EditorID} has {graphs.Count} animation graph components, not exactly one to change");
+        graph = graphs[0];
         if (graph.ANAM == null || !graph.ANAM.Contains(VanillaGraphWord, StringComparison.OrdinalIgnoreCase))
             throw new Refusal($"ACTI {VanillaId:X6} {acti.EditorID} names graph {graph.ANAM}, not {VanillaGraphWord}");
         if (string.IsNullOrEmpty(graph.BNAM) || string.IsNullOrEmpty(graph.CNAM))
@@ -98,12 +99,15 @@ static class Control
     }
 
     // a copy of the vanilla record under our form key: every field and component the vanilla one has, but the graph component
-    static Mutagen.Bethesda.Starfield.Activator MakeControl(IActivatorGetter vanilla, string anam, string cnam, string vanillaBnam)
+    static Mutagen.Bethesda.Starfield.Activator MakeControl(IActivatorGetter vanilla, string anam, string cnam)
     {
         var copy = vanilla.Duplicate(Own(ControlId));
         copy.EditorID = ControlEdid;
-        foreach (var old in copy.Components.OfType<AnimationGraphComponent>().ToList()) copy.Components.Remove(old);
-        copy.Components.Add(new AnimationGraphComponent { ANAM = anam, BNAM = vanillaBnam, CNAM = cnam });
+        // change ONLY the graph (ANAM) and the clip folder (CNAM) of the copied component: BNAM, DNAM, ENAM and anything else it carries stay as the
+        // vanilla record has them (a component rebuilt from scratch would drop the fields this tool does not name: the Courier's FAL-579 hold)
+        var comp = copy.Components.OfType<AnimationGraphComponent>().Single();
+        comp.ANAM = anam;
+        comp.CNAM = cnam;
         return copy;
     }
 
@@ -116,6 +120,8 @@ static class Control
         Console.WriteLine($"anam={graph.ANAM}");
         Console.WriteLine($"bnam={graph.BNAM}");
         Console.WriteLine($"cnam={graph.CNAM}");
+        Console.WriteLine($"dnam={graph.DNAM}");
+        Console.WriteLine($"enam={graph.ENAM}");
         Console.WriteLine($"components={acti.Components.Count()}");
         return 0;
     }
@@ -129,7 +135,7 @@ static class Control
         mod.ModHeader.Flags |= StarfieldModHeader.HeaderFlag.Master;               // as every plugin of ours that loads
         mod.ModHeader.Author = "fo4-to-starfield";
         mod.Quests.Add(MakeQuest());
-        mod.Activators.Add(MakeControl(vanilla, anam, cnam, graph.BNAM!));
+        mod.Activators.Add(MakeControl(vanilla, anam, cnam));
         mod.ModHeader.Stats.NextFormID = 0x802;
         // the copy points into Starfield.esm (keywords, sounds, ...): name the master (the check asserts exactly this one)
         mod.ModHeader.MasterReferences.Add(new MasterReference { Master = SfEsm });
@@ -198,7 +204,7 @@ static class Control
         if (a != null)
         {
             var g = a.Components.OfType<IAnimationGraphComponentGetter>().ToList();
-            Console.WriteLine($"  ACTI {a.EditorID} model {a.Model?.File} components {a.Components.Count()} graph {(g.Count == 1 ? $"ANAM {g[0].ANAM} BNAM {g[0].BNAM} CNAM {g[0].CNAM}" : $"{g.Count} graph components")}");
+            Console.WriteLine($"  ACTI {a.EditorID} model {a.Model?.File} components {a.Components.Count()} graph {(g.Count == 1 ? $"ANAM {g[0].ANAM} BNAM {g[0].BNAM} CNAM {g[0].CNAM} DNAM {g[0].DNAM ?? "none"} ENAM {g[0].ENAM ?? "none"}" : $"{g.Count} graph components")}");
             Need(a.EditorID == ControlEdid, $"the ACTI is {a.EditorID}, not {ControlEdid}");
             Need(string.Equals(a.Model?.File, vanilla.Model?.File, StringComparison.OrdinalIgnoreCase), "the model is not the vanilla holder's");
             Need(g.Count == 1, "not exactly one animation graph component");
@@ -209,6 +215,8 @@ static class Control
                 Need(g[0].BNAM == vgraph.BNAM, $"rig is {g[0].BNAM}, not the vanilla holder's {vgraph.BNAM}");
                 Need(g[0].CNAM == cnam, $"clip folder is {g[0].CNAM}, not {cnam}");
                 Need(g[0].CNAM != vgraph.CNAM, "the clip folder is still the vanilla holder's");
+                Need(g[0].DNAM == vgraph.DNAM, $"DNAM is {g[0].DNAM ?? "none"}, not the vanilla holder's {vgraph.DNAM ?? "none"}");
+                Need(g[0].ENAM == vgraph.ENAM, $"ENAM is {g[0].ENAM ?? "none"}, not the vanilla holder's {vgraph.ENAM ?? "none"}");
             }
             Need(a.Components.Count() == vanilla.Components.Count(), $"{a.Components.Count()} components, the vanilla holder has {vanilla.Components.Count()}");
             Need(a.FormKey != vanilla.FormKey, "the control has the vanilla form key (it would be an override)");
@@ -229,6 +237,7 @@ static class Control
         {
             ANAM = "AnimTextData\\Tables\\Graphs\\ActivatorStateGraph01.agx",
             BNAM = "Props\\ArtifactHolder\\CharacterAssets\\skeleton.rig", CNAM = "Props\\ArtifactHolder\\Animations",
+            DNAM = "Props\\ArtifactHolder\\DNAM-KEPT", ENAM = "Props\\ArtifactHolder\\ENAM-KEPT",     // the real record's are unread: the fixture sets both so a drop shows
         });
         mod.Activators.Add(acti);
         Directory.CreateDirectory(outDir);
