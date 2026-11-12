@@ -801,13 +801,20 @@ Copy-Item "D:\Modding\staging\focc_sidecar_$date\FOCCSidecar.dll" "$sf\Data\SFSE
 Copy-Item "D:\Modding\staging\focc_sidecar_$date\FOCCSidecar.ini" "$sf\Data\SFSE\Plugins\FOCCSidecar.ini"
 (Get-Content "$sf\Data\SFSE\Plugins\FOCCSidecar.ini") -replace 'bEnabled=0','bEnabled=1' | Set-Content -Encoding ASCII "$sf\Data\SFSE\Plugins\FOCCSidecar.ini"
 Get-Content "$sf\Data\SFSE\Plugins\FOCCSidecar.ini"
+$rt = "$saves\FO4SF-Runtime"; $had_rt = Test-Path "$sf\Data\SFSE\Plugins\FO4SF-Runtime.ini"
+if (-not $had_rt) { Set-Content -Encoding UTF8 "$sf\Data\SFSE\Plugins\FO4SF-Runtime.ini" "[Runtime]`r`nDir=$rt" }
+Get-Content "$sf\Data\SFSE\Plugins\FO4SF-Runtime.ini"
 Get-FileHash -Algorithm SHA256 "$sf\Data\SFSE\Plugins\FOCCSidecar.dll"
 ```
 
 Expect the ini to read `bEnabled=1` (the build writes 0, the kill switch; without 1 the dll loads idle, logs `step=off`
-and writes no `FOCCSidecar\` folder, so P1-3 would be INCONCLUSIVE). The libxse build also wants
+and writes nothing, so P1-3 would be INCONCLUSIVE). Since FAL-246 the sidecars and `focc_sidecar.log` go to the
+run-time folder `FO4SF-Runtime.ini` names (`$rt`, beside the saves; an existing file stays and its `Dir` is `$rt`),
+not under `Data`: no `FO4SF-Runtime.ini`, or a `Dir` whose parent does not exist, is `refuse step=runtime_dir` in
+`FOCCSidecar.log` and no sidecar at all (`sfse/FOCCSidecar/README.md`, "Where the files land"). The libxse build also wants
 `versionlib-1-16-244-0.bin` in the same folder (SFSE checks that an Address Library user has it; the plugin reads no id
-from it), the file FOCCPing and FO4SFPipboyMenu use. Uninstall = delete `FOCCSidecar.dll` and `FOCCSidecar.ini` (and the `FOCCSidecar\` folder beside it once collected). If the game does not reach
+from it), the file FOCCPing and FO4SFPipboyMenu use. Uninstall = delete `FOCCSidecar.dll` and `FOCCSidecar.ini`, and `FO4SF-Runtime.ini` if `$had_rt` was false; `$rt` is
+player data and stays. If the game does not reach
 the main menu, delete it at once (rule 7).
 
 **Job focc-P1-3 (run). Game: launched through `sfse_loader.exe`, not Steam** (cycle.ps1 is not the path here).
@@ -822,9 +829,9 @@ loader, in the save menu delete `focc_p1_b`, quit.
 
 ```powershell
 $out = "D:\Modding\testqueue\focc_P1_$date"; New-Item -ItemType Directory -Force "$out\sfse" | Out-Null
-Copy-Item "$sf\Data\SFSE\Plugins\FOCCSidecar\focc_sidecar.log" "$out\sfse\"
+Copy-Item "$rt\logs\focc_sidecar.log" "$out\sfse\"
 Copy-Item "$(Split-Path $saves)\SFSE\Logs\FOCCSidecar.log" "$out\sfse\"   # the plugin's own log (step= and refuse step= lines)
-Copy-Item "$sf\Data\SFSE\Plugins\FOCCSidecar\sidecars" "$out\sfse\sidecars" -Recurse
+Copy-Item "$rt\sidecars" "$out\sfse\sidecars" -Recurse
 Get-ChildItem $saves -Filter *.sfs | Select Name,Length | ConvertTo-Json > "$out\saves.json"
 $env:PYTHONPATH = "src"; python -m fo4sf.combined.probes p1 $out; $LASTEXITCODE
 ```

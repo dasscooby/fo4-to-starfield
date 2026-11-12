@@ -9,7 +9,7 @@
 includes("lib/commonlibsf")
 
 set_project("FOCCSidecar")
-set_version("0.2.0")
+set_version("0.3.0")
 set_license("GPL-3.0")
 set_languages("c++23")
 set_warnings("allextra")
@@ -28,7 +28,7 @@ target("FOCCSidecar", function()
     set_values("commonlib.plugin.install", false)
 
     add_files("src/**.cpp", "sha256.cpp")
-    add_headerfiles("src/**.h", "codec.h", "sha256.h")
+    add_headerfiles("src/**.h", "codec.h", "runtime_dir.h", "sha256.h")
     add_includedirs("src", ".")
     set_pcxxheader("src/pch.h")
 end)
