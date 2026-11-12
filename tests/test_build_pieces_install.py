@@ -17,7 +17,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(ROOT / "scripts" / "planet"))
 sys.path.insert(0, str(ROOT / "scripts" / "game"))
 sys.path.insert(0, str(ROOT / "src"))
-from ba2_fixture import archive_from_tree  # noqa: E402
+from ba2_fixture import general_archive, texture_archive  # noqa: E402
 from fo4sf.planet import esm  # noqa: E402
 import exp_install  # noqa: E402
 import make_build_pieces as mws  # noqa: E402
@@ -74,8 +74,11 @@ class BuildPiecesInstallTests(unittest.TestCase):
         old_build = exp_install.build_ba2
         self.addCleanup(setattr, exp_install, "build_ba2", old_build)
 
-        def stub_build(a, root_dir, out):
-            write(out, archive_from_tree(Path(root_dir)))
+        def stub_build(a, root_dir, out, textures=False):
+            root_p = Path(root_dir)
+            files = {q.relative_to(root_p).as_posix(): q.read_bytes() for q in sorted(root_p.rglob("*")) if q.is_file()}
+            tex = {k: v for k, v in files.items() if k.startswith("Textures/")}
+            write(out, texture_archive(tex) if textures else general_archive({k: v for k, v in files.items() if k not in tex}))
             return out
         exp_install.build_ba2 = stub_build
 
@@ -126,6 +129,32 @@ class BuildPiecesInstallTests(unittest.TestCase):
         self.assertEqual(self.lines(), ["# header", "*FO4Port.esm", "*FO4TerrainCore.esm"])
         self.assertEqual(self.read(exp_install.RECORD), EXP_RECORD)
         self.assertEqual(self.read(planet_probe_install.RECORD), PLANET_RECORD)
+
+    def test_pictures_go_into_their_own_texture_archive_and_come_out_again(self):
+        from fo4sf.workshop import piece_icons
+        rel = piece_icons.icon_path(PLUGIN, 0x802)
+        dds = piece_icons.dds(1, "FO4Core_junkwall01")
+        write(os.path.join(self.staged, "Data", *rel.split("/")), dds)
+        plan_p = os.path.join(self.staged, "plan.json")
+        plan = json.load(open(plan_p, encoding="utf-8"))
+        plan["outputs"]["Data/" + rel] = sha(dds)
+        with open(plan_p, "w", encoding="utf-8") as f:
+            json.dump(plan, f)
+        code, out = self.run_main("install", "--dir", self.staged)
+        self.assertEqual(code, 0, out)
+        for name in (PLUGIN, "FO4SFBuildPieces - Main.ba2", "FO4SFBuildPieces - Textures.ba2", pai.RECORD):
+            self.assertTrue(os.path.isfile(os.path.join(self.data, name)), name)
+        from fo4sf import ba2
+        main = ba2.Ba2(os.path.join(self.data, "FO4SFBuildPieces - Main.ba2"))
+        tex = ba2.Ba2(os.path.join(self.data, "FO4SFBuildPieces - Textures.ba2"))
+        self.assertEqual([e.name for e in main.entries], ["Scripts/FO4SF_BPQuest.pex"])      # the picture is not in the General archive
+        self.assertEqual((tex.kind, [e.name for e in tex.entries]), ("DX10", [rel]))
+        self.assertFalse(os.path.exists(os.path.join(self.data, "Textures")))                  # packed, not loose
+        self.assertEqual(self.run_main("install", "--dir", self.staged)[1].strip().splitlines()[-1], "already installed")
+        code, out = self.run_main("uninstall")
+        self.assertEqual(code, 0, out)
+        for name in (PLUGIN, "FO4SFBuildPieces - Main.ba2", "FO4SFBuildPieces - Textures.ba2", pai.RECORD):
+            self.assertFalse(os.path.exists(os.path.join(self.data, name)), name)
 
     def test_a_changed_stage_is_refused(self):
         with open(os.path.join(self.staged, PLUGIN), "ab") as f:
