@@ -6,13 +6,15 @@ usage:
       co_Outpost_Crafting_WorkbenchIndustrialStation 2E2F2C): its created object, workbench keyword, filters, build limit,
       components, the other recipes under the same workbench keyword, the outpost category keywords (dotnet/BuildPieces).
   python make_build_pieces.py core [--core <FO4TerrainCore.esm>] [--pieces a,b,c]
-      read only: the statics of the installed core and the three or four a build would use (editor id, local id, model).
+      read only: the statics of the installed core and the pieces a build would use (editor id, local id, model).
   python make_build_pieces.py precheck [--content-resources <zip>] [--out <precheck.json>]
       read only: every native the script needs, looked up in Starfield's base sources. Exit 1 when one is missing.
   python make_build_pieces.py stage --out <dir> [--starfield ..] [--core ..] [--compiler ..] [--content-resources ..]
                                      [--pieces a,b,c] [--shell clone|plain] [--category vanilla|add|replace] [--cobj ..]
+                                     [--tab ..] [--workbench <kywd>] [--filter <kywd|own>] [--variants (EXPERIMENTAL: crashes the game at load)] [--inner same|bare] [--lead none|shells]
+                                     [--pictures N (default: every piece with --set fo4)] [--template-filing] [--set fo4]
       1. dotnet/BuildPieces build + check against the Starfield.esm and core given (offline_check.txt);
-      2. the Papyrus compile of FO4SF_BPQuest with the three or four core ids put in (the ;COREn lines);
+      2. the Papyrus compile of FO4SF_BPQuest with the core ids put in (the ;COREIDS line);
       3. plan.json (SHA-256 of every file and of both inputs, the variant, the pieces) and README.txt. Built in a new
          <out>.partial-<time>-<pid> and renamed to <out> only when every step passed; an existing <out> is refused.
   python make_build_pieces.py log [--file <FO4SFBP.0.log>]
@@ -37,7 +39,7 @@ sys.path.insert(0, os.path.join(REPO, "scripts", "newgame"))
 sys.path.insert(0, os.path.join(REPO, "src"))
 from make_newgame import extract_sources, new_partial, run  # noqa: E402
 import make_workshop_probe as wp  # noqa: E402
-from fo4sf.workshop import build_pieces_log  # noqa: E402
+from fo4sf.workshop import build_pieces_log, piece_icons  # noqa: E402
 
 PROJECT = os.path.join(REPO, "dotnet", "BuildPieces")
 PLUGIN = "FO4SFBuildPieces.esm"
@@ -54,18 +56,22 @@ REQUIRED = {
     "ScriptObject": ["StartTimer"],
     "Form": ["GetFormID"],
 }
-CORE_LINE = re.compile(r"^int CoreId(?P<n>[1-4]) = 0 +;CORE(?P=n)$", re.M)
+CORE_LINE = re.compile(r"^    ;COREIDS$", re.M)
+MAX_PIECES = 40
+# the default placement of --set fo4 (rung A, PC pass at 211dae28): the recipes keep workbench keyword 2CFDE6 (the workshop offers them)
+# and are filed by filter 06D72D (the MISCELLANEOUS tab, after its two vanilla entries); --template-filing keeps the template's instead
+FO4_WORKBENCH, FO4_FILTER = "2CFDE6", "06D72D"
 
 
 def set_core_ids(text, pieces):
-    """The script's text with the pieces' core local ids put in (;COREn lines); n > len(pieces) stay 0 (no such piece)."""
-    def sub(m):
-        n = int(m.group("n"))
-        return f"int CoreId{n} = 0x{pieces[n - 1]['core_id']:06X}  ;CORE{n}" if n <= len(pieces) else m.group(0)
-    new = CORE_LINE.sub(sub, text)
-    if len(CORE_LINE.findall(text)) != 4:
-        sys.exit("the script has not four 'int CoreIdN = 0 ;COREN' lines to put the ids into")
-    return new
+    """The script's text with the pieces' core local ids put in at the ;COREIDS line (an array of len(pieces))."""
+    if len(CORE_LINE.findall(text)) != 1:
+        sys.exit("the script has not exactly one '    ;COREIDS' line to put the ids into")
+    if not 0 < len(pieces) <= MAX_PIECES:
+        sys.exit(f"{len(pieces)} pieces: 1 to {MAX_PIECES} are possible")
+    lines = [f"    CoreIds = new int[{len(pieces)}]"] + [f"    CoreIds[{i}] = 0x{p['core_id']:06X}" for i, p in enumerate(pieces)]
+    lines += [f"    RecipeIds = new int[{len(pieces)}]"] + [f"    RecipeIds[{i}] = 0x{p['recipe_id']:06X}" for i, p in enumerate(pieces)]
+    return CORE_LINE.sub(lambda m: "\n".join(lines), text)
 
 
 def tool(args, **kw):
@@ -76,7 +82,42 @@ def variant_opts(a):
     o = ["--shell", a.shell, "--category", a.category, "--cobj", a.cobj]
     if a.pieces:
         o += ["--pieces", a.pieces]
+    if a.set:
+        o += ["--set", a.set]
+    if a.tab:
+        o += ["--tab", a.tab]
+    if a.workbench:
+        o += ["--workbench", a.workbench]
+    if a.filter:
+        o += ["--filter", a.filter]
+    if a.variants:
+        o += ["--variants", "--inner", a.inner, "--lead", a.lead]
     return o
+
+
+VARIANTS_WARNING = ("WARNING: --variants is EXPERIMENTAL. At 47dc064b the game crashed before the main menu (0xC0000005) with it, "
+                    "with and without pictures. Do not use it in a kit you want to keep; the default stage (no --variants) works.")
+
+
+def default_filing(a):
+    """--set fo4 without any filing switch of its own: workbench 2CFDE6 and filter 06D72D (the MISCELLANEOUS tab). Returns True when it applied."""
+    if a.set == "fo4" and not (a.workbench or a.filter or a.tab or a.template_filing) and a.category == "vanilla":
+        a.workbench, a.filter = FO4_WORKBENCH, FO4_FILTER
+        return True
+    return False
+
+
+def write_pictures(out, pieces, count):
+    """The first `count` pieces' pictures under Data/Textures/Interface/WorkshopIcons/<plugin>/<shell id, 8 hex>cl.dds (128 x 128 BC3, DX10 header)."""
+    paths = []
+    for p in pieces[:count]:
+        rel = piece_icons.icon_path(PLUGIN, 0x802 + p["n"] - 1)
+        full = os.path.join(out, "Data", *rel.split("/"))
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "wb") as f:
+            f.write(piece_icons.dds(p["n"], p["edid"], p["name"]))
+        paths.append(rel)
+    return paths
 
 
 def menu(a):
@@ -85,7 +126,7 @@ def menu(a):
 
 
 def core(a):
-    tool(["core", a.core] + (["--pieces", a.pieces] if a.pieces else []))
+    tool(["core", a.core] + (["--pieces", a.pieces] if a.pieces else []) + (["--set", a.set] if a.set else []))
     return 0
 
 
@@ -145,6 +186,11 @@ def load_plan(stage_dir):
 
 def stage(a):
     final = os.path.abspath(a.out)
+    default_applied = default_filing(a)
+    if a.variants:
+        print(VARIANTS_WARNING, file=sys.stderr)
+    if a.pictures is not None and not 0 <= a.pictures <= MAX_PIECES:
+        sys.exit(f"--pictures is 0 to {MAX_PIECES}")
     if os.path.exists(final):
         sys.exit(f"{final} exists: stage into a new folder (an earlier stage is never overwritten)")
     sf_before, core_before = wp.sha256(a.starfield), wp.sha256(a.core)
@@ -152,7 +198,7 @@ def stage(a):
     work = os.path.join(out, "work")
     os.makedirs(work)
     opts = variant_opts(a)
-    pj = tool(["pieces", a.core] + (["--pieces", a.pieces] if a.pieces else []), check=True).stdout
+    pj = tool(["pieces", a.core] + (["--pieces", a.pieces] if a.pieces else []) + (["--set", a.set] if a.set else []) + (["--variants"] if a.variants else []), check=True).stdout
     pieces = json.loads([l for l in pj.splitlines() if l.startswith("[")][-1])
     wrote = tool(["build", a.starfield, a.core, out] + opts).stdout
     check = tool(["check", os.path.join(out, PLUGIN), a.starfield, a.core] + opts).stdout
@@ -173,6 +219,7 @@ def stage(a):
     with open(os.path.join(out, SCRIPT + ".psc"), "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
     shutil.rmtree(work)
+    pictures = write_pictures(out, pieces, len(pieces) if a.pictures is None and a.set else (a.pictures or 0))   # --set fo4: a picture for every piece unless --pictures N says otherwise
     menu_txt = tool(["menu", a.starfield, "--cobj", a.cobj], check=False).stdout
     with open(os.path.join(out, "menu.txt"), "w", encoding="utf-8") as f:
         f.write(menu_txt)
@@ -180,7 +227,9 @@ def stage(a):
         sys.exit(f"Starfield.esm or the core changed during the build, nothing published; attempt kept in {out}")
     plan = {"kind": "build-pieces", "version": 1, "plugins": [PLUGIN], "outputs": stage_files(out),
             "inputs": {"Starfield.esm": {"sha256": sf_before}, "core": {"name": os.path.basename(a.core), "sha256": core_before}},
-            "variant": {"shell": a.shell, "category": a.category, "cobj": a.cobj}, "pieces": pieces,
+            "variant": {"shell": a.shell, "category": a.category, "tab": a.tab or None, "set": a.set or None, "cobj": a.cobj,
+                         "workbench": a.workbench or None, "filter": a.filter or None, "variants": bool(a.variants),
+                         "inner": a.inner if a.variants else None, "lead": a.lead if a.variants else None, "pictures": pictures, "default_filing": default_applied}, "pieces": pieces,
             "log": "<My Games>/Starfield/Logs/Script/User/FO4SFBP.0.log"}
     with open(os.path.join(out, "plan.json"), "w", encoding="utf-8") as f:
         json.dump(plan, f, indent=1)
@@ -188,10 +237,10 @@ def stage(a):
     with open(os.path.join(out, "README.txt"), "w", encoding="utf-8") as f:
         f.write(f"""Build pieces ({datetime.date.today().isoformat()}). docs/research/build-pieces.md
 {PLUGIN} (sha256 {plan['outputs'][PLUGIN]}): {len(pieces)} buildables for the outpost build menu, one recipe each (a copy of {a.cobj}),
-variant shell={a.shell} category={a.category}. Pieces: {names}.
+variant shell={a.shell} category={a.category} tab={a.tab or 'none'} workbench={a.workbench or 'template'} filter={a.filter or 'template'} variants={'EXPERIMENTAL (inner recipes ' + a.inner + ', list lead ' + a.lead + '): crashed the game at load at 47dc064b' if a.variants else 'no'} set={a.set or 'none'} pictures={len(pictures)}. Pieces: {names}.
 Master Starfield.esm only; adds records, overrides none; the installed core is not a master (its model paths were read at stage time).
 Checked against Starfield.esm {sf_before} and {os.path.basename(a.core)} {core_before}. Re-stage after a game or core update.
-Install (the owner's word, game closed; loose scripts are not read, the installer packs them into a ba2):
+{('Pictures: ' + ', '.join(pictures) + ' (the installer packs them into FO4SFBuildPieces - Textures.ba2).' + chr(10)) if pictures else ''}Install (the owner's word, game closed; loose scripts are not read, the installer packs them into ba2 archives):
   python scripts\\planet\\build_pieces_install.py install --dir <this folder> --starfield <game dir>
 Remove:  python scripts\\planet\\build_pieces_install.py uninstall --starfield <game dir>
 Read:    python scripts\\planet\\make_build_pieces.py log
@@ -220,16 +269,26 @@ def main(argv=None):
     corep = os.path.join(STARFIELD, "Data", CORE_NAME)
 
     def variant(sp):
-        sp.add_argument("--pieces", default="", help="comma separated editor ids of three or four core statics (default: the tool's choice)")
+        sp.add_argument("--pieces", default="", help="comma separated editor ids (* allowed) of core statics, 3 to 40 (default: the tool's four)")
+        sp.add_argument("--set", default="", choices=("", "fo4"), help="a named set of core statics (fo4: junk walls, pier shack walls and roofs, sandbags, bed, table, crates, barrel)")
+        sp.add_argument("--tab", default="", help="file the recipes under a vanilla outpost category keyword (structures, furniture, decorations, miscellaneous, storage, defenses or an editor id); needs --category add|replace")
+        sp.add_argument("--workbench", default="", help="the recipes' workbench keyword (a keyword editor id or 6 hex digits of its form id), chosen apart from the filter; not with --tab or --category add|replace")
+        sp.add_argument("--filter", default="", help="the recipes' only filter keyword (editor id, 6 hex digits, or 'own' = a keyword of our own with a full name); the template's workbench stays unless --workbench")
+        sp.add_argument("--variants", action="store_true", help="EXPERIMENTAL, OFF by default: crashed the game before the main menu at 47dc064b (PC, 11 Nov). One recipe per group (junk walls 01..07, pier shack walls, roofs) whose created object is a form list of recipes; stage it only to test the crash, one --inner/--lead rung at a time")
+        sp.add_argument("--lead", choices=("none", "shells"), default="none", help="--variants: the form list holds only the recipes (none) or the shells first and then the recipes (as the vanilla list)")
         sp.add_argument("--shell", choices=("clone", "plain"), default="clone")
         sp.add_argument("--category", choices=("vanilla", "add", "replace"), default="vanilla")
         sp.add_argument("--cobj", default=DEFAULT_COBJ)
+        sp.add_argument("--inner", choices=("same", "bare"), default="same", help="--variants: the filing of the recipes inside the list: same as the list's recipe, or bare (no workbench keyword, no filter)")
+        sp.add_argument("--pictures", type=int, default=None, help="draw 128 x 128 pictures for the first N pieces' shells (BC3, DX10 header); the installer puts them in a texture archive. Default: every piece with --set fo4 (the game showed them at 47dc064b), none otherwise; 0 = none")
+        sp.add_argument("--template-filing", action="store_true", help="--set fo4: keep the template's workbench keyword and filters (the CRAFTING tab) instead of the default 2CFDE6 / 06D72D")
     m = sub.add_parser("menu")
     m.add_argument("--starfield", default=sfp)
     m.add_argument("--cobj", default=DEFAULT_COBJ)
     c = sub.add_parser("core")
     c.add_argument("--core", default=corep)
     c.add_argument("--pieces", default="")
+    c.add_argument("--set", default="", choices=("", "fo4"))
     pc = sub.add_parser("precheck")
     pc.add_argument("--content-resources", default=cr)
     pc.add_argument("--out", default=None)

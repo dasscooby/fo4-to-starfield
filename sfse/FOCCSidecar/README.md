@@ -42,10 +42,13 @@ contract as text (no compiler for the dll here).
 Checked first, as FO4SFPipboyMenu and FOCCPing do, each failure one `refuse step=<step>` line in the plugin's SFSE log
 (`Documents\My Games\Starfield\SFSE\Logs\FOCCSidecar.log`) and the plugin idle:
 
-1. `step=load runtime=<v> sfse=<v> plugin_version=2 enabled=<0|1>`, then the runtime must be 1.16.244.0
+1. `step=load runtime=<v> sfse=<v> plugin_version=3 enabled=<0|1>`, then the runtime must be 1.16.244.0
    (`refuse step=version runtime=<v> expected=1.16.244.0`).
 2. The kill switch (below): off logs `step=off` and nothing else happens.
-3. `<dll folder>\FOCCSidecar\sidecars\` is created if missing (`refuse step=folder path=<p> error=<n>`).
+3. The profile's run-time folder (FAL-246, "Where the files land" below): `FO4SF-Runtime.ini` next to the dll names it,
+   its parent folder exists, and `sidecars\` and `logs\` are made inside it; then `step=runtime_dir dir=<Dir>`. Anything
+   else is one `refuse step=runtime_dir file=FO4SF-Runtime.ini reason=<why>` (or `dir=<Dir> reason=parent_missing`, or
+   `path=<p> reason=create error=<n>`) and the plugin writes nothing.
 4. SFSE's messaging interface takes the listener (`refuse step=listen messaging=<0|1>`); then `step=listen`.
 
 The plugin reads no Address Library id and touches no game address or structure. libxse's plugin rule still marks
@@ -74,18 +77,32 @@ JSON of `world_state`), as the probe plan's P1 pass rule says. `sidecar.decode` 
 
 ### Where the files land
 
-`<Starfield>\Data\SFSE\Plugins\FOCCSidecar\focc_sidecar.log` and `...\FOCCSidecar\sidecars\*.focc`. The folder is
-found with `GetModuleFileNameW` on the dll itself, so the sidecars and their log are not written under Documents
-(Controlled Folder Access blocks our writes there; `scripts/bridge/make_bridge.py`). The plugin's SFSE log is libxse's,
-`Documents\My Games\Starfield\SFSE\Logs\FOCCSidecar.log`, where SFSE writes its own logs and where FO4SFPipboyMenu's log
-was written on the PC on 10 Nov. The job card copies all three into the testqueue folder.
+Since FAL-246 (item 2 of the stage additions), out of the game's `Data` folder: `<Dir>\logs\focc_sidecar.log` and
+`<Dir>\sidecars\*.focc`, where `<Dir>` is the profile's run-time folder beside its saves (for the FO4SF folder,
+`Documents\My Games\Starfield\Saves\FO4SF\FO4SF-Runtime`). The dll reads `<Dir>` from `FO4SF-Runtime.ini` next to
+it, written by the launcher (FAL-247 document `native-launcher-contract`) or, in a probe session, by the card:
+
+```
+[Runtime]
+Dir=<absolute path>
+```
+
+UTF-8 (a BOM is fine), the value taken literally (no `%VAR%` expansion, no unescaping, no quotes), an absolute drive or
+`\\server\share` path with no `.` or `..` component, exactly one `Dir=` under `[Runtime]`. `runtime_dir.h` is the
+reader; `tests/data/runtime_dir_vectors.json` holds the cases it and the launcher's writer must meet. Dir's parent must
+exist; the plugin makes Dir, `sidecars\` and `logs\` inside it. It never writes under `Data` and never guesses a
+Documents path. Controlled Folder Access blocks our Python tools in Documents (`scripts/bridge/make_bridge.py`); the
+plugin runs inside `Starfield.exe`, which writes the saves in that folder, so its writes there are expected to pass.
+That is unverified until a session shows it. The plugin's SFSE log, with its `step=` and `refuse step=` lines, is
+libxse's, `Documents\My Games\Starfield\SFSE\Logs\FOCCSidecar.log`, outside `Data` already. The job card copies
+all three into the testqueue folder.
 
 ### Log format
 
 One JSON object per line, CRLF, appended (never rewritten), keys `seq` and `time` (UTC) first:
 
 ```
-{"seq": 1, "time": "...", "event": "load", "plugin": "FOCCSidecar", "plugin_version": 2, "sfse_version": "0x...", "runtime_version": "1.16.244.0", "messaging": true, "registered": true, "dir": "..."}
+{"seq": 1, "time": "...", "event": "load", "plugin": "FOCCSidecar", "plugin_version": 3, "sfse_version": "0x...", "runtime_version": "1.16.244.0", "messaging": true, "registered": true, "dir": "..."}
 {"seq": 2, "time": "...", "event": "sfse_post_load"}
 {"seq": 3, "time": "...", "event": "pre_load", "save": "<name>", "save_hex": "<hex of the raw bytes>"}
 {"seq": 4, "time": "...", "event": "post_load", "save": "<name>", "save_hex": "...", "file": "<name>-<hash8>.focc", "found": false, "valid": false, "counter": -1, "error": "not found"}
@@ -132,14 +149,16 @@ powershell -File sfse\FOCCSidecar\build.ps1 -Out D:\Modding\staging\focc_sidecar
 as for FOCCPing and FO4SFPipboyMenu; the script is theirs with this plugin's name and its three codec files. Expect
 exit `0`, then `FOCCSidecar.dll`, `FOCCSidecar.pdb`, `FOCCSidecar.ini` (`bEnabled=0`) and `build.json` in `-Out`;
 `build.json` names libxse `9d090c4c521f4f2c1aa00bb05923c380d47ae596` and `9fbb74d628134ab4ea3a3cf5c0ed3f7eeabbd01d`,
-`plugin_version` `0.2.0` and the dll's sha256. Post the exit code, the dll's sha256 and, on exit 1 (`build.cmd exit 90`
+`plugin_version` `0.3.0` and the dll's sha256. Post the exit code, the dll's sha256 and, on exit 1 (`build.cmd exit 90`
 configure or `91` build), `xmake_output.txt` whole. It refuses an `-Out` that already holds a dll; after exit 90 or 91
 the same `-Out` runs again.
 
-**Install (by hand, game closed):** `FOCCSidecar.dll` and `FOCCSidecar.ini` into `<Starfield>\Data\SFSE\Plugins\`,
+**Install (by hand, game closed):** `FOCCSidecar.dll`, `FOCCSidecar.ini` and `FO4SF-Runtime.ini` (above) into
+`<Starfield>\Data\SFSE\Plugins\`,
 `bEnabled=1` in that ini, and `versionlib-1-16-244-0.bin` there too if it is not already (the session installs it
 for the other plugins). Record the sha256s. **Run** through `sfse_loader.exe`. **Uninstall:** delete the dll and the
-ini (and, once collected, the `FOCCSidecar\` folder beside them). The runbook's P1 card has the save and load steps and
+ini (`FO4SF-Runtime.ini` too if the card wrote it). The runtime folder is player data and stays. The runbook's P1 card
+has the save and load steps and
 the judge (`python -m fo4sf.combined.probes p1 <folder>`).
 
 ## Verified offline (Linux container, 2026-10-21; the codec only since FAL-216)

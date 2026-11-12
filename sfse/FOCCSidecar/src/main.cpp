@@ -5,7 +5,7 @@
 //     src/fo4sf/combined/sidecar.py: name rule, canonical JSON, checksum) with the stub world state
 //     {"counter": k, "probe": "P1"}, k counting pre-save events in this process.
 //   - On PostLoadGame it reads the sidecar for the loaded save back and verifies it.
-//   - Every event is appended as one JSON object per line to focc_sidecar.log, which group C's checker reads.
+//   - Every event is appended as one JSON object per line to logs\focc_sidecar.log, which group C's checker reads.
 //   - It never deletes anything but its own temp file (SFSE sends no delete message; sidecar.orphans() lists orphans
 //     offline).
 //   - Kill switch: without `bEnabled=1` under [FOCCSidecar] in FOCCSidecar.ini next to the dll it registers nothing
@@ -16,7 +16,7 @@
 // Address Library id (the commonlibsf.plugin rule still marks it as an Address Library user, so SFSE wants the file in
 // the plugin folder, which the probe session installs anyway). Checked before anything is registered:
 //   - the runtime is 1.16.244.0 (SFSE's), else nothing but the refusal line;
-//   - the kill switch, then the plugin folder and its sidecars\ folder can be created;
+//   - the kill switch, then the profile's run-time folder (FAL-246, below) and its sidecars\ and logs\ folders;
 //   - SFSE gives a messaging interface and takes the listener.
 // Any failure is one "refuse step=<step>" line in FOCCSidecar.log (SFSE's log folder) and the plugin stays idle.
 //
@@ -26,8 +26,13 @@
 // copied). Whether that name is the save's display name or its file stem is UNVERIFIED: the log carries the raw bytes
 // and their hex so the checker can compare with the .sfs names.
 //
-// Files (all under <dll folder>\FOCCSidecar\): focc_sidecar.log, sidecars\<name>.focc. The dll folder is found with
-// GetModuleFileNameW on this module.
+// Files (FAL-246 item 2: out of the game's Data folder): <Dir>\logs\focc_sidecar.log and <Dir>\sidecars\<name>.focc,
+// where Dir is the profile's run-time folder beside its saves, read from FO4SF-Runtime.ini next to the dll
+// (../runtime_dir.h; the launcher writes it, FAL-247 native-launcher-contract). No file, a malformed one, or a Dir
+// whose parent folder does not exist is "refuse step=runtime_dir", and the plugin writes nothing: no fallback under
+// Data, no guessed Documents path. The plugin makes sidecars\ and logs\ (and Dir itself) inside an existing parent:
+// it runs inside Starfield.exe, which writes the saves there, while Controlled Folder Access blocks our Python tools
+// in Documents (docs/JOURNAL.md, 14 Oct). Whether it lets the plugin write there is the session's to show.
 
 #include "pch.h"
 
@@ -36,11 +41,12 @@
 #include <mutex>
 
 #include "codec.h"
+#include "runtime_dir.h"
 
 namespace
 {
 	constexpr REL::Version  kRuntime{ 1, 16, 244, 0 };
-	constexpr std::uint32_t kPluginVersion = 2;   // 1 was the PluginAPI.h build of 21-28 Oct 2026
+	constexpr std::uint32_t kPluginVersion = 3;   // 1: the PluginAPI.h build of 21-28 Oct 2026; 2: FAL-216, files in Data
 
 	// sfse/PluginAPI.h (MIT) at 48535cc, SFSEMessagingInterface: kMessage_PreSaveGame .. kMessage_PostLoadGame
 	constexpr std::uint32_t kPreSaveGame = 4;
@@ -48,8 +54,8 @@ namespace
 	constexpr std::uint32_t kPreLoadGame = 6;
 	constexpr std::uint32_t kPostLoadGame = 7;
 
-	std::filesystem::path g_dir;        // <dll folder>\FOCCSidecar
-	std::filesystem::path g_sidecars;   // <dll folder>\FOCCSidecar\sidecars
+	std::filesystem::path g_logs;       // <Dir>\logs
+	std::filesystem::path g_sidecars;   // <Dir>\sidecars
 	std::mutex            g_mutex;
 	long long             g_counter = 0;   // pre-save events seen in this process (set from the sidecar on a valid load)
 	long long             g_seq = 0;       // log line sequence
@@ -79,7 +85,7 @@ namespace
 		std::lock_guard lock(g_mutex);
 		++g_seq;
 		const auto line = std::format("{{\"seq\": {}, \"time\": {}, {}}}", g_seq, focc::json_string(UtcNow()), a_fields);
-		std::ofstream out(g_dir / "focc_sidecar.log", std::ios::binary | std::ios::app);
+		std::ofstream out(g_logs / "focc_sidecar.log", std::ios::binary | std::ios::app);
 		out << line << "\r\n";
 		REX::INFO("step=event {}{}", line, out ? "" : " (focc_sidecar.log not written)");
 	}
@@ -144,6 +150,39 @@ namespace
 			++n;
 		}
 		return std::string(p, n);
+	}
+
+	// FAL-246: the profile's run-time folder from FO4SF-Runtime.ini next to the dll. Its parent must exist (the game's
+	// save folder); Dir, sidecars\ and logs\ are made inside it. False (one refusal line) on anything else
+	bool RuntimeFolder(const std::filesystem::path& a_pluginDir)
+	{
+		std::string text;
+		std::string error;
+		if (!ReadWhole(a_pluginDir / fo4sf_runtime::kIniName, text, error)) {
+			return Refuse("runtime_dir", std::format("file={} reason={}", fo4sf_runtime::kIniName, error));
+		}
+		const auto parsed = fo4sf_runtime::parse_runtime_ini(text);
+		if (!parsed.ok) {
+			return Refuse("runtime_dir", std::format("file={} reason={}", fo4sf_runtime::kIniName, parsed.error));
+		}
+		std::filesystem::path root(std::u8string_view(reinterpret_cast<const char8_t*>(parsed.dir.data()), parsed.dir.size()));
+		if (!root.has_filename()) {
+			root = root.parent_path();   // a trailing separator
+		}
+		std::error_code ec;
+		if (!std::filesystem::is_directory(root.parent_path(), ec)) {
+			return Refuse("runtime_dir", std::format("dir={} reason=parent_missing", parsed.dir));
+		}
+		g_sidecars = root / fo4sf_runtime::kSidecars;
+		g_logs = root / fo4sf_runtime::kLogs;
+		for (const auto& folder : { g_sidecars, g_logs }) {
+			std::filesystem::create_directories(folder, ec);   // existing folders are fine
+			if (ec || !std::filesystem::is_directory(folder, ec)) {
+				return Refuse("runtime_dir", std::format("path={} reason=create error={}", Utf8(folder), ec.value()));
+			}
+		}
+		REX::INFO("step=runtime_dir dir={}", parsed.dir);
+		return true;
 	}
 
 	std::string NameFields(const std::string& a_save)
@@ -246,12 +285,7 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 		REX::INFO("step=off (bEnabled=1 under [FOCCSidecar] in FOCCSidecar.ini to probe)");
 		return true;
 	}
-	g_dir = dir / "FOCCSidecar";
-	g_sidecars = g_dir / "sidecars";
-	std::error_code ec;
-	std::filesystem::create_directories(g_sidecars, ec);   // existing folders are fine
-	if (ec || !std::filesystem::is_directory(g_sidecars, ec)) {
-		Refuse("folder", std::format("path={} error={}", Utf8(g_sidecars), ec.value()));
+	if (!RuntimeFolder(dir)) {
 		return true;
 	}
 	const auto messaging = SFSE::GetMessagingInterface();
@@ -259,7 +293,7 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	LogLine(std::format("\"event\": \"load\", \"plugin\": \"FOCCSidecar\", \"plugin_version\": {}, \"sfse_version\": {}, "
 						"\"runtime_version\": {}, \"messaging\": {}, \"registered\": {}, \"dir\": {}",
 		kPluginVersion, focc::json_string(std::format("{:#010x}", a_sfse->SFSEVersion())), focc::json_string(runtime.string()),
-		messaging ? "true" : "false", registered ? "true" : "false", focc::json_string(Utf8(g_dir))));
+		messaging ? "true" : "false", registered ? "true" : "false", focc::json_string(Utf8(g_logs.parent_path()))));
 	if (!registered) {
 		Refuse("listen", std::format("messaging={}", messaging ? 1 : 0));
 		return true;

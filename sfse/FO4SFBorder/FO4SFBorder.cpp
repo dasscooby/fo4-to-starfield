@@ -19,8 +19,11 @@
 //     "on" restores the value the setting had when the switch first found it, not a hard-coded 1.
 //
 // Kill switch: FO4SFBorder.ini next to the dll, [FO4SFBorder] Mode=0 (default: loaded, idle, writes nothing),
-// 1 = probe (find, watch and log; never writes game memory), 2 = switch. Log: <dll folder>\FO4SFBorder\fo4sf_border.log,
-// one JSON object per line. The dll folder is found with GetModuleFileNameW, so nothing is written under Documents.
+// 1 = probe (find, watch and log; never writes game memory), 2 = switch. Log (FAL-246 item 2, out of the game's Data
+// folder): <Dir>\logs\fo4sf_border.log, one JSON object per line, where Dir is the profile's run-time folder beside
+// its saves, read from FO4SF-Runtime.ini next to the dll (../FOCCSidecar/runtime_dir.h; the launcher writes it). With
+// Mode 1 or 2 and no usable Dir the plugin stays idle (no worker, no write of game memory, no file) and says why once
+// through OutputDebugString: it has no other log of its own, and nothing falls back into Data.
 //
 // Interface: only SFSE's MIT-licensed sfse/PluginAPI.h (fetched by ..\FOCCSidecar\fetch_pluginapi.ps1 at the pinned
 // commit, never committed). Build: build.sh (mingw-w64, static) or MSVC (README.md).
@@ -41,11 +44,12 @@
 
 #include "PluginAPI.h"
 #include "scan.h"
+#include "../FOCCSidecar/runtime_dir.h"
 
 namespace {
 
 constexpr std::uint32_t kRuntime_1_16_244 = (1u << 24) | (16u << 16) | (244u << 4);
-constexpr std::uint32_t kPluginVersion = 1;
+constexpr std::uint32_t kPluginVersion = 2;           // 1: the log under Data (24 Oct 2026)
 constexpr int kWatchBytes = 32;           // bytes before each candidate pointer that the probe watches
 
 HMODULE g_module = nullptr;
@@ -64,6 +68,16 @@ std::string narrow(const std::wstring& w) {
     if (n > 1) {
         out.resize(static_cast<std::size_t>(n - 1));
         WideCharToMultiByte(CP_UTF8, 0, w.c_str(), -1, out.data(), n, nullptr, nullptr);
+    }
+    return out;
+}
+
+std::wstring widen(const std::string& s) {   // UTF-8 to UTF-16; "" when s is not valid UTF-8
+    const int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), static_cast<int>(s.size()), nullptr, 0);
+    std::wstring out;
+    if (n > 0) {
+        out.resize(static_cast<std::size_t>(n));
+        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), static_cast<int>(s.size()), out.data(), n);
     }
     return out;
 }
@@ -94,6 +108,43 @@ void log_line(const std::string& body) {
     DWORD written = 0;
     WriteFile(h, line.data(), static_cast<DWORD>(line.size()), &written, nullptr);
     CloseHandle(h);
+}
+
+// FAL-246: the profile's run-time folder from FO4SF-Runtime.ini next to the dll. Its parent must exist (the game's
+// save folder); Dir and logs\ are made inside it. On success `logs` is <Dir>\logs; otherwise `why` says what failed.
+bool runtime_logs(const std::wstring& base, std::wstring& logs, std::string& why) {
+    const std::wstring ini = base + L"\\" + widen(fo4sf_runtime::kIniName);
+    HANDLE h = CreateFileW(ini.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) { why = "file=FO4SF-Runtime.ini reason=not found"; return false; }
+    std::string text(fo4sf_runtime::kMaxFile + 1, '\0');
+    DWORD got = 0;
+    const BOOL done = ReadFile(h, text.data(), static_cast<DWORD>(text.size()), &got, nullptr);
+    CloseHandle(h);
+    if (!done) { why = "file=FO4SF-Runtime.ini reason=read failed"; return false; }
+    text.resize(got);
+    const fo4sf_runtime::RuntimeDir parsed = fo4sf_runtime::parse_runtime_ini(text);
+    if (!parsed.ok) { why = "file=FO4SF-Runtime.ini reason=" + parsed.error; return false; }
+    std::wstring root = widen(parsed.dir);
+    if (root.empty()) { why = "dir=" + parsed.dir + " reason=not utf-8"; return false; }
+    while (root.size() > 3 && (root.back() == L'\\' || root.back() == L'/')) root.pop_back();   // a trailing separator
+    const std::size_t cut = root.find_last_of(L"\\/");
+    const std::wstring parent = cut == std::wstring::npos ? std::wstring() : root.substr(0, cut == 2 ? 3 : cut);
+    const DWORD attr = parent.empty() ? INVALID_FILE_ATTRIBUTES : GetFileAttributesW(parent.c_str());
+    if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+        why = "dir=" + parsed.dir + " reason=parent_missing";
+        return false;
+    }
+    const std::wstring folder = root + L"\\" + widen(fo4sf_runtime::kLogs);
+    for (const std::wstring& d : {root, folder}) {
+        CreateDirectoryW(d.c_str(), nullptr);         // an existing folder is fine
+        const DWORD a = GetFileAttributesW(d.c_str());
+        if (a == INVALID_FILE_ATTRIBUTES || !(a & FILE_ATTRIBUTE_DIRECTORY)) {
+            why = "path=" + narrow(d) + " reason=create error=" + std::to_string(GetLastError());
+            return false;
+        }
+    }
+    logs = folder;
+    return true;
 }
 
 std::wstring module_dir() {
@@ -391,8 +442,12 @@ __declspec(dllexport) bool SFSEPlugin_Load(const SFSEInterface* sfse) {
     wchar_t path[1024] = {0};
     GetPrivateProfileStringW(L"FO4SFBorder", L"SignalLog", L"", path, 1024, ini.c_str());
     g_signal_path = path[0] ? std::wstring(path) : documents_signal_path();
-    g_dir = base + L"\\FO4SFBorder";
-    CreateDirectoryW(g_dir.c_str(), nullptr);
+    std::string why;
+    if (!runtime_logs(base, g_dir, why)) {            // FAL-246: no run-time folder, nothing at all
+        g_dir.clear();
+        OutputDebugStringA(("FO4SFBorder: refuse step=runtime_dir " + why + "\n").c_str());
+        return true;
+    }
 
     const PluginHandle handle = sfse->GetPluginHandle();
     auto* messaging = static_cast<SFSEMessagingInterface*>(sfse->QueryInterface(kInterface_Messaging));
@@ -401,7 +456,8 @@ __declspec(dllexport) bool SFSEPlugin_Load(const SFSEInterface* sfse) {
     log_line("\"event\": \"load\", \"plugin_version\": " + std::to_string(kPluginVersion) + ", \"mode\": " + std::to_string(g_mode) +
              ", \"value_offset\": " + std::to_string(g_value_offset) + ", \"sfse_version\": \"" + hex(sfse->sfseVersion) +
              "\", \"runtime_version\": \"" + hex(sfse->runtimeVersion) + "\", \"registered\": " + (registered ? "true" : "false") +
-             ", \"task\": " + (g_task ? "true" : "false") + ", \"signal_log\": " + json_string(narrow(g_signal_path)));
+             ", \"task\": " + (g_task ? "true" : "false") + ", \"signal_log\": " + json_string(narrow(g_signal_path)) +
+             ", \"log_dir\": " + json_string(narrow(g_dir)));
     if (!registered) g_data_loaded = true;            // no PostDataLoad will come: scan on the worker's schedule
     HANDLE t = CreateThread(nullptr, 0, worker, nullptr, 0, nullptr);
     if (t) CloseHandle(t);
