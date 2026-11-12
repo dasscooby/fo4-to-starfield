@@ -355,7 +355,7 @@ Function ReleaseHold(string why)
 EndFunction
 
 Function SaveScale(Actor p)
-    {The player's scale before the use (FurnitureScaleActorToOne is on three of the four records): restored when the use ends.}
+    {The player's scale before the use (FurnitureScaleActorToOne is on two of the four: the secret panel and the ID reader): restored when the use ends.}
     SavedScale = 1.0
     ScaleKnown = false
 ;OPT ObjectReference.GetScale     SavedScale = p.GetScale()
