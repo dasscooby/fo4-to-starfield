@@ -216,7 +216,8 @@ How it runs, the channel's way:
 - **Flags:** `PageFlagSets` (default `0x19` since FAL-414: `0x9`, the set at which test C's clicks reached our menu, plus bit 4 (`0x10`), which puts StopContextProcessing (78) on the control map's stack so Tab arrives as Cancel; PC sweep at 14176a5e: bit 1 `0x2` pauses the game, bit 8 `0x100` blanks the world, bits 6, 9, 10, 18, 25, 27 showed nothing; the game does not pause at `0x19`) cycles per open like
   `FlagSets`. **Pause** (FAL-446, the owner's call: a setting with both modes): `Pause=0` (shipped) leaves the sets as
   they are, the game runs behind the Pip-Boy; `Pause=1` adds bit 1 (`0x2`) to every set, which paused the game in that
-  sweep; `step=load_d` / `load_e` logs `pause=<0 or 1>` with the resulting `flag_sets=`. DATA's `GAME PAUSED` is the pause byte, live: at `e7925e00` no set paused the game.
+  sweep; `step=load_d` / `load_e` logs `pause=<0 or 1>` with the resulting `flag_sets=`. Whether `Pause=1` becomes the
+  shipped default (the owner's "paused", 11 Nov) is decided by its own run: `docs/spikes/pipboy-pause-trial-card.md` (FAL-565). DATA's `GAME PAUSED` is the pause byte, live: at `e7925e00` no set paused the game.
 
 Where each value comes from, and what is checked before it is used:
 
@@ -602,7 +603,7 @@ Take a screenshot while the menu is open after the fifth press, and one after th
 ### PASS at (e), `Stage=5` (the owner's card: `docs/spikes/pipboy-page-kit-owner-card.md`)
 
 1. Everything in (b), with `stage=5` and `step=ready stage=e`. Before it come:
-   - `step=load_e flag_sets=0x9 snapshot_key=0x7a`;
+   - `step=load_e flag_sets=0x19 pause=0 snapshot_key=0x7a click_call=none` (`flag_sets=0x1b pause=1` with `Pause=1`);
    - six `step=kit_keys` lines and seven `step=page_def` lines;
    - `step=pages pages=7 tabs=5 signature="FO4SF KIT 1 16 STAT,INV,DATA,MAP,RADIO"`;
    - `step=channel_ids` and `step=page_ids` as at (d), with 34 `step=id` lines.

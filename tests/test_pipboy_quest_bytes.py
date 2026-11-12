@@ -70,6 +70,17 @@ class PluginTests(unittest.TestCase):
         self.assertRegex(ini, r"\nPause=0\n")                                    # ships not pausing
         self.assertIn("`Pause=1`", self.readme)
 
+    def test_pause_has_its_own_trial_card(self):
+        """FAL-565: Pause=1 becomes the default only after its own run; the card names the ini line and the log's lines."""
+        card = (ROOT / "docs" / "spikes" / "pipboy-pause-trial-card.md").read_text(encoding="utf-8")
+        self.assertIn("docs/spikes/pipboy-pause-trial-card.md", self.readme)
+        self.assertIn(f"flag_sets={0x19 | 0x2:#x} pause=1", card)    # the shipped PageFlagSets plus the pause bit
+        self.assertIn("flag_sets=0x1b pause=1", self.readme)
+        for line in ("tag=key paused=1", "tag=main_after_close paused=0", "tag=key paused=0", "-replace '^Pause=0','Pause=1'"):
+            self.assertIn(line, card)
+        self.assertIn("pause={}", self.main)
+        self.assertIn("tag={} paused={}", self.main)
+
     def test_the_stage_reads_the_offset_mission_stage_at_names(self):
         """FAL-527: the u16 at MissionStageAt=, read with Peek only, ? and one page_unknown line without it."""
         self.assertIn("kQuestStageLast = kQuestDumpEnd - 2;", self.main)
