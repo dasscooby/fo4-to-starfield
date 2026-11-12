@@ -215,6 +215,12 @@ namespace
 	constexpr std::size_t   kQuestPointerLast = kQuestDumpEnd - 8;   // FAL-571: the dump's last 8-byte word
 	constexpr std::size_t   kObjectiveBlock = 0x40;          // FAL-571: the bytes read behind each pointer followed
 	constexpr std::size_t   kKitObjectives = 8;              // [Kit] MissionObjective= lines, at most
+	constexpr std::size_t   kQuestObjectivesAt = 0x148;      // FAL-571, PC at 73271aa3: objectives' BSTArray, data at +0x150
+	constexpr std::size_t   kObjectiveOwnerAt = 0x18;        // ... in each objective: its quest's address,
+	constexpr std::size_t   kObjectiveNumberAt = 0x24;       // its number (u16, 10, 85, 86 as the console takes it)
+	constexpr std::size_t   kObjectiveStateAt = 0x28;        // and its state (a byte: 0 not shown, 1 shown, 3 shown and completed)
+	constexpr std::uint32_t kQuestObjectivesMax = 64;        // a larger size is not read (reason=head)
+	constexpr std::size_t   kKitObjectiveRows = 12;          // value rows for objectives: 16 less FORM, FILE, FLAGS, STAGE
 	constexpr std::string_view kKitChars = " !#%&'()*+,-./0123456789:;<=>?ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_";   // KIT_FONT
 	constexpr auto          kKitTitle = "fo4sfTitle";        // NAMES
 	constexpr auto          kKitHeader = "fo4sfHeaderInfo";
@@ -2351,6 +2357,8 @@ namespace
 	// log does). The first read logs the quest's bytes from +0x100 once (step=kit_quest), where the flags and the
 	// current stage are; the stage shows ? until [Kit] MissionStageAt= names its offset (FAL-527). Starfield's own
 	// quests are not listed yet
+	void KitObjectiveRows(std::uintptr_t a_quest, std::uint32_t a_formId, std::vector<std::pair<std::string, std::string>>& a_info);
+
 	std::vector<KitRow> KitQuestRows()
 	{
 		static std::uint32_t formId = 0;
@@ -2413,19 +2421,99 @@ namespace
 		std::ranges::transform(file, file.begin(), [](unsigned char a_c) { return static_cast<char>(std::toupper(a_c)); });
 		std::vector<std::pair<std::string, std::string>> info{ { "FORM", std::format("{:08X}", formId) }, { "FILE", file },
 			{ "FLAGS", flagged ? std::format("{:04X}", flags) : "?" }, { "STAGE", stageText } };
-		// FAL-571: each objective [Kit] MissionObjective= names, its state the byte at the end of its path (a pointer read
-		// at each offset before; Peek only), shown raw as OBJECTIVE <n> until the PC's log names the values; one row
-		// OBJECTIVES ? without the setting. Logged at the first read and at each change:
-		// step=kit_quest_objective form= objective=<n> path=+<offset>/... state=<n>
-		static std::vector<int> loggedStates;
-		loggedStates.resize(g_kit.objectives.size(), -1);
+		KitObjectiveRows(quest, formId, info);
+		return { { name, "", std::move(info) } };
+	}
+
+	// FAL-571: an objective's state as the PC's run at 73271aa3 read it (0, 1, 3); any other value raw
+	std::string ObjectiveState(std::uint8_t a_state)
+	{
+		switch (a_state) {
+		case 0:
+			return "NOT SHOWN";
+		case 1:
+			return "SHOWN";
+		case 3:
+			return "DONE";
+		default:
+			return std::format("STATE {}", static_cast<unsigned>(a_state));
+		}
+	}
+
+	// FAL-571: the quest's objectives as value rows OBJECTIVE <n>, each its state named (ObjectiveState). Peek only.
+	// [Kit] MissionObjective= lines, when there are any, are used as they are (an override, each read along its path).
+	// Else the objectives' BSTArray at +0x148 is walked: its size at most 64 and at most its capacity, and every entry an
+	// objective whose +0x18 is this quest, else one row OBJECTIVES ? and what=quest_objectives reason=head or
+	// reason=objective index=<i> (nothing shown from a half-read array). Logged when it changes:
+	// step=kit_quest_objectives form= at=+148 size= capacity= objectives=<n>,... (or the reason), and each state at the
+	// first read and at each change: step=kit_quest_objective form= objective=<n> from=<array or path=...> state=<n>.
+	// At most 12 rows: past 11, the 12th is MORE OBJECTIVES <count>
+	void KitObjectiveRows(std::uintptr_t a_quest, std::uint32_t a_formId, std::vector<std::pair<std::string, std::string>>& a_info)
+	{
+		static std::unordered_map<std::uint32_t, int> loggedStates;
+		const auto shown = [&](std::uint16_t a_number, std::uint8_t a_state, const std::string& a_from) {
+			a_info.emplace_back(std::format("OBJECTIVE {}", a_number), ObjectiveState(a_state));
+			auto& logged = loggedStates.try_emplace(a_number, -1).first->second;
+			if (logged != a_state) {
+				logged = a_state;
+				REX::INFO("step=kit_quest_objective form={:08X} objective={} from={} state={}", a_formId, a_number, a_from,
+					static_cast<unsigned>(a_state));
+			}
+		};
 		if (g_kit.objectives.empty()) {
-			info.emplace_back("OBJECTIVES", Unknown("quest_objectives", "reason=no_objectives (MissionObjective= in [Kit])"));
+			static std::string loggedWalk;
+			ArrayHead          head{};
+			std::string        why;
+			std::vector<std::pair<std::uint16_t, std::uint8_t>> found;
+			if (!Peek(a_quest + kQuestObjectivesAt, head) || head.size > head.capacity || head.size > kQuestObjectivesMax ||
+				(head.size && !head.data)) {
+				why = std::format("reason=head size={} capacity={} data={}", head.size, head.capacity, Hex(head.data));
+			}
+			for (std::uint32_t i = 0; why.empty() && i < head.size; ++i) {
+				std::uintptr_t objective = 0;
+				std::uintptr_t owner = 0;
+				std::uint16_t  number = 0;
+				std::uint8_t   state = 0;
+				if (!Peek(head.data + 8ull * i, objective) || !objective || !Peek(objective + kObjectiveOwnerAt, owner) ||
+					owner != a_quest || !Peek(objective + kObjectiveNumberAt, number) || !Peek(objective + kObjectiveStateAt, state)) {
+					why = std::format("reason=objective index={} objective={} owner={}", i, Hex(objective), Hex(owner));
+				} else {
+					found.emplace_back(number, state);
+				}
+			}
+			std::string numbers;
+			for (const auto& entry : found) {
+				numbers += std::format("{}{}", numbers.empty() ? "" : ",", entry.first);
+			}
+			if (numbers.empty()) {
+				numbers = "none";
+			}
+			const auto walk = why.empty() ? std::format("size={} capacity={} objectives={}", head.size, head.capacity, numbers) : why;
+			if (walk != loggedWalk) {
+				loggedWalk = walk;
+				REX::INFO("step=kit_quest_objectives form={:08X} at=+{:03X} {}", a_formId, kQuestObjectivesAt, walk);
+			}
+			if (!why.empty()) {
+				a_info.emplace_back("OBJECTIVES", Unknown("quest_objectives", why));
+				return;
+			}
+			if (found.empty()) {
+				a_info.emplace_back("OBJECTIVES", "NONE");
+				return;
+			}
+			const auto rows = found.size() > kKitObjectiveRows ? kKitObjectiveRows - 1 : found.size();
+			for (std::size_t i = 0; i < rows; ++i) {
+				shown(found[i].first, found[i].second, "array");
+			}
+			if (rows < found.size()) {
+				a_info.emplace_back("MORE OBJECTIVES", std::to_string(found.size() - rows));
+			}
+			return;
 		}
 		for (std::size_t i = 0; i < g_kit.objectives.size(); ++i) {
 			const auto&    objective = g_kit.objectives[i];
 			std::string    path;
-			std::uintptr_t at = quest;
+			std::uintptr_t at = a_quest;
 			bool           read = true;
 			for (std::size_t p = 0; p < objective.path.size(); ++p) {
 				path += std::format("{}+{:02X}", p ? "/" : "", objective.path[p]);
@@ -2433,21 +2521,14 @@ namespace
 					read = Peek(at + objective.path[p], at) && at;
 				}
 			}
-			const auto   label = std::format("OBJECTIVE {}", objective.index);
 			std::uint8_t state = 0;
 			if (!read || !Peek(at + objective.path.back(), state)) {
-				info.emplace_back(label, Unknown(std::format("objective:{}", objective.index),
+				a_info.emplace_back(std::format("OBJECTIVE {}", objective.index), Unknown(std::format("objective:{}", objective.index),
 					std::format("reason=unreadable objective={} path={}", objective.index, path)));
 				continue;
 			}
-			info.emplace_back(label, std::to_string(state));
-			if (loggedStates[i] != state) {
-				loggedStates[i] = state;
-				REX::INFO("step=kit_quest_objective form={:08X} objective={} path={} state={}", formId, objective.index, path,
-					static_cast<unsigned>(state));
-			}
+			shown(objective.index, state, "path=" + path);
 		}
-		return { { name, "", std::move(info) } };
 	}
 
 	// FAL-571, after the quest's bytes on F11 at stage (e): where the objectives' states are. They are not among the

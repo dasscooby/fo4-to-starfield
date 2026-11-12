@@ -156,25 +156,65 @@ class PluginTests(unittest.TestCase):
         read = function(self.main, "bool ReadKit(")
         self.assertIn('key == "MissionObjective" && KitObjectiveLine(value)', read)
         rows = function(self.main, "std::vector<KitRow> KitQuestRows(")
-        part = rows[rows.index("static std::vector<int> loggedStates;"):]
-        self.assertIn('info.emplace_back("OBJECTIVES", Unknown("quest_objectives", '
-                      '"reason=no_objectives (MissionObjective= in [Kit])"));', part)
+        self.assertIn("KitObjectiveRows(quest, formId, info);", rows)
+        self.assertIn("return { { name, \"\", std::move(info) } };", rows)
+        part = function(self.main, "std::string>>& a_info)\n\t{")
+        part = part[part.index("for (std::size_t i = 0; i < g_kit.objectives.size(); ++i) {"):]   # the override
         self.assertIn("read = Peek(at + objective.path[p], at) && at;", part)       # a null pointer stops the path
         self.assertIn("Peek(at + objective.path.back(), state)", part)
-        self.assertIn('std::format("OBJECTIVE {}", objective.index)', part)
-        self.assertIn('"step=kit_quest_objective form={:08X} objective={} path={} state={}"', part)
-        self.assertLess(part.index("if (loggedStates[i] != state) {"), part.index("step=kit_quest_objective"))
-        self.assertIn("return { { name, \"\", std::move(info) } };", part)
+        self.assertIn('shown(objective.index, state, "path=" + path);', part)
         self.assertNotIn("FormById(", part)
         self.assertNotIn("REL::", part)
         ini = (PLUGIN / "FO4SFPipboyMenu.ini").read_text(encoding="utf-8")
-        self.assertNotRegex(ini, r"\nMissionObjective=")                         # ships without: OBJECTIVES ?
+        self.assertNotRegex(ini, r"\nMissionObjective=")                         # ships without: the walk
         self.assertIn("; [Kit] MissionObjective=<n>|<path>", ini)
         for text in ("MissionObjective=<n>|<path>", "step=kit_quest_obj ", "step=kit_quest_objs", "owned=0",
                      "step=kit_quest_objective", "--objective <n>", "setobjectivedisplayed <form id> <n> 1"):
             self.assertIn(text, self.readme, text)
         card = (ROOT / "docs" / "spikes" / "pipboy-page-kit-owner-card.md").read_text(encoding="utf-8")
         self.assertIn("`setobjectivecompleted <id> <n> 1`", card)
+
+    def test_the_objectives_are_walked_from_the_array(self):
+        """FAL-571, the PC at 73271aa3: the BSTArray at +0x148 (data +0x150), each entry's +0x18 the quest, its number at
+        +0x24 and its state at +0x28; bounded by size, capacity and 64; all or nothing; states named 0, 1, 3."""
+        for part in ("kQuestObjectivesAt = 0x148;", "kObjectiveOwnerAt = 0x18;", "kObjectiveNumberAt = 0x24;",
+                     "kObjectiveStateAt = 0x28;", "kQuestObjectivesMax = 64;", "kKitObjectiveRows = 12;"):
+            self.assertIn(part, self.main, part)
+        names = function(self.main, "std::string ObjectiveState(")
+        for part in ('case 0:\n\t\t\treturn "NOT SHOWN";', 'case 1:\n\t\t\treturn "SHOWN";', 'case 3:\n\t\t\treturn "DONE";',
+                     'return std::format("STATE {}", static_cast<unsigned>(a_state));'):
+            self.assertIn(part, names, part)
+        walk = function(self.main, "std::string>>& a_info)\n\t{")
+        self.assertLess(walk.index("if (g_kit.objectives.empty()) {"),
+                        walk.index("for (std::size_t i = 0; i < g_kit.objectives.size(); ++i) {"))   # lines override
+        for part in ("Peek(a_quest + kQuestObjectivesAt, head)", "head.size > head.capacity",
+                     "head.size > kQuestObjectivesMax", "(head.size && !head.data)",
+                     "for (std::uint32_t i = 0; why.empty() && i < head.size; ++i) {",
+                     "Peek(head.data + 8ull * i, objective) || !objective", "Peek(objective + kObjectiveOwnerAt, owner)",
+                     "owner != a_quest", "Peek(objective + kObjectiveNumberAt, number)",
+                     "Peek(objective + kObjectiveStateAt, state)",
+                     'a_info.emplace_back("OBJECTIVES", Unknown("quest_objectives", why));',
+                     'a_info.emplace_back("OBJECTIVES", "NONE");', 'shown(found[i].first, found[i].second, "array");',
+                     'a_info.emplace_back("MORE OBJECTIVES", std::to_string(found.size() - rows));',
+                     '"step=kit_quest_objectives form={:08X} at=+{:03X} {}"',
+                     '"step=kit_quest_objective form={:08X} objective={} from={} state={}"',
+                     "a_info.emplace_back(std::format(\"OBJECTIVE {}\", a_number), ObjectiveState(a_state));"):
+            self.assertIn(part, walk, part)
+        # all or nothing: rows come only after the reason check
+        self.assertLess(walk.index("if (!why.empty()) {"), walk.index('shown(found[i].first, found[i].second, "array");'))
+        self.assertLess(walk.index("if (walk != loggedWalk) {"), walk.index("step=kit_quest_objectives"))
+        self.assertLess(walk.index("if (logged != a_state) {"), walk.index("step=kit_quest_objective form"))
+        self.assertNotIn("FormById(", walk)
+        self.assertNotIn("REL::", walk)
+        self.assertNotIn("reinterpret_cast<", walk)
+        self.assertLess(self.main.index("\tvoid KitObjectiveRows(std::uintptr_t a_quest, std::uint32_t a_formId, "
+                                        "std::vector<std::pair<std::string, std::string>>& a_info);"),
+                        self.main.index("\tstd::vector<KitRow> KitQuestRows("))
+        for text in ("step=kit_quest_objectives", "+0x150", "`+0x18`", "`+0x24`", "`+0x28`", "NOT SHOWN", "MORE OBJECTIVES",
+                     "**Verified at `73271aa3`**", "+0x148"):
+            self.assertIn(text, self.readme, text)
+        card = (ROOT / "docs" / "spikes" / "pipboy-page-kit-owner-card.md").read_text(encoding="utf-8")
+        self.assertIn("NOT SHOWN", card)
 
     def test_the_readme_names_the_dump_and_the_helper(self):
         self.assertIn("step=kit_quest_bytes", self.readme)
