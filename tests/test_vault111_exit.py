@@ -157,6 +157,21 @@ class ToolTests(unittest.TestCase):
     def check(self, plugin, params=None):
         return self.run_tool("check", plugin, params or self.params, self.fx / "Starfield.esm", self.fx / "FO4Port.esm")
 
+    def test_mesh_paths_compare_equal_across_slash_direction_prefix_and_case(self):
+        r = self.run_tool("selftest")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("selftest ok", r.stdout)
+
+    def test_a_backslash_model_in_the_params_checks_ok(self):
+        spec = json.loads(self.params.read_text())
+        spec["pickup"] = {**spec["pickup"], "model": "Meshes\\\\fixture\\\\pipboyground.nif"}
+        spec["pickup"].pop("base_edid")
+        p = self.tmp / "bs.json"
+        p.write_text(json.dumps(spec))
+        r, plugin = self.build("bs", p)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.check(plugin, p).returncode, 0)
+
     def test_build_then_check_passes(self):
         r, plugin = self.build()
         self.assertEqual(r.returncode, 0, r.stderr)

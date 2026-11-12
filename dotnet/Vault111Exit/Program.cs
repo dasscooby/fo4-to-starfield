@@ -31,6 +31,7 @@ try
 {
     if (args.Length == 5 && args[0] == "build") return Kit.Build(args[1], args[2], args[3], args[4]);
     if (args.Length == 5 && args[0] == "check") return Kit.Check(args[1], args[2], args[3], args[4]);
+    if (args.Length == 1 && args[0] == "selftest") return Kit.SelfTest();
     if (args.Length == 3 && args[0] == "scan") return Kit.Scan(args[1], args[2]);
     if (args.Length == 2 && args[0] == "fixture") return Kit.Fixture(args[1]);
 }
@@ -118,11 +119,32 @@ static class Kit
         return copy;
     }
 
-    /// <summary>Mutagen stores a model path as "Meshes/<path>" with forward slashes.</summary>
-    static string MeshPath(string m)
+    /// <summary>A model path in one form whatever the platform wrote it in: forward slashes, no doubled or leading slash, no leading
+    /// "Meshes/", lower case (Windows gave "Meshes\\fo4port\\..." where the Linux read gave "Meshes/fo4port/...").</summary>
+    public static string MeshKey(string? m)
     {
-        m = m.Replace('\\', '/');
-        return m.StartsWith("Meshes/", StringComparison.OrdinalIgnoreCase) ? m : "Meshes/" + m;
+        var parts = (m ?? "").Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries).ToList();
+        if (parts.Count > 0 && parts[0].Equals("Meshes", StringComparison.OrdinalIgnoreCase)) parts.RemoveAt(0);
+        return string.Join('/', parts).ToLowerInvariant();
+    }
+
+    public static bool SameMesh(string? a, string? b) => MeshKey(a) == MeshKey(b);
+
+    /// <summary>selftest: SameMesh on the forms the two platforms give; exit 1 on a miss.</summary>
+    public static int SelfTest()
+    {
+        var bad = new List<string>();
+        void T(bool ok, string what) { if (!ok) bad.Add(what); }
+        T(SameMesh("Meshes\\fo4port\\interiors\\a.nif", "Meshes/fo4port/interiors/a.nif"), "backslash vs slash");
+        T(SameMesh("fo4port\\interiors\\a.nif", "Meshes\\fo4port\\interiors\\a.nif"), "no Meshes prefix vs prefix");
+        T(SameMesh("Meshes\\\\fo4port\\\\a.nif", "Meshes/fo4port/a.nif"), "doubled backslashes");
+        T(SameMesh("MESHES\\FO4Port\\A.nif", "meshes/fo4port/a.nif"), "case");
+        T(!SameMesh("Meshes\\fo4port\\a.nif", "Meshes\\fo4port\\b.nif"), "different files compared equal");
+        T(!SameMesh("Meshes\\fo4port\\meshes\\a.nif", "Meshes\\fo4port\\a.nif"), "an inner Meshes folder was dropped");
+        T(MeshKey(null) == "", "null");
+        foreach (var b in bad) Console.Error.WriteLine("SELFTEST FAIL " + b);
+        if (bad.Count == 0) Console.WriteLine("selftest ok: 7 mesh path comparisons");
+        return bad.Count == 0 ? 0 : 1;
     }
 
     static ScriptEntry Script(string name) => new() { Name = name, Flags = ScriptEntry.Flag.Local };
@@ -231,7 +253,9 @@ static class Kit
         {
             var a = mod.Activators.FirstOrDefault(x => x.FormKey == Own(id));
             Need(a != null && a.EditorID == edid, $"no ACTI {edid} at {id:X}");
-            Need(a?.Model?.File.ToString() == MeshPath(ModelOf(port, spot)), $"{edid} model is {a?.Model?.File}, not {ModelOf(port, spot)}");
+            var want = ModelOf(port, spot);
+            var got = a?.Model?.File.ToString();
+            Need(SameMesh(got, want), $"{edid} model: file has '{got}' (key '{MeshKey(got)}'), wanted '{want}' (key '{MeshKey(want)}')");
             Need(a?.VirtualMachineAdapter?.Scripts.Count == 1 && a.VirtualMachineAdapter.Scripts[0].Name == edid, $"{edid} has not exactly its own script");
         }
         var ts = mod.Activators.FirstOrDefault(x => x.FormKey == Own(TerminalBaseId))?.VirtualMachineAdapter?.Scripts.FirstOrDefault();
