@@ -36,3 +36,9 @@ for each Sound text key of a Play clip (frame = seconds x 30, at least 1). Wheth
 - Pass: our console moves on 21 and 22 (the flip and the button), `EV Done` arrives in the same window with `t` near the clip's length.
 - If the console does not move but the vanilla one did: the rig or `.af` path does not take a non-door model (unread, the main risk), or the plugin's graph component is wrong; the offline check shows the component written.
 - Not verified here: any in-game behaviour, the real Papyrus compile on the base sources, the CALUMI clip writer on a console.
+
+## Where the console is, and what the PC build used (from the PC's offline run, 12 Nov)
+- The override is on the BASE (ACTI `00E0D9` of FO4Port.esm on that PC's build), so every reference of that base shows the new model. Stages 10 to 28 act on a SPAWNED copy: `PlaceAtMe` 2.5 m in front of the player, in whatever cell they stand in. Look in front of you after stage 10.
+- Whether the placed console `001319` is a reference of this base is UNVERIFIED here (the stager prints the base id; `001319` is the placed ref named in the experiment's plan). To check the placed one too, `player.moveto 03001319` (port at index 03 on that load order) and look; if it still shows the old model, the placed ref uses a different base.
+- The PC's collision template was gone: the first `historicaloilportraits` model of the game's archive was used for it. It is a stand-in for the physics donor, not the console's shape.
+- FO4 clips read on the PC: `Stage2` 1.633 s (flip, `SoundPlay.OBJSwitchGearDoorPanelOpenFlip` at 0), `Stage3` 0.633 s (button, `SoundPlay.OBJSwitchGearDoorPanelOpenPush` at 0), `Stage2Loop` 1.0 s, `Stage3Loop` 0.033 s with key `Stage4`, three more of 0.033 s; bones `Button` and `Lid`. Map used: `--states "Stage2=StateA_Play,Stage3=StateB_Play"`; the other five are left out.

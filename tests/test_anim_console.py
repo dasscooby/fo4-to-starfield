@@ -89,6 +89,7 @@ class ScriptTests(unittest.TestCase):
 
     def test_info_output_is_parsed_and_a_missing_one_refused(self):
         self.assertEqual(mac.parse_info("ACTI x\nBASE_ID 0x001234\nMODEL Meshes/a/b.nif\n"), {"base_id": "001234", "model": "Meshes/a/b.nif"})
+        self.assertEqual(mac.parse_info("BASE_ID 0xE0D9\nMODEL Meshes\\a\\b.nif\n")["model"], "Meshes/a/b.nif")   # Windows prints backslashes
         for bad in ("BASE_ID 0x1\nMODEL \n", "MODEL Meshes/a.nif\n", ""):
             with self.assertRaises(SystemExit):
                 mac.parse_info(bad)

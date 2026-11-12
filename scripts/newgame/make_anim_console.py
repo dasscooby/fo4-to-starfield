@@ -76,7 +76,7 @@ def parse_info(text):
     model = re.search(r"^MODEL (.+)$", text, re.M)
     if not base or not model or not model.group(1).strip():
         sys.exit("the plugin tool's info did not give BASE_ID and MODEL (is the base's model empty?)")
-    return {"base_id": base.group(1), "model": model.group(1).strip()}
+    return {"base_id": base.group(1), "model": model.group(1).strip().replace("\\", "/")}   # one form: forward slashes, whatever the OS prints
 
 
 # ----------------------------------------------------------------------------------------------- the original console
