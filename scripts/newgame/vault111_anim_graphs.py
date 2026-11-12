@@ -39,7 +39,8 @@ from fo4sf.planet import esm  # noqa: E402
 STARFIELD = r"D:\SteamLibrary\steamapps\common\Starfield\Data"
 DEFAULT_GRAPHS = ("stageswithloops", "stages", "twostages", "activatorstategraph01", "twostateactivator", "onestateactivator",
                   "genericstategraph01", "genericstategraph02", "genericopenclose01", "fxbeginmiddleend", "furnitureopenclose",
-                  "furnituredefault", "1stperson_furniture")
+                  "furnituredefault", "1stperson_furniture",
+                  "hybridstategraph01", "genericpowersimple", "outpostdeploy")      # the last three: the most used on ACTI/FURN (PC run, #744)
 RECORD_GROUPS = (b"ACTI", b"FURN")
 FIELD_LABELS = ("Sequence Name", "Enter Events", "Exit Events", "Send Event On End")
 INTEREST = re.compile(r"sequence|event|state|anim", re.I)
@@ -324,6 +325,33 @@ def folder_files(archives, folder):
     return sorted(found)
 
 
+def afx_lines(archives, files, limit=3):
+    """Event-like strings of the first .afx files of a folder (the clip descriptors: where a clip's events would live)."""
+    out = []
+    for item in [x for x in files if x.lower().endswith(".afx")][:limit]:
+        archive_name, name = item.split(": ", 1)
+        got = find_entry(archives, name)
+        if got is None or isinstance(got[1], Exception):
+            out.append(f"    {name}: unreadable")
+            continue
+        words = []
+        for m in re.finditer(rb"[\x20-\x7e]{3,}", got[1]):
+            w = m.group().decode("latin-1")
+            if w not in words:
+                words.append(w)
+        out.append(f"    {name} ({len(got[1])} bytes): " + (" | ".join(words[:25]) or "no printable strings"))
+    return out
+
+
+def rig_folders(bnam):
+    """Folders to list for a record with a rig and no CNAM: the rig's own folder and its animations sibling."""
+    folder = bnam.replace("/", "\\").rsplit("\\", 1)[0] if bnam else ""
+    if not folder:
+        return []
+    parent = folder.rsplit("\\", 1)[0] if "\\" in folder else ""
+    return [folder, folder + "\\animations"] + ([parent + "\\animations"] if parent else [])
+
+
 def model_entry(archives, path):
     p = path.replace("/", "\\").lstrip("\\")
     for cand in ([p] if p.lower().startswith("meshes\\") else ["Meshes\\" + p, p]):
@@ -333,7 +361,7 @@ def model_entry(archives, path):
     return "Meshes\\" + p if not p.lower().startswith("meshes\\") else p, None
 
 
-def model_report(archives, path, cnam=""):
+def model_report(archives, path, cnam="", bnam=""):
     """(lines, facts dict for the outcome table) of one model."""
     lines = [f"--- model {path}"]
     facts = {"path": path, "read": False, "sequences": None, "managers": None, "af": None}
@@ -363,6 +391,15 @@ def model_report(archives, path, cnam=""):
         files = folder_files(archives, cnam)
         facts["af"] = len([x for x in files if x.lower().endswith((".af", ".afx"))])
         lines.append(f"  CNAM folder {cnam}: {len(files)} .af/.afx/.rig file(s)" + (": " + "; ".join(files[:8]) + (" ..." if len(files) > 8 else "") if files else ""))
+        lines += afx_lines(archives, files)
+    elif bnam:
+        seen_files = []
+        for folder in rig_folders(bnam):
+            seen_files += [x for x in folder_files(archives, folder) if x not in seen_files]
+        facts["af"] = len([x for x in seen_files if x.lower().endswith((".af", ".afx"))])
+        lines.append(f"  no CNAM; rig {bnam}: clips under the rig's folders: {len(seen_files)} file(s)"
+                     + (": " + "; ".join(seen_files[:8]) + (" ..." if len(seen_files) > 8 else "") if seen_files else " (none: the clips come from elsewhere)"))
+        lines += afx_lines(archives, seen_files)
     return lines, facts
 
 
@@ -471,7 +508,7 @@ def run(a):
     out += ["", "##### 3. models"]
     todo, seen = [], set()
     for m in a.model:
-        todo.append((m, "", ""))
+        todo.append((m, "", "", ""))
         seen.add(m.lower())
     for g in wanted:
         taken = 0
@@ -480,13 +517,13 @@ def run(a):
                 break
             if h["model"].lower() not in seen:
                 seen.add(h["model"].lower())
-                todo.append((h["model"], h["CNAM"], g))
+                todo.append((h["model"], h["CNAM"], g, h["BNAM"]))
                 taken += 1
     facts = []
     if not todo:
         out.append("no model to read (none given with --model, and no record named one)")
-    for path, cnam, g in todo:
-        lines, f = model_report(archives, path, cnam)
+    for path, cnam, g, bnam in todo:
+        lines, f = model_report(archives, path, cnam, bnam)
         f["graph"] = g
         facts.append(f)
         out += (["  (graph " + g + ")"] if g else []) + lines
