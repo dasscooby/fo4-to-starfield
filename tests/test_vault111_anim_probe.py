@@ -171,6 +171,27 @@ class Vault111AnimProbeGraphFilesTests(unittest.TestCase):
         self.assertIn("base CNAM file: read from FO4Port - Main.ba2", text)
         self.assertIn("KlaxonStop", text)
 
+    def test_the_agx_event_fields_are_printed_with_their_values(self):
+        agx = b"\0agx\0Event\0EventDone\0Send Event On End\0EventClosed\0Enter Events\0PlayKlaxon\0Exit_Events\0StopKlaxon\0"
+        with open(os.path.join(self.tmp.name, "FO4Port - Main.ba2"), "wb") as f:
+            f.write(general_archive({AGX: agx, RIG: b"\0rig\0Event\0"}))
+        text = self.run_probe()
+        self.assertIn(".agx fields Event, Send Event On End, Enter Events, Exit Events", text)
+        self.assertIn("Event: 2 occurrence(s)", text)      # the bare name and the one inside Send Event On End
+        self.assertIn("(inside a longer field name)", text)
+        self.assertIn("after: EventDone | Send Event On End", text)
+        self.assertIn("Send Event On End: 1 occurrence(s)", text)
+        self.assertIn("after: EventClosed", text)
+        self.assertIn("Enter Events: 1 occurrence(s)", text)
+        self.assertIn("after: PlayKlaxon", text)
+        self.assertIn("Exit Events: 1 occurrence(s)", text)      # written Exit_Events
+        self.assertIn("after: StopKlaxon", text)
+        self.assertEqual(text.count(".agx fields"), 1)           # the .rig gets none
+
+    def test_an_agx_without_the_fields_says_not_found(self):
+        text = self.run_probe()
+        self.assertIn("Send Event On End: not found in the file", text)
+
     def test_a_graph_missing_from_the_archives_is_said(self):
         with open(os.path.join(self.tmp.name, "FO4Port - Main.ba2"), "wb") as f:
             f.write(general_archive({"Meshes\\Other.nif": b"x"}))
