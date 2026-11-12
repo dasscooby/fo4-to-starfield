@@ -1,6 +1,8 @@
 """FAL-446: the mission's bytes on F11 at the Pip-Boy kit's stage (e), and the helper that names the current stage's
-offset from two dumps (scripts/ui/pipboy_quest_bytes.py); FAL-527: [Kit] MissionStageAt=, the quest page's STAGE. The plugin's side is checked as text (no compiler here: the
-PC build is the compile check); the helper on a made-up log in the plugin's format."""
+offset from two dumps (scripts/ui/pipboy_quest_bytes.py); FAL-527: [Kit] MissionStageAt=, the quest page's STAGE;
+FAL-571: the blocks behind the mission's pointers on F11 and [Kit] MissionObjective=, its objectives. The plugin's side
+is checked as text (no compiler here: the PC build is the compile check); the helper on a made-up log in the plugin's
+format."""
 import os
 import re
 import sys
@@ -28,6 +30,13 @@ def dump_lines(n, form, body):
         hexes = ",".join(chunk[j:j + 8].hex() for j in range(0, len(chunk), 8))
         lines.append(f"[info] step=kit_quest_bytes n={n} form={form} at=+{0x38 + i:03X} bytes={hexes}\n")
     return lines
+
+
+def obj_lines(n, form, blocks, followed=40):
+    """The plugin's FAL-571 lines for one F11 press: blocks is {path: (address, 0x40 bytes)}."""
+    lines = [f"[info] step=kit_quest_obj n={n} form={form} path={path} at={at:#x} bytes="
+             + ",".join(data[j:j + 8].hex() for j in range(0, len(data), 8)) + "\n" for path, (at, data) in blocks.items()]
+    return lines + [f"[info] step=kit_quest_objs n={n} form={form} followed={followed} owned={len(blocks)}\n"]
 
 
 class PluginTests(unittest.TestCase):
@@ -108,6 +117,65 @@ class PluginTests(unittest.TestCase):
         for text in (self.readme, card, pqb.__doc__):
             self.assertNotIn("setstage FO4SF_Min00", text)
 
+    def test_the_wider_dump_follows_pointers_that_point_back(self):
+        """FAL-571: on F11, after the quest's bytes, each followable word one hop and one more, owned blocks logged."""
+        self.assertIn("kQuestPointerLast = kQuestDumpEnd - 8;", self.main)
+        self.assertIn("kObjectiveBlock = 0x40;", self.main)
+        follow = function(self.main, "bool Followable(")
+        for part in ("a_addr % 8 != 0", "InImage(a_addr, 1)", "REX::W32::VirtualQuery(", "info.state != REX::W32::MEM_COMMIT",
+                     "constexpr std::uint32_t guard = 0x100;", "(info.protect & guard) == 0",
+                     "a_addr + kObjectiveBlock <= end"):
+            self.assertIn(part, follow, part)
+        log = function(self.main, "void LogKitQuestObjectives(")
+        self.assertIn("std::set<std::uintptr_t> seen{ quest };", log)                  # each block once, never the quest
+        self.assertLess(log.index("Followable(to)"), log.index("Peek(to, words.data(), kObjectiveBlock)"))
+        self.assertIn("std::ranges::find(words, quest) != words.end()", log)          # it points back: logged
+        self.assertIn('"step=kit_quest_obj n={} form={:08X} path={} at={} bytes={}"', log)
+        self.assertIn('"step=kit_quest_objs n={} form={:08X} followed={} owned={}"', log)
+        self.assertIn("for (auto at = kQuestDumpAt; at <= kQuestPointerLast; at += 8) {", log)
+        self.assertIn("for (const auto& block : hop1) {", log)                        # two hops, no third
+        self.assertIn("nullptr);", log)
+        for text in (follow, log):
+            self.assertNotIn("FormById(", text)
+            self.assertNotIn("REL::", text)
+        dump = function(self.main, "void LogKitQuestBytes(")
+        self.assertLess(dump.index("step=kit_quest_bytes n={} form="), dump.index("LogKitQuestObjectives(n, formId);"))
+        self.assertLess(self.main.index("\tvoid LogKitQuestObjectives("), self.main.index("\tvoid LogKitQuestBytes("))
+
+    def test_the_objectives_read_the_paths_mission_objective_names(self):
+        """FAL-571: each MissionObjective= read with Peek only along its path; one OBJECTIVES ? row without any."""
+        self.assertIn("kKitObjectives = 8;", self.main)
+        self.assertIn("std::vector<KitObjective>                      objectives;", self.main)
+        check = function(self.main, "bool KitObjectiveLine(")
+        for part in ("g_kit.objectives.size() == kKitObjectives", "number.size() > 5", "value > 0xFFFF",
+                     "a_o.index == index", "part.size() > 3", "objective.path.size() == 3", "path.size() < 2",
+                     "path.front() < kQuestDumpAt || path.front() > kQuestPointerLast || path.front() % 8 != 0",
+                     "path[1] > kObjectiveBlock - 8 || path[1] % 8 != 0", "path.back() >= kObjectiveBlock",
+                     "g_kit.objectives.push_back(std::move(objective));"):
+            self.assertIn(part, check, part)
+        read = function(self.main, "bool ReadKit(")
+        self.assertIn('key == "MissionObjective" && KitObjectiveLine(value)', read)
+        rows = function(self.main, "std::vector<KitRow> KitQuestRows(")
+        part = rows[rows.index("static std::vector<int> loggedStates;"):]
+        self.assertIn('info.emplace_back("OBJECTIVES", Unknown("quest_objectives", '
+                      '"reason=no_objectives (MissionObjective= in [Kit])"));', part)
+        self.assertIn("read = Peek(at + objective.path[p], at) && at;", part)       # a null pointer stops the path
+        self.assertIn("Peek(at + objective.path.back(), state)", part)
+        self.assertIn('std::format("OBJECTIVE {}", objective.index)', part)
+        self.assertIn('"step=kit_quest_objective form={:08X} objective={} path={} state={}"', part)
+        self.assertLess(part.index("if (loggedStates[i] != state) {"), part.index("step=kit_quest_objective"))
+        self.assertIn("return { { name, \"\", std::move(info) } };", part)
+        self.assertNotIn("FormById(", part)
+        self.assertNotIn("REL::", part)
+        ini = (PLUGIN / "FO4SFPipboyMenu.ini").read_text(encoding="utf-8")
+        self.assertNotRegex(ini, r"\nMissionObjective=")                         # ships without: OBJECTIVES ?
+        self.assertIn("; [Kit] MissionObjective=<n>|<path>", ini)
+        for text in ("MissionObjective=<n>|<path>", "step=kit_quest_obj ", "step=kit_quest_objs", "owned=0",
+                     "step=kit_quest_objective", "--objective <n>", "setobjectivedisplayed <form id> <n> 1"):
+            self.assertIn(text, self.readme, text)
+        card = (ROOT / "docs" / "spikes" / "pipboy-page-kit-owner-card.md").read_text(encoding="utf-8")
+        self.assertIn("`setobjectivecompleted <id> <n> 1`", card)
+
     def test_the_readme_names_the_dump_and_the_helper(self):
         self.assertIn("step=kit_quest_bytes", self.readme)
         self.assertIn("scripts/ui/pipboy_quest_bytes.py", self.readme)
@@ -136,6 +204,98 @@ class StageAtTests(unittest.TestCase):
 
     def test_the_shipped_ini_has_none(self):
         self.assertIsNone(kit.read_kit()["stage_at"])
+
+
+class ObjectiveTests(unittest.TestCase):
+    """parse_kit's MissionObjective=, the same check as the plugin's KitObjectiveLine."""
+    KIT = "[Kit]\nMission=FO4SFMission.esm|800\n"
+    PAGE = "[Page DATA/QUESTS]\nList=quests\n"
+
+    def test_good(self):
+        for value, index, path in (("10|1A0/1C", 10, [0x1A0, 0x1C]), ("85|38/0/3F", 85, [0x38, 0, 0x3F]),
+                                   ("86|330/38/0", 86, [0x330, 0x38, 0]), ("65535|1a8/8/1c", 65535, [0x1A8, 8, 0x1C])):
+            kit_ = kit.parse_kit(self.KIT + f"MissionObjective={value}\n" + self.PAGE)
+            self.assertEqual(kit_["objectives"], [{"index": index, "path": path}], value)
+
+    def test_bad(self):
+        for value in ("", "10", "10|", "|1A0/1C", "65536|1A0/1C", "-1|1A0/1C", "1 0|1A0/1C", "10|1A0", "10|1A0/8/8/1C",
+                      "10|30/1C", "10|338/1C", "10|1A4/1C", "10|1A0/40", "10|1A0/4/1C", "10|1A0/40/1C", "10|1A0//1C",
+                      "10|+1A0/1C", "10|0x1A0/1C", "10|1A0/1C/", "10|1A0/1C|2"):
+            with self.assertRaises(kit.KitError, msg=value):
+                kit.check_objective(value, 1)
+
+    def test_each_once_and_at_most_eight(self):
+        with self.assertRaises(kit.KitError):
+            kit.parse_kit(self.KIT + "MissionObjective=10|1A0/1C\nMissionObjective=010|1A8/1C\n" + self.PAGE)
+        eight = "".join(f"MissionObjective={n}|1A0/{n:X}\n" for n in range(8))
+        self.assertEqual(len(kit.parse_kit(self.KIT + eight + self.PAGE)["objectives"]), 8)
+        with self.assertRaises(kit.KitError):
+            kit.parse_kit(self.KIT + eight + "MissionObjective=9|1A0/9\n" + self.PAGE)
+
+    def test_the_shipped_ini_has_none(self):
+        self.assertEqual(kit.read_kit()["objectives"], [])
+
+
+class ObjectiveHelperTests(unittest.TestCase):
+    """FAL-571: pipboy_quest_bytes.py --objective on a made-up log in the plugin's format."""
+    QUEST = 0x7FF6_1234_0000
+
+    def block(self, index, state):
+        data = bytearray(0x40)
+        data[0x08:0x10] = self.QUEST.to_bytes(8, "little")                     # its owner, as the plugin requires
+        data[0x1C:0x1E] = index.to_bytes(2, "little")
+        data[0x20] = state
+        return bytes(data)
+
+    def presses(self, state_a, state_b):
+        stage = bytearray(0x40)
+        stage[0:8] = self.QUEST.to_bytes(8, "little")
+        stage[0x30] = 1
+        before = {"+1A0/+00": (0x2000, self.block(10, state_a)), "+1A0/+08": (0x2100, self.block(85, 0)),
+                  "+200": (0x3000, bytes(stage))}
+        after = dict(before)
+        after["+1A0/+00"] = (0x2000, self.block(10, state_b))
+        changed = bytearray(stage)
+        changed[0x30] = 2                                                        # a block that is not objective 10's
+        after["+200"] = (0x3000, bytes(changed))
+        return obj_lines(3, "07000800", before) + obj_lines(5, "07000800", after)
+
+    def test_the_lines_read_back(self):
+        found = pqb.blocks(self.presses(0, 1) + dump_lines(3, "07000800", bytes(0x300)))
+        self.assertEqual(sorted(found), [3, 5])
+        form, blocks, counts = found[3]
+        self.assertEqual((form, counts), ("07000800", (40, 3)))
+        self.assertEqual(blocks["+1A0/+00"], (0x2000, self.block(10, 0)))
+
+    def test_the_state_byte_is_marked(self):
+        found = pqb.blocks(self.presses(0, 1))
+        rows = pqb.objective_changes(found[3][1], found[5][1], 10)
+        self.assertEqual(rows, [("+1A0/+00", 0x20, 0, 1, True), ("+200", 0x30, 1, 2, False)])
+        line = pqb.objective_line(10, rows)
+        self.assertEqual(line, "MissionObjective=10|1A0/0/20")
+        self.assertEqual(kit.check_objective(line.split("=", 1)[1], 1), {"index": 10, "path": [0x1A0, 0, 0x20]})
+        self.assertIsNone(pqb.objective_line(10, pqb.objective_changes(found[3][1], found[5][1], 86)))   # none marked
+        self.assertIsNone(pqb.objective_line(10, rows + [("+1A0/+08", 0x20, 0, 1, True)]))           # several
+
+    def test_a_block_that_moved_is_not_compared(self):
+        found = pqb.blocks(self.presses(0, 1))
+        moved = dict(found[5][1])
+        moved["+1A0/+00"] = (0x2800, moved["+1A0/+00"][1])
+        self.assertEqual([row[0] for row in pqb.objective_changes(found[3][1], moved, 10)], ["+200"])
+
+    def test_main_on_a_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = os.path.join(tmp, "FO4SFPipboyMenu.log")
+            with open(log, "w", encoding="utf-8") as handle:
+                handle.writelines(self.presses(1, 3))
+            self.assertEqual(pqb.main([log, "--objective", "10"]), 0)
+            self.assertEqual(pqb.main([log, "--objective", "10", "--after", "4"]), 2)
+            with open(log, "w", encoding="utf-8") as handle:                     # nothing points back: wider dump
+                handle.writelines(obj_lines(3, "07000800", {}) + obj_lines(5, "07000800", {}))
+            self.assertEqual(pqb.main([log, "--objective", "10"]), 1)
+            with open(log, "w", encoding="utf-8") as handle:                     # a plugin before FAL-571
+                handle.writelines(dump_lines(3, "07000800", bytes(0x300)))
+            self.assertEqual(pqb.main([log, "--objective", "10"]), 2)
 
 
 class HelperTests(unittest.TestCase):
