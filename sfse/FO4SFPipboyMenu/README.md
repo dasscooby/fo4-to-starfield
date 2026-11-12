@@ -32,6 +32,7 @@ and logs every step. The stage is picked by `Stage` in `FO4SFPipboyMenu.ini`:
 | `scripts/ui/make_probe_swf.py` | writes the stage (b) movie, with `--channel` the stage (c) one and with `--page` the stage (d) one (pure Python; tests `tests/test_make_probe_swf.py`, `tests/test_pipboy_stat_page.py`) |
 | `scripts/ui/make_pipboy_kit.py` | the page kit (stage (e)): reads and checks the pages of the ini (`--check`) and writes the kit's movie for them (pure Python, on `make_probe_swf.py`; tests `tests/test_pipboy_kit.py`) |
 | `scripts/ui/pipboy_quest_bytes.py` | reads two F11 dumps of the mission (`step=kit_quest_bytes`) from the log and lists the words that differ, to find the current stage, and prints its `MissionStageAt=` line (FAL-446, FAL-527); with `--objective <n>`, the bytes that differ behind the mission's pointers (`step=kit_quest_obj`) and the `MissionObjective=` line (FAL-571; test `tests/test_pipboy_quest_bytes.py`) |
+| `scripts/ui/pipboy_map_bytes.py` | reads two F11 dumps of the player (`step=kit_map_bytes`, `step=kit_map_cell`) from the log: the angle float that turned by about 90° and its `HeadingAt=` line; with `--grid`, whether the cell's own grid follows POSITION over 4096 and its `GridUnits=` line (FAL-595; test `tests/test_pipboy_map_bytes.py`) |
 | `scripts/ui/make_pipboy_probe.py` | stages the empty `FO4SFPipboyProbe.esm` and the movie (`--channel`, `--page` or `--kit`); `check` checks the plugin |
 | `scripts/ui/pipboy_probe_install.py` | stage (b) install with its own record (test `tests/test_pipboy_probe_install.py`) |
 
@@ -275,7 +276,7 @@ tab, a sub-tab or a row is reported under one of that row's names, whether it la
 `make_pipboy_kit.py` reads them to draw the main tabs (`--check` prints them). Both apply the same grammar and checks:
 
 - `[Kit]`: `Title=`, `Header=<value>`, `Hints=`, `Mission=`, `MissionStageAt=` and `MissionObjective=` (below, the
-  `quests` list).
+  `quests` list), `HeadingAt=` and `GridUnits=` (below, `heading` and `grid`).
 - `[Page <TAB>/<SUB>]`: a page. Main tabs come in the order of their first page (up to 5); sub-tabs come in page
   order (up to 5 per tab). A page has exactly one of:
   - `Row=<label>|<value>` lines (up to 64, 16 on screen, scrolled);
@@ -295,7 +296,7 @@ row value is longer than 8 characters shows that value after its label, in the l
 | INV / ITEMS | `List=inventory`: the player's items, name and count, sorted by name (FAL-426) |
 | DATA / QUESTS | `List=quests`: our mission first, the quest `[Kit] Mission=` names (FAL-431) |
 | DATA / KIT TEST | `List=kit_test`: thirty rows to scroll, select and click |
-| MAP / WORLD | rows: world, cell, position, time, days passed (FAL-426: the map's first content; the drawn map waits for the map track) |
+| MAP / WORLD | rows: world, cell, position, heading, grid, time, days passed (FAL-426: the map's first content; FAL-595: heading and grid, `?` until the PC's reads set them; the drawn map waits for the map track, `docs/spikes/pipboy-map-page-plan.md`) |
 | RADIO / STATIONS | notice: waits for its own track (the radio) |
 
 **Value providers.** Every value is read on the main thread, with stage (d)'s reads and two calls only. When one
@@ -310,6 +311,8 @@ cannot be read it prints `?`, and its reason is logged once as `step=page_unknow
 | `time` | `GameHour` `0x38` and `GameDaysPassed` `0x39` at the value offset found and checked as at (d): `hh:mm   DAY n` | `what=time reason=globals_unread`, `no_value_offset` or `out_of_range` |
 | `days` | `GameDaysPassed`, two decimals, checked as the time is | `what=days reason=globals_unread`, `no_value_offset` or `out_of_range` |
 | `position` | the player's position, whole units | `what=position reason=no_player` |
+| `heading` | FAL-595: the player's heading in compass degrees (`0` to `359`), the float at `[Kit] HeadingAt=[-]<80\|84\|88>` among the player's `OBJ_REFR::angle` (libxse, `+0x80`, radians), read with `Peek` only, negated when the line has `-` (the float falls as the player turns right); logged once, `step=kit_heading heading_at=<offset> rad=<r> deg=<d>`. Not shipped: the PC's read sets it. F11 at stage (e) logs the player's 64 bytes from `+0x80` and the six floats there, `step=kit_map_bytes n=<snapshot> at=+080 bytes=<hex> floats=<six>`: F11 standing still, turn on the spot about 90° right, F11 again, and `scripts/ui/pipboy_map_bytes.py <log>` marks the float that turned and prints the `HeadingAt=` line | `what=heading reason=no_heading_at` without the setting, `reason=unreadable` |
+| `grid` | FAL-595: the player's cell on the grid, `x y`, POSITION's x and y over `[Kit] GridUnits=<decimal>` (256 to 65536; Fallout 4's and the hypothesis: 4096), rounded down; `NONE (INTERIOR)` where WORLD says so; logged at the first read and at each change, `step=kit_grid units=<u> x=<x> y=<y>`. Not shipped: the PC's read sets it. The same F11 logs the player's cell and its own grid, `step=kit_map_cell n=<snapshot> cell=<addr> world=<addr> flags=<hex> data=<addr> cell_x=<x> cell_y=<y>` (libxse 9d090c4 `TESObjectCELL`: `cellFlags` `+0x40`, `cellData` `+0x58`, an `EXTERIOR_DATA` with `cellX`, `cellY` at `+0`, `+4`; `cell_xy=unreadable` when a read faults): F11 in one cell, walk across a border, F11 again, and `pipboy_map_bytes.py <log> --grid` prints `GridUnits=4096` when the cell's grid matches POSITION over it in both | `what=grid reason=no_grid_units` without the setting, `reason=no_player` |
 | `av:<hex>` | the player's `GetActorValue` with the `ActorValueInfo` form of that form id. The form is looked up once by its id and accepted by its RTTI type, with stage (d)'s `AcceptById`, logged as `step=kit_av av:<id>:form=<0 or 1>:type=<rtti>:...:<used or refused>` | `what=av:<hex> reason=no_such_actor_value` |
 
 Lists: `kit_test` (thirty rows, no read of the game), `inventory` (FAL-426) and `quests` (FAL-431). `[Kit]

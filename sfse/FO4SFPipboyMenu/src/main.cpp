@@ -93,7 +93,9 @@
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <mutex>
+#include <numbers>
 #include <optional>
 #include <set>
 #include <string>
@@ -164,6 +166,12 @@ namespace
 	constexpr std::size_t   kBaseObjectAt = 0x80 + 0x18;     // libxse RE::TESObjectREFR::data, OBJ_REFR::objectReference
 	constexpr std::size_t   kParentCellAt = 0xB0;            // libxse RE::TESObjectREFR::parentCell
 	constexpr std::size_t   kCellWorldAt = 0x118;            // libxse RE::TESObjectCELL::cellWorldspace
+	constexpr std::size_t   kAngleAt = 0x80;                 // FAL-595: libxse OBJ_REFR::angle, three floats (radians)
+	constexpr std::size_t   kMapDumpBytes = 0x40;            // F11: the player's +0x80 to +0xC0 (angle, location, ... parentCell)
+	constexpr std::size_t   kCellFlagsAt = 0x40;             // libxse RE::TESObjectCELL::cellFlags (kInterior = 1)
+	constexpr std::size_t   kCellDataAt = 0x58;              // libxse RE::TESObjectCELL::cellData: EXTERIOR_DATA*, cellX, cellY
+	constexpr std::uint32_t kGridUnitsMin = 256;             // [Kit] GridUnits=: a cell's width in game units, 256 ...
+	constexpr std::uint32_t kGridUnitsMax = 65536;           // ... to 65536 (Fallout 4's and the hypothesis: 4096)
 	constexpr std::size_t   kLevelAt = 0x08 + 0x06;          // libxse RE::TESActorBaseData::actorData, ACTOR_BASE_DATA::level
 	constexpr std::size_t   kFullNameAt = 0x08;              // libxse RE::TESFullName::fullName (a BSFixedStringCS)
 	constexpr std::size_t   kPageLines = 7;                  // make_probe_swf.py PAGE_LINES
@@ -245,8 +253,8 @@ namespace
 	constexpr auto          kKitClose = "fo4sfClose";
 	constexpr auto          kKitId = "fo4sfKitId";
 	// VALUE_PROVIDERS and LIST_PROVIDERS; av:<hex> is the actor value of that form id
-	constexpr std::array<std::string_view, 10> kKitValues{ "health", "level", "xp", "carry_max", "rads", "cell", "world",
-		"time", "days", "position" };
+	constexpr std::array<std::string_view, 12> kKitValues{ "health", "level", "xp", "carry_max", "rads", "cell", "world",
+		"time", "days", "position", "heading", "grid" };
 	constexpr std::array<std::string_view, 3> kKitLists{ "kit_test", "inventory", "quests" };
 	constexpr std::string_view kKitActorValue = "av:";
 	// the menus a main-thread snapshot asks the engine about (IsMenuRegistered, IsMenuOpen); only Console is named by
@@ -1663,6 +1671,9 @@ namespace
 		std::uint32_t                                  missionId = 0;   // and its form's local id in that file
 		std::size_t                                    missionStageAt = 0;   // MissionStageAt=: its stage's u16, or 0 (STAGE ?)
 		std::vector<KitObjective>                      objectives;   // MissionObjective=: each objective's state, or none
+		std::size_t                                    headingAt = 0;   // HeadingAt=: the player's heading float, or 0 (HEADING ?)
+		bool                                           headingTurnsDown = false;   // HeadingAt=-<hex>: it falls turning right
+		std::uint32_t                                  gridUnits = 0;   // GridUnits=: a cell's width in game units, or 0 (GRID ?)
 		std::vector<KitPage>                           pages;
 		std::vector<std::string>                       tabs;     // in the order of their first page
 		std::array<std::vector<std::size_t>, kKitTabs> subs;     // each tab's pages, in order
@@ -1830,6 +1841,38 @@ namespace
 		return true;
 	}
 
+	// parse_kit's check_heading_at (FAL-595): [-]<80, 84 or 88>, the player's angle float that is the heading, as
+	// scripts/ui/pipboy_map_bytes.py names it from two F11 dumps around a turn to the right; '-' when it falls
+	bool KitHeadingAt(std::string_view a_text)
+	{
+		const bool down = a_text.starts_with('-');
+		if (down) {
+			a_text.remove_prefix(1);
+		}
+		if (a_text != "80" && a_text != "84" && a_text != "88") {
+			return false;
+		}
+		g_kit.headingAt = static_cast<std::size_t>(std::strtoul(std::string(a_text).c_str(), nullptr, 16));
+		g_kit.headingTurnsDown = down;
+		return true;
+	}
+
+	// parse_kit's check_grid_units (FAL-595): <decimal>, a cell's width in game units (256 to 65536), as
+	// scripts/ui/pipboy_map_bytes.py names it from F11 dumps in two cells
+	bool KitGridUnits(std::string_view a_text)
+	{
+		if (a_text.empty() || a_text.size() > 5 ||
+			!std::ranges::all_of(a_text, [](char a_c) { return a_c >= '0' && a_c <= '9'; })) {
+			return false;
+		}
+		const auto units = static_cast<std::uint32_t>(std::strtoul(std::string(a_text).c_str(), nullptr, 10));
+		if (units < kGridUnitsMin || units > kGridUnitsMax) {
+			return false;
+		}
+		g_kit.gridUnits = units;
+		return true;
+	}
+
 	// parse_kit's check_objective (FAL-571): <index>|<path>, the objective's number (1 to 5 decimal digits, at most 65535,
 	// once) and where its state is, as scripts/ui/pipboy_quest_bytes.py --objective prints it from the F11 dumps: 2 or 3
 	// offsets of 1 to 3 hex digits joined by '/', the first a pointer in the quest's dump (a multiple of 8, 38 to 330),
@@ -1965,6 +2008,10 @@ namespace
 					// KitStageAt kept it
 				} else if (key == "MissionObjective" && KitObjectiveLine(value)) {
 					// KitObjectiveLine kept it
+				} else if (key == "HeadingAt" && !g_kit.headingAt && KitHeadingAt(value)) {
+					// KitHeadingAt kept it
+				} else if (key == "GridUnits" && !g_kit.gridUnits && KitGridUnits(value)) {
+					// KitGridUnits kept it
 				} else {
 					return KitRefuse(n, std::format("kit_key key={}", key));
 				}
@@ -2106,6 +2153,56 @@ namespace
 		return form;
 	}
 
+	// FAL-595: the player's heading in compass degrees (0 to 359), the float at [Kit] HeadingAt= (Peek only; ? without
+	// the setting), negated for HeadingAt=-<hex>; logged once: step=kit_heading heading_at= rad= deg=
+	std::string HeadingText()
+	{
+		if (!g_kit.headingAt) {
+			return Unknown("heading", "reason=no_heading_at (HeadingAt= in [Kit])");
+		}
+		float rad = 0.0f;
+		if (!CheckSingleton("PlayerCharacter", kPlayerSingleton, kPlayerRtti, g_playerOk) ||
+			!Peek(Singleton(kPlayerSingleton) + g_kit.headingAt, rad) || !std::isfinite(rad) || std::abs(rad) > 1000.0f) {
+			return Unknown("heading", std::format("reason=unreadable heading_at=+{:03X}", g_kit.headingAt));
+		}
+		const auto turned = g_kit.headingTurnsDown ? -rad : rad;
+		auto       deg = static_cast<int>(std::lround(std::fmod(turned * 180.0 / std::numbers::pi, 360.0)));
+		deg = (deg % 360 + 360) % 360;
+		static bool logged = false;
+		if (!logged) {
+			logged = true;
+			REX::INFO("step=kit_heading heading_at={}+{:03X} rad={:.4f} deg={}", g_kit.headingTurnsDown ? "-" : "",
+				g_kit.headingAt, rad, deg);
+		}
+		return std::to_string(deg);
+	}
+
+	// FAL-595: the player's cell on the grid, POSITION's x and y over [Kit] GridUnits=, rounded down (? without the
+	// setting; NONE (INTERIOR) in a cell without a worldspace, as WORLD); logged at the first read and at each change:
+	// step=kit_grid units= x= y=
+	std::string GridText()
+	{
+		if (!g_kit.gridUnits) {
+			return Unknown("grid", "reason=no_grid_units (GridUnits= in [Kit])");
+		}
+		if (PlaceText().second == "NONE (INTERIOR)") {
+			return "NONE (INTERIOR)";
+		}
+		std::array<float, 3> xyz{};
+		if (!ReadPosition(xyz) || !std::isfinite(xyz[0]) || !std::isfinite(xyz[1])) {
+			return Unknown("grid", "reason=no_player");
+		}
+		const auto  x = static_cast<std::int64_t>(std::floor(xyz[0] / static_cast<double>(g_kit.gridUnits)));
+		const auto  y = static_cast<std::int64_t>(std::floor(xyz[1] / static_cast<double>(g_kit.gridUnits)));
+		constexpr auto none = std::numeric_limits<std::int64_t>::min();
+		static auto    logged = std::pair<std::int64_t, std::int64_t>{ none, none };
+		if (logged != std::pair{ x, y }) {
+			logged = { x, y };
+			REX::INFO("step=kit_grid units={} x={} y={}", g_kit.gridUnits, x, y);
+		}
+		return std::format("{} {}", x, y);
+	}
+
 	// one value provider's text (README, "Stage (e)": what each reads, and its step=page_unknown line when it cannot);
 	// main thread only
 	std::string KitValueRead(std::string_view a_spec)
@@ -2152,6 +2249,12 @@ namespace
 			return ReadPosition(xyz) && std::isfinite(xyz[0]) && std::isfinite(xyz[1]) && std::isfinite(xyz[2]) ?
 			           std::format("{:.0f} {:.0f} {:.0f}", xyz[0], xyz[1], xyz[2]) :
 			           Unknown("position", "reason=no_player");
+		}
+		if (a_spec == "heading") {
+			return HeadingText();
+		}
+		if (a_spec == "grid") {
+			return GridText();
 		}
 		if (a_spec.starts_with(kKitActorValue)) {   // ReadKit checked the hex
 			const auto id = static_cast<std::uint32_t>(std::strtoul(std::string(a_spec.substr(kKitActorValue.size())).c_str(), nullptr, 16));
@@ -2598,6 +2701,46 @@ namespace
 			REX::INFO("step=kit_quest_bytes n={} form={:08X} at=+{:03X} bytes={}", n, formId, at, KitBytes(g_kitQuest + at, 0x40));
 		}
 		LogKitQuestObjectives(n, formId);
+	}
+
+	// FAL-595, main thread, on the snapshot key at stage (e): the player's bytes from +0x80 to +0xC0 (OBJ_REFR's angle
+	// and location, ... parentCell at +0xB0) and the six floats at +0x80 (step=kit_map_bytes n= at=+080 bytes= floats=),
+	// then the player's cell and its own grid (libxse TESObjectCELL::cellData at +0x58, EXTERIOR_DATA's cellX and cellY:
+	// step=kit_map_cell n= cell= world= flags= data= cell_x= cell_y=), so F11 before and after a turn shows which float
+	// is the heading and F11 in two cells which GridUnits= POSITION needs (scripts/ui/pipboy_map_bytes.py). Peek only.
+	void LogKitMapBytes()
+	{
+		const auto n = g_snapshots.load();
+		if (!CheckSingleton("PlayerCharacter", kPlayerSingleton, kPlayerRtti, g_playerOk)) {
+			REX::INFO("step=kit_map_bytes n={} reason=no_player", n);
+			return;
+		}
+		const auto           player = Singleton(kPlayerSingleton);
+		std::array<float, 6> floats{};
+		std::string          floatText = "unreadable";
+		if (Peek(player + kAngleAt, floats)) {
+			floatText.clear();
+			for (std::size_t i = 0; i < floats.size(); ++i) {
+				floatText += std::format("{}{:.4f}", i ? "," : "", floats[i]);
+			}
+		}
+		REX::INFO("step=kit_map_bytes n={} at=+{:03X} bytes={} floats={}", n, kAngleAt, KitBytes(player + kAngleAt, kMapDumpBytes),
+			floatText);
+		std::uintptr_t cell = 0;
+		ObjectType     cellType;
+		if (!Peek(player + kParentCellAt, cell) || !IsType(cell, "TESObjectCELL@@", cellType)) {
+			REX::INFO("step=kit_map_cell n={} reason=cell cell={}", n, Hex(cell));
+			return;
+		}
+		std::uintptr_t               world = 0;
+		std::uint32_t                flags = 0;
+		std::uintptr_t               data = 0;
+		std::array<std::int32_t, 2>  xy{};
+		const bool                   gotWorld = Peek(cell + kCellWorldAt, world);
+		const bool                   gotFlags = Peek(cell + kCellFlagsAt, flags);
+		const bool                   gotXy = Peek(cell + kCellDataAt, data) && data && Peek(data, xy);
+		REX::INFO("step=kit_map_cell n={} cell={} world={} flags={} data={} {}", n, Hex(cell), gotWorld ? Hex(world) : "unreadable",
+			gotFlags ? Hex(flags) : "unreadable", Hex(data), gotXy ? std::format("cell_x={} cell_y={}", xy[0], xy[1]) : "cell_xy=unreadable");
 	}
 
 	// a_text in lines of at most a_columns, each broken after its last space, '_', '-', '/' or '|' when the rest does
@@ -3648,6 +3791,7 @@ namespace
 					Snapshot("key", true);
 					if (g_stage == 5) {   // FAL-446: the mission's bytes, for the stage's offset
 						LogKitQuestBytes();
+						LogKitMapBytes();   // FAL-595: the player's angle and cell, for HeadingAt= and GridUnits=
 					}
 				});
 			}

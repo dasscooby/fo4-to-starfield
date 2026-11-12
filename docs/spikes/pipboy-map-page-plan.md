@@ -4,19 +4,22 @@ Claude (sole survivor), 12 Nov 2026. **A plan, no code.** Nothing here has run i
 terrain docs: **verified** = read from the source or a PC log, **hypothesis** = to be proven by the read named
 beside it. The pause default (`Pause=0`) does not change.
 
-## What the MAP page shows today (verified, source at `cdde9fbc`)
+## What the MAP page shows today (verified, source at `cdde9fbc`; step 1 added two rows, FAL-595)
 
-`[Page MAP/WORLD]` in `sfse/FO4SFPipboyMenu/FO4SFPipboyMenu.ini` has five text rows:
+`[Page MAP/WORLD]` in `sfse/FO4SFPipboyMenu/FO4SFPipboyMenu.ini` has seven text rows:
 
 | Row | Value | Read |
 |---|---|---|
 | WORLD | the worldspace's name (`NameText`), or `NONE (INTERIOR)` | the player's `parentCell` (`+0xB0`), its worldspace |
 | CELL | the cell's name (`NameText`) | the same cell |
 | POSITION | `x y z`, whole game units | `ReadPosition`: the player's `OBJ_REFR::location` at `+0x80 + 0x0C` (Peek) |
+| HEADING | compass degrees, `0` to `359`; `?` until `[Kit] HeadingAt=` is set | the angle float `HeadingAt=` names (Peek) |
+| GRID | `x y`, POSITION over a cell's width, rounded down; `?` until `[Kit] GridUnits=` is set | `ReadPosition` |
 | TIME | the game hour | `GameHour` |
 | DAYS PASSED | the day count | `GameDaysPassed` |
 
-There is no picture, no heading and no marker. The page is text in the kit's dot-matrix font.
+There is no picture and no marker, and HEADING and GRID stay `?` until the PC reads below set their two `[Kit]`
+lines. The page is text in the kit's dot-matrix font.
 
 ## What a player needs first
 
@@ -39,17 +42,24 @@ converted.
 
 ## The steps, smallest first, each ending in something a player can see
 
-### Step 1: heading and grid as rows (code: small, Peek only)
+### Step 1: heading and grid as rows (code: small, Peek only; written on FAL-595, PC reads open)
 
-Add two rows to MAP/WORLD:
+Two rows on MAP/WORLD, each `?` with one `step=page_unknown` line saying why until the PC has proven its place
+(`sfse/FO4SFPipboyMenu/README.md`, `heading` and `grid`). F11 at stage (e) logs the player's bytes from `+0x80` to
+`+0xC0` with the six floats there (`step=kit_map_bytes`) and the player's cell with its own grid (libxse
+`TESObjectCELL::cellData` at `+0x58`, `EXTERIOR_DATA` `cellX`, `cellY`: `step=kit_map_cell`);
+`scripts/ui/pipboy_map_bytes.py` reads two dumps and prints `HeadingAt=` (and `--grid`: `GridUnits=`). The rows:
 - **HEADING:** compass degrees, from the player's `OBJ_REFR::angle`. In libxse `angle` comes before `location` in
   `OBJ_REFR`, so it is the three floats at `+0x80`, in radians. **Hypothesis:** z is the heading.
 - **GRID:** the cell grid `x / 4096, y / 4096`, rounded down. **Hypothesis:** our overlay keeps 4096 units per
   cell, as Fallout 4 does.
 
 **PC reads that prove it:**
-- **R1:** F11 at stage (e), standing still, then turn about 90° right and press F11 again. A one-line log of the 24
-  bytes at the player's `+0x80` (added with this step) shows which float moved, by about π/2.
+- **R1:** F11 at stage (e), standing still, then turn on the spot about 90° right and press F11 again. The
+  `kit_map_bytes` line (the 64 bytes at the player's `+0x80`, added with this step) shows which float moved, by
+  about π/2; the helper prints `HeadingAt=`.
+- **R1b (GRID):** F11 in one cell, walk until POSITION's x or y has crossed a multiple of 4096 by a few hundred units,
+  F11 again; the helper (`--grid`) prints `GridUnits=4096` when the cell's own grid follows POSITION over 4096 in both.
 - **R2:** `coc FO4Core_RedRocketSpawn` and read POSITION. Compare it with the Red Rocket spawn marker's local
   position in `map-markers.md` (`-989.257, 1146.514, 107.143`) to fix the units and the offset between the overlay
   and Fallout 4's Commonwealth grid. Do the same once at Sanctuary.

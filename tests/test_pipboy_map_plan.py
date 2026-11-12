@@ -19,7 +19,7 @@ class MapPlanTests(unittest.TestCase):
         page = self.ini[self.ini.index("[Page MAP/WORLD]\n"):]
         page = page[:page.index("\n\n")]
         rows = [line.split("=", 1)[1].split("|")[0] for line in page.splitlines()[1:]]
-        self.assertEqual(rows, ["WORLD", "CELL", "POSITION", "TIME", "DAYS PASSED"])
+        self.assertEqual(rows, ["WORLD", "CELL", "POSITION", "HEADING", "GRID", "TIME", "DAYS PASSED"])   # FAL-595
         for row in rows:
             self.assertIn(f"| {row} |", self.plan, row)
         self.assertIn("kPositionAt = 0x80 + 0x0C;", self.main)       # location after angle in OBJ_REFR
