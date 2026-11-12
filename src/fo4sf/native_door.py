@@ -89,8 +89,11 @@ def clip_descriptor(name):
     return ET.tostring(root, encoding='utf-8')
 
 
-def export(plan, dll, output, unit_scale):
+def export(plan, dll, output, unit_scale, descriptors=None):
+    """descriptors: {clip name: .afx bytes} for an object that is no door (anim_object); the clip names are then exactly its keys.
+    None: the door's Open / Close and their descriptors."""
     prepared=prepare(plan,unit_scale)
+    allowed=set(descriptors) if descriptors is not None else {'Open','Close'}
     output=pathlib.Path(output).resolve()
     repo=pathlib.Path(__file__).resolve().parents[2]
     if output==repo or repo in output.parents:raise ValueError('native assets must stay outside repository')
@@ -115,7 +118,7 @@ def export(plan, dll, output, unit_scale):
         rigpath=output/'door.rig'
         require(bind('SaveSkeletonRigToSFBGSFormatDirectC',[p,c.c_wchar_p,p],b)(rig,str(rigpath),error))
         for clip in prepared['clips']:
-            if clip['name'] not in ('Open','Close'):raise ValueError('unsupported door clip name')
+            if clip['name'] not in allowed:raise ValueError('unsupported door clip name')
             anim=bind('CreateAnimationC',[c.c_char_p,c.c_uint],p)(clip['name'].encode(),len(prepared['bones']))
             try:
                 require(anim)
@@ -139,7 +142,7 @@ def export(plan, dll, output, unit_scale):
                     finally:
                         if block:bind('DeleteAnimationBlockC',[p],b)(block)
                 require(bind('SaveAnimationToSFBGSFormatDirectC',[p,c.c_wchar_p,p,p],b)(anim,str(output/(clip['name']+'.af')),rig,error))
-                (output/(clip['name']+'.afx')).write_bytes(clip_descriptor(clip['name']))
+                (output/(clip['name']+'.afx')).write_bytes(descriptors[clip['name']] if descriptors is not None else clip_descriptor(clip['name']))
             finally:
                 if anim:bind('DeleteAnimationC',[p],b)(anim)
         (output/'events.json').write_text(json.dumps({'runtime_events_encoded':False,'clips':[
@@ -156,12 +159,12 @@ RIG_FILE = 'characterassets/skeleton.rig'
 CLIP_DIR = 'animations'
 
 
-def export_files(plan, dll, unit_scale, exporter=None):
+def export_files(plan, dll, unit_scale, exporter=None, descriptors=None):
     """Rig + Open/Close clips + .afx descriptors as {relative path: bytes} (RIG_FILE, CLIP_DIR/<name>.af/.afx).
     Written through a temporary folder outside the repository; the events sidecar is not part of the result."""
     exporter=exporter or export
     with tempfile.TemporaryDirectory(prefix='fo4port-door-') as tmp:
-        prepared=exporter(plan,dll,tmp,unit_scale)
+        prepared=exporter(plan,dll,tmp,unit_scale) if descriptors is None else exporter(plan,dll,tmp,unit_scale,descriptors=descriptors)
         out={RIG_FILE:(pathlib.Path(tmp)/'door.rig').read_bytes()}
         for clip in prepared['clips']:
             for suffix in ('.af','.afx'):

@@ -553,7 +553,8 @@ def rigid_skinned_parts(src, shape, bones):
 def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, clip_files, unit_scale: float = UNIT_SCALE,
                            collision_template: bytes = None, leaf_physics_donor: bytes = None,
                            rest_pose_check: bool = False, aliases: dict = None,
-                           drop_skinned: bool = False) -> Tuple[Dict[str, bytes], dict]:
+                           drop_skinned: bool = False, allowed=None, expect_clips=None, plan_hook=None,
+                           anim_graph: str = None, motion_clip: str = "Open") -> Tuple[Dict[str, bytes], dict]:
     """FO4 door whose "Open" sequence moves geometry under more than one node (frozen_door_parts: double doors,
     shutters, sliding panel sets) -> Starfield door with its OWN rig and clips, as vanilla double doors have
     (IndIntRmSmWallMid_DoorA01: one rig bone and one clip track per leaf, one keyframed body per leaf).
@@ -571,14 +572,22 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
     (door_rig.rest_pose_issue; the sliding / lifting route, which takes every NOT_HINGED_RE door).
     aliases: door_rig.plan's sequence aliases (an animated activator converted as a door, pipeline.OWN_RIG_ALIASES).
     drop_skinned: leave skinned shapes out instead of refusing the door (a rig cannot carry them); the door entry lists
-    them under "dropped_skinned_shapes"."""
+    them under "dropped_skinned_shapes".
+    allowed / expect_clips / plan_hook / anim_graph / motion_clip: an animated object that is no door (anim_object, the
+    Vault 111 console on an activator graph): the clip-slot names the sequences may take, the exact clip names the plan
+    must end with, a function plan -> plan run after the identity binds (it adds the one-frame hold clips), the graph the
+    entry names, and the clip open_motion reports. All default to the door's own."""
     from . import door_model, door_rig, native_door
     if collision_template is None or leaf_physics_donor is None:
         raise ValueError("multi-part door needs the box template and a keyframed donor body")
     src = nifmod.parse(fo4_nif)
-    plan = door_rig.animated_identity_binds(door_rig.plan(src, placed=True, aliases=aliases))
-    if sorted(c["name"] for c in plan["clips"]) != ["Close", "Open"]:
-        raise nifmod.NifError("door needs exactly one Open and one Close sequence")   # the graph plays both
+    plan = door_rig.animated_identity_binds(door_rig.plan(src, placed=True, aliases=aliases, allowed=allowed))
+    if plan_hook is not None:
+        plan = plan_hook(plan)
+    want = sorted(expect_clips) if expect_clips is not None else ["Close", "Open"]
+    if sorted(c["name"] for c in plan["clips"]) != want:
+        raise nifmod.NifError("door needs exactly one Open and one Close sequence" if expect_clips is None else
+                              f"the object needs exactly the clips {want}, the plan has {sorted(c['name'] for c in plan['clips'])}")   # the graph plays them
     if rest_pose_check and (issue := door_rig.rest_pose_issue(plan)):
         raise nifmod.NifError(issue)
     base = out_name.rsplit("/", 1)[-1]
@@ -666,7 +675,7 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
         raise ValueError("clip writer returned no rig or clips")
     for relative, data in extra.items():
         files[f"meshes/{out_name}/{relative}"] = data
-    door = {"origin_offset": [0.0, 0.0, 0.0], "anim_graph": sfnif.DOOR_TEMPLATE["anim_graph"],
+    door = {"origin_offset": [0.0, 0.0, 0.0], "anim_graph": anim_graph or sfnif.DOOR_TEMPLATE["anim_graph"],
             "bounds": [[round(min(p[k] for p in all_pts), 4) for k in range(3)],
                        [round(max(p[k] for p in all_pts), 4) for k in range(3)]],
             "skeleton": f"{out_name}/{native_door.RIG_FILE}".replace("/", "\\"),
@@ -674,7 +683,7 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
             "rig": "native",
             "animated_bones": sorted({bones[i]["name"] for i in range(len(bones)) if bones[i]["node"] in animated}),
             "moving_bodies": len(collision),
-            "open_motion": door_rig.open_motion(plan, unit_scale),
+            "open_motion": door_rig.open_motion(plan, unit_scale, motion_clip),
             "files": sorted(f"meshes/{out_name}/{relative}" for relative in extra)}
     if plan.get("ignored_tracks"):                  # shader / visibility tracks FO4 also plays: not ported, said so
         door["ignored_tracks"] = sorted({f'{t["target"]} ({t["reason"]})' for t in plan["ignored_tracks"]})
