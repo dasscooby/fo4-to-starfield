@@ -15,16 +15,17 @@ Scriptname FO4SF_PlayerFurnQuest extends Quest
    30..33  the same use with a scripted leave at 3 s (one Activate) instead of waiting for the 15 s close: 30 PowerCycle, 31 SecretPanel, 32 IDCardReader, 33 Heller reader
    40      a reading of every spawned reference now
    60      release the layer, Disable and Delete every spawned reference
- Guards against stranding the player (all required): (1) the 15 s timer started BEFORE the layer exists releases the layer whatever
- happened; (2) if GetSitState is not 0 at 15 s the furniture is activated once more (the game's own way out, MQ101Script) and a notice
- says so; 3 s later a player still not at 0 gets the furniture Disabled; (3) stage 60 releases the layer and deletes every spawned reference;
- the layer is also released at once on Actor.OnGetUp / ObjectReference.OnExitFurniture. NEVER the wait form of PlayAnimation (no PlayAnimation
- at all: the player clip is the furniture's own), no SnapIntoInteraction, no PlayerPathToFurniture, no FurnitureForce1stPerson stamped.
  Every line that matters also shows as a short on-screen notification beginning "PF " (Say), because script logging is off on the PC.
  Optional natives are lines that begin with ";OPT <Base.Name> ": scripts/newgame/make_player_furn.py stage compiles each on its own and keeps
  the ones that compile (the event handlers are optional lines named after their event). ";VOID " lines are the register call's second shape.
  One line per finding in the user log "FO4SFPFurn" (My Games/Starfield/Logs/Script/User/FO4SFPFurn.0.log): FO4SFPFURN rt=<real time s> <event>
  key=value ... end=true (form ids as Papyrus prints them: signed decimal, "none" for None). t= is seconds since the use began.}
+
+; Guards against stranding the player (all required): (1) the 15 s timer started BEFORE the layer exists releases the layer whatever
+; happened; (2) if GetSitState is not 0 at 15 s the furniture is activated once more (the game's own way out, MQ101Script) and a notice
+; says so; 3 s later a player still not at 0 gets the furniture Disabled; (3) stage 60 releases the layer and deletes every spawned reference;
+; the layer is also released at once on Actor.OnGetUp / ObjectReference.OnExitFurniture. NEVER the wait form of PlayAnimation (no PlayAnimation
+; at all: the player clip is the furniture's own), no SnapIntoInteraction, no PlayerPathToFurniture, no FurnitureForce1stPerson stamped.
 
 ; ---------------------------------------------------------------- the layout (dotnet/PlayerFurn/Program.cs)
 
