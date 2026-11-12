@@ -168,7 +168,7 @@ class GraphsModeTests(unittest.TestCase):
     def test_the_outcome_table_is_filled_from_the_reads(self):
         text = self.run_graphs()
         self.assertIn("read: YES: Props\\Console\\Console01.nif carries ['playanim01'] (graph stages)", text)
-        self.assertIn("read: NO: none of 2 model(s) read has .af/.afx in its CNAM folder with no sequences", text)     # the console model has clips AND sequences
+        self.assertIn("read: NO: none of 2 model(s) read has .af/.afx in its clip folder with no sequences", text)     # the console model has clips AND sequences
         rows = dict((f, g) for f, g, _ in graphs.outcome_table(
             {"stages": {"Sequence Name": {"PlayAnim01"}}}, {"stages": 1},
             [{"path": "a.nif", "read": True, "sequences": ["PlayAnim01"], "managers": 1, "af": 2, "graph": "stages"}], True, 1))
@@ -183,6 +183,30 @@ class GraphsModeTests(unittest.TestCase):
             [{"path": "b.nif", "read": True, "sequences": [], "managers": 0, "af": 3, "graph": "stages"}], True, 1))
         self.assertTrue(rows["vanilla activator ACTIs use rig + .af and their models carry no sequences"].startswith("YES: 1 of 1"))
         self.assertTrue(rows["vanilla activator models carry NiControllerSequence named as the graph's Sequence Name values"].startswith("NO: 1 model(s) read"))
+
+    def test_a_refused_container_is_unread_not_no_sequences(self):
+        refused = {"path": "bad.nif", "read": True, "sequences": None, "managers": None, "af": 2, "graph": "stages", "raw": ["NiControllerSequence"]}
+        parsed = {"path": "ok.nif", "read": True, "sequences": [], "managers": 0, "af": 0, "graph": "stages", "raw": []}
+        rows = graphs.outcome_table({"stages": {"Sequence Name": {"PlayAnim01"}}}, {"stages": 2}, [parsed, refused], True, 1)
+        self.assertTrue(rows[0][1].startswith("unread: 1 model(s) parsed with no sequence"), rows[0][1])
+        self.assertIn("bad.nif (raw scan saw NiControllerSequence)", rows[0][1])
+        self.assertTrue(rows[1][1].startswith("unread"), rows[1][1])        # the refused model's .af folder does not make M1 YES
+        self.assertEqual(rows[2][1], "unread")
+        only = graphs.outcome_table({}, {"stages": 1}, [refused], True, 1)
+        self.assertTrue(only[0][1].startswith("unread") and only[1][1].startswith("unread"))
+
+    def test_sequence_names_are_compared_exactly_not_without_punctuation(self):
+        m = {"path": "a.nif", "read": True, "sequences": ["Open_01"], "managers": 1, "af": 0, "graph": "stages", "raw": []}
+        rows = graphs.outcome_table({"stages": {"Sequence Name": {"Open01"}}}, {"stages": 1}, [m], True, 1)
+        self.assertTrue(rows[0][1].startswith("NO"), rows[0][1])
+        m["sequences"] = ["OPEN01"]
+        self.assertTrue(graphs.outcome_table({"stages": {"Sequence Name": {"Open01"}}}, {"stages": 1}, [m], True, 1)[0][1].startswith("YES"))
+
+    def test_a_state_called_sequence_name_in_a_headed_table_does_not_pull_cells_in(self):
+        data = agx("T", [["Sequence Name", "NotASequence", "", "", ""], ["Real", "PlayAnim01", "", "", ""]])
+        _, values = graphs.graph_lines("t.agx", "x", data)
+        self.assertEqual(values["Sequence Name"], {"PlayAnim01", "NotASequence"})       # by its column header only; the first cell's text is a state name
+        self.assertNotIn("Sequence Name", values["Sequence Name"])
 
     def test_nothing_read_says_unread_everywhere(self):
         for name in os.listdir(self.data):

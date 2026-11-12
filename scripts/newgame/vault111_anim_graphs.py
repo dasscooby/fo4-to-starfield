@@ -169,11 +169,16 @@ def row_fields(row):
     """{field label: [values]} of one parsed row: header=value cells, and name/value rows whose first cell is the field."""
     got = {}
     pairs = row["pairs"]
+    by_header = False
     for h, v in pairs:
         key = norm(re.sub(r"\[\d+\]$", "", h))
-        if key in FIELD_KEYS and v != "":
-            got.setdefault(FIELD_KEYS[key], []).append(v)
-    if len(pairs) >= 2 and norm(pairs[0][1]) in FIELD_KEYS:
+        if key in FIELD_KEYS:
+            by_header = True
+            if v != "":
+                got.setdefault(FIELD_KEYS[key], []).append(v)
+    # the name/value layout (first cell is the field's name) only for a row with no column headed by a field: a state
+    # whose value happens to read "Sequence Name" in a headed table must not pull its other cells in as values
+    if not by_header and len(pairs) >= 2 and norm(pairs[0][1]) in FIELD_KEYS:
         got.setdefault(FIELD_KEYS[norm(pairs[0][1])], []).extend(v for _, v in pairs[1:] if v != "")
     return got
 
@@ -270,7 +275,7 @@ def nif_facts(data):
     """Facts of one NIF: header (text line, version, user and BS versions), NiControllerManager count, sequence names, text keys
     per NiTextKeyExtraData block.  A file the container parser refuses still gets its header words and a raw presence scan."""
     f = {"line": "", "version": None, "bs_version": None, "user_version": None, "blocks": None, "types": {}, "managers": None,
-         "sequences": None, "text_keys": [], "note": ""}
+         "sequences": None, "text_keys": [], "note": "", "raw": []}
     nl = data.find(b"\n")
     f["line"] = data[:nl].decode("latin-1") if 0 < nl < 80 and data.startswith(b"Gamebryo") else ""
     if not f["line"]:
@@ -287,6 +292,7 @@ def nif_facts(data):
         f["note"] = f"container not parsed ({type(e).__name__}: {e}); block names found by raw scan of the first 8 KB only"
         f["managers"] = None
         f["types"] = {t: 1 for t in ("NiControllerManager", "NiControllerSequence", "NiTextKeyExtraData") if t.encode() in head}
+        f["raw"] = sorted(f["types"])
         return f
     f["bs_version"], f["blocks"] = n.bs_version, len(n.blocks)
     seqs, keys = [], []
@@ -336,7 +342,7 @@ def model_entry(archives, path):
 def model_report(archives, path, cnam=""):
     """(lines, facts dict for the outcome table) of one model."""
     lines = [f"--- model {path}"]
-    facts = {"path": path, "read": False, "sequences": None, "managers": None, "af": None}
+    facts = {"path": path, "read": False, "sequences": None, "managers": None, "af": None, "raw": []}
     name, got = model_entry(archives, path)
     if got is None:
         lines.append(f"  not in the archives read (tried {name})")
@@ -358,7 +364,7 @@ def model_report(archives, path, cnam=""):
             lines.append(f"  NiControllerManager: {n['managers']}")
             lines.append(f"  NiControllerSequence: {len(n['sequences'])}: " + (", ".join(n["sequences"]) if n["sequences"] else "none"))
             lines.append("  text keys: " + ("; ".join(f"block {i}: " + (", ".join(k) if k else "none") for i, k in n["text_keys"]) if n["text_keys"] else "none"))
-        facts["sequences"], facts["managers"] = n["sequences"], n["managers"]
+        facts["sequences"], facts["managers"], facts["raw"] = n["sequences"], n["managers"], n["raw"]
     if cnam:
         files = folder_files(archives, cnam)
         facts["af"] = len([x for x in files if x.lower().endswith((".af", ".afx"))])
@@ -368,33 +374,43 @@ def model_report(archives, path, cnam=""):
 
 # ----------------------------------------------------------------------------------------------- the report
 def outcome_table(values, counts, models, esm_read, graphs_read):
-    """The rev 9 outcome rows, each 'YES ...', 'NO ...' or 'unread ...' from what was read."""
+    """The rev 9 outcome rows, each 'YES ...', 'NO ...' or 'unread ...' from what was read.  A model whose container the
+    parser refused is neither 'no sequences' nor 'has sequences': it is unread, and any raw-scan hit is said."""
     rows = []
     modelled = [m for m in models if m["read"]]
+    parsed = [m for m in modelled if m["sequences"] is not None]
+    refused = [m for m in modelled if m["sequences"] is None]
+    refused_note = ""
+    if refused:
+        refused_note = (f"; {len(refused)} model(s) had a container the parser refused and are unread: "
+                        + ", ".join(m["path"] + (" (raw scan saw " + ", ".join(m["raw"]) + ")" if m["raw"] else "") for m in refused[:4]))
     if not modelled:
-        r1 = "unread (no model was found in the archives read)"
-        r2 = r1
+        r1 = r2 = "unread (no model was found in the archives read)"
     else:
         match = []
-        for m in modelled:
-            seqs = {norm(s) for s in (m["sequences"] or [])}
-            want = {norm(v) for v in values.get(m.get("graph", ""), {}).get("Sequence Name", set())}
+        for m in parsed:
+            seqs = {s.lower() for s in m["sequences"]}                 # exact names, case-blind only: Open_01 is not Open01
+            want = {v.lower() for v in values.get(m.get("graph", ""), {}).get("Sequence Name", set())}
             if seqs & want:
                 match.append(f"{m['path']} carries {sorted(seqs & want)} (graph {m.get('graph', '?')})")
-        anyseq = [m["path"] for m in modelled if m["sequences"]]
-        unparsed = [m["path"] for m in modelled if m["sequences"] is None]
+        anyseq = [m["path"] for m in parsed if m["sequences"]]
         if match:
-            r1 = "YES: " + "; ".join(match[:4])
+            r1 = "YES: " + "; ".join(match[:4]) + refused_note
         elif anyseq:
-            r1 = "NO: models carry sequences, but not under the graph's Sequence Name values: " + ", ".join(anyseq[:4])
-        elif unparsed and len(unparsed) == len(modelled):
-            r1 = "unread (every model's container was refused by the parser; see the raw scan lines)"
+            r1 = ("NO among the parsed models: " + ", ".join(anyseq[:4]) + " carry sequences, but not under the graph's Sequence Name values"
+                  + refused_note) if not refused else "unread in part: " + ", ".join(anyseq[:4]) + " carry sequences, not under the graph's names" + refused_note
+        elif refused:
+            r1 = f"unread: {len(parsed)} model(s) parsed with no sequence" + refused_note
         else:
-            r1 = f"NO: {len(modelled)} model(s) read, none carries NiControllerSequence"
-        rig = [m["path"] for m in modelled if m["af"] and not m["sequences"]]
-        r2 = (f"YES: {len(rig)} of {len(modelled)} model(s) have .af/.afx in their CNAM folder and no sequences: " + ", ".join(rig[:4])
-              if rig else f"NO: none of {len(modelled)} model(s) read has .af/.afx in its CNAM folder with no sequences"
-              + ("" if any(m["af"] is not None for m in modelled) else " (no CNAM folder was given for them)"))
+            r1 = f"NO: {len(parsed)} model(s) read, none carries NiControllerSequence"
+        rig = [m["path"] for m in parsed if m["af"] and not m["sequences"]]
+        if rig:
+            r2 = f"YES: {len(rig)} of {len(parsed)} parsed model(s) have .af/.afx in their clip folder and no sequences: " + ", ".join(rig[:4]) + refused_note
+        elif refused:
+            r2 = "unread: no parsed model has .af/.afx and no sequences" + refused_note
+        else:
+            r2 = (f"NO: none of {len(parsed)} model(s) read has .af/.afx in its clip folder with no sequences"
+                  + ("" if any(m["af"] is not None for m in parsed) else " (no CNAM or rig folder was given for them)"))
     rows.append(("vanilla activator models carry NiControllerSequence named as the graph's Sequence Name values", r1, "M2 is the game's own way: Step 1 variants B and C"))
     rows.append(("vanilla activator ACTIs use rig + .af and their models carry no sequences", r2, "M1 is the way: Step 1 variant D"))
     both = r1.startswith("YES") and r2.startswith("YES")
