@@ -124,6 +124,61 @@ class Vault111AnimProbeSecondHeadTests(unittest.TestCase):
             self.assertIn(w, probe.DEFAULT_BASE_WORDS)
 
 
+AGX = "AnimTextData\\Tables\\Graphs\\SimpleOpenClose01.agx"
+RIG = "Meshes\\fo4port\\interiors\\vault\\doors\\CogDoorRig\\skeleton.rig"
+ANIMS = "fo4port\\interiors\\vault\\doors\\CogDoorRig\\animations"
+
+
+class Vault111AnimProbeGraphFilesTests(unittest.TestCase):
+    """A Starfield DOOR names its graph (ANAM, a path with no Meshes prefix), its rig (BNAM) and an animations folder (CNAM):
+    the probe must open each file and list the folder."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        w = esm.PluginWriter(["Starfield.esm"])
+        door = w.own(0x901)
+        w.add(esm.Record("DOOR", door, [(b"EDID", esm.zbytes("FO4Port_VltGearDoor01")), (b"ANAM", esm.zbytes(AGX)),
+                                        (b"BNAM", esm.zbytes(RIG[len("Meshes\\"):])), (b"CNAM", esm.zbytes(ANIMS))]))
+        w.add(esm.Record("REFR", w.own(0x126D), [(b"NAME", struct.pack("<I", door)), (b"DATA", struct.pack("<6f", 0, 0, 0, 0, 0, 0))]))
+        with open(os.path.join(self.tmp.name, "FO4Port.esm"), "wb") as f:
+            f.write(w.to_bytes())
+        files = {AGX: b"\0agx\0StateOpen\0EventDone\0", RIG: b"\0rig\0b_Cog\0b_Walkway01\0",
+                 "Meshes\\" + ANIMS + "\\Open.af": b"\0af\0Open\0", "Meshes\\" + ANIMS + "\\Open.afx": b"\0afx\0KlaxonStop\0"}
+        with open(os.path.join(self.tmp.name, "FO4Port - Main.ba2"), "wb") as f:
+            f.write(general_archive(files))
+        self.out = os.path.join(self.tmp.name, "r.txt")
+
+    def run_probe(self):
+        self.assertEqual(probe.main(["--out", self.out, "--data", self.tmp.name, "--ref", "00126D"]), 0)
+        with open(self.out, encoding="utf-8") as f:
+            return f.read()
+
+    def test_the_graph_is_found_without_a_meshes_prefix_and_its_strings_printed(self):
+        text = self.run_probe()
+        self.assertIn("animation file (ANAM): " + AGX, text)
+        self.assertIn("base ANAM: read from FO4Port - Main.ba2", text)
+        self.assertIn("StateOpen | EventDone", text)
+
+    def test_the_rig_is_opened(self):
+        text = self.run_probe()
+        self.assertIn("animation file (BNAM)", text)
+        self.assertIn("b_Cog | b_Walkway01", text)
+
+    def test_the_animations_folder_is_listed_and_each_clip_file_read(self):
+        text = self.run_probe()
+        self.assertIn("base CNAM: folder " + ANIMS + ": 2 entries", text)
+        self.assertIn("Open.af", text)
+        self.assertIn("base CNAM file: read from FO4Port - Main.ba2", text)
+        self.assertIn("KlaxonStop", text)
+
+    def test_a_graph_missing_from_the_archives_is_said(self):
+        with open(os.path.join(self.tmp.name, "FO4Port - Main.ba2"), "wb") as f:
+            f.write(general_archive({"Meshes\\Other.nif": b"x"}))
+        text = self.run_probe()
+        self.assertIn("base ANAM: model not in the archives read", text)
+        self.assertIn("no archive entry under it", text)
+
+
 class Vault111AnimProbeTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

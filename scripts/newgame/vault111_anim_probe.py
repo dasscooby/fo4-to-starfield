@@ -8,6 +8,10 @@ the archive holds beside the model (.hkx, .kf, .nif of the same folder), and, fo
 readable strings (event and state names). Nothing is a verdict: each section says what it read and says "not found"
 when the archive had nothing.
 
+Third head: the DOOR record's ANAM (graph .agx), BNAM (.rig) and CNAM (animations folder) are opened: each file looked up as
+named (no Meshes prefix), its strings printed; the folder listed and each .af / .afx / .rig / .agx under it read. The game's own
+graph lives in Starfield's archives: add them with --game-archive.
+
 Also (FAL-476 second head): every subrecord of the base record is printed (signature, size, first bytes, text) and each 4-byte
 one that holds a form id of this plugin is followed one hop (the DOOR record's sound and other links, with any file they
 name); the Fallout 4 original of each model is looked up by the port path with its prefix removed and else by file name
@@ -15,7 +19,7 @@ name); the Fallout 4 original of each model is looked up by the port path with i
 PipboyGroundTake, VaultConsole, GearDoor) is reported like the listed ones, or the report says the port has none.
 
 usage: python vault111_anim_probe.py --out <report.txt> [--data <Starfield Data>] [--port FO4Port.esm]
-                                     [--archive <ba2> ...] [--fo4-data <Fallout 4 Data>] [--ref 00126D ...]
+                                     [--archive <ba2> ...] [--game-archive <Starfield ba2> ...] [--fo4-data <Fallout 4 Data>] [--ref 00126D ...]
                                      [--base-edid <word> ...]
 It opens the plugin and the archives read-only and writes only --out. Nothing in the game folder changes; no install.
 By default the archives are every FO4Port*.ba2 in --data; --fo4-data adds Fallout4 - Meshes.ba2 and
@@ -36,6 +40,7 @@ STARFIELD = r"D:\SteamLibrary\steamapps\common\Starfield\Data"
 DEFAULT_REFS = ("00126D", "00138B", "001616")
 FILE_WORDS = re.compile(rb"\.(hkx|kf|nif|hkt|txt)\b|graph|behavior|anim", re.I)
 MAX_STRINGS = 300
+ANIM_EXT = (".agx", ".rig", ".af", ".afx")      # a Starfield animation graph, skeleton rig, clip and clip events file
 DEFAULT_BASE_WORDS = ("GearDoorConsole", "PipboySkeleton", "PipboyGroundTake", "VaultConsole", "GearDoor")
 FO4_NAMES = ("Fallout4 - Meshes.ba2", "Fallout4 - Animations.ba2")
 
@@ -81,7 +86,7 @@ def describe(plugin, records, fid):
     paths = []
     for s, d in rec.subs:
         text = zstr(d)
-        if len(text) >= 4 and text.isprintable() and re.search(r"\.(nif|hkx|kf)\b", text, re.I):
+        if len(text) >= 4 and text.isprintable() and re.search(r"\.(nif|hkx|kf|agx|rig|af|afx)\b", text, re.I):
             paths.append((s.decode("latin-1"), text))
     return rec, lines, paths
 
@@ -254,8 +259,26 @@ def report_ref(plugin, records, cell_of, archives, fo4, fid):
     if not paths:
         out.append("  model path: none found in the base's subrecords")
     for sub, path in paths:
-        out.append(f"  model path ({sub}): {path}")
-        out += file_report(archives, path, "port", fo4)
+        low = path.lower()
+        if low.endswith(ANIM_EXT):
+            out.append(f"  animation file ({sub}): {path}")
+            out += file_report(archives, path, f"base {sub}", None)
+        else:
+            out.append(f"  model path ({sub}): {path}")
+            out += file_report(archives, path, "port", fo4)
+    for sub, text in folders(brec):
+        out += folder_report(archives, text, f"base {sub}")
+    return out
+
+
+def folders(rec):
+    """[(subrecord signature, text)] of printable path-like subrecords with a folder separator and no file extension."""
+    out = []
+    for sig, d in rec.subs:
+        text = zstr(d)
+        if sig != b"EDID" and len(text) >= 5 and len(text) == len(d) - 1 and text.isprintable() and ("\\" in text or "/" in text) \
+                and not re.search(r"\.\w{1,4}$", text):
+            out.append((sig.decode("latin-1"), text))
     return out
 
 
@@ -315,8 +338,15 @@ def file_report(archives, path, label, fo4):
     """Lines about one model or graph path: its archive entry, the NIF read, files beside it, graphs; then (fo4 not None) its original."""
     out = []
     low = path.lower()
-    model = path if low.startswith("meshes") or low.startswith("animations") else "Meshes\\" + path
+    anim = low.endswith(ANIM_EXT)
+    model = path if low.startswith("meshes") or low.startswith("animations") or anim else "Meshes\\" + path
     got = lookup(archives, model)
+    if got is None and anim:
+        for cand in ("Meshes\\" + path, "Animations\\" + path):
+            got = lookup(archives, cand)
+            if got:
+                model = cand
+                break
     if got is None:
         out.append(f"  {label}: model not in the archives read: {model}")
         for n in neighbours(archives, model):
@@ -324,7 +354,7 @@ def file_report(archives, path, label, fo4):
     else:
         where, data = got
         out.append(f"  {label}: read from {where}: {len(data)} bytes")
-        if low.endswith(".hkx"):
+        if low.endswith(".hkx") or anim:
             out += hkx_lines(model + " in " + where, data)
         elif low.endswith(".kf"):
             out.append("  a .kf clip: strings " + " | ".join(ascii_strings(data, 3)[:60]))
@@ -347,8 +377,28 @@ def file_report(archives, path, label, fo4):
                     hit = lookup(archives, nm)
                     if hit:
                         out += hkx_lines(nm + " in " + hit[0], hit[1])
-    if fo4 is not None:
+    if fo4 is not None and not anim:
         out += original_report(fo4, path)
+    return out
+
+
+def folder_report(archives, folder, label):
+    """A subrecord that is a folder (the DOOR's animations folder): every archive entry under it, each animation file read."""
+    key = folder.replace("/", "\\").strip("\\").lower()
+    found = []
+    for path, a in archives:
+        if isinstance(a, str):
+            continue
+        for n in a.names:
+            low = n.replace("/", "\\").lower()
+            if low.startswith(key + "\\") or low.startswith("meshes\\" + key + "\\") or low.startswith("animations\\" + key + "\\"):
+                found.append(n)
+    if not found:
+        return [f"  {label}: folder {folder}: no archive entry under it (tried as named, under Meshes\\ and under Animations\\)"]
+    out = [f"  {label}: folder {folder}: {len(found)} entries: " + "; ".join(sorted(found)[:40])]
+    for n in sorted(found):
+        if n.lower().endswith(ANIM_EXT + (".hkx", ".kf")):
+            out += file_report(archives, n, f"{label} file", None)
     return out
 
 
@@ -394,6 +444,8 @@ def main(argv=None):
     ap.add_argument("--data", default=STARFIELD)
     ap.add_argument("--port")
     ap.add_argument("--archive", action="append", default=[])
+    ap.add_argument("--game-archive", action="append", default=[],
+                    help="a Starfield archive to read as well (the DOOR's .agx graph and .rig live in the game's own archives, e.g. Starfield - Animations.ba2)")
     ap.add_argument("--fo4-data")
     ap.add_argument("--ref", action="append")
     ap.add_argument("--base-edid", action="append", help="a word of a base EditorID; every reference on such a base is reported")
@@ -402,6 +454,7 @@ def main(argv=None):
     if not os.path.isfile(port):
         sys.exit(f"{port} missing")
     paths = list(a.archive) or sorted(glob.glob(os.path.join(a.data, "FO4Port*.ba2")))
+    paths += [g if os.path.isabs(g) else os.path.join(a.data, g) for g in a.game_archive]
     fo4 = []
     if a.fo4_data:
         fo4 = open_archives([os.path.join(a.fo4_data, n) for n in FO4_NAMES if os.path.isfile(os.path.join(a.fo4_data, n))])
