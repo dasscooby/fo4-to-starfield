@@ -71,6 +71,8 @@ class ScriptTests(unittest.TestCase):
         self.assertIn('Debug.Notification("AP " + msg)', PSC)
         self.assertIn('" after=" + after', PSC)                                      # Done's after= is the clip's length
         self.assertEqual(PSC.count("PlayRt = Utility.GetCurrentRealTime()"), 2)      # PlayOne and ActivateOnce
+        self.assertIn('Say("READ s" + stage + " " + when + " 3d=" + r.Is3DLoaded()', PSC)      # 3D loaded / distance / height difference on screen
+        self.assertIn('Say("SPAWN s" + stage + " moved=" + moved', PSC)
         for what in ('Say("EV " + asEventName + " w" + ListenStage + " t" + after)', 'Say("PLAY s" + stage + " " + n + " ok=" + ok)',
                      'Say("W s" + stage + " quiet")', 'Say("ACTIVATE s" + stage)'):
             self.assertIn(what, PSC)

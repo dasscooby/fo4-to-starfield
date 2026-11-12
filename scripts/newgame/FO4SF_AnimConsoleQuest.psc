@@ -181,6 +181,7 @@ Function Reading(string when, int stage, ObjectReference r)
     endif
     Actor p = Game.GetPlayer()
     Trace("read stage=" + stage + " when=" + when + " ref=" + Id(r) + " base=" + Id(r.GetBaseObject()) + " loaded=" + r.Is3DLoaded() + " disabled=" + r.IsDisabled() + " cell=" + Id(r.GetParentCell()) + " pos=" + r.GetPositionX() + "," + r.GetPositionY() + "," + r.GetPositionZ() + " dist=" + p.GetDistance(r))
+    Say("READ s" + stage + " " + when + " 3d=" + r.Is3DLoaded() + " off=" + r.IsDisabled() + " dist=" + p.GetDistance(r) + " dz=" + (r.GetPositionZ() - p.GetPositionZ()))
 EndFunction
 
 Function Spawn(int stage)
@@ -202,6 +203,7 @@ Function Spawn(int stage)
 ;OPT ObjectReference.MoveTo         moved = true
 ;OPT ObjectReference.MoveTo     endif
     Trace("spawn stage=" + stage + " base=" + Id(base) + " ref=" + Id(TestRef) + " moved=" + moved + " persist=true")
+    Say("SPAWN s" + stage + " moved=" + moved + " ahead=" + AheadM)
     Reading("now", stage, TestRef)
     RegisterAll(stage)
 EndFunction
