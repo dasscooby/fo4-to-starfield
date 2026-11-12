@@ -14,20 +14,24 @@ a hold clip of one frame is accepted; whether the engine takes the audio frame w
 from xml.etree import ElementTree as ET
 
 GRAPH = "AnimTextData\\Tables\\Graphs\\ActivatorStateGraph01.agx"
+GRAPH_GENERIC = "AnimTextData\\Tables\\Graphs\\GenericStateGraph01.agx"     # the four-state graph (FAL-489 control, PC session 22:35 UTC 12 Nov); the stager reads the real path
 PLAY_SLOTS = ("StateA_Play", "StateB_Play")
 IDLE_OF = {"StateA_Play": "StateA_Idle", "StateB_Play": "StateB_Idle"}
+PLAY_SLOTS4 = ("StateA_Play", "StateB_Play", "StateC_Play", "StateD_Play")          # genericstategraph01's four play slots
+IDLE_OF4 = {"StateA_Play": "StateA_Idle", "StateB_Play": "StateB_Idle", "StateC_Play": "StateC_Idle", "StateD_Play": "StateD_Idle"}
 FPS = 30
 
 
-def parse_states(text):
-    """'Stage1=StateA_Play,Stage2=StateB_Play' -> {"Stage1": "StateA_Play", "Stage2": "StateB_Play"}; refuses anything else."""
+def parse_states(text, slots=PLAY_SLOTS):
+    """'Stage1=StateA_Play,Stage2=StateB_Play' -> {"Stage1": "StateA_Play", "Stage2": "StateB_Play"}; refuses anything else. slots: the Play slots a
+    sequence may be mapped to (PLAY_SLOTS4 for genericstategraph01)."""
     out = {}
     for part in [p.strip() for p in (text or "").split(",") if p.strip()]:
         if "=" not in part:
             raise ValueError(f"state map entry {part!r} is not <FO4 sequence>=<slot>")
         seq, slot = (x.strip() for x in part.split("=", 1))
-        if slot not in PLAY_SLOTS:
-            raise ValueError(f"slot {slot!r} is not one of {PLAY_SLOTS} (the Idle slots are made, not mapped)")
+        if slot not in slots:
+            raise ValueError(f"slot {slot!r} is not one of {slots} (the Idle slots are made, not mapped)")
         if not seq or seq in out or slot in out.values():
             raise ValueError(f"sequence or slot named twice in {text!r}")
         out[seq] = slot
@@ -36,15 +40,30 @@ def parse_states(text):
     return out
 
 
-IDLE_MODES = ("toggle", "hold")
+IDLE_MODES = ("toggle", "hold", "chain")
+
+
+def chain_slots(states):
+    """The mapped Play slots of a chain in slot order (A, B, C, D): the order the clips run in, each starting from the pose the one before it
+    ended in. A slot may be left out (Stage2 on StateA_Play and Stage3 on StateC_Play is a chain of two: the graph returns from StateB_Play to
+    the rest pose but from StateC_Play to StateC_Idle, FAL-489 control). ValueError for an empty map."""
+    mapped = set(states.values())
+    chain = [n for n in PLAY_SLOTS4 if n in mapped]
+    if not chain or len(chain) != len(mapped):
+        raise ValueError(f"the chain needs at least one of the Play slots {PLAY_SLOTS4}; got {sorted(mapped)}")
+    return chain
 
 
 def slot_names(states, idles="hold"):
     """Every clip the object ends with. idles="hold": each mapped Play slot and the Idle hold made from it. idles="toggle" (add_toggle_idles):
-    each mapped Play slot and BOTH Idle slots, whichever Play slots are mapped."""
+    each mapped Play slot and BOTH Idle slots, whichever Play slots are mapped. idles="chain" (add_chain_idles): all eight slots of
+    genericstategraph01 (the mapped Play slots are chained in slot order; a slot may be left out)."""
     if idles not in IDLE_MODES:
         raise ValueError(f"idles {idles!r} is not one of {IDLE_MODES}")
     names = []
+    if idles == "chain":                                  # genericstategraph01: all four Play slots and all four Idle slots, whatever is mapped
+        chain_slots(states)
+        return sorted(list(PLAY_SLOTS4) + list(IDLE_OF4.values()))
     if idles == "toggle":
         names = list(states.values()) + list(IDLE_OF.values())
         return sorted(set(names))
@@ -117,6 +136,71 @@ def add_toggle_idles(plan):
             held.append(t["name"])
         clips = [{**b, "tracks": tracks, "starts_from": "StateB_Idle", "held_at_idle_pose": held} if c is b else c for c in clips]
     clips += [_hold_frame(source, "StateA_Idle", 0), _hold_frame(source, "StateB_Idle", -1)]
+    return {**plan, "clips": clips}
+
+
+def add_chain_idles(plan):
+    """plan -> plan for genericstategraph01 (FAL-489, the converted console on four states): the mapped Play slots are a chain, each clip starts
+    from the pose the one before it ended in, and the four Idle slots hold four successive poses:
+        StateA_Idle = the first frame of the first clip (rest),   StateB_Idle = the pose after the first clip,
+        StateC_Idle = the pose after the second,                  StateD_Idle = the pose after the third (the last mapped clip's end).
+    With fewer clips than idles the last pose repeats (a chain of two: C and D hold the pose after the second). A bone a clip leaves
+    standing (every sample the same) is held at the pose the chain has reached (as add_toggle_idles does for slot B), a bone it moves keeps
+    its own samples; a 'static' flag survives only when the pose's source track was static too. The chain is the mapped Play slots in slot
+    order (a slot may be left out: then a clip's starts_from names the Idle of its POSITION in the chain, not of its slot). Play slots nobody mapped become SPARE clips:
+    a bone-for-bone hold of the final pose, one frame long (1/30 s), so the graph's slot is filled and plays nothing. Every clip keeps one
+    track per rig bone in rig order. Which pose each Idle slot SHOULD show is a hypothesis (the idle rule of #747 session 7); the graph's own
+    rest after a play is read in the stages kit's card, not here. Needs the clips' tracks to be filled (fill_static_tracks) first."""
+    by = {c["name"]: c for c in plan["clips"]}
+    chain = [n for n in PLAY_SLOTS4 if n in by]
+    if not chain:
+        return plan
+    first = by[chain[0]]
+    effective = {c["name"]: c for c in plan["clips"] if c["name"] not in chain}
+    poses = [(None, 0, chain[0], "first")]            # (tracks by node or None for the first clip's own, which sample of them, source clip, frame label)
+    cur = {t["node"]: t for t in first["tracks"]}
+    cur_sample = {t["node"]: t["samples"][0] for t in first["tracks"]}
+    for k, name in enumerate(chain):
+        clip = by[name]
+        if k == 0:
+            effective[name] = clip
+        else:
+            held, tracks = [], []
+            for t in clip["tracks"]:
+                src = cur.get(t["node"])
+                stays = all(_same_pose(t["samples"][0], x) for x in t["samples"][1:])
+                if src is None or not stays:
+                    tracks.append(t)
+                    continue
+                pose = cur_sample[t["node"]]
+                s0, s1 = t["samples"][0]["elapsed"], t["samples"][-1]["elapsed"]
+                row = {**t, "samples": [{**pose, "elapsed": s0}, {**pose, "elapsed": s1}]}
+                if t.get("static") and not src.get("static"):
+                    row.pop("static")
+                tracks.append(row)
+                held.append(t["name"])
+            effective[name] = {**clip, "tracks": tracks, "starts_from": f"State{'ABCD'[k]}_Idle", "held_at_idle_pose": held}
+        cur = {t["node"]: t for t in effective[name]["tracks"]}
+        cur_sample = {t["node"]: t["samples"][-1] for t in effective[name]["tracks"]}
+        poses.append((cur, -1, name, "last"))
+    clips = [effective[c["name"]] if c["name"] in effective else c for c in plan["clips"]]
+    for i, idle in enumerate(IDLE_OF4.values()):
+        tracks_of, which, source, label = poses[min(i, len(chain))]
+        template = effective[source]
+        held_tracks = []
+        for t in template["tracks"] if which == 0 else tracks_of.values():
+            smp = dict(t["samples"][which])
+            smp["elapsed"] = 0.0
+            held_tracks.append({**t, "samples": [smp]})
+        clips.append({**template, "name": idle, "duration": 0.0, "events": [], "tracks": held_tracks, "hold_of": source, "hold_frame": label})
+        for k_ in ("starts_from", "held_at_idle_pose"):
+            clips[-1].pop(k_, None)
+    last = effective[chain[-1]]
+    final_tracks = [{**t, "samples": [{**t["samples"][-1], "elapsed": 0.0}, {**t["samples"][-1], "elapsed": 1.0 / FPS}]} for t in last["tracks"]]
+    for slot in [n for n in PLAY_SLOTS4 if n not in chain]:                    # every unmapped slot, wherever it sits in the order
+        clips.append({**last, "name": slot, "duration": 1.0 / FPS, "events": [], "tracks": final_tracks, "hold_of": chain[-1], "hold_frame": "last", "spare": True})
+        clips[-1].pop("starts_from", None)
+        clips[-1].pop("held_at_idle_pose", None)
     return {**plan, "clips": clips}
 
 
@@ -221,7 +305,7 @@ def descriptors(plan, foley=None):
     """{clip name: .afx bytes} for every clip of the plan: a Play slot carries its own sounds, an Idle slot none."""
     out = {}
     for clip in plan["clips"]:
-        out[clip["name"]] = descriptor(clip["name"], audio=audio_frames(clip, foley) if clip["name"] in PLAY_SLOTS else ())
+        out[clip["name"]] = descriptor(clip["name"], audio=audio_frames(clip, foley) if clip["name"] in PLAY_SLOTS4 and not clip.get("spare") else ())
     return out
 
 

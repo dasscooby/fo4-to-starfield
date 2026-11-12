@@ -786,13 +786,15 @@ class Converter:
         return res
 
     def convert_anim_object(self, nif_name: str, states: dict, foley: Optional[str] = None, out_suffix: str = "_anim",
-                            swap_siblings: bool = False, idles: str = "toggle") -> dict:
+                            swap_siblings: bool = False, idles: str = "toggle", graph: Optional[str] = None) -> dict:
         """An animated FO4 object that is no door (the Vault 111 console, FAL-489 variant D) as a model with its own rig and
         one clip per activator-graph slot, through the door path's multi-part builder: states maps FO4 sequence names to
         the Play slots (anim_object.parse_states), each Play slot also gets a one-frame Idle hold, every .afx is written in
         the vanilla shape (a sound at foley when one is named). Needs the CALUMI library and the vanilla donor body, as
         the doors do. The result's "anim" entry is the manifest (skeleton, animations, graph, clip table); "ok" False
-        carries "reason". Files land in the staging folder like every conversion."""
+        carries "reason". Files land in the staging folder like every conversion. idles="chain" with graph=<ANAM of genericstategraph01>
+        (FAL-489, the four-state console): four Play slots and four Idle slots holding four successive poses (anim_object.add_chain_idles);
+        graph defaults to the activator graph."""
         from . import anim_object, native_door
         res = {"nif": nif_name, "ok": False}
         try:
@@ -814,7 +816,8 @@ class Converter:
                 if swap_siblings:                                  # the experiment of FAL-489 session 6: the two siblings' indices exchanged
                     plan = anim_object.swap_siblings(plan)
                 plan = anim_object.fill_static_tracks(plan)
-                plan = anim_object.add_toggle_idles(plan) if idles == "toggle" else anim_object.add_holds(plan)
+                plan = (anim_object.add_toggle_idles(plan) if idles == "toggle" else
+                        anim_object.add_chain_idles(plan) if idles == "chain" else anim_object.add_holds(plan))
                 holder["plan"] = plan
                 return plan
 
@@ -824,7 +827,7 @@ class Converter:
                 raw, out_name, mats, clip_files, collision_template=self.collision_template,
                 leaf_physics_donor=self.door_physics_donor, aliases=dict(states), drop_skinned=True,
                 allowed=tuple(states.values()), expect_clips=anim_object.slot_names(states, idles), plan_hook=hook,
-                anim_graph=anim_object.GRAPH, motion_clip=sorted(states.values())[0])
+                anim_graph=graph or anim_object.GRAPH, motion_clip=sorted(states.values())[0])
             anim["states"] = dict(states)
             anim["clips"] = anim_object.clip_table(holder["plan"], convert_static.UNIT_SCALE)
             anim["foley"] = foley or ""
