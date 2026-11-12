@@ -56,7 +56,7 @@ class ScriptTests(unittest.TestCase):
         ran = [int(s) for s in re.findall(r"StageList\[\d+\] = (\d+)", PSC)]
         m = re.search(r"Stages = \{ ([\d, ]+) \}", TOOL_SRC)
         self.assertEqual(ran, [int(x) for x in m.group(1).split(",")])
-        self.assertEqual(ran, [10, 20, 21, 22, 23, 24, 31, 32, 33, 34, 40, 60])
+        self.assertEqual(ran, [10, 20, 21, 22, 23, 24, 31, 32, 33, 34, 35, 36, 40, 60])
         self.assertIn(f"new int[{len(ran)}]", PSC)
         self.assertIn('string LogName = "FO4SFAnimDL"', PSC)
         self.assertTrue(mad.LOG.endswith("FO4SFAnimDL.0.log"))
@@ -74,29 +74,26 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("masters are not exactly [Starfield.esm]", TOOL_SRC)
         self.assertIn("records of another plugin (overrides)", TOOL_SRC)
 
-    def test_the_calls_are_claudes_door_then_lift_one_per_stage(self):
-        """Claude, FAL-489, 12 Nov 21:06 UTC: door Open, Close, then (both false) StateA_Play, StateB_Play; lift Stage1, Stage1Transition,
-        Stage2, Stage2Transition; one call per stage."""
-        self.assertEqual(strings("DoorCalls", PSC), ["Open", "Close", "StateA_Play", "StateB_Play"])
-        self.assertEqual(strings("LiftCalls", PSC), ["Stage1", "Stage1Transition", "Stage2", "Stage2Transition"])
+    def test_the_calls_are_the_pcs_read_one_per_stage(self):
+        """Claude, #755 1bfe5534, 12 Nov 21:15 UTC: door Open, Close, Opened, Closed; lift Stage1, Stage2, Stage1NoTransition, Stage2NoTransition
+        and, once, the clip names Stage1Transition / Stage2Transition (not events: expected false); one call per stage."""
+        self.assertEqual(strings("DoorCalls", PSC), ["Open", "Close", "Opened", "Closed"])
+        self.assertEqual(strings("LiftCalls", PSC), ["Stage1", "Stage2", "Stage1NoTransition", "Stage2NoTransition", "Stage1Transition", "Stage2Transition"])
         self.assertIn("PlayOne(stage, \"door\", DoorRef, DoorCalls[stage - 21])", PSC)
         self.assertIn("PlayOne(stage, \"lift\", LiftRef, LiftCalls[stage - 31])", PSC)
         self.assertIn("elseif stage >= 21 && stage <= 24", PSC)
-        self.assertIn("elseif stage >= 31 && stage <= 34", PSC)
+        self.assertIn("elseif stage >= 31 && stage <= 36", PSC)
+        self.assertIn("new string[6]", PSC)
         self.assertEqual(PSC.count("r.PlayAnimation(n)"), 1)
         self.assertIn("bool ok = r.PlayAnimation(n)", PSC)
 
-    def test_the_registered_events_are_claudes_door_list_and_the_lifts_calls(self):
-        door = strings("DoorEvents", PSC)
-        for e in ("Open", "Close", "Trans01", "IsOn", "IsOff", "Done"):               # Claude's list
-            self.assertIn(e, door)
-        lift = strings("LiftEvents", PSC)
-        for e in ("Stage1", "Stage1Transition", "Stage2", "Stage2Transition"):        # the dump of twostages is UNREAD: its calls stand in
-            self.assertIn(e, lift)
-        self.assertIn(f"new string[{len(door)}]", PSC)
-        self.assertIn(f"new string[{len(lift)}]", PSC)
+    def test_the_registered_events_are_the_pcs_read(self):
+        self.assertEqual(strings("DoorEvents", PSC)[:6], ["Opened", "Closed", "Trans01", "Done", "IsOn", "IsOff"])
+        self.assertEqual(strings("LiftEvents", PSC), ["TransitionComplete", "Stage1", "Stage2"])
+        self.assertNotIn("UNREAD here", PSC)                                          # the lift's events are read now
         self.assertIn("RegisterForAnimationEvent(r, n)", PSC)
-        self.assertIn("UNREAD here", PSC)                                              # the script says so itself
+        for lst in ("DoorEvents", "LiftEvents"):
+            self.assertIn(f"new string[{len(strings(lst, PSC))}]", PSC)
 
     def test_the_lift_is_placed_disabled_and_enabled_only_after_a_move_away_from_the_player(self):
         self.assertIn("LiftRef = p.PlaceAtMe(liftBase, 1, true, true, false)", PSC)    # abInitiallyDisabled = true

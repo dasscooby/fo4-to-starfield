@@ -12,7 +12,7 @@ Claude runs it for one session on the PC after the Courier's CLEAR. **Nothing he
 
 ## What is built
 - `dotnet/AnimDoorLiftControl` (new): `FO4SFAnimDoorLift.esm`, master `Starfield.esm` only, two records, overrides none. QUST `FO4SF_AnimDoorLiftQuest`
-  (0x800, start game enabled, stages 10 20 21..24 31..34 40 60, no properties) and ACTI `FO4SF_AnimDoorControl` (0x801): a **new** activator (a DOOR is not an ACTI, so there is
+  (0x800, start game enabled, stages 10 20 21..24 31..36 40 60, no properties) and ACTI `FO4SF_AnimDoorControl` (0x801): a **new** activator (a DOOR is not an ACTI, so there is
   nothing to duplicate) with the model, BNAM and CNAM of the vanilla DOOR `AK_Ext_Bld_WallA_DoorA_01_Alt02` `000AA24A` (read from the `Starfield.esm` given) and ANAM
   `genericopenclose01.agx` (its path read from the game's archives). One component only, the graph. The vanilla door is neither overridden nor placed.
   `info` / `build` / `check` / `fixture`; `build` refuses a graph that is not `genericopenclose01`, a door that is missing, has no graph component, no model, no rig or
@@ -28,21 +28,23 @@ Claude runs it for one session on the PC after the Courier's CLEAR. **Nothing he
 |---|---|
 | 10 | place the door 4 m ahead; place the lift **disabled**, move it 40 m ahead, enable it only if the move happened (no `MoveTo` = it stays disabled: never a moving platform on the player); register |
 | 20 | register every event again on both |
-| 21..24 | DOOR: `Open`, `Close`, `StateA_Play`, `StateB_Play` (the last two matter when both first calls returned false; run them anyway, they cost nothing) |
-| 31..34 | LIFT: `Stage1`, `Stage1Transition`, `Stage2`, `Stage2Transition` |
+| 21..24 | DOOR: `Open`, `Close`, then the direct `Opened`, `Closed` |
+| 31..36 | LIFT: `Stage1`, `Stage2`, `Stage1NoTransition`, `Stage2NoTransition`, then `Stage1Transition`, `Stage2Transition` (clip names, not events: expected false, tried once so the log says so) |
 | 40 | a reading of both |
 | 60 | disable and delete both |
 
-Set the next stage only after the previous window has closed (`W sN quiet` / `W sN heard n`). Door events registered: `Open`, `Close`, `Trans01`, `IsOn`, `IsOff`, `Done`,
-`StateA_Play`, `StateB_Play`, `StateA_Idle`, `StateB_Idle`. Lift events: **the dump of `twostages` is unread**, so the list is its four call names plus `Done` and `Trans01`; to be replaced
-by what Claude's `--dump-graph twostages --dump-graph genericopenclose01` shows (a one-line edit of `LiftEvents` / `DoorEvents`, then re-stage).
+Set the next stage only after the previous window has closed (`W sN quiet` / `W sN heard n`). **The lists are the PC's read of the real graphs (supported: Claude on #755 at `1bfe5534`, 12 Nov 21:15 UTC; not replayed here):**
+`twostages` takes `Stage1`, `Stage2`, `Stage1NoTransition`, `Stage2NoTransition` and sends `TransitionComplete`; `genericopenclose01` takes `Open`, `Close` and the direct `Opened`, `Closed` (states `Closed`,
+`Opening`, `Opened`, `Closing`; clip tags `Open` and `Close`). Registered on the door: `Opened`, `Closed`, `Trans01`, `Done`, `IsOn`, `IsOff`, `Open`, `Close`; on the lift: `TransitionComplete`, `Stage1`, `Stage2`.
+What a `PlayAnimation` of those names DOES in the game is what the session shows: the read says which events enter which state, not that the call fires them.
 
 What the log cannot say: whether the door or the lift moved. That is a screenshot before and after each stage. The lift is a moving platform: stand well away from its spot.
 
 ## Unread, and what would change this kit
 - Whether a bare ACTI with only the door's model and a graph component behaves like the door (the real DOOR's other components are printed by `info` as `door_components`, none copied).
-- Whether `genericopenclose01` takes the door's own clips (`SimpleOpenClose01` names them; the generic graph's Sequence Names are unread by me).
-- What `ShipQuickLift1` is (ACTI/FURN/other), whether it names `twostages`, and what a disabled-then-enabled platform does.
+- Whether `genericopenclose01` takes the door's own clips (the read names clip tags `Open` and `Close`; the vanilla door's clips live on `SimpleOpenClose01`: whether the file names match is unread).
+- What `ShipQuickLift1` is (ACTI/FURN/other), whether it names `twostages` (`info` prints it at stage time), and what a disabled-then-enabled platform does.
+- Whether `Stage1Transition` / `Stage2Transition` return false as the read predicts (stages 35 and 36 log it).
 - That `ObjectReference.Enable` exists as called (the compile on the PC decides; it is not an optional line).
 
 ## Stage and run (PC)

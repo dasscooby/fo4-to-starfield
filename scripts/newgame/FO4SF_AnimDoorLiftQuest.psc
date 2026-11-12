@@ -8,8 +8,9 @@ Scriptname FO4SF_AnimDoorLiftQuest extends Quest
 ;   10        place the door 4 m in front of the player and the lift LIFT_M in front, DISABLED until it has been moved there (a lift that
 ;             cannot be moved away is left disabled and says so: it is never left standing on the player), then register every event name
 ;   20        register every event name again on both (the log shows each call's return)
-;   21..24    the DOOR: Open, Close, StateA_Play, StateB_Play (the last two matter when Open and Close both returned false), then 15 s of listening
-;   31..34    the LIFT: Stage1, Stage1Transition, Stage2, Stage2Transition, then 15 s of listening
+;   21..24    the DOOR: Open, Close, then the direct Opened, Closed, then 15 s of listening each
+;   31..36    the LIFT: Stage1, Stage2, Stage1NoTransition, Stage2NoTransition, then Stage1Transition and Stage2Transition (clip names, not events: expected
+;             false, tried once so the log says so), then 15 s of listening each
 ;   40        a reading of both references now
 ;   60        Disable and Delete both
 ; One name per stage: set the next stage only after the 15 s window of the last one has closed (its "quiet" or "listened" line). An event is
@@ -18,8 +19,9 @@ Scriptname FO4SF_AnimDoorLiftQuest extends Quest
 ; Optional natives are lines that begin with ";OPT <Base.Name> ": scripts/newgame/make_anim_doorlift.py stage compiles each on its own and keeps
 ; the ones that compile. ";VOID " lines are the register call's second shape (no return value). One line per finding in the user log
 ; "FO4SFAnimDL" (My Games\\Starfield\\Logs\\Script\\User\\FO4SFAnimDL.0.log): FO4SFANIM rt=<real time s> <event> key=value ... end=true.
-; Which events the lift's graph sends is UNREAD here (the dump of twostages was not read when this was written): its list is the call names
-; plus Done and Trans01, and is to be replaced by what the dump shows.
+; The call and event lists are the PC's read of the real graphs (Claude, #755 1bfe5534, 12 Nov 21:15 UTC; supported, not replayed here): twostages takes Stage1, Stage2,
+; Stage1NoTransition, Stage2NoTransition and sends TransitionComplete; genericopenclose01 takes Open, Close and the direct Opened, Closed (states Closed, Opening, Opened,
+; Closing; clip tags Open and Close). What a PlayAnimation of those names DOES in the game is what the session shows.
 
 ; ---------------------------------------------------------------- the layout (dotnet/AnimDoorLiftControl/Program.cs)
 
@@ -54,8 +56,8 @@ float LastEventRt = 0.0
 
 Event OnInit()
     Debug.OpenUserLog(LogName)
-    StageList = new int[12]
-    DoneList = new bool[12]
+    StageList = new int[14]
+    DoneList = new bool[14]
     StageList[0] = 10
     StageList[1] = 20
     StageList[2] = 21
@@ -66,36 +68,35 @@ Event OnInit()
     StageList[7] = 32
     StageList[8] = 33
     StageList[9] = 34
-    StageList[10] = 40
-    StageList[11] = 60
+    StageList[10] = 35
+    StageList[11] = 36
+    StageList[12] = 40
+    StageList[13] = 60
     DoorCalls = new string[4]
     DoorCalls[0] = "Open"
     DoorCalls[1] = "Close"
-    DoorCalls[2] = "StateA_Play"
-    DoorCalls[3] = "StateB_Play"
-    LiftCalls = new string[4]
+    DoorCalls[2] = "Opened"
+    DoorCalls[3] = "Closed"
+    LiftCalls = new string[6]
     LiftCalls[0] = "Stage1"
-    LiftCalls[1] = "Stage1Transition"
-    LiftCalls[2] = "Stage2"
-    LiftCalls[3] = "Stage2Transition"
-    DoorEvents = new string[10]
-    DoorEvents[0] = "Open"
-    DoorEvents[1] = "Close"
+    LiftCalls[1] = "Stage2"
+    LiftCalls[2] = "Stage1NoTransition"
+    LiftCalls[3] = "Stage2NoTransition"
+    LiftCalls[4] = "Stage1Transition"
+    LiftCalls[5] = "Stage2Transition"
+    DoorEvents = new string[8]
+    DoorEvents[0] = "Opened"
+    DoorEvents[1] = "Closed"
     DoorEvents[2] = "Trans01"
-    DoorEvents[3] = "IsOn"
-    DoorEvents[4] = "IsOff"
-    DoorEvents[5] = "Done"
-    DoorEvents[6] = "StateA_Play"
-    DoorEvents[7] = "StateB_Play"
-    DoorEvents[8] = "StateA_Idle"
-    DoorEvents[9] = "StateB_Idle"
-    LiftEvents = new string[6]
-    LiftEvents[0] = "Stage1"
-    LiftEvents[1] = "Stage1Transition"
+    DoorEvents[3] = "Done"
+    DoorEvents[4] = "IsOn"
+    DoorEvents[5] = "IsOff"
+    DoorEvents[6] = "Open"
+    DoorEvents[7] = "Close"
+    LiftEvents = new string[3]
+    LiftEvents[0] = "TransitionComplete"
+    LiftEvents[1] = "Stage1"
     LiftEvents[2] = "Stage2"
-    LiftEvents[3] = "Stage2Transition"
-    LiftEvents[4] = "Done"
-    LiftEvents[5] = "Trans01"
     Trace("init version=" + Version + " quest=" + GetFormID() + " installed=" + Game.IsPluginInstalled(ProbePlugin) + " doorcontrol=" + Id(Game.GetFormFromFile(DoorControlId, ProbePlugin)) + " lift=" + Id(Game.GetFormFromFile(LiftId, GamePlugin)) + " doorevents=" + DoorEvents.Length + " liftevents=" + LiftEvents.Length)
     StartTimer(POLL_S, TIMER_POLL)
 EndEvent
@@ -270,7 +271,7 @@ Function Step(int stage)
         RegisterList(stage, "lift", LiftRef, LiftEvents)
     elseif stage >= 21 && stage <= 24
         PlayOne(stage, "door", DoorRef, DoorCalls[stage - 21])
-    elseif stage >= 31 && stage <= 34
+    elseif stage >= 31 && stage <= 36
         PlayOne(stage, "lift", LiftRef, LiftCalls[stage - 31])
     elseif stage == 40
         Reading("stage40", stage, "door", DoorRef)
