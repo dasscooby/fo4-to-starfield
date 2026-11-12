@@ -97,6 +97,15 @@ class PluginTests(unittest.TestCase):
         self.assertIn("MissionStageAt=", self.readme)
         self.assertIn("step=kit_quest_stage", self.readme)
 
+    def test_setstage_takes_the_form_id(self):
+        """FAL-527, the PC's run at 10409137: the console refuses the mission's editor ID in setstage; the docs say form id."""
+        card = (ROOT / "docs" / "spikes" / "pipboy-page-kit-owner-card.md").read_text(encoding="utf-8")
+        self.assertIn("`setstage 07000800 20`", self.readme)
+        self.assertIn("`setstage <id> <n>`", card)
+        self.assertIn("form id", pqb.__doc__)
+        for text in (self.readme, card, pqb.__doc__):
+            self.assertNotIn("setstage FO4SF_Min00", text)
+
     def test_the_readme_names_the_dump_and_the_helper(self):
         self.assertIn("step=kit_quest_bytes", self.readme)
         self.assertIn("scripts/ui/pipboy_quest_bytes.py", self.readme)

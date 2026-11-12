@@ -3,7 +3,8 @@
 
 At stage (e) (`Stage=5`) the snapshot key (F11) logs the mission's bytes from +0x38 to +0x338, 64 to a line:
 `step=kit_quest_bytes n=<snapshot> form=<id> at=+<offset> bytes=<hex, a comma every 8>`. Open the quests page once,
-press F11, set the mission to another stage in the console, press F11 again; then run this on the plugin's log. It
+press F11, set the mission to another stage in the console (`setstage <its form id, as the page's FORM shows it> <n>`:
+the console refuses its editor ID), press F11 again; then run this on the plugin's log. It
 lists every 2-byte word that differs between two dumps (the first and the last in the log, or --before/--after), with
 both values in decimal, and marks a word that went from the first stage to the second (--stages 20,30) as `stage?`.
 When exactly one word is marked it prints the line for the plugin's ini, `MissionStageAt=<hex>` in [Kit] (FAL-527):

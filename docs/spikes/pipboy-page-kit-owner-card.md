@@ -43,7 +43,7 @@ of `docs/spikes/pipboy-channel-bridge-session.md`, sections 1 to 3, with these c
 
 1. **Build** only `sfse\FO4SFPipboyMenu`, into a new staging folder. Run the tests
    `python -m unittest tests.test_make_probe_swf tests.test_make_pipboy_probe tests.test_pipboy_probe_install
-   tests.test_pipboy_menu_channel tests.test_pipboy_stat_page tests.test_pipboy_kit`, then `python scripts\guard.py`.
+   tests.test_pipboy_menu_channel tests.test_pipboy_stat_page tests.test_pipboy_kit tests.test_pipboy_quest_bytes`, then `python scripts\guard.py`.
    Post the dll's sha256.
 2. **Stage** with `--kit`: `python scripts\ui\make_pipboy_probe.py stage $exp --kit`, then `check` on the plugin file: `python scripts\ui\make_pipboy_probe.py check $exp\FO4SFPipboyProbe.esm`.
    `python scripts\ui\make_pipboy_kit.py --check` prints the seven pages, and `make_probe_swf.py --read` on the movie
@@ -69,6 +69,7 @@ of `docs/spikes/pipboy-channel-bridge-session.md`, sections 1 to 3, with these c
 | STAT / STATUS | CELL, WORLD, TIME | where the player stands; TIME's minutes move while the Pip-Boy is open. Console: `getglobalvalue 00000039` (days passed; `00000038` is the hour); by name the console refuses both (PC run, 11 Nov, 0393cbe3) |
 | STAT / SPECIAL | STRENGTH to LUCK | `player.getav strength`, `player.getav perception`, `player.getav endurance`, `player.getav charisma`, `player.getav intelligence`, `player.getav agility`, `player.getav luck` |
 | DATA / KIT TEST | ROW n OF 30, KEY MOVES, CLICK MOVES | none: no game value |
+| DATA / QUESTS | FORM, STAGE | `getstage <id>` and `setstage <id> <n>`, `<id>` the mission's form id as FORM shows it (`07000800` on the PC, 12 Nov); by its editor ID (`FO4SF_Min00`) the console refuses it ("not found for parameter Quest"). STAGE needs `MissionStageAt=` in `[Kit]` (README, `quests`), else `?` |
 
 **What the log must show:** see `sfse/FO4SFPipboyMenu/README.md`, "PASS at (e)".
 
