@@ -36,13 +36,14 @@ def quaternion_from_matrix(matrix):
     return [x/length for x in result]
 
 
-def plan(source, samples_per_second=30, placed=False, aliases=None):
+def plan(source, samples_per_second=30, placed=False, aliases=None, allowed=None):
     """placed=True: the scene root's own stored transform counts as identity, as for a placed reference in game
     (nif.world_transforms(placed=True); docs/ai/research-log.md 2026-10-10). An animated scene root is then refused:
     its samples would carry the stored root transform the game leaves out.
     aliases: door_motion.inspect's {FO4 sequence: "Open" / "Close"}; an aliased object with an Open and no Close (the
-    cog door's Stage2) closes by playing its Open backwards (door_clips.reversed_clip)."""
-    report=door_motion.inspect(source,aliases)
+    cog door's Stage2) closes by playing its Open backwards (door_clips.reversed_clip).
+    allowed: door_motion.inspect's clip-slot names for an object that is no door (then no Close is made up)."""
+    report=door_motion.inspect(source,aliases,allowed)
     if report['issues']:
         raise nif.NifError('door has absent or ambiguous animation bindings')
     roots=set(nif.footer_roots(source)) if placed else set()
@@ -91,7 +92,7 @@ def plan(source, samples_per_second=30, placed=False, aliases=None):
         attachments.append({'shape':shape,'bone':indices[parents[shape]],
                             'local_transform':{'translation_source_units':list(t),'rotation_row_major':list(r),'scale':s}})
     clips=[door_clips.sample_sequence(sequence,binds,samples_per_second) for sequence in report['sequences']]
-    if aliases and [c['name'] for c in clips]==['Open']:
+    if aliases and allowed is None and [c['name'] for c in clips]==['Open']:
         clips.append(door_clips.reversed_clip(clips[0]))
     # shader / visibility / particle tracks animate no node and stay out of the rig; listed so a manifest can say so
     return {'space':'source_local','bones':bones,'attachments':attachments,'clips':clips,
@@ -190,6 +191,7 @@ def open_motion(plan, unit_scale, clip_name='Open'):
     for clip in plan['clips']:
         if clip['name']!=clip_name:continue
         for track in clip['tracks']:
+            if track.get('static'):continue        # anim_object.fill_static_tracks: written for the block order, moves nothing
             i=index[track['node']];parent=bones[i]['parent']
             frame=world[parent] if parent!=-1 else [1.0,0.0,0.0,0.0]
             scale=world_scale[parent] if parent!=-1 else 1.0         # keys are in the parent's frame, its scale included
