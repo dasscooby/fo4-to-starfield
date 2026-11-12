@@ -367,8 +367,23 @@ def model_entry(archives, path):
     return "Meshes\\" + p if not p.lower().startswith("meshes\\") else p, None
 
 
-def model_report(archives, path, cnam="", bnam=""):
-    """(lines, facts dict for the outcome table) of one model."""
+def clip_tied(archives, item, want):
+    """True when a guessed-folder clip is tied to the graph: its file name, or a string in its .afx, is exactly (case-blind)
+    one of the graph's Sequence Name values.  Nothing else ties a clip found only by folder guesswork to a record."""
+    name = item.split(": ", 1)[1].replace("/", "\\").rsplit("\\", 1)[-1]
+    if name.rsplit(".", 1)[0].lower() in want:
+        return True
+    if name.lower().endswith(".afx"):
+        got = find_entry(archives, item.split(": ", 1)[1])
+        if got is not None and not isinstance(got[1], Exception):
+            return any(m.group().decode("latin-1").lower() in want for m in re.finditer(rb"[\x20-\x7e]{3,}", got[1]))
+    return False
+
+
+def model_report(archives, path, cnam="", bnam="", want=()):
+    """(lines, facts dict for the outcome table) of one model.  want: the graph's Sequence Name values, lower-cased; a guessed
+    rig folder's clips count (facts["af"]) only when they are tied to one of them, a CNAM folder's always do."""
+    want = {w.lower() for w in want}
     lines = [f"--- model {path}"]
     facts = {"path": path, "read": False, "sequences": None, "managers": None, "af": None, "raw": []}
     name, got = model_entry(archives, path)
@@ -402,9 +417,15 @@ def model_report(archives, path, cnam="", bnam=""):
         seen_files = []
         for folder in rig_folders(bnam):
             seen_files += [x for x in folder_files(archives, folder) if x not in seen_files]
-        facts["af"] = len([x for x in seen_files if x.lower().endswith((".af", ".afx"))])
+        clips = [x for x in seen_files if x.lower().endswith((".af", ".afx"))]
+        tied = [x for x in clips if clip_tied(archives, x, want)]
+        facts["af"], facts["guessed"] = len(tied), [x for x in clips if x not in tied]
         lines.append(f"  no CNAM; rig {bnam}: clips under the rig's folders: {len(seen_files)} file(s)"
                      + (": " + "; ".join(seen_files[:8]) + (" ..." if len(seen_files) > 8 else "") if seen_files else " (none: the clips come from elsewhere)"))
+        if clips:
+            lines.append(f"  {len(tied)} of {len(clips)} .af/.afx tied to this graph's Sequence Name (by name or .afx string); counted for M1: {len(tied)}")
+            if facts["guessed"]:
+                lines.append("  found beside the rig, not tied to this graph (guessed folders, not counted): " + "; ".join(facts["guessed"][:8]) + (" ..." if len(facts["guessed"]) > 8 else ""))
         lines += afx_lines(archives, seen_files)
     return lines, facts
 
@@ -539,7 +560,7 @@ def run(a):
     if not todo:
         out.append("no model to read (none given with --model, and no record named one)")
     for path, cnam, g, bnam in todo:
-        lines, f = model_report(archives, path, cnam, bnam)
+        lines, f = model_report(archives, path, cnam, bnam, values.get(g, {}).get("Sequence Name", ()))
         f["graph"] = g
         facts.append(f)
         out += (["  (graph " + g + ")"] if g else []) + lines
