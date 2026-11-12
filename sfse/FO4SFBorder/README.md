@@ -22,7 +22,7 @@ memory; `tests/test_sfse_border.py` also pins the contract with the script's log
 
 ## Modes (`[FO4SFBorder]` in the ini next to the dll)
 
-- `Mode=0`: loads, logs one `load` line, does nothing else.
+- `Mode=0` (the kill switch): loads and stays idle and silent: no log line, no file, no worker.
 - `Mode=1` probe: after game data loads, finds the candidates every 2 s and logs the 32 bytes before each pointer
   whenever they change (`changed` lines). Never writes game memory. Typing `SetINI "bBorderRegionsEnabled:General" 0`
   then `1` in the console shows the value's offset.
