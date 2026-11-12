@@ -65,3 +65,27 @@ def verify_archive(path: str, inputs: dict[str, str]) -> None:
                     raise ValueError(f"archive resource differs from pinned input: {name}")
     except (struct.error, UnicodeError) as error:
         raise ValueError("archive layout is truncated or unreadable") from error
+
+
+def verify_texture_archive(path: str, inputs: dict[str, str]) -> None:
+    """A DX10 BA2 of textures against the pinned .dds files (key Data/Textures/..., SHA-256 of the whole file): the archive's names are
+    exactly those, and each entry read back (fo4sf.ba2 regenerates the DX10 header) is the pinned file."""
+    expected = {normalized_name(k[5:]): h for k, h in inputs.items() if k.startswith("Data/")}
+    if not expected:
+        raise ValueError("no pinned texture inputs for the texture archive")
+    try:
+        with open(path, "rb") as stream:
+            magic, version, kind, count, _name_offset = struct.unpack("<4sI4sIQ", stream.read(24))
+        if magic != b"BTDX" or kind != b"DX10" or version not in (1, 2, 7, 8):
+            raise ValueError("texture archive must be an uncompressed-layout DX10 BA2 (v1/v2)")
+        archive = Ba2(path)
+    except (struct.error, UnicodeError) as error:
+        raise ValueError("texture archive layout is truncated or unreadable") from error
+    names = [normalized_name(entry.name) for entry in archive.entries]
+    if len(set(names)) != len(names) or set(names) != set(expected) or count != len(expected):
+        raise ValueError("texture archive names do not exactly cover the pinned texture inventory")
+    for name, entry in zip(names, archive.entries):
+        if entry.kind != "DX10":
+            raise ValueError(f"texture archive entry is not a texture: {name}")
+        if hashlib.sha256(archive.read(entry.name)).hexdigest() != expected[name]:
+            raise ValueError(f"texture archive resource differs from pinned input: {name}")
