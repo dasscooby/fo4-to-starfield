@@ -47,7 +47,7 @@ All six stand in the spawn cell (0, 0) of the test world, around the arrival, on
 | T6 | ACHR citizen | persistent | XLCN + LCPR row | a fix for Codsworth |
 | T7 | REFR XMarker | persistent, stored in the spawn cell's own persistent group (run 2) | none | rank 2 of the `merge-diff` document (FAL-188): a persistent reference kept as a child of our own exterior cell |
 
-Run 2 reads T7 as PASS (T7 with player, T1 left behind), FAIL (T7 left behind or not loaded) or confounded (T1 and T7
+Run 2 reads T7 as PASS (T7 with player, T1 left behind), FAIL (T7 left behind, or not loaded while T5 was found), `cell not loaded` (T7 and T5 both not loaded: the spawn cell never loaded, so T7 says nothing; probe run 2, FAL-207) or confounded (T1 and T7
 both with player), after the LC172 control (MERGE and LC172COC with player); `probe_log.t7_result`. The stage option
 `--alignment relative` (default `absolute`) builds the second kit with the block's INAM 0, as vanilla's LC overlays.
 

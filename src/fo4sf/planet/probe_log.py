@@ -42,7 +42,10 @@ and t7_result() reads it at each arrival on our planet (at the last reading), af
 elsewhere where MERGE and LC172COC are both with player, else "control failed" or, never read, "control not read":
 the session proves nothing):
   PASS         T7 with player and T1 left behind (the offset of T7 is then a whole-cell overlay shift, not ~0)
-  FAIL         T7 left behind or not loaded (rank 2 is wrong: no exterior-persistent markers as the map fix)
+  FAIL         T7 left behind, or not loaded while T5 (the cell-content control) was found (with player or left
+               behind): rank 2 is wrong, no exterior-persistent markers as the map fix
+  cell not loaded  T7 and T5 both not loaded at that arrival: the spawn cell never loaded, so T7 says nothing
+               (probe run 2, FAL-207: not a FAIL)
   confounded   T1 and T7 both with player (the whole world started instancing: not a result for T7's placement)
   unknown      anything else (T7 or T1 unread, or not installed)
 
@@ -53,7 +56,7 @@ returns the largest float, 3.4e38 (verified: probe run 1, 31 of 33 readings), wh
 """
 import re
 
-LINE = re.compile(r"FO4SFPP rt=(?P<rt>[-+\d.eE]+) (?P<event>\w+)(?P<rest>.*)$", re.IGNORECASE)
+LINE = re.compile(r"FO4SF(?:PP|CS) rt=(?P<rt>[-+\d.eE]+) (?P<event>\w+)(?P<rest>.*)$", re.IGNORECASE)
 TOKEN = re.compile(r"(\w+)=(\S*)")
 EVENTS = ("init", "chain", "arrive", "player", "planet", "ref", "location")
 ID_KEYS = {"quest", "world", "loc", "planet", "surface", "planetloc", "cell", "id", "editorloc", "type", "atmos",
@@ -149,13 +152,40 @@ def runs(lines):
         p = parse_line(line)
         if p is None:
             continue
-        if p["event"] == "init" and cur:
+        if p["event"] == "init" and cur and not twin_init(cur, p):
             out.append(cur)
             cur = []
         cur.append(p)
     if cur:
         out.append(cur)
     return out
+
+
+INIT_FORMS = ("world", "loc", "planet", "surface", "planetloc")     # the init line's forms: all present = complete
+
+
+def init_forms(p):
+    """How many of the init line's forms it holds (the others read none: GetFormFromFile found nothing)."""
+    return sum(1 for k in INIT_FORMS if p.get(k) is not None)
+
+
+def twin_init(cur, p):
+    """Whether the init line p is OnInit logging a second time in the run cur (probe run 2: an empty second line):
+    only before the run's first arrival (a later init is a new session, which must not borrow this run's init or
+    control), and only when p or every init so far is incomplete (a complete line never joins an earlier complete one)."""
+    if any(x["event"] == "arrive" for x in cur):
+        return False
+    inits = [x for x in cur if x["event"] == "init"]
+    if not inits:                                # a headerless prefix (the log lost its start) is a run of its own
+        return False
+    return init_forms(p) < len(INIT_FORMS) or all(init_forms(x) < len(INIT_FORMS) for x in inits)
+
+
+def best_init(lines):
+    """The init line to read: when OnInit logged more than once (probe run 2: the second line came out empty), the
+    first one holding the most forms, so a complete line wins over an empty one; None without an init line."""
+    inits = [p for p in lines if p["event"] == "init"]
+    return max(inits, key=init_forms, default=None)      # max keeps the first of equal lines
 
 
 def hexid(v):
@@ -335,7 +365,7 @@ def control_held(arrivals):
 
 
 def t7_result(refs, control=None):
-    """PASS, FAIL, confounded, unknown, "control failed" (control False: the LC172 control did not hold, so nothing
+    """PASS, FAIL, "cell not loaded" (T7 and T5 both not loaded), confounded, unknown, "control failed" (control False: the LC172 control did not hold, so nothing
     is proved), "control not read" (control None: no LC172 arrival was read) or None (no T7 reading) for one arrival's refs ({tag: {"verdict": ...}}, as summarize() files them)."""
     t7 = (refs.get("T7") or {}).get("verdict")
     if t7 is None:
@@ -345,6 +375,8 @@ def t7_result(refs, control=None):
     if control is None:
         return "control not read"                # no LC172 arrival read MERGE and LC172COC: PASS would prove nothing
     t1 = (refs.get("T1") or {}).get("verdict")
+    if t7 == "not loaded" and (refs.get("T5") or {}).get("verdict") == "not loaded":
+        return "cell not loaded"                 # the cell control is not loaded either: the spawn cell never loaded
     if t7 in ("left behind", "not loaded"):
         return "FAIL"
     if t7 == "with player" and t1 == "left behind":
@@ -352,6 +384,42 @@ def t7_result(refs, control=None):
     if t7 == "with player" and t1 == "with player":
         return "confounded"
     return "unknown"
+
+
+def core_storage_result(lines, run=-1):
+    """The core storage probe's verdict per arrival (FAL-208, scripts/core_storage/FO4SF_CoreStorageQuest.psc: lines
+    "FO4SFCS rt=... player|ref n=.. at=.. tag=CS_P|CS_T ...", read like the planet probe's) at each arrival's last
+    reading: [{"n", "cs_p", "cs_t", "result"}], the result by the control first: CS_T not loaded is "cell not loaded"
+    (the cell never loaded: CS_P is not judged); CS_T found and CS_P with player is PASS; CS_T found and CS_P left
+    behind or not loaded is FAIL; "not installed" for a missing plugin; "unknown" for anything else (a cut line, a
+    tag unread, CS_T in an interior). One run only (default the last; runs() splits at each init line), so an earlier
+    session's readings never complete a later, cut one. The offset of CS_P is for the reader of the log (core merge about -1200, -2700)."""
+    last = {}
+    order = []
+    rs = runs(lines)
+    for p in (rs[run] if rs else []):
+        if p["event"] != "ref" or not isinstance(p.get("tag"), str) or p["tag"] not in ("CS_P", "CS_T"):
+            continue
+        n = p.get("n")
+        if n not in last:
+            last[n] = {}
+            order.append(n)
+        last[n][p["tag"]] = ref_verdict(p)
+    out = []
+    for n in order:
+        p_v, t_v = last[n].get("CS_P"), last[n].get("CS_T")
+        if "not installed" in (p_v, t_v):
+            res = "not installed"
+        elif t_v == "not loaded":
+            res = "cell not loaded"
+        elif t_v in ("with player", "left behind") and p_v == "with player":
+            res = "PASS"
+        elif t_v in ("with player", "left behind") and p_v in ("left behind", "not loaded"):
+            res = "FAIL"
+        else:
+            res = "unknown"
+        out.append({"n": n, "cs_p": p_v, "cs_t": t_v, "result": res})
+    return out
 
 
 def local_positions(plan):
@@ -375,7 +443,7 @@ def summarize(lines, plan=None, run=-1):
     if not rs:
         return {"runs": 0, "arrivals": [], "problems": ["no FO4SFPP line in the log"]}
     lines_ = rs[run]
-    init = next((p for p in lines_ if p["event"] == "init"), None)
+    init = best_init(lines_)
     chain = next((p for p in lines_ if p["event"] == "chain"), None)
     names = known_names(plan, init)
     reading, chain_problems, notes = chain_reading(chain, names, (init or {}).get("version"))
