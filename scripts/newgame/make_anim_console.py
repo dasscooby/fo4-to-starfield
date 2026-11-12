@@ -122,11 +122,11 @@ def sequence_motion(raw, names):
     """{sequence: [{bone, travel_m, rotation_deg, axis}]}: what each track of each sequence does from its first to its last
     sample (door_rig.open_motion over a plan that keeps every named sequence). A track listed in sequences_table can stand
     still: travel 0 and 0 degrees. {} when the plan cannot be made."""
-    from fo4sf import door_rig, nif
+    from fo4sf import convert_static, door_rig, nif
     try:
         src = nif.parse(raw)
-        plan = door_rig.plan(src, placed=True, allowed=tuple(names))
-        return {n: door_rig.open_motion(plan, 0.01428, n) for n in names if any(c["name"] == n for c in plan["clips"])}
+        plan = door_rig.animated_identity_binds(door_rig.plan(src, placed=True, allowed=tuple(names)))
+        return {n: door_rig.open_motion(plan, convert_static.UNIT_SCALE, n) for n in names if any(c["name"] == n for c in plan["clips"])}
     except (nif.NifError, KeyError, ValueError, IndexError, struct.error):
         return {}
 

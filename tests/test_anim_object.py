@@ -7,14 +7,15 @@ import struct
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from unittest.mock import patch
 import xml.etree.ElementTree as ET
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fo4sf import anim_object, convert_static, door_motion, door_rig, native_door, nif, pipeline  # noqa: E402
+from fo4sf import anim_object, convert_static, door_motion, door_rig, fo4skin, native_door, nif, pipeline  # noqa: E402
 from test_collision import fake_template  # noqa: E402
-from test_door_two_panels import donor, door_nif, node_names, two_leaves  # noqa: E402
+from test_door_two_panels import donor, door_nif, fake_clip_files, node_names, sliding_panels, two_leaves  # noqa: E402
 
 STATES = {"Stage1": "StateA_Play", "Stage2": "StateB_Play"}
 
@@ -162,11 +163,47 @@ class BuilderTests(unittest.TestCase):
         self.assertEqual(len(rows), len([s for s in nif.fo4_trishapes(console_nif()) if s.positions and s.triangles]))
         self.assertEqual({r["fate"] for r in rows}, {"kept"})
         self.assertTrue(all(r["bones"] and r["material"] == "Materials\\x.mat" for r in rows))
-        table = {c["name"]: c for c in anim_object.clip_table(plan)}
+        table = {c["name"]: c for c in anim_object.clip_table(plan, convert_static.UNIT_SCALE)}
         play, hold = table["StateA_Play"], table["StateA_Idle"]
         self.assertEqual(sorted(m["bone"] for m in play["motion"]), play["bones"])
         self.assertTrue(any(m["travel_m"] != [0.0, 0.0, 0.0] or m["rotation_deg"] for m in play["motion"]))   # the leaves move
         self.assertTrue(all(m["travel_m"] == [0.0, 0.0, 0.0] and m["rotation_deg"] == 0.0 for m in hold["motion"]))   # a hold stands still
+
+    def test_travel_is_in_metres_and_matches_open_motion(self):
+        (_, anim), plan = self.build()
+        table = {c["name"]: c for c in anim_object.clip_table(plan, convert_static.UNIT_SCALE)}
+        raw = {c["name"]: c for c in anim_object.clip_table(plan, 1.0)}
+        for name in ("StateA_Play", "StateB_Play"):
+            for m, r in zip(table[name]["motion"], raw[name]["motion"]):
+                self.assertEqual(m["rotation_deg"], r["rotation_deg"])                               # a turn does not depend on the scale
+                for x, y in zip(m["travel_m"], r["travel_m"]):
+                    self.assertAlmostEqual(x, y / 70.0, places=3)                                    # metres are source units over 70
+        self.assertEqual(table["StateA_Play"]["motion"], anim["open_motion"])                       # the manifest's open_motion uses the same scale
+        with self.assertRaises(TypeError):
+            anim_object.clip_table(plan)                                                             # no silent 1.0
+
+    def test_two_shapes_with_one_name_get_their_own_fate(self):
+        """Every shape of the sliding-door fixture is named Root. One is blended across two rig bones and dropped (drop_skinned);
+        the name must not drag the kept panel and the frame into the 'dropped' label (FAL-512)."""
+        from test_sliding_by_motion import SkinnedPanelTests
+        f = door_nif(sliding_panels())
+        names = node_names(f)
+        _, shapes, read_skin = SkinnedPanelTests().skinned(f, names["PanelA"], second=names["PanelB"])
+        with unittest.mock.patch.object(nif, "fo4_trishapes", side_effect=shapes), \
+                unittest.mock.patch.object(fo4skin, "read_skin", side_effect=read_skin):
+            count = len([s for s in nif.fo4_trishapes(f) if s.positions and s.triangles])
+            _, door = convert_static.convert_multipart_door(
+                nif.serialize(f), "fo4port/ped", ["x.mat"] * count, fake_clip_files, collision_template=fake_template(),
+                leaf_physics_donor=donor(), drop_skinned=True, plan_hook=lambda plan: plan)
+        rows = door["shapes"]
+        self.assertEqual({r["shape"] for r in rows}, {"Root"})                                       # one name for all
+        dropped = [r for r in rows if r["fate"].startswith("dropped")]
+        self.assertEqual(len(dropped), 1)
+        self.assertEqual(dropped[0]["bones"], [])
+        self.assertEqual(door["dropped_skinned_shapes"], ["Root"])
+        kept = [r for r in rows if r["fate"] == "kept"]
+        self.assertEqual(len(kept), len(rows) - 1)
+        self.assertTrue(all(r["bones"] for r in kept))                                               # the others keep their bones
 
     def test_a_shape_without_a_material_is_reported_as_left_out(self):
         f = console_nif()

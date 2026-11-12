@@ -607,6 +607,7 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
                 key = b if len(parts) == 1 else f"{b}.{k}"
                 kept[key] = (piece, m)
                 rebound[key] = bone
+    dropped_blocks = {b for b, (s, _) in kept.items() if s.skinned}          # by block: shape names can repeat
     dropped_skinned = sorted(shape_name(b, s) for b, (s, _) in kept.items() if s.skinned)
     if dropped_skinned and not drop_skinned:
         raise nifmod.NifError("skinned door shapes cannot be rigged (blended or off-rig weights)")
@@ -702,7 +703,7 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
             keys = [k for k in bone_of if k == s.block or str(k).startswith(f"{s.block}.")]
             if m is None:
                 fate = "left out: no material (effect shader or marker)"
-            elif name in dropped_skinned:
+            elif s.block in dropped_blocks:
                 fate = "dropped: skinned, a rig cannot carry it"
             elif keys:
                 fate = "kept"

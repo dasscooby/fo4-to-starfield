@@ -822,7 +822,7 @@ class Converter:
                 allowed=tuple(states.values()), expect_clips=anim_object.slot_names(states), plan_hook=hook,
                 anim_graph=anim_object.GRAPH, motion_clip=sorted(states.values())[0])
             anim["states"] = dict(states)
-            anim["clips"] = anim_object.clip_table(holder["plan"])
+            anim["clips"] = anim_object.clip_table(holder["plan"], convert_static.UNIT_SCALE)
             anim["foley"] = foley or ""
             for relp, data in files.items():
                 write_staged(os.path.join(self.staging, *relp.split("/")), data)

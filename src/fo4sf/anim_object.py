@@ -102,10 +102,10 @@ def descriptors(plan, foley=None):
     return out
 
 
-def clip_table(plan, unit_scale=1.0):
+def clip_table(plan, unit_scale):
     """Rows for the stager's report and the card: name, seconds, frames, bones with a track, hold_of, audio frames (no foley),
     and per track what it does from the first to the last sample (door_rig.open_motion: travel in metres, rotation in degrees).
-    "bones" lists every track; "motion" says which of them actually move: a track can exist and stand still."""
+    "bones" lists every track; "motion" says which of them actually move: a track can exist and stand still. unit_scale (source units to metres, convert_static.UNIT_SCALE) is required: travel is in metres."""
     from . import door_rig
     rows = []
     for clip in plan["clips"]:

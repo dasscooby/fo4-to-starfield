@@ -34,7 +34,8 @@ string LogName = "FO4SFAnimD"
 string ProbePlugin = "FO4SFAnimConsole.esm"
 string BasePlugin = "FO4Port.esm"
 int BaseId = 0  ;BASE the console base's local id in FO4Port.esm (the stager writes it; 0 = not given)
-float AheadM = 2.5
+float AheadM = 1.5      ; metres in front of the player (variant D session 2 read dist 2.5007 for 2.5: the unit is metres)
+float UpM = 1.2         ; metres above the player's own height: a guess at chest height for this model, unread
 
 ; ---------------------------------------------------------------- state
 
@@ -185,7 +186,7 @@ Function Reading(string when, int stage, ObjectReference r)
 EndFunction
 
 Function Spawn(int stage)
-    {PlaceAtMe the console base (persistent), then 2.5 m in front of the player when MoveTo exists, then register.}
+    {PlaceAtMe the console base (persistent), then AheadM in front of the player and UpM above the player's height when MoveTo exists, turned to face the player when SetAngle exists, then register.}
     Actor p = Game.GetPlayer()
     Form base = None
     if BaseId != 0
@@ -197,13 +198,18 @@ Function Spawn(int stage)
     endif
     TestRef = p.PlaceAtMe(base, 1, true, false, false)
     bool moved = false
+    bool turned = false
 ;OPT ObjectReference.MoveTo     if TestRef
 ;OPT ObjectReference.MoveTo         float a = p.GetAngleZ()
-;OPT ObjectReference.MoveTo         TestRef.MoveTo(p, AheadM * Math.Sin(a), AheadM * Math.Cos(a), 0.0, false)
+;OPT ObjectReference.MoveTo         TestRef.MoveTo(p, AheadM * Math.Sin(a), AheadM * Math.Cos(a), UpM, false)
 ;OPT ObjectReference.MoveTo         moved = true
 ;OPT ObjectReference.MoveTo     endif
-    Trace("spawn stage=" + stage + " base=" + Id(base) + " ref=" + Id(TestRef) + " moved=" + moved + " persist=true")
-    Say("SPAWN s" + stage + " moved=" + moved + " ahead=" + AheadM)
+;OPT ObjectReference.SetAngle     if TestRef
+;OPT ObjectReference.SetAngle         TestRef.SetAngle(0.0, 0.0, p.GetAngleZ() + 180.0)
+;OPT ObjectReference.SetAngle         turned = true
+;OPT ObjectReference.SetAngle     endif
+    Trace("spawn stage=" + stage + " base=" + Id(base) + " ref=" + Id(TestRef) + " moved=" + moved + " turned=" + turned + " persist=true")
+    Say("SPAWN s" + stage + " moved=" + moved + " turned=" + turned + " ahead=" + AheadM + " up=" + UpM)
     Reading("now", stage, TestRef)
     RegisterAll(stage)
 EndFunction

@@ -23,6 +23,7 @@ from fo4sf import anim_object, nif  # noqa: E402
 from test_anim_object import STATES, console_nif  # noqa: E402
 from test_anim_probe import BASES, fake_compiler, fake_sources  # noqa: E402
 
+BASES_D = {**BASES, "ObjectReference": BASES["ObjectReference"] + "Function SetAngle(float x, float y, float z) native\n"}
 PSC = (ROOT / "scripts" / "newgame" / "FO4SF_AnimConsoleQuest.psc").read_text(encoding="utf-8")
 TOOL_SRC = (ROOT / "dotnet" / "AnimConsoleProbe" / "Program.cs").read_text(encoding="utf-8")
 PLUGIN = "FO4SFAnimConsole.esm"
@@ -74,14 +75,14 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(PSC.count("PlayRt = Utility.GetCurrentRealTime()"), 2)      # PlayOne and ActivateOnce
         self.assertIn('Say("READ s" + stage + " " + when + " 3d=" + r.Is3DLoaded()', PSC)      # 3D loaded / distance / height difference on screen
         self.assertIn('" az=" + r.GetAngleZ() + " pa=" + p.GetAngleZ())', PSC)           # the copy's and the player's heading
-        self.assertIn('Say("SPAWN s" + stage + " moved=" + moved', PSC)
+        self.assertIn('Say("SPAWN s" + stage + " moved=" + moved + " turned=" + turned', PSC)
         for what in ('Say("EV " + asEventName + " w" + ListenStage + " t" + after)', 'Say("PLAY s" + stage + " " + n + " ok=" + ok)',
                      'Say("W s" + stage + " quiet")', 'Say("ACTIVATE s" + stage)'):
             self.assertIn(what, PSC)
 
     def test_the_committed_script_compiles_alone_and_the_register_shape_replaces_cleanly(self):
         self.assertEqual(mac.enable(PSC, []), PSC)
-        self.assertEqual(mac.optional_names(PSC), ["ObjectReference.MoveTo", "ObjectReference.Delete"])
+        self.assertEqual(mac.optional_names(PSC), ["ObjectReference.MoveTo", "ObjectReference.SetAngle", "ObjectReference.Delete"])
         self.assertIn(mac.probe_a.BOOL_LINE, PSC)
         self.assertNotIn(mac.probe_a.BOOL_LINE, mac.probe_a.reg_shape(PSC, False))
 
@@ -103,14 +104,24 @@ class ScriptTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 mac.parse_info(bad)
 
+    def test_the_copy_is_placed_upright_at_chest_height_facing_the_player(self):
+        self.assertIn("float AheadM = 1.5", PSC)
+        self.assertIn("float UpM = 1.2", PSC)
+        self.assertIn("TestRef.MoveTo(p, AheadM * Math.Sin(a), AheadM * Math.Cos(a), UpM, false)", PSC)
+        self.assertIn("TestRef.SetAngle(0.0, 0.0, p.GetAngleZ() + 180.0)", PSC)          # turned half a circle from the player's heading
+        on = mac.enable(PSC, ["ObjectReference.MoveTo", "ObjectReference.SetAngle"])
+        self.assertIn("turned = true", on.split("Spawn")[1].split("EndFunction")[0].replace(";OPT ObjectReference.SetAngle ", ""))
+        off = mac.enable(PSC, ["ObjectReference.MoveTo"])
+        self.assertIn(";OPT ObjectReference.SetAngle         TestRef.SetAngle", off)        # a SetAngle that does not compile stays off
+
     def test_the_variant_a_precheck_list_covers_this_script(self):
         z = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, z, True)
         zp = os.path.join(z, "cr.zip")
-        fake_sources(zp)
+        fake_sources(zp, BASES_D)
         r = mac.probe_a.precheck_sources(mac.read_sources(zp), PSC)
         self.assertEqual(r["missing"], [])
-        self.assertEqual(r["optional"], {"ObjectReference.MoveTo": True, "ObjectReference.Delete": True})
+        self.assertEqual(r["optional"], {"ObjectReference.MoveTo": True, "ObjectReference.SetAngle": True, "ObjectReference.Delete": True})
 
 
 class SequencesTableTests(unittest.TestCase):
@@ -258,7 +269,7 @@ class StageTests(unittest.TestCase):
     # ------------------------------------------------------------- the stager
     def args(self, out, **kw):
         z = self.root / (Path(out).name + "-cr.zip")
-        fake_sources(z)
+        fake_sources(z, BASES_D)
         base = dict(out=str(out), starfield_data=str(self.data), port_data="", fo4_data="fo4", door_anim_dll="d.dll", collision_template="c.nif",
                     texconv="t.exe", content_resources=str(z), compiler=str(fake_compiler(self.root)), states="Stage1=StateA_Play,Stage2=StateB_Play",
                     foley="", model="", edid=mac.EDID)
