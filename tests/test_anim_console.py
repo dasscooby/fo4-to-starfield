@@ -241,6 +241,16 @@ class StageTests(unittest.TestCase):
         r = cls.run_tool("fixture", cls.data)
         assert r.returncode == 0, r.stdout + r.stderr
         cls.margs = ["--model", "fo4port\\interiors\\vault\\props\\console01_anim.nif", "--rig", "fo4port\\r\\skeleton.rig", "--anims", "fo4port\\r\\animations"]
+        # FAL-558: one default stage (~9 s: the stager's tool calls) shared by the tests that only read it; a test that changes the
+        # stage works on its own copy (fresh_stage), one that changes inputs stages again.
+        make, cls.shared_holder = cls.converter()
+        cls.shared = cls.root / "staged"
+        assert mac.stage(cls.args(cls.shared, foley="QST_Flip"), converter=make) == 0
+
+    def fresh_stage(self, name):
+        out = self.root / name
+        shutil.copytree(self.shared, out)
+        return out
 
     @classmethod
     def run_tool(cls, *argv):
@@ -300,16 +310,18 @@ class StageTests(unittest.TestCase):
         self.assertIn("0 ACTI named NoSuchActi", proc.stderr)
 
     # ------------------------------------------------------------- the stager
-    def args(self, out, **kw):
-        z = self.root / (Path(out).name + "-cr.zip")
+    @classmethod
+    def args(cls, out, **kw):
+        z = cls.root / (Path(out).name + "-cr.zip")
         fake_sources(z, BASES_D)
-        base = dict(out=str(out), starfield_data=str(self.data), port_data="", fo4_data="fo4", door_anim_dll="d.dll", collision_template="c.nif",
-                    texconv="t.exe", content_resources=str(z), compiler=str(fake_compiler(self.root)), states="Stage1=StateA_Play,Stage2=StateB_Play",
+        base = dict(out=str(out), starfield_data=str(cls.data), port_data="", fo4_data="fo4", door_anim_dll="d.dll", collision_template="c.nif",
+                    texconv="t.exe", content_resources=str(z), compiler=str(fake_compiler(cls.root)), states="Stage1=StateA_Play,Stage2=StateB_Play",
                     foley="", model="", edid=mac.EDID)
         base.update(kw)
         return type("A", (), base)()
 
-    def converter(self, textures=()):
+    @classmethod
+    def converter(cls, textures=()):
         raw = nif.serialize(console_nif())
         holder = {}
 
@@ -320,9 +332,8 @@ class StageTests(unittest.TestCase):
         return make, holder
 
     def test_stage_converts_builds_compiles_and_pins_every_file(self):
-        make, holder = self.converter()
-        out = self.root / "staged"
-        self.assertEqual(mac.stage(self.args(out, foley="QST_Flip"), converter=make), 0)
+        holder = self.shared_holder
+        out = self.shared                                                                  # staged once in setUpClass with foley QST_Flip
         self.assertTrue(holder["conv"].calls[0][0].lower().endswith("console01.nif"))      # the first candidate the source holds
         self.assertEqual(holder["conv"].calls[0][1:], (STATES, "QST_Flip"))
         plan = json.loads((out / "plan.json").read_text())
@@ -342,6 +353,7 @@ class StageTests(unittest.TestCase):
         self.assertIn("int BaseId = 0x001234  ;BASE", (out / "FO4SF_AnimConsoleQuest.psc").read_text())
         self.assertIn("StateA_Idle: 0.0 s (0 frames)", (out / "README.txt").read_text())
         self.assertFalse((out / "work").exists())
+        make, _ = self.converter()
         with self.assertRaises(SystemExit):                                                  # an earlier stage is never overwritten
             mac.stage(self.args(out), converter=make)
 
@@ -362,9 +374,7 @@ class StageTests(unittest.TestCase):
         self.assertFalse(any("textures" in k for k in json.loads((self.root / "staged-t2" / "plan.json").read_text())["outputs"]))
 
     def test_swap_siblings_is_off_by_default_and_reaches_the_converter_when_asked(self):
-        make, holder = self.converter()
-        self.assertEqual(mac.stage(self.args(self.root / "staged-sw0"), converter=make), 0)
-        self.assertFalse(holder["conv"].swapped)
+        self.assertFalse(self.shared_holder["conv"].swapped)                                # the default stage is the one staged in setUpClass
         make, holder = self.converter()
         self.assertEqual(mac.stage(self.args(self.root / "staged-sw1", swap_siblings=True), converter=make), 0)
         self.assertTrue(holder["conv"].swapped)
@@ -395,9 +405,7 @@ class StageTests(unittest.TestCase):
     def test_inspect_reads_the_staged_rig_tracks_nodes_and_predicted_poses(self):
         import contextlib
         import io
-        make, _ = self.converter()
-        out = self.root / "staged-i"
-        mac.stage(self.args(out), converter=make)
+        out = self.fresh_stage("staged-i")
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             code = mac.main(["inspect", "--stage", str(out)])
@@ -455,9 +463,7 @@ class StageTests(unittest.TestCase):
         import contextlib
         import io
         import math as m
-        make, _ = self.converter()
-        out = self.root / "staged-d"
-        mac.stage(self.args(out), converter=make)
+        out = self.fresh_stage("staged-d")
         folder = out / "Data" / "meshes" / "fo4port" / "interiors" / "vault" / "props" / "console01_anim"
         (folder / "characterassets").mkdir(parents=True, exist_ok=True)
         (folder / "animations").mkdir(parents=True, exist_ok=True)
@@ -541,9 +547,7 @@ class StageTests(unittest.TestCase):
             self.assertEqual(mac.dump_stage(type("A", (), dict(stage=d, dll="x"))(), object()), 2)
 
     def test_a_changed_stage_or_starfield_esm_is_refused_by_verify(self):
-        make, _ = self.converter()
-        out = self.root / "staged-v"
-        mac.stage(self.args(out), converter=make)
+        out = self.fresh_stage("staged-v")
         plan = json.loads((out / "plan.json").read_text())
         with open(out / PLUGIN, "ab") as f:
             f.write(b"!")
