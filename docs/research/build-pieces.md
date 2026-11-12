@@ -64,7 +64,7 @@ get into that menu, and can Fallout 4 pieces made from statics the installed cor
   that plugin is absent) and says in the log whether each is there, as the workshop kit finds the bench;
 * default choice of the pieces (`core`): the first four statics by form id with a model of their own, skipping editor ids or paths that say
   collision, marker, lod, trigger, invisible, navcut, blocker, dummy, helper, portal, sound, light, and a model already used.
-  `--pieces a,b,c[,d]` names three or four by editor id instead. **Whether these look like furniture or like walls is the PC's reading of the
+  `--pieces a,b,c,...` names 3 to 40 by editor id instead (or `--set fo4`). **Whether these look like furniture or like walls is the PC's reading of the
   `core` list**; the fixture's choice (crate, barrel, wall, locker) is made up;
 * QUST `FO4SF_BPQuest` (start game enabled, one stage, no properties): 20 s after the game starts it writes, per piece, what it found
   (shell, recipe, core static) to `FO4SFBP.0.log` and says how many on screen.
@@ -75,6 +75,40 @@ get into that menu, and can Fallout 4 pieces made from statics the installed cor
 |---|---|---|
 | `--shell` | `clone` (default), `plain` | `clone`: each shell is a copy of the template's created object with the script, model and name replaced (what the real file makes buildable stays); `plain`: a bare Activator with a model and a name. `clone` is refused by name when the created object is not a Furniture, Activator or Static |
 | `--category` | `vanilla` (default), `add`, `replace` | `vanilla`: the template's filters (the pieces go to the CRAFTING tab); `add`: the template's filters plus a keyword of our own (`FO4SF_BPCategory`, a renamed copy of the template's first filter keyword, shown as "FO4 pieces"); `replace`: the first filter swapped for it |
+| `--tab` | `structures`, `furniture`, `decorations`, `miscellaneous`, `storage`, `defenses`, or a KYWD editor id | (second pass, FAL-433) files the recipes under a vanilla `OutpostCategory*` keyword instead of our own; needs `--category add\|replace`, adds no KYWD record. `replace`: workbench keyword AND filter list become the tab keyword (what the template has twice as `OutpostCategoryCrafting`); `add`: the template's workbench keyword and filters stay and the tab keyword is appended to the filters. The PC reports per rung which tab lists them and whether a tab that was empty before appears at all |
+| `--workbench` | a KYWD editor id, a tab short name or 6 hex digits of its form id | (third pass, FAL-438) the recipes' workbench keyword, chosen apart from the filter; the template's filters stay. Not together with `--tab` or `--category add\|replace` |
+| `--filter` | as `--workbench`, or `own` | the recipes' only filter keyword, the template's workbench stays unless `--workbench` is given. `own`: a KYWD of our own (`FO4SF_BPCategory`, full name "FO4 pieces", copy of the template's first filter): does a sixth tab with that name appear? |
+| `--variants` | **EXPERIMENTAL, off by default; crashes the game before the main menu (0xC0000005, PC at 47dc064b, with and without pictures).** Flag, with `--set fo4` | one recipe per group (junk walls 01..07 as "FO4 junk wall", the pier shack walls, the pier shack roofs) whose created object is a form list (`FO4SF_BPList1..`, ids 852..85F). **Fourth pass (FAL-445): the list holds one RECIPE per variant** (`FO4SF_BPInner<n>`, ids 860..887, each making its shell), as the vanilla `OutpostFurnitureBedList02_Beds` (15 items: nine `co_Outpost_Furniture_BedList02_Decor*` recipes, a pack-in, five Furniture objects). Third pass (shells in the list) showed seven separate entries all named "FO4 junk wall", no `1/7` counter. `menu --cobj co_Outpost_Furniture_BedList02_Decor1_01` and `co_Outpost_Furniture_BedList02_Beds` print what the vanilla recipes are. Single pieces keep their own recipe |
+| `--lead` | `none` (default), `shells` | with `--variants`: the form list holds only the recipes, or the variants' shells first and then the recipes (the vanilla list's order: a pack-in and Furniture, then recipes). One rung per idea; offline cause not proven (see below) |
+| `--inner` | `same` (default), `bare` | with `--variants`: the inner recipes' filing. `same`: the list recipe's workbench keyword and filters; `bare`: no workbench keyword, no filter (a recipe only the list offers). The vanilla `_Decor` recipes' real filing is unread: `menu` prints it (the FLST items show each recipe's workbench, filters, limit, sort, conditions, art) |
+| `--pictures` | `N`, 0 to 40 (default: every piece with `--set fo4`, 0 otherwise; verified in the game at 47dc064b: the drawn pictures replace the round "!") | draws 128 x 128 pictures (shape + initials, BC3, DX10 header, nothing from either game) for the first N pieces' shells under `Data/Textures/Interface/WorkshopIcons/FO4SFBuildPieces.esm/<shell id, 8 hex>cl.dds`; the installer packs them into `FO4SFBuildPieces - Textures.ba2` (DX10) next to the Main archive |
+| `--template-filing` | flag | `--set fo4` only: keep the template's workbench keyword and filters (the CRAFTING tab) instead of the default below |
+
+**Default placement of `--set fo4` (fourth pass; rung A of the third, PC PASS at 211dae28):** workbench keyword `2CFDE6`, filter `06D72D`
+(the MISCELLANEOUS tab, after its two vanilla entries). Any of `--workbench`, `--filter`, `--tab`, `--category add|replace` or
+`--template-filing` replaces it. `plan.json` says what was applied (`variant.workbench`, `variant.filter`, `variant.default_filing`).
+**The filter picks the tab; the workbench keyword decides whether the workshop offers the recipe.**
+
+PC results of the second pass (#740 at 4df538ba, 11 Nov): this workshop shows CRAFTING, FURNITURE, DECORATIONS, DISPLAYS, MISCELLANEOUS; the workbench keyword decides whether it offers a recipe (`replace --tab structures`: workbench 2A7578 not listed; `replace --tab miscellaneous`: workbench 06D72D not listed; `add --tab structures`: workbench 2CFDE6, CRAFTING, all 34, no STRUCTURES tab). Vanilla MISCELLANEOUS entries use workbench `0E6A3E OutpostCategoryMiscInterior` with filter `06D72D`. Next rungs: workbench 2CFDE6 + filter 06D72D; workbench 0E6A3E + filter 06D72D; workbench 2BE3B5 / 293ADF + own filter; workbench 2CFDE6 + `--filter own`.
+| `--set` | `fo4` | a named list of core statics (`FO4Core_junkwall01..07`, `junkwallcorner01`, `junkwalldoor01`, `junkwallgate01`, `piershackwall*`, `piershackroof*`, `sandbagsingle01`, `bedmetal01`, `cafetable01`, `woodcrate`, `cratelarge01`, `metalbarrel01`; each tried as `FO4Core_<name>`, then as written). A name the core lacks is printed on stderr and skipped. `--pieces` now takes 3 to 40 editor ids, `*` allowed; the default stays four. Layout: shells `0x802..0x829`, recipes `0x82A..0x851`; cost 1,1,2,2 repeating |
+
+**The pictures (fourth pass, FAL-445; read from the game's archives and program, not from this repo):** the base game has
+`textures/interface/workshopicons/<created object's form id, 8 hex>cl.dds` for each buildable: 128 x 128, one mip, DXGI 77 (BC3). The program
+builds a mod item's name with `%s/%08x%s.dds` from the plugin's file name, the form id masked to the file's own part and a suffix:
+`Textures/Interface/WorkshopIcons/FO4SFBuildPieces.esm/00000802cl.dds` for the shell at 0x802. Loose files of that name did not show in one run (no
+loose-file setting on this install), so the stage holds them under `Data/Textures/...` and `build_pieces_install.py` builds `FO4SFBuildPieces - Textures.ba2`
+(Archive2 `-format=DX10`, stored) beside the plugin, the scripts staying in `- Main.ba2`; `exp_install.py --textures-archive` is the switch (other kits
+keep their textures in Main). The pictures are drawn by `src/fo4sf/workshop/piece_icons.py` (pure Python): a dark tile, a light frame, a plain shape
+(square, circle, triangle, diamond by the piece's number) in a colour from its name, its initials in our own 5 x 7 letters; BC3, DX10 header as
+`fo4sf.ba2` regenerates one. **Offline only:** the picture's look (decoded and viewed), the archive reader round trip on a synthetic DX10 archive, the
+installer with a stub archiver. **Not run:** Archive2 on the PC, the game reading the archive, and whether the picture replaces the round "!". A
+form list entry's picture would be keyed by the list's id (0x852..), not the shell's: `--pictures` draws shells only.
+
+**The icon (rung 2 of FAL-433):** the template has `menu art none`, so the picture of a station is on the created object or elsewhere.
+`menu` now prints every set field of the created object and of the COBJ (`fields of created object`, `fields of COBJ`, art-like names marked
+`<- art-like`) and the fields of the records that art-like links point to. Run `make_build_pieces.py menu` on the real file and read it; nothing
+offline says which field it is. `menu` also prints a `tabs` table: for each `OutpostCategory*` keyword how many recipes use it as workbench
+keyword / as filter, with up to three samples (menu-art ones first), so a better template than 2E2F2C can be named with `--cobj`.
 
 "A category of their own if the menu allows one": whether it does is rung 2 and 3 of the ladder. If the menu needs a tab keyword
 that is not just a renamed filter, `menu` shows it (the `OutpostCategory*`/`Filter*` keyword list) and the next commit changes the
@@ -140,5 +174,18 @@ The kit pairs with the installed core. THROWAWAY STATE ONLY, NO SAVE.
 * **The Papyrus compile** of `FO4SF_BPQuest.psc` (the PC's compiler); only a fake compiler ran in the tests. The script's natives are the same
   ones the workshop and power armor kits already compile (`Game.GetFormFromFile`, `IsPluginInstalled`, `Debug.OpenUserLog`, `TraceUser`,
   `Notification`, `Utility.GetCurrentRealTime`, `StartTimer`, `GetFormID`): no optional native, no guessed name.
+* **Fourth pass (FAL-445):** the vanilla `_Decor` recipes' filing (the inner recipes' `--inner` rung is a guess), whether a recipe inside a form list is
+  shown as a VARIANTS entry (`1/7`), whether the pictures replace the "!", Archive2's DX10 output for these files, the BA2 name hashes (written by Archive2, not by us).
 * **The category keyword:** a renamed copy of a filter keyword is a guess at what makes a tab.
 * **A game update** changes Starfield.esm: `plan.json` pins its SHA-256 and the core's, and the installer refuses a changed one.
+
+## --variants crash (FAL-464; offline, no game, nothing here is verified as the cause)
+
+PC at 47dc064b: `--set fo4 --pictures 3` passes (pictures show); `--variants` (with or without pictures) crashes at data load, 0xC0000005.
+The pictures-only plugin has the same shells and outer recipes, so the difference is the form list of recipes and the inner recipes.
+Checked offline on the fixture: no inner recipe makes a list or a recipe (each makes its own Furniture shell), no list holds itself,
+form ids 0x852..0x85F (lists) and 0x860..0x887 (inner recipes) do not overlap shells or outer recipes. Differences from the vanilla list that
+remain as candidate ideas, one rung each: (1) our list holds ONLY recipes, the vanilla one starts with a pack-in and Furniture (`--lead shells`);
+(2) our inner recipes carry the workbench keyword and filter (`--inner same`), vanilla `_Decor` recipes may not (`--inner bare`); (3) our inner
+recipes are copies of the workbench template COBJ and keep its other fields (e.g. the build-limit global `MaxBuildCountGlobal`); whether a vanilla `_Decor` recipe has one is unread (no rung yet, the real record decides).
+Needs from the real file: `menu --cobj co_Outpost_Furniture_BedList02_Beds` and `co_Outpost_Furniture_BedList02_Decor1_01`.

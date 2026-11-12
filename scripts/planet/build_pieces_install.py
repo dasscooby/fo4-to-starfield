@@ -6,7 +6,7 @@ usage: python scripts/planet/build_pieces_install.py install --dir <stage> --sta
 
 The same wrapper as workshop_probe_install.py, on a record of its own, Data\\FO4SFBuildPieces.install.json, so the kit rides
 along: it installs FO4SFBuildPieces.esm with its Data tree packed into "FO4SFBuildPieces - Main.ba2" (loose files are not read
-on this install) and a "*FO4SFBuildPieces.esm" line appended to Plugins.txt, after checking the stage against its plan.json and
+on this install; the staged pictures, Data\\Textures, go into "FO4SFBuildPieces - Textures.ba2", a DX10 archive) and a "*FO4SFBuildPieces.esm" line appended to Plugins.txt, after checking the stage against its plan.json and
 the game's Data (every file pinned, Starfield.esm and the core unchanged since the stage). Everything else is exp_install.py's
 behaviour: no existing game file is overwritten, uninstall removes exactly the recorded files and the line it added, an
 interrupted install rolls back. The workshop owner kit (workshop_probe_install.py) is a separate record: both can be installed.
@@ -53,7 +53,7 @@ def install(a):
     names = sorted(n for n in os.listdir(d) if n.lower().endswith(".esm"))
     if sorted(plan["plugins"]) != names:
         sys.exit(f"build pieces not installed: the stage holds {names}, plan.json lists {plan['plugins']}")
-    return installer(["install", "--exp-dir", d, "--starfield", a.starfield, "--pack", "--plugins", ",".join(plan["plugins"])] +
+    return installer(["install", "--exp-dir", d, "--starfield", a.starfield, "--pack", "--textures-archive", "--plugins", ",".join(plan["plugins"])] +
                      (["--prepacked", a.prepacked] if getattr(a, "prepacked", "") else []))
 
 
