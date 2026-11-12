@@ -71,6 +71,7 @@ of `docs/spikes/pipboy-channel-bridge-session.md`, sections 1 to 3, with these c
 | DATA / KIT TEST | ROW n OF 30, KEY MOVES, CLICK MOVES | none: no game value |
 | DATA / QUESTS | FORM, STAGE | `getstage <id>` and `setstage <id> <n>`, `<id>` the mission's form id as FORM shows it (`07000800` on the PC's load order, 12 Nov: the first two digits are the plugin's load index, so read it off FORM); by its editor ID (`FO4SF_Min00`) the console refuses it ("not found for parameter Quest"). STAGE needs `MissionStageAt=` in `[Kit]` (README, `quests`), else `?` |
 | DATA / QUESTS | OBJECTIVE 10, 85, 86 | `setobjectivedisplayed <id> <n> 1` and `setobjectivecompleted <id> <n> 1`, `<id>` as for `setstage`, `<n>` the objective (10, 85, 86). Each row shows `NOT SHOWN`, `SHOWN` or `DONE` (0, 1, 3; another value raw as `STATE <n>`), read from the mission's own objectives with no setting (README, `quests`); `MissionObjective=<n>\|<path>` lines in `[Kit]` override that. `OBJECTIVES ?` if the objectives cannot be read whole |
+| DATA / QUESTS | the list (FAL-584) | After the mission, each other quest of `FO4SFMission.esm` with an objective `SHOWN` or `DONE`, with the same rows. `setobjectivedisplayed 07000814 <n> 1` on the keeper (if it has objectives) adds its row; the log's `step=kit_quests` names the quests found. `stopquest 07000814` and `startquest 07000814` around a reopen show the running bit in `step=kit_quest_flags` (a test save that is not kept) |
 
 **What the log must show:** see `sfse/FO4SFPipboyMenu/README.md`, "PASS at (e)".
 

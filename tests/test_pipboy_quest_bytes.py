@@ -58,7 +58,7 @@ class PluginTests(unittest.TestCase):
         rows = function(self.main, "std::vector<KitRow> KitQuestRows(")
         self.assertLess(rows.index('if (!IsType(quest, "TESQuest@@", type)) {'), rows.index("g_kitQuest = quest;"))
         self.assertIn("g_kitQuest = 0;", rows)
-        self.assertIn('{ "STAGE", stageText }', rows)                             # ? until MissionStageAt= names it
+        self.assertIn('{ "STAGE", stageText }', function(self.main, "KitRow KitQuestRow("))   # ? until MissionStageAt=
         key = function(self.main, "std::uint32_t KeyThread(")
         snap = key[key.index('Snapshot("key", true);'):]
         self.assertLess(snap.index("if (g_stage == 5) {"), snap.index("LogKitQuestBytes();"))
@@ -101,11 +101,12 @@ class PluginTests(unittest.TestCase):
         self.assertLess(check.index("return false;"), check.index("g_kit.missionStageAt = at;"))
         read = function(self.main, "bool ReadKit(")
         self.assertIn('key == "MissionStageAt" && !g_kit.missionStageAt && KitStageAt(value)', read)   # once
-        rows = function(self.main, "std::vector<KitRow> KitQuestRows(")
-        stage = rows[rows.index("static int    loggedStage = -1;"):]
+        rows = function(self.main, "KitRow KitQuestRow(")                       # FAL-584: each quest's row
+        self.assertIn("static std::unordered_map<std::uint32_t, int> loggedStages;", rows)   # per quest
+        stage = rows[rows.index("auto&         loggedStage = loggedStages.try_emplace(a_formId, -1).first->second;"):]
         self.assertIn('std::string   stageText = "?";', stage)
         self.assertIn('Unknown("quest_stage", "reason=no_stage_at (MissionStageAt= in [Kit])");', stage)
-        self.assertIn("Peek(quest + g_kit.missionStageAt, stage)", stage)
+        self.assertIn("Peek(a_quest + g_kit.missionStageAt, stage)", stage)
         self.assertIn("stageText = std::to_string(stage);", stage)
         self.assertIn('"step=kit_quest_stage form={:08X} stage_at=+{:03X} stage={}"', stage)
         self.assertLess(stage.index("if (loggedStage != stage) {"), stage.index("step=kit_quest_stage"))
@@ -166,9 +167,9 @@ class PluginTests(unittest.TestCase):
             self.assertIn(part, check, part)
         read = function(self.main, "bool ReadKit(")
         self.assertIn('key == "MissionObjective" && KitObjectiveLine(value)', read)
-        rows = function(self.main, "std::vector<KitRow> KitQuestRows(")
-        self.assertIn("KitObjectiveRows(quest, formId, info);", rows)
-        self.assertIn("return { { name, \"\", std::move(info) } };", rows)
+        rows = function(self.main, "KitRow KitQuestRow(")
+        self.assertIn("a_shown = KitObjectiveRows(a_quest, a_formId, info);", rows)
+        self.assertIn("return { name, \"\", std::move(info) };", rows)
         part = function(self.main, "std::string>>& a_info)\n\t{")
         part = part[part.index("for (std::size_t i = 0; i < g_kit.objectives.size(); ++i) {"):]   # the override
         self.assertIn("read = Peek(at + objective.path[p], at) && at;", part)       # a null pointer stops the path
@@ -196,7 +197,7 @@ class PluginTests(unittest.TestCase):
                      'return std::format("STATE {}", static_cast<unsigned>(a_state));'):
             self.assertIn(part, names, part)
         walk = function(self.main, "std::string>>& a_info)\n\t{")
-        self.assertLess(walk.index("if (g_kit.objectives.empty()) {"),
+        self.assertLess(walk.index("if (g_kit.objectives.empty() || a_quest != g_kitQuest) {"),
                         walk.index("for (std::size_t i = 0; i < g_kit.objectives.size(); ++i) {"))   # lines override
         for part in ("Peek(a_quest + kQuestObjectivesAt, head)", "head.size > head.capacity",
                      "head.size > kQuestObjectivesMax", "(head.size && !head.data)",
@@ -218,7 +219,7 @@ class PluginTests(unittest.TestCase):
         self.assertNotIn("FormById(", walk)
         self.assertNotIn("REL::", walk)
         self.assertNotIn("reinterpret_cast<", walk)
-        self.assertLess(self.main.index("\tvoid KitObjectiveRows(std::uintptr_t a_quest, std::uint32_t a_formId, "
+        self.assertLess(self.main.index("\tbool KitObjectiveRows(std::uintptr_t a_quest, std::uint32_t a_formId, "
                                         "std::vector<std::pair<std::string, std::string>>& a_info);"),
                         self.main.index("\tstd::vector<KitRow> KitQuestRows("))
         for text in ("step=kit_quest_objectives", "+0x150", "`+0x18`", "`+0x24`", "`+0x28`", "NOT SHOWN", "MORE OBJECTIVES",
@@ -226,6 +227,59 @@ class PluginTests(unittest.TestCase):
             self.assertIn(text, self.readme, text)
         card = (ROOT / "docs" / "spikes" / "pipboy-page-kit-owner-card.md").read_text(encoding="utf-8")
         self.assertIn("NOT SHOWN", card)
+
+    def test_every_quest_of_the_mission_file_is_listed(self):
+        """FAL-584: the mission's file scanned once for its other quests (0x800 to 0xFFF within the file's width), each
+        looked up again and checked by its RTTI at every read, listed after the mission when one objective is shown or
+        done; the same value rows; MissionObjective= paths only for the mission; logging per quest."""
+        for part in ("kQuestScanFrom = 0x800;", "kQuestScanLast = 0xFFF;"):
+            self.assertIn(part, self.main, part)
+        scan = function(self.main, "std::vector<std::uint32_t> KitFileQuests(")
+        for part in ("top == 0xFE ? 0xFFFu : top == 0xFD ? 0xFFFFu : 0xFFFFFFu", "std::min(kQuestScanLast, local)",
+                     "(a_mission & ~local) | id", 'formId != a_mission && IsType(FormById(formId), "TESQuest@@", type)',
+                     '"step=kit_quests form={:08X} scanned={:X}-{:X} quests={}"'):
+            self.assertIn(part, scan, part)
+        rows = function(self.main, "std::vector<KitRow> KitQuestRows(")
+        self.assertIn("std::vector<KitRow> rows{ KitQuestRow(quest, type, formId, missionShown) };", rows)   # always first
+        self.assertLess(rows.index("g_kitQuest = quest;"), rows.index("KitQuestRow(quest, type, formId"))  # paths: mission
+        self.assertIn("others = KitFileQuests(formId);", rows)
+        self.assertIn("others.reset();", rows)                                      # a mission not found scans again
+        loop = rows[rows.index("for (const auto id : *others) {"):]
+        self.assertLess(loop.index("const auto other = FormById(id);"), loop.index("KitQuestRow(other, otherType, id, shown)"))
+        self.assertLess(loop.index('if (!IsType(other, "TESQuest@@", otherType)) {'), loop.index("KitQuestRow(other"))
+        self.assertLess(loop.index("if (shown) {"), loop.index("rows.push_back(std::move(row));"))
+        self.assertIn('"step=kit_quests_listed form={:08X} listed={}"', loop)
+        self.assertLess(loop.index("if (listed != loggedListed) {"), loop.index("step=kit_quests_listed"))
+        row = function(self.main, "KitRow KitQuestRow(")
+        self.assertNotIn("FormById(", row)
+        self.assertNotIn("g_kitQuest", row)
+        self.assertIn('"step=kit_quest_flags form={:08X} flags={}"', row)
+        self.assertLess(row.index("if (loggedFlag != (flagged ? flags : -2)) {"), row.index("step=kit_quest_flags"))
+        walk = function(self.main, "std::string>>& a_info)\n\t{")
+        self.assertIn("static std::unordered_map<std::uint64_t, int> loggedStates;", walk)
+        self.assertIn("(std::uint64_t{ a_formId } << 16) | a_number", walk)
+        self.assertIn("auto&       loggedWalk = loggedWalks[a_formId];", walk)
+        self.assertIn("any = any || a_state == 1 || a_state == 3;", walk)
+        self.assertIn("return std::ranges::any_of(found, [](const auto& a_entry) { return a_entry.second == 1 || "
+                      "a_entry.second == 3; });", walk)                          # one past the 12 rows counts too
+        self.assertEqual(walk.count("return false;"), 2)                         # unread or none: not listed
+        self.assertNotIn("FormById(", walk)
+        for text in ("step=kit_quests ", "step=kit_quests_listed", "step=kit_quest_flags", "**The list (FAL-584):**", "stopquest"):
+            self.assertIn(text, self.readme, text)
+
+    def test_the_file_prefix_model(self):
+        """FAL-584: a Python model of KitFileQuests' ids: full, small (FE) and medium (FD) files."""
+        def ids(mission, first=0x800, last=0xFFF):
+            top = mission >> 24
+            local = 0xFFF if top == 0xFE else 0xFFFF if top == 0xFD else 0xFFFFFF
+            return [(mission & ~local & 0xFFFFFFFF) | i for i in range(first, min(last, local) + 1)]
+        full = ids(0x07000800)
+        self.assertEqual((full[0], full[-1], len(full)), (0x07000800, 0x07000FFF, 0x800))
+        self.assertIn(0x07000814, full)                                          # FO4SF_CodsworthKeeper (make_mission)
+        small = ids(0xFE012800)
+        self.assertEqual((small[0], small[-1]), (0xFE012800, 0xFE012FFF))
+        medium = ids(0xFD030800)
+        self.assertEqual((medium[0], medium[-1]), (0xFD030800, 0xFD030FFF))
 
     def test_the_readme_names_the_dump_and_the_helper(self):
         self.assertIn("step=kit_quest_bytes", self.readme)

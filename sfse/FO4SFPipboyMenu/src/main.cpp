@@ -221,6 +221,8 @@ namespace
 	constexpr std::size_t   kObjectiveStateAt = 0x28;        // and its state (a byte: 0 not shown, 1 shown, 3 shown and completed)
 	constexpr std::uint32_t kQuestObjectivesMax = 64;        // a larger size is not read (reason=head)
 	constexpr std::size_t   kKitObjectiveRows = 12;          // value rows for objectives: 16 less FORM, FILE, FLAGS, STAGE
+	constexpr std::uint32_t kQuestScanFrom = 0x800;          // FAL-584: the mission file's local ids searched for its quests,
+	constexpr std::uint32_t kQuestScanLast = 0xFFF;          // once (FO4SFMission.esm's run 0x800 to 0x82x)
 	constexpr std::string_view kKitChars = " !#%&'()*+,-./0123456789:;<=>?ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_";   // KIT_FONT
 	constexpr auto          kKitTitle = "fo4sfTitle";        // NAMES
 	constexpr auto          kKitHeader = "fo4sfHeaderInfo";
@@ -2351,19 +2353,95 @@ namespace
 		return 0;
 	}
 
-	// the quest list (FAL-431; README, "Stage (e)", lists): our mission first, the quest [Kit] Mission= names, by its
-	// file and local id (KitFileForm), accepted by its RTTI (TESQuest); its name (TESFullName, at +0x40 in Starfield's
-	// RTTI) and its QUEST_DATA flags as read (u16 at +0x10C, the running and completed bits not named until the PC's
-	// log does). The first read logs the quest's bytes from +0x100 once (step=kit_quest), where the flags and the
-	// current stage are; the stage shows ? until [Kit] MissionStageAt= names its offset (FAL-527). Starfield's own
-	// quests are not listed yet
-	void KitObjectiveRows(std::uintptr_t a_quest, std::uint32_t a_formId, std::vector<std::pair<std::string, std::string>>& a_info);
+	// FAL-571, FAL-584: a quest's objectives as value rows (KitObjectiveRows, below); true when one is shown or done
+	bool KitObjectiveRows(std::uintptr_t a_quest, std::uint32_t a_formId, std::vector<std::pair<std::string, std::string>>& a_info);
 
+	// FAL-584: one quest's row, the mission's or another quest's of its file: its name (TESFullName, at +0x40 in
+	// Starfield's RTTI, else its form id) and the value rows FORM, FILE, FLAGS (its QUEST_DATA flags as read, u16 at
+	// +0x10C, raw: the PC's game run at 3d5354e5 read 0162 with the mission started, its bits not named yet), STAGE (the
+	// u16 at [Kit] MissionStageAt=, FAL-527: the offset is TESQuest's, so it reads every quest; ? without it) and its
+	// objectives (KitObjectiveRows). Peek only. Logged per quest at the first read and at each change:
+	// step=kit_quest_flags form= flags=<hex> and step=kit_quest_stage form= stage_at=+<offset> stage=<n>. a_shown: one
+	// of its objectives is shown or done
+	KitRow KitQuestRow(std::uintptr_t a_quest, const ObjectType& a_type, std::uint32_t a_formId, bool& a_shown)
+	{
+		static std::unordered_map<std::uint32_t, int> loggedFlags;
+		static std::unordered_map<std::uint32_t, int> loggedStages;
+		std::string    name;   // its TESFullName as the inventory reads one, else its form id
+		std::uintptr_t entry = 0;
+		const auto     at = BaseOffset(a_type, "TESFullName@@");
+		if (!at || !CheckSubobject(a_quest, a_type, *at) || !Peek(a_quest + *at + kFullNameAt, entry) || !ReadPoolString(entry, name) ||
+			name.empty()) {
+			name = std::format("{:08X}", a_formId);
+		}
+		std::uint16_t flags = 0;
+		const bool    flagged = Peek(a_quest + kQuestFlagsAt, flags);
+		auto&         loggedFlag = loggedFlags.try_emplace(a_formId, -1).first->second;
+		if (loggedFlag != (flagged ? flags : -2)) {
+			loggedFlag = flagged ? flags : -2;
+			REX::INFO("step=kit_quest_flags form={:08X} flags={}", a_formId, flagged ? std::format("{:04x}", flags) : "unreadable");
+		}
+		// FAL-527: the stage, a u16 at [Kit] MissionStageAt= (read with Peek only; ? without the setting)
+		auto&         loggedStage = loggedStages.try_emplace(a_formId, -1).first->second;
+		std::uint16_t stage = 0;
+		std::string   stageText = "?";
+		if (!g_kit.missionStageAt) {
+			Unknown("quest_stage", "reason=no_stage_at (MissionStageAt= in [Kit])");
+		} else if (!Peek(a_quest + g_kit.missionStageAt, stage)) {
+			Unknown("quest_stage", std::format("reason=unreadable stage_at=+{:03X}", g_kit.missionStageAt));
+		} else {
+			stageText = std::to_string(stage);
+			if (loggedStage != stage) {
+				loggedStage = stage;
+				REX::INFO("step=kit_quest_stage form={:08X} stage_at=+{:03X} stage={}", a_formId, g_kit.missionStageAt, stage);
+			}
+		}
+		std::string file = g_kit.missionFile;
+		std::ranges::transform(file, file.begin(), [](unsigned char a_c) { return static_cast<char>(std::toupper(a_c)); });
+		std::vector<std::pair<std::string, std::string>> info{ { "FORM", std::format("{:08X}", a_formId) }, { "FILE", file },
+			{ "FLAGS", flagged ? std::format("{:04X}", flags) : "?" }, { "STAGE", stageText } };
+		a_shown = KitObjectiveRows(a_quest, a_formId, info);
+		return { name, "", std::move(info) };
+	}
+
+	// FAL-584: the quests of the mission's file other than the mission, once. The mission's accepted form id gives the
+	// file's prefix (FE: a small file, 12-bit local ids; FD: a medium file, 16 bits; else a full file, 24 bits); each
+	// local id from kQuestScanFrom to kQuestScanLast within that width goes through the engine's lookup (main thread, as
+	// the mission's does) and is kept when it is a TESQuest by its RTTI. Logged once:
+	// step=kit_quests form=<mission> scanned=<first>-<last> quests=<id>,... (or none)
+	std::vector<std::uint32_t> KitFileQuests(std::uint32_t a_mission)
+	{
+		const auto          top = a_mission >> 24;
+		const std::uint32_t local = top == 0xFE ? 0xFFFu : top == 0xFD ? 0xFFFFu : 0xFFFFFFu;
+		const auto          last = std::min(kQuestScanLast, local);
+		std::vector<std::uint32_t> quests;
+		std::string                ids;
+		for (auto id = kQuestScanFrom; id <= last; ++id) {
+			const auto formId = (a_mission & ~local) | id;
+			ObjectType type;
+			if (formId != a_mission && IsType(FormById(formId), "TESQuest@@", type)) {
+				quests.push_back(formId);
+				ids += std::format("{}{:08X}", ids.empty() ? "" : ",", formId);
+			}
+		}
+		REX::INFO("step=kit_quests form={:08X} scanned={:X}-{:X} quests={}", a_mission, kQuestScanFrom, last, ids.empty() ? "none" : ids);
+		return quests;
+	}
+
+	// the quest list (FAL-431; README, "Stage (e)", lists): our mission first, the quest [Kit] Mission= names, by its
+	// file and local id (KitFileForm), accepted by its RTTI (TESQuest), always listed. The first read logs the quest's
+	// bytes from +0x100 once (step=kit_quest), where the flags and the current stage are. FAL-584: then every other quest
+	// of the mission's file (KitFileQuests), each looked up again and checked by its RTTI at each read, listed in form id
+	// order when one of its objectives is shown or done (the player has been shown it; the running bit in FLAGS is not
+	// named yet, so it is not the test), with the same value rows (KitQuestRow). The listed ones are logged when they
+	// change: step=kit_quests_listed form=<mission> listed=<id>,... (or none). Starfield's own quests are not listed yet
 	std::vector<KitRow> KitQuestRows()
 	{
-		static std::uint32_t formId = 0;
-		static bool          logged = false;
-		const auto           unread = [](std::string_view a_why, const std::string& a_detail) {
+		static std::uint32_t                              formId = 0;
+		static bool                                       logged = false;
+		static std::optional<std::vector<std::uint32_t>> others;   // KitFileQuests, once the mission is found
+		static std::string                                loggedListed = "-";
+		const auto                                        unread = [](std::string_view a_why, const std::string& a_detail) {
 			Unknown("quests", std::format("reason={} {}", a_why, a_detail));
 			return std::vector<KitRow>{ { "QUESTS NOT READ", "", { { "REASON", std::string(a_why) } } } };
 		};
@@ -2382,47 +2460,44 @@ namespace
 				REX::INFO("step=kit_quest mission={}|{:X} found=no {}", g_kit.missionFile, g_kit.missionId, detail);
 			}
 			formId = 0;
+			others.reset();
 			g_kitQuest = 0;
 			return unread("mission_not_found", std::format("mission={}|{:X}", g_kit.missionFile, g_kit.missionId));
 		}
 		g_kitQuest = quest;
-		std::string    name;   // its TESFullName as the inventory reads one, else its form id
-		std::uintptr_t entry = 0;
-		const auto     at = BaseOffset(type, "TESFullName@@");
-		if (!at || !CheckSubobject(quest, type, *at) || !Peek(quest + *at + kFullNameAt, entry) || !ReadPoolString(entry, name) ||
-			name.empty()) {
-			name = std::format("{:08X}", formId);
-		}
-		std::uint16_t flags = 0;
-		const bool    flagged = Peek(quest + kQuestFlagsAt, flags);
+		bool                missionShown = false;   // the mission is listed either way
+		std::vector<KitRow> rows{ KitQuestRow(quest, type, formId, missionShown) };
 		if (!logged) {
 			logged = true;
+			std::uint16_t flags = 0;
+			const bool    flagged = Peek(quest + kQuestFlagsAt, flags);
+			const auto    at = BaseOffset(type, "TESFullName@@");
 			REX::INFO("step=kit_quest mission={}|{:X} found=yes form={:08X} quest={} type={} full_name_at={} name=\"{}\" flags={} "
-				"bytes100={} {}", g_kit.missionFile, g_kit.missionId, formId, Hex(quest), type.name, at ? Hex(*at) : "none", name,
-				flagged ? std::format("{:04x}", flags) : "unreadable", KitBytes(quest + kQuestBytesAt, 0x40), detail);
+				"bytes100={} {}", g_kit.missionFile, g_kit.missionId, formId, Hex(quest), type.name, at ? Hex(*at) : "none",
+				rows.front().name, flagged ? std::format("{:04x}", flags) : "unreadable", KitBytes(quest + kQuestBytesAt, 0x40), detail);
 		}
-		// FAL-527: the stage, a u16 at [Kit] MissionStageAt= (read with Peek only; ? without the setting), logged at
-		// the first read and at each change: step=kit_quest_stage form= stage_at=+<offset> stage=<n>
-		static int    loggedStage = -1;
-		std::uint16_t stage = 0;
-		std::string   stageText = "?";
-		if (!g_kit.missionStageAt) {
-			Unknown("quest_stage", "reason=no_stage_at (MissionStageAt= in [Kit])");
-		} else if (!Peek(quest + g_kit.missionStageAt, stage)) {
-			Unknown("quest_stage", std::format("reason=unreadable stage_at=+{:03X}", g_kit.missionStageAt));
-		} else {
-			stageText = std::to_string(stage);
-			if (loggedStage != stage) {
-				loggedStage = stage;
-				REX::INFO("step=kit_quest_stage form={:08X} stage_at=+{:03X} stage={}", formId, g_kit.missionStageAt, stage);
+		if (!others) {
+			others = KitFileQuests(formId);
+		}
+		std::string listed;
+		for (const auto id : *others) {
+			const auto other = FormById(id);
+			ObjectType otherType;
+			bool       shown = false;
+			if (!IsType(other, "TESQuest@@", otherType)) {
+				continue;
+			}
+			auto row = KitQuestRow(other, otherType, id, shown);
+			if (shown) {
+				listed += std::format("{}{:08X}", listed.empty() ? "" : ",", id);
+				rows.push_back(std::move(row));
 			}
 		}
-		std::string file = g_kit.missionFile;
-		std::ranges::transform(file, file.begin(), [](unsigned char a_c) { return static_cast<char>(std::toupper(a_c)); });
-		std::vector<std::pair<std::string, std::string>> info{ { "FORM", std::format("{:08X}", formId) }, { "FILE", file },
-			{ "FLAGS", flagged ? std::format("{:04X}", flags) : "?" }, { "STAGE", stageText } };
-		KitObjectiveRows(quest, formId, info);
-		return { { name, "", std::move(info) } };
+		if (listed != loggedListed) {
+			loggedListed = listed;
+			REX::INFO("step=kit_quests_listed form={:08X} listed={}", formId, listed.empty() ? "none" : listed);
+		}
+		return rows;
 	}
 
 	// FAL-571: an objective's state as the PC's run at 73271aa3 read it (0, 1, 3); any other value raw
@@ -2441,29 +2516,34 @@ namespace
 	}
 
 	// FAL-571: the quest's objectives as value rows OBJECTIVE <n>, each its state named (ObjectiveState). Peek only.
-	// [Kit] MissionObjective= lines, when there are any, are used as they are (an override, each read along its path).
-	// Else the objectives' BSTArray at +0x148 is walked: its size at most 64 and at most its capacity, and every entry an
-	// objective whose +0x18 is this quest, else one row OBJECTIVES ? and what=quest_objectives reason=head or
-	// reason=objective index=<i> (nothing shown from a half-read array). Logged when it changes:
+	// [Kit] MissionObjective= lines, when there are any, are used as they are for the mission (an override, each read
+	// along its path; FAL-584: never for another quest). Else the objectives' BSTArray at +0x148 is walked: its size at
+	// most 64 and at most its capacity, and every entry an objective whose +0x18 is this quest, else one row
+	// OBJECTIVES ? and what=quest_objectives reason=head or reason=objective index=<i> (nothing shown from a half-read
+	// array). Logged when it changes:
 	// step=kit_quest_objectives form= at=+148 size= capacity= objectives=<n>,... (or the reason), and each state at the
 	// first read and at each change: step=kit_quest_objective form= objective=<n> from=<array or path=...> state=<n>.
-	// At most 12 rows: past 11, the 12th is MORE OBJECTIVES <count>
-	void KitObjectiveRows(std::uintptr_t a_quest, std::uint32_t a_formId, std::vector<std::pair<std::string, std::string>>& a_info)
+	// At most 12 rows: past 11, the 12th is MORE OBJECTIVES <count>. FAL-584: true when one objective read is shown
+	// or done (1 or 3; one beyond the 12 rows counts too), and the logging is per quest
+	bool KitObjectiveRows(std::uintptr_t a_quest, std::uint32_t a_formId, std::vector<std::pair<std::string, std::string>>& a_info)
 	{
-		static std::unordered_map<std::uint32_t, int> loggedStates;
+		static std::unordered_map<std::uint64_t, int> loggedStates;   // (form id << 16) | objective number
+		bool       any = false;
 		const auto shown = [&](std::uint16_t a_number, std::uint8_t a_state, const std::string& a_from) {
 			a_info.emplace_back(std::format("OBJECTIVE {}", a_number), ObjectiveState(a_state));
-			auto& logged = loggedStates.try_emplace(a_number, -1).first->second;
+			auto& logged = loggedStates.try_emplace((std::uint64_t{ a_formId } << 16) | a_number, -1).first->second;
 			if (logged != a_state) {
 				logged = a_state;
 				REX::INFO("step=kit_quest_objective form={:08X} objective={} from={} state={}", a_formId, a_number, a_from,
 					static_cast<unsigned>(a_state));
 			}
+			any = any || a_state == 1 || a_state == 3;
 		};
-		if (g_kit.objectives.empty()) {
-			static std::string loggedWalk;
-			ArrayHead          head{};
-			std::string        why;
+		if (g_kit.objectives.empty() || a_quest != g_kitQuest) {
+			static std::unordered_map<std::uint32_t, std::string> loggedWalks;   // per quest (FAL-584)
+			auto&       loggedWalk = loggedWalks[a_formId];
+			ArrayHead   head{};
+			std::string why;
 			std::vector<std::pair<std::uint16_t, std::uint8_t>> found;
 			if (!Peek(a_quest + kQuestObjectivesAt, head) || head.size > head.capacity || head.size > kQuestObjectivesMax ||
 				(head.size && !head.data)) {
@@ -2495,11 +2575,11 @@ namespace
 			}
 			if (!why.empty()) {
 				a_info.emplace_back("OBJECTIVES", Unknown("quest_objectives", why));
-				return;
+				return false;
 			}
 			if (found.empty()) {
 				a_info.emplace_back("OBJECTIVES", "NONE");
-				return;
+				return false;
 			}
 			const auto rows = found.size() > kKitObjectiveRows ? kKitObjectiveRows - 1 : found.size();
 			for (std::size_t i = 0; i < rows; ++i) {
@@ -2508,7 +2588,7 @@ namespace
 			if (rows < found.size()) {
 				a_info.emplace_back("MORE OBJECTIVES", std::to_string(found.size() - rows));
 			}
-			return;
+			return std::ranges::any_of(found, [](const auto& a_entry) { return a_entry.second == 1 || a_entry.second == 3; });
 		}
 		for (std::size_t i = 0; i < g_kit.objectives.size(); ++i) {
 			const auto&    objective = g_kit.objectives[i];
@@ -2529,6 +2609,7 @@ namespace
 			}
 			shown(objective.index, state, "path=" + path);
 		}
+		return any;
 	}
 
 	// FAL-571, after the quest's bytes on F11 at stage (e): where the objectives' states are. They are not among the
