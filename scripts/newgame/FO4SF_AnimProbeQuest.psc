@@ -13,7 +13,9 @@ Scriptname FO4SF_AnimProbeQuest extends Quest
    30      Activate(player) by script: whether the activator's own activation plays something and sends events
    40      a reading of the reference now
    60      Disable and Delete the spawned reference
- One name per stage so each is its own line. NEVER the wait form (it never returns when the graph sends no end event).
+ One name per stage so each is its own line: set the next stage only after the 15 s window of the last one has closed (its "quiet" or
+ "listened" line), because one window is open at a time. An event is logged with stage=<the open window's stage>, or stage=0 when no
+ window is open (an event from the registration, the spawn or a late one is then not counted for any name). NEVER the wait form (it never returns when the graph sends no end event).
  Optional natives are lines that begin with ";OPT <Base.Name> ": scripts/newgame/make_anim_probe.py stage compiles each on its own
  and keeps the ones that compile. ";VOID " lines are the register call's second shape (no return value): the stager keeps them
  instead of the bool-return line when the base scripts declare RegisterForAnimationEvent without a return. One line per finding in the user log "FO4SFAnim" (My Games\\Starfield\\Logs\\Script\\User\\
@@ -39,7 +41,8 @@ bool[] DoneList
 string[] EventNames
 string[] PlayNames
 ObjectReference TestRef = None
-int CurrentStage = 0
+int ListenStage = 0         ; the play stage whose 15 s window is open; 0 = none (an event then is logged stage=0: outside any window)
+int WindowEvents = 0        ; events that arrived in the open window
 float LastEventRt = 0.0
 
 ; ---------------------------------------------------------------- init
@@ -119,8 +122,11 @@ EndFunction
 
 Event OnAnimationEvent(ObjectReference akSource, string asEventName)
     float now = Utility.GetCurrentRealTime()
-    Trace("event name=" + asEventName + " src=" + Id(akSource) + " stage=" + CurrentStage + " since=" + (now - LastEventRt))
+    Trace("event name=" + asEventName + " src=" + Id(akSource) + " stage=" + ListenStage + " since=" + (now - LastEventRt))
     LastEventRt = now
+    if ListenStage != 0
+        WindowEvents += 1
+    endif
 EndEvent
 
 string Function Reg(ObjectReference r, string n)
@@ -184,11 +190,13 @@ Event OnTimer(int aiTimerID)
         StartTimer(POLL_S, TIMER_POLL)
     elseif aiTimerID >= TIMER_QUIET
         int stage = aiTimerID - TIMER_QUIET
-        float quiet = Utility.GetCurrentRealTime() - LastEventRt
-        if LastEventRt == 0.0 || quiet >= LISTEN_S - 0.5
+        if WindowEvents == 0
             Trace("quiet stage=" + stage + " seconds=" + LISTEN_S)
         else
-            Trace("listened stage=" + stage + " last_event_s_ago=" + quiet)
+            Trace("listened stage=" + stage + " events=" + WindowEvents + " seconds=" + LISTEN_S)
+        endif
+        if ListenStage == stage
+            ListenStage = 0
         endif
         Reading("settled", stage, TestRef)
     endif
@@ -206,7 +214,6 @@ Function Poll()
 EndFunction
 
 Function Step(int stage)
-    CurrentStage = stage
     if stage == 10
         Spawn(stage)
     elseif stage == 20
@@ -229,6 +236,8 @@ Function PlayOne(int stage, string n)
         return
     endif
     Reading("before", stage, TestRef)
+    ListenStage = stage
+    WindowEvents = 0
     bool ok = TestRef.PlayAnimation(n)
     Trace("play stage=" + stage + " name=" + n + " ref=" + Id(TestRef) + " ok=" + ok)
     StartTimer(LISTEN_S, TIMER_QUIET + stage)
@@ -240,6 +249,8 @@ Function ActivateOnce(int stage)
         return
     endif
     Reading("before", stage, TestRef)
+    ListenStage = stage
+    WindowEvents = 0
     TestRef.Activate(Game.GetPlayer(), false)
     Trace("step stage=" + stage + " call=Activate ref=" + Id(TestRef))
     StartTimer(LISTEN_S, TIMER_QUIET + stage)

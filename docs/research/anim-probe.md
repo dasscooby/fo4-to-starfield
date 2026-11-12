@@ -49,10 +49,11 @@ The console does not know the quest by its editor id: use `setstage <index>00080
 
 Registered event names (22): `Trans01 Done StateA_Idle StateA_Play StateB_Idle StateB_Play Play01..Play04 Trans02 TurnOn TurnOff Reset
 TransitionComplete AnimFinish EndAnim Stage4 KlaxonStop IdleStop IsOn IsOff`. One `PlayAnimation` name per stage, never the wait form.
+Set each of stages 21 to 28 only after the last one's `quiet` / `listened` line is in the log (15 s): one listening window is open at a time. Each logged event carries the stage whose window was open (`stage=0` when none was: registration and spawn events are listed apart and never count for a name).
 **Screenshot before and after each of stages 21 to 28** (does the object move?): Papyrus cannot read that. The user log
 `My Games\Starfield\Logs\Script\User\FO4SFAnim.0.log` says what each call returned and which events came.
 
-Read it with `python scripts\newgame\make_anim_probe.py log`: verdict `EVENTS ARRIVE`, `PLAY, NO EVENTS`, `NO PLAY` or `INCONCLUSIVE`
+Read it with `python scripts\newgame\make_anim_probe.py log`: verdict `EVENTS ARRIVE` (a true `PlayAnimation` and an event inside that name's own window), `PLAY, NO EVENTS`, `NO PLAY` or `INCONCLUSIVE`
 (exit 0 when the activator was spawned). THROWAWAY STATE ONLY, NO SAVE (the spawned reference is persistent).
 
 ## Staging (on the PC)

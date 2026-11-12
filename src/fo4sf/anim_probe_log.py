@@ -7,14 +7,16 @@ time stamp in front). A line without end=true was cut and is left out (and count
 
 Events: init (the forms it found), spawn (PlaceAtMe: ref), read (a reading of the reference: stage, when, loaded, disabled, cell,
 pos, dist), register (RegisterForAnimationEvent for one name: ok), play (one PlayAnimation name: ok = its return), event (an
-animation event that arrived: name, stage = the stage active when it came, since = seconds since the previous event), quiet
-(15 s without an event after a stage's call), listened (events did arrive in the window), step (Activate by script), cleanup.
+animation event that arrived: name, stage = the play stage whose 15 s window was open when it came, 0 when none was open, since =
+seconds since the previous event), quiet
+(no event in that stage's 15 s window), listened (events=N arrived in it), step (Activate by script), cleanup.
 
 The log cannot say whether the object moved: that is the screenshot before and after a stage. It says what the calls returned and
 which events arrived after each name. Verdict (exit 0 when the activator was spawned, 1 when the session is inconclusive):
-  EVENTS ARRIVE   a PlayAnimation returned true and at least one animation event arrived (the path works in our setup)
-  PLAY, NO EVENTS a PlayAnimation returned true but no event arrived at all (the graph sends none Papyrus can hear, or the
-                  registration did not take: see the register lines)
+  EVENTS ARRIVE   a PlayAnimation returned true AND an event arrived inside that same name's window (stage = its stage). Events
+                  with stage=0 or in a window whose call returned false do not count; they are listed apart
+  PLAY, NO EVENTS a PlayAnimation returned true but no event arrived in any such window (the graph sends none Papyrus can
+                  hear, or the registration did not take: see the register lines)
   NO PLAY         the activator was spawned but every PlayAnimation returned false or was not reached
   INCONCLUSIVE    no spawn line with a reference (the script did not run, the plugin was not loaded, or stage 10 was not set)
 """
@@ -87,26 +89,28 @@ def summarize(lines):
     plays = {}
     for e in events:
         if e["event"] == "play":
-            plays[e.get("stage")] = {"name": e.get("name"), "ok": e.get("ok"), "events": [], "quiet": False}
+            plays[e.get("stage")] = {"name": e.get("name"), "ok": e.get("ok"), "events": [], "quiet": False, "listened": 0}
         elif e["event"] == "step" and e.get("call") == "Activate":
-            plays[e.get("stage")] = {"name": "Activate(player)", "ok": None, "events": [], "quiet": False}
+            plays[e.get("stage")] = {"name": "Activate(player)", "ok": None, "events": [], "quiet": False, "listened": 0}
     for e in arrived:
         if e.get("stage") in plays:
             plays[e["stage"]]["events"].append(e)
-    for e in events:
+    for e in events:                                                   # the window's own verdict is recomputed from the events, not trusted
         if e["event"] == "quiet" and e.get("stage") in plays:
-            plays[e["stage"]]["quiet"] = True
+            plays[e["stage"]]["quiet"] = not plays[e["stage"]]["events"]
     played = [p for p in plays.values() if p["ok"] is True]
+    counted = [e for p in played for e in p["events"]]                 # events inside a true PlayAnimation's own window
     if spawned is None:
         verdict = ("INCONCLUSIVE", "no spawn line with a reference (the script did not run, the plugin was not loaded, the vanilla "
                                    "activator was not found, or stage 10 was not set)")
-    elif played and arrived:
-        verdict = ("EVENTS ARRIVE", f"PlayAnimation returned true for {len(played)} name(s) and {len(arrived)} animation event(s) "
-                                    f"arrived ({', '.join(sorted({str(e.get('name')) for e in arrived}))})")
+    elif counted:
+        names = sorted({str(p["name"]) for p in played if p["events"]})
+        verdict = ("EVENTS ARRIVE", f"PlayAnimation returned true for {len(played)} name(s); {len(counted)} animation event(s) arrived inside "
+                                    f"the window of: {', '.join(names)} ({', '.join(sorted({str(e.get('name')) for e in counted}))})")
     elif played:
         regs = [r for r in registers if r.get("ok") is True]
-        verdict = ("PLAY, NO EVENTS", f"PlayAnimation returned true for {len(played)} name(s) but no animation event arrived; "
-                                      f"{len(regs)} of {len(registers)} register call(s) returned true")
+        verdict = ("PLAY, NO EVENTS", f"PlayAnimation returned true for {len(played)} name(s) but no animation event arrived in any of their "
+                                      f"windows ({len(arrived)} event(s) arrived outside them); {len(regs)} of {len(registers)} register call(s) returned true")
     else:
         verdict = ("NO PLAY", "the activator was spawned, but no PlayAnimation returned true (all false, or the play stages were not set)")
     return {"events": events, "cut": cut, "spawned": spawned, "registers": registers, "plays": plays, "arrived": arrived, "verdict": verdict}
@@ -135,10 +139,10 @@ def report(s):
     out.append("stage  name              return  events after it")
     for stage, p in sorted(s["plays"].items(), key=lambda kv: kv[0] if isinstance(kv[0], int) else 0):
         evs = ", ".join(f"{e.get('name')}@{e.get('since')}s" for e in p["events"])
-        out.append(f"{fmt(stage):<6} {fmt(p['name']):<17} {fmt(p['ok']):<7} " + (evs if evs else ("none (quiet 15 s)" if p["quiet"] else "none")))
+        out.append(f"{fmt(stage):<6} {fmt(p['name']):<17} {fmt(p['ok']):<7} " + (evs if evs else ("none (quiet 15 s)" if p["quiet"] else "none (window not closed in the log)")))
     stray = [e for e in s["arrived"] if e.get("stage") not in s["plays"]]
     if stray:
-        out.append("events outside a play stage: " + ", ".join(f"{e.get('name')} (stage {fmt(e.get('stage'))})" for e in stray))
+        out.append("events outside any play window (stage 0 or a stage with no play): " + ", ".join(f"{e.get('name')} (stage {fmt(e.get('stage'))})" for e in stray))
     if s["cut"]:
         out.append(f"{s['cut']} line(s) without end=true were cut and left out")
     out.append(f"{s['verdict'][0]}: {s['verdict'][1]}. Whether the object moved is the screenshot before and after, not the log.")

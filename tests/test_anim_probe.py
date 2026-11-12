@@ -340,6 +340,35 @@ class LogTests(unittest.TestCase):
         self.assertIn("21     Play01            true    Trans01@0.0s, Done@2.5s", text)
         self.assertIn("22     StateA_Play       false   none (quiet 15 s)", text)
 
+    def test_an_event_outside_the_play_window_does_not_make_events_arrive(self):
+        """FAL-493 FINDING: a stage-0 event (registration, spawn) beside a true PlayAnimation whose own window is quiet."""
+        s = alog.summarize(self.lines("spawn stage=10 base=77 ref=99 moved=true persist=true", "event name=StateA_Idle src=99 stage=0 since=0.0",
+                                      "play stage=21 name=Play01 ref=99 ok=true", "quiet stage=21 seconds=15.0"))
+        self.assertEqual(s["verdict"][0], "PLAY, NO EVENTS")
+        self.assertIn("1 event(s) arrived outside them", s["verdict"][1])
+        self.assertIn("events outside any play window (stage 0 or a stage with no play): StateA_Idle (stage 0)", "\n".join(alog.report(s)))
+        # an event in a window whose call returned false is not counted either
+        s = alog.summarize(self.lines("spawn stage=10 base=77 ref=99 moved=true persist=true", "play stage=21 name=Play01 ref=99 ok=false",
+                                      "event name=Done src=99 stage=21 since=0.0", "listened stage=21 events=1 seconds=15.0"))
+        self.assertEqual(s["verdict"][0], "NO PLAY")
+
+    def test_a_quiet_line_beside_an_event_in_the_same_window_is_not_called_quiet(self):
+        s = alog.summarize(self.lines("spawn stage=10 base=77 ref=99 moved=true persist=true", "play stage=21 name=Play01 ref=99 ok=true",
+                                      "event name=Trans01 src=99 stage=21 since=0.0", "quiet stage=21 seconds=15.0"))
+        self.assertEqual(s["verdict"][0], "EVENTS ARRIVE")
+        self.assertFalse(s["plays"][21]["quiet"])
+        self.assertIn("21     Play01            true    Trans01@0.0s", "\n".join(alog.report(s)))
+
+    def test_each_event_carries_the_window_stage_and_a_window_counts_its_events(self):
+        self.assertIn("int ListenStage = 0", PSC)
+        self.assertIn('" stage=" + ListenStage', PSC)
+        self.assertNotIn("CurrentStage", PSC)
+        self.assertEqual(PSC.count("ListenStage = stage"), 2)                  # PlayOne and ActivateOnce open a window
+        self.assertIn("WindowEvents = 0", PSC)
+        self.assertIn('Trace("quiet stage=" + stage + " seconds=" + LISTEN_S)', PSC)
+        self.assertIn('Trace("listened stage=" + stage + " events=" + WindowEvents', PSC)
+        self.assertIn("if WindowEvents == 0", PSC)
+
     def test_play_true_and_no_events(self):
         s = alog.summarize(self.lines("spawn stage=10 base=77 ref=99 moved=true persist=true", "register stage=10 name=Trans01 ref=99 ok=true",
                                       "play stage=21 name=Play01 ref=99 ok=true", "quiet stage=21 seconds=15.0"))
@@ -365,7 +394,7 @@ class LogTests(unittest.TestCase):
         s = alog.summarize(self.lines("spawn stage=10 base=77 ref=99 moved=true persist=true", "step stage=30 call=Activate ref=99",
                                       "event name=Done src=99 stage=30 since=1.0", "event name=Reset src=99 stage=50 since=3.0"))
         self.assertIn("30     Activate(player)", "\n".join(alog.report(s)))
-        self.assertIn("events outside a play stage: Reset (stage 50)", "\n".join(alog.report(s)))
+        self.assertIn("events outside any play window (stage 0 or a stage with no play): Reset (stage 50)", "\n".join(alog.report(s)))
 
     def test_log_command_exit_codes(self):
         with tempfile.TemporaryDirectory() as d:
