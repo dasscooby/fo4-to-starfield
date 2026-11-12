@@ -38,6 +38,92 @@ def plugin_bytes():
     return w.to_bytes()
 
 
+PORT_MODEL = "Meshes\\fo4port\\interiors\\vault\\doors\\CogDoor01.nif"
+FO4_MODEL = "Meshes\\Interiors\\Vault\\Doors\\CogDoor01.nif"
+
+
+def second_plugin_bytes():
+    """A DOOR (linked to a sound-like record that names a graph file) and a STAT console, both placed."""
+    w = esm.PluginWriter(["Starfield.esm"])
+    link = w.own(0x900)
+    w.add(esm.Record("SOUN", link, [(b"EDID", esm.zbytes("CogOpenSound")), (b"FNAM", esm.zbytes(GRAPH))]))
+    door = w.own(0x901)
+    w.add(esm.Record("DOOR", door, [(b"EDID", esm.zbytes("FO4Port_VltGearDoor01")), (b"MODL", esm.zbytes(PORT_MODEL[len("Meshes\\"):])),
+                                    (b"SNAM", struct.pack("<I", link)), (b"FNAM", b"\x01")]))
+    stat = w.own(0x902)
+    w.add(esm.Record("STAT", stat, [(b"EDID", esm.zbytes("FO4Port_V111GearDoorConsole02")), (b"MODL", esm.zbytes("Other\\Console.nif"))]))
+    w.add(esm.Record("REFR", w.own(0x126D), [(b"NAME", struct.pack("<I", door)), (b"DATA", struct.pack("<6f", 0, 0, 0, 0, 0, 0))]))
+    w.add(esm.Record("REFR", w.own(0x138B), [(b"NAME", struct.pack("<I", stat)), (b"DATA", struct.pack("<6f", 1, 1, 1, 0, 0, 0))]))
+    return w.to_bytes()
+
+
+class Vault111AnimProbeSecondHeadTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.data = os.path.join(self.tmp.name, "Data")
+        self.fo4 = os.path.join(self.tmp.name, "FO4")
+        os.makedirs(self.data)
+        os.makedirs(self.fo4)
+        with open(os.path.join(self.data, "FO4Port.esm"), "wb") as f:
+            f.write(second_plugin_bytes())
+        with open(os.path.join(self.data, "FO4Port - Main.ba2"), "wb") as f:
+            f.write(general_archive({PORT_MODEL: b"not a nif at all, graph.hkx", GRAPH: b"\0\0hkb\0LinkEvent\0\0"}))
+        self.out = os.path.join(self.tmp.name, "report.txt")
+
+    def write_fo4(self, files):
+        with open(os.path.join(self.fo4, "Fallout4 - Meshes.ba2"), "wb") as f:
+            f.write(general_archive(files))
+
+    def run_probe(self, *extra):
+        self.assertEqual(probe.main(["--out", self.out, "--data", self.data] + list(extra)), 0)
+        with open(self.out, encoding="utf-8") as f:
+            return f.read()
+
+    def test_every_base_subrecord_is_printed_and_a_link_is_followed_with_its_file(self):
+        text = self.run_probe("--ref", "00126D")
+        self.assertIn("SNAM 4 bytes:", text)
+        self.assertIn("FNAM 1 bytes: 01", text)
+        self.assertIn("base link SNAM -> SOUN", text)
+        self.assertIn("edid=CogOpenSound", text)
+        self.assertIn("link SNAM path (FNAM): read from FO4Port - Main.ba2", text)
+        self.assertIn("LinkEvent", text)
+
+    def test_the_original_is_found_by_the_port_path_with_its_prefix_taken_out(self):
+        self.write_fo4({FO4_MODEL: b"original bytes"})
+        text = self.run_probe("--ref", "00126D", "--fo4-data", self.fo4)
+        self.assertIn("original (Fallout 4) at Meshes\\Interiors\\vault\\doors\\CogDoor01.nif", text)      # the port's own folder case
+        self.assertIn("original: read from Fallout4 - Meshes.ba2: 14 bytes", text)
+        self.assertIn("Fallout 4 archives: Fallout4 - Meshes.ba2 (1 files)", text)
+
+    def test_the_original_is_found_by_file_name_when_the_folders_differ(self):
+        self.write_fo4({"Meshes\\Somewhere\\Else\\CogDoor01.nif": b"original bytes"})
+        text = self.run_probe("--ref", "00126D", "--fo4-data", self.fo4)
+        self.assertIn("original (Fallout 4) found by file name Meshes\\Somewhere\\Else\\CogDoor01.nif", text)
+
+    def test_a_missing_original_says_what_was_tried_and_no_data_says_so(self):
+        self.write_fo4({"Meshes\\Other.nif": b"x"})
+        text = self.run_probe("--ref", "00126D", "--fo4-data", self.fo4)
+        self.assertIn("original (Fallout 4): not found by the paths", text)
+        self.assertIn("no file of that name", text)
+        self.assertIn("original (Fallout 4): not read: no --fo4-data given", self.run_probe("--ref", "00126D"))
+
+    def test_references_are_found_by_base_word_and_an_absent_one_is_said(self):
+        text = self.run_probe("--ref", "00126D", "--base-edid", "GearDoorConsole", "--base-edid", "PipboySkeleton")
+        self.assertIn("references whose base EditorID contains 'GearDoorConsole': 1 (00138B)", text)
+        self.assertIn("base type STAT", text)
+        self.assertIn("references whose base EditorID contains 'PipboySkeleton': 0", text)
+        self.assertIn("none: the port has no placed reference on such a base", text)
+
+    def test_a_reference_already_listed_is_not_reported_twice(self):
+        text = self.run_probe("--ref", "00126D", "--base-edid", "VltGearDoor")
+        self.assertIn("ref 00126D: already reported above", text)
+
+    def test_the_default_words_name_the_console_the_skeleton_and_the_pickup(self):
+        for w in ("GearDoorConsole", "PipboySkeleton", "PipboyGroundTake"):
+            self.assertIn(w, probe.DEFAULT_BASE_WORDS)
+
+
 class Vault111AnimProbeTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

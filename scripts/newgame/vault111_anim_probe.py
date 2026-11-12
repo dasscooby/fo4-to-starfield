@@ -8,8 +8,15 @@ the archive holds beside the model (.hkx, .kf, .nif of the same folder), and, fo
 readable strings (event and state names). Nothing is a verdict: each section says what it read and says "not found"
 when the archive had nothing.
 
+Also (FAL-476 second head): every subrecord of the base record is printed (signature, size, first bytes, text) and each 4-byte
+one that holds a form id of this plugin is followed one hop (the DOOR record's sound and other links, with any file they
+name); the Fallout 4 original of each model is looked up by the port path with its prefix removed and else by file name
+(--fo4-data); and every reference whose base EditorID contains a --base-edid word (default: GearDoorConsole, PipboySkeleton,
+PipboyGroundTake, VaultConsole, GearDoor) is reported like the listed ones, or the report says the port has none.
+
 usage: python vault111_anim_probe.py --out <report.txt> [--data <Starfield Data>] [--port FO4Port.esm]
                                      [--archive <ba2> ...] [--fo4-data <Fallout 4 Data>] [--ref 00126D ...]
+                                     [--base-edid <word> ...]
 It opens the plugin and the archives read-only and writes only --out. Nothing in the game folder changes; no install.
 By default the archives are every FO4Port*.ba2 in --data; --fo4-data adds Fallout4 - Meshes.ba2 and
 Fallout4 - Animations.ba2 (the source models and graphs), which settles whether a clip exists in the original.
@@ -29,6 +36,8 @@ STARFIELD = r"D:\SteamLibrary\steamapps\common\Starfield\Data"
 DEFAULT_REFS = ("00126D", "00138B", "001616")
 FILE_WORDS = re.compile(rb"\.(hkx|kf|nif|hkt|txt)\b|graph|behavior|anim", re.I)
 MAX_STRINGS = 300
+DEFAULT_BASE_WORDS = ("GearDoorConsole", "PipboySkeleton", "PipboyGroundTake", "VaultConsole", "GearDoor")
+FO4_NAMES = ("Fallout4 - Meshes.ba2", "Fallout4 - Animations.ba2")
 
 
 # ----------------------------------------------------------------------------------------------- the plugin
@@ -77,6 +86,27 @@ def describe(plugin, records, fid):
     return rec, lines, paths
 
 
+def sub_lines(rec):
+    """Every subrecord: signature, size, the first 24 bytes in hex, and its text when it is printable."""
+    out = []
+    for sig, d in rec.subs:
+        text = zstr(d)
+        shown = f" text={text!r}" if len(text) >= 3 and text.isprintable() and len(text) == len(d) - 1 else ""
+        out.append(f"    {sig.decode('latin-1')} {len(d)} bytes: {d[:24].hex()}{shown}")
+    return out
+
+
+def links(rec, records, self_fid):
+    """[(subrecord signature, form id)] of the 4-byte subrecords that hold a form id of this plugin's records."""
+    out = []
+    for sig, d in rec.subs:
+        if len(d) == 4 and sig not in (b"EDID",):
+            fid = struct.unpack_from("<I", d)[0]
+            if fid in records and fid != self_fid:
+                out.append((sig.decode("latin-1"), fid))
+    return out
+
+
 def ref_line(rec):
     out = {}
     name = rec.get(b"NAME")
@@ -107,10 +137,15 @@ def open_archives(paths):
 
 
 def lookup(archives, name):
+    """(archive file name, bytes) of the entry called name: exact first, then ignoring case and slash direction (the
+    archives keep each folder's own case: Fallout 4's \"Interiors\" is the port's \"interiors\")."""
+    key = name.replace("/", "\\").lower()
     for path, a in archives:
         if isinstance(a, str):
             continue
         i = a.find(name)
+        if i is None:
+            i = next((a.find(n) for n in a.names if n.replace("/", "\\").lower() == key), None)
         if i is not None:
             return os.path.basename(path), a.read(i)
     return None
@@ -192,44 +227,108 @@ def hkx_lines(name, data):
 
 
 # ----------------------------------------------------------------------------------------------- the report
-def probe(plugin, archives, refs):
+def report_ref(plugin, records, cell_of, archives, fo4, fid):
+    """The report of one reference: REFR, cell, position, base with every subrecord, its links, and each model read."""
+    out = []
+    rec, lines, _ = describe(plugin, records, fid)
+    info = ref_line(rec)
+    cell = cell_of.get(fid)
+    cell_edid = plugin.record_at(records[cell][0]).edid if cell in records else "?"
+    out += ["  " + lines[0], f"  cell {cell_edid} ({cell:08X})" if cell is not None else "  cell unknown",
+            "  " + position(info.get("DATA"))]
+    base = info.get("base")
+    if base is None or base not in records:
+        out.append(f"  base {base:08X} is not in this plugin (a master's record: read it with the records tool)"
+                   if base is not None else "  no NAME subrecord: no base")
+        return out
+    brec, blines, paths = describe(plugin, records, base)
+    out.append("  base " + blines[0])
+    out.append("  base type " + records[base][1])
+    out += ["  base subrecords:"] + sub_lines(brec)
+    for sub, fid2 in links(brec, records, base):
+        r2, l2, p2 = describe(plugin, records, fid2)
+        out.append(f"  base link {sub} -> " + l2[0])
+        out += sub_lines(r2)
+        for sub2, path2 in p2:
+            out += file_report(archives, path2, f"link {sub} path ({sub2})", None)
+    if not paths:
+        out.append("  model path: none found in the base's subrecords")
+    for sub, path in paths:
+        out.append(f"  model path ({sub}): {path}")
+        out += file_report(archives, path, "port", fo4)
+    return out
+
+
+def refs_by_base_word(plugin, records, word):
+    """([reference form ids whose base EditorID contains word], [base records of this plugin that do, placed or not])."""
+    word = word.lower()
+    base_edid = {}
+
+    def edid_of(fid):
+        if fid not in base_edid:
+            base_edid[fid] = (plugin.record_at(records[fid][0]).edid or "") if fid in records else ""
+        return base_edid[fid]
+    refs = []
+    for fid, (off, sig) in sorted(records.items()):
+        if sig in ("REFR", "ACHR"):
+            name = plugin.record_at(off).get(b"NAME")
+            if name and len(name) >= 4 and word in edid_of(struct.unpack_from("<I", name)[0]).lower():
+                refs.append(fid)
+    bases = [f for f, (_, sig) in sorted(records.items()) if sig not in ("REFR", "ACHR", "CELL", "GRUP") and word in edid_of(f).lower()]
+    return refs, bases
+
+
+def probe(plugin, archives, refs, fo4=None, words=()):
+    fo4 = [] if fo4 is None else fo4
     records, cell_of = index_records(plugin)
     out = [f"vault111_anim_probe: {plugin.path}; masters {', '.join(plugin.masters) or 'none'}; "
            f"{len(records)} records; archives: " + (", ".join(f"{os.path.basename(p)} ({a if isinstance(a, str) else len(a.names)} files)"
                                                              for p, a in archives) or "none")]
+    out.append("Fallout 4 archives: " + (", ".join(f"{os.path.basename(p)} ({a if isinstance(a, str) else len(a.names)} files)"
+                                                   for p, a in fo4) or "none given (--fo4-data)"))
+    done = set()
     for local in refs:
         out += ["", f"===== ref {local.upper()}"]
         fid = find_ref(records, plugin, local)
         if fid is None:
             out.append(f"  not found: no REFR or ACHR with local id {local.upper()} in {os.path.basename(plugin.path)}")
             continue
-        rec, lines, _ = describe(plugin, records, fid)
-        info = ref_line(rec)
-        cell = cell_of.get(fid)
-        cell_edid = plugin.record_at(records[cell][0]).edid if cell in records else "?"
-        out += ["  " + lines[0], f"  cell {cell_edid} ({cell:08X})" if cell is not None else "  cell unknown",
-                "  " + position(info.get("DATA"))]
-        base = info.get("base")
-        if base is None or base not in records:
-            out.append(f"  base {base:08X} is not in this plugin (a master's record: read it with the records tool)"
-                       if base is not None else "  no NAME subrecord: no base")
-            continue
-        brec, blines, paths = describe(plugin, records, base)
-        out.append("  base " + blines[0])
-        out.append("  base type " + records[base][1])
-        if not paths:
-            out.append("  model path: none found in the base's subrecords")
-        for sub, path in paths:
-            out.append(f"  model path ({sub}): {path}")
-            model = path if path.lower().startswith("meshes") else "Meshes\\" + path
-            got = lookup(archives, model)
-            if got is None:
-                out += [f"  model not in the archives read: {model}"]
-                for n in neighbours(archives, model):
-                    out.append("  beside it: " + n)
+        done.add(fid)
+        out += report_ref(plugin, records, cell_of, archives, fo4, fid)
+    for word in words:
+        found, bases = refs_by_base_word(plugin, records, word)
+        out += ["", f"===== references whose base EditorID contains '{word}': {len(found)}"
+                    + (f" ({', '.join(f'{f & 0xFFFFFF:06X}' for f in found)})" if found else "")]
+        if not found:
+            out.append(f"  none: the port has no placed reference on such a base; base records with that word in the EditorID: "
+                       + (", ".join(f"{records[f][1]} {f & 0xFFFFFF:06X} {plugin.record_at(records[f][0]).edid}" for f in bases[:12]) if bases else "none"))
+        for fid in found:
+            if fid in done:
+                out.append(f"  ref {fid & 0xFFFFFF:06X}: already reported above")
                 continue
-            where, data = got
-            out.append(f"  model read from {where}: {len(data)} bytes")
+            done.add(fid)
+            out += ["", f"  --- ref {fid & 0xFFFFFF:06X}"] + report_ref(plugin, records, cell_of, archives, fo4, fid)
+    return "\n".join(out) + "\n"
+
+
+def file_report(archives, path, label, fo4):
+    """Lines about one model or graph path: its archive entry, the NIF read, files beside it, graphs; then (fo4 not None) its original."""
+    out = []
+    low = path.lower()
+    model = path if low.startswith("meshes") or low.startswith("animations") else "Meshes\\" + path
+    got = lookup(archives, model)
+    if got is None:
+        out.append(f"  {label}: model not in the archives read: {model}")
+        for n in neighbours(archives, model):
+            out.append("  beside it: " + n)
+    else:
+        where, data = got
+        out.append(f"  {label}: read from {where}: {len(data)} bytes")
+        if low.endswith(".hkx"):
+            out += hkx_lines(model + " in " + where, data)
+        elif low.endswith(".kf"):
+            out.append("  a .kf clip: strings " + " | ".join(ascii_strings(data, 3)[:60]))
+        else:
             lines2, (parsed, graphs) = read_nif(data)
             out += lines2
             near = neighbours(archives, model)
@@ -243,12 +342,50 @@ def probe(plugin, archives, refs):
                 else:
                     out.append(f"  graph {g}: not in the archives read")
             for n in near:
-                if n.lower().endswith(".hkx") and not any(n.lower().endswith(g.lower().replace('/', '\\')) for g in graphs):
+                if n.lower().endswith(".hkx") and not any(n.lower().endswith(g.lower().replace("/", "\\")) for g in graphs):
                     nm = n.split(": ", 1)[1]
                     hit = lookup(archives, nm)
                     if hit:
                         out += hkx_lines(nm + " in " + hit[0], hit[1])
-    return "\n".join(out) + "\n"
+    if fo4 is not None:
+        out += original_report(fo4, path)
+    return out
+
+
+def original_candidates(path):
+    """The Fallout 4 path the port path was made from: the same path with the port's "fo4port\\" folder taken out and its
+    "interiors" / "animobjects" folder put back to Fallout 4's names, plus the path as it is."""
+    p = path.replace("/", "\\").strip("\\")
+    if p.lower().startswith("meshes\\"):
+        p = p[7:]
+    parts = p.split("\\")
+    out = ["Meshes\\" + p]
+    if parts and parts[0].lower() == "fo4port":
+        rest = parts[1:]
+        if rest and rest[0].lower() in ("interiors", "animobjects"):
+            out.append("Meshes\\" + "\\".join([{"interiors": "Interiors", "animobjects": "AnimObjects"}[rest[0].lower()]] + rest[1:]))
+        out.append("Meshes\\" + "\\".join(rest))
+    return out
+
+
+def original_report(fo4, path):
+    if not fo4:
+        return ["  original (Fallout 4): not read: no --fo4-data given"]
+    if all(isinstance(a, str) for _, a in fo4):
+        return ["  original (Fallout 4): not read: " + "; ".join(f"{os.path.basename(p)} {a}" for p, a in fo4)]
+    tried = original_candidates(path)
+    for cand in tried:
+        got = lookup(fo4, cand)
+        if got is not None:
+            return [f"  original (Fallout 4) at {cand}:"] + ["  " + l for l in file_report(fo4, cand, "original", None)]
+    base = tried[0].rsplit("\\", 1)[-1].lower()
+    same = sorted({f"{os.path.basename(p)}: {n}" for p, a in fo4 if not isinstance(a, str) for n in a.names
+                  if n.replace("/", "\\").lower().rsplit("\\", 1)[-1] == base})
+    if len(same) == 1:
+        nm = same[0].split(": ", 1)[1]
+        return [f"  original (Fallout 4) found by file name {nm}:"] + ["  " + l for l in file_report(fo4, nm, "original", None)]
+    return ["  original (Fallout 4): not found by the paths " + ", ".join(tried) + ("; " + str(len(same)) + " files of that name: " + "; ".join(same[:6]) if same else "; no file of that name")]
+
 
 
 def main(argv=None):
@@ -259,20 +396,22 @@ def main(argv=None):
     ap.add_argument("--archive", action="append", default=[])
     ap.add_argument("--fo4-data")
     ap.add_argument("--ref", action="append")
+    ap.add_argument("--base-edid", action="append", help="a word of a base EditorID; every reference on such a base is reported")
     a = ap.parse_args(argv)
     port = a.port or os.path.join(a.data, "FO4Port.esm")
     if not os.path.isfile(port):
         sys.exit(f"{port} missing")
     paths = list(a.archive) or sorted(glob.glob(os.path.join(a.data, "FO4Port*.ba2")))
+    fo4 = []
     if a.fo4_data:
-        paths += [os.path.join(a.fo4_data, n) for n in ("Fallout4 - Meshes.ba2", "Fallout4 - Animations.ba2")
-                  if os.path.isfile(os.path.join(a.fo4_data, n))]
+        fo4 = open_archives([os.path.join(a.fo4_data, n) for n in FO4_NAMES if os.path.isfile(os.path.join(a.fo4_data, n))])
     with esm.Plugin(port) as plugin:
-        text = probe(plugin, open_archives(paths), a.ref or list(DEFAULT_REFS))
+        text = probe(plugin, open_archives(paths), a.ref or list(DEFAULT_REFS), fo4,
+                     a.base_edid if a.base_edid is not None else DEFAULT_BASE_WORDS)
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     with open(a.out, "w", encoding="utf-8") as f:
         f.write(text)
-    print(f"vault111_anim_probe ok: {len(paths)} archive(s), report {a.out}")
+    print(f"vault111_anim_probe ok: {len(paths)} archive(s), {len(fo4 or [])} Fallout 4 archive(s), report {a.out}")
     return 0
 
 
