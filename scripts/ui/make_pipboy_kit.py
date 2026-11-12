@@ -11,7 +11,9 @@ fill them); adding or changing a page is an edit of that file and a re-stage, no
   [Kit]                     Title=<text>, Header=<value> (the title bar's right side), Hints=<text> (the key hints),
                             Mission=<plugin file>|<local id hex> (our mission, the first row of List=quests),
                             MissionStageAt=<hex offset> (its current stage, a u16: pipboy_quest_bytes.py names it),
-                            MissionObjective=<n>|<path> (up to 8: an objective's state, pipboy_quest_bytes.py names it)
+                            MissionObjective=<n>|<path> (up to 8: an objective's state, pipboy_quest_bytes.py names it),
+                            HeadingAt=[-]<80|84|88> (the player's heading float) and GridUnits=<decimal> (a cell's
+                            width), each named by pipboy_map_bytes.py from F11 dumps (FAL-595)
   [Page <TAB>/<SUB>]        one page: the main tab it sits under and its sub-tab, in the order the sections come; then
                             exactly one of
     Row=<label>|<value>       a row of the list, its value from a value provider (any number, scrolled 16 at a time)
@@ -21,7 +23,8 @@ fill them); adding or changing a page is an edit of that file and a re-stage, no
     Footer=<label>|<value>    a footer cell (up to three)
     Hint=<text>               the key hints on this page instead of [Kit]'s
 
-Values (VALUE_PROVIDERS): health, level, xp, carry_max, rads, cell, world, time, days, position, and av:<hex>, any
+Values (VALUE_PROVIDERS): health, level, xp, carry_max, rads, cell, world, time, days, position, heading, grid (FAL-595:
+? until [Kit] HeadingAt= and GridUnits= are set), and av:<hex>, any
 actor value by its form id (Starfield.esm's are 00 + the id: av:2C2 is Strength). Lists (LIST_PROVIDERS): kit_test,
 inventory (the player's items, FAL-426), quests (our mission first, the quest Mission= names, FAL-431).
 Every label is upper case in KIT_FONT's characters and fits its field; the plugin refuses the whole file otherwise
@@ -112,7 +115,8 @@ NAMES = {
     "hints": "fo4sfHints", "close": "fo4sfClose", "kit_id": "fo4sfKitId",
 }
 
-VALUE_PROVIDERS = ("health", "level", "xp", "carry_max", "rads", "cell", "world", "time", "days", "position")
+VALUE_PROVIDERS = ("health", "level", "xp", "carry_max", "rads", "cell", "world", "time", "days", "position", "heading",
+                   "grid")
 LIST_PROVIDERS = ("kit_test", "inventory", "quests")
 AV_PREFIX = "av:"
 PIPBOY_GREEN = swf.PIPBOY_GREEN
@@ -171,6 +175,28 @@ def check_stage_at(value, line):
     return at
 
 
+HEADING_AT = ("80", "84", "88")         # the player's OBJ_REFR::angle floats (kAngleAt), in its F11 dump
+GRID_UNITS = (1, 65536)                  # [Kit] GridUnits= (kGridUnitsMin, kGridUnitsMax)
+
+
+def check_heading_at(value, line):
+    """[-]<80, 84 or 88>: which of the player's angle floats (+0x80) is the heading, '-' when it falls as the player
+    turns right, as scripts/ui/pipboy_map_bytes.py prints it (FAL-595). The plugin's KitHeadingAt reads the same."""
+    down = value.startswith("-")
+    at = value[1:] if down else value
+    if at not in HEADING_AT:
+        raise KitError(f"line {line}: HeadingAt {value!r} is not 80, 84 or 88 (with - when it falls turning right)")
+    return {"at": int(at, 16), "down": down}
+
+
+def check_grid_units(value, line):
+    """<decimal>: a cell's width in game units, 1 to 65536, as scripts/ui/pipboy_map_bytes.py prints it (FAL-595).
+    The plugin's KitGridUnits reads the same."""
+    if not re.fullmatch(r"[0-9]{1,5}", value) or not GRID_UNITS[0] <= int(value) <= GRID_UNITS[1]:
+        raise KitError(f"line {line}: GridUnits {value!r} is not a number from {GRID_UNITS[0]} to {GRID_UNITS[1]}")
+    return int(value)
+
+
 OBJECTIVE_BLOCK = 0x40                   # the bytes the plugin's F11 dump reads behind each pointer (kObjectiveBlock)
 MAX_OBJECTIVES = 8                       # MissionObjective= lines (kKitObjectives)
 
@@ -210,7 +236,7 @@ def parse_kit(text):
     """The [Kit] section and the [Page <TAB>/<SUB>] sections of the ini, checked; other sections are skipped. The
     plugin's ReadKit (main.cpp) reads the same grammar with the same checks."""
     kit = {"title": "FO4SF PIP-BOY", "header": "", "hints": "", "mission": None, "stage_at": None, "objectives": [],
-           "pages": []}
+           "heading_at": None, "grid_units": None, "pages": []}
     section = None
     page = None
     for n, raw in enumerate(text.splitlines(), 1):
@@ -254,6 +280,10 @@ def parse_kit(text):
                 kit["mission"] = check_mission(value, n)
             elif key == "MissionStageAt" and kit["stage_at"] is None:
                 kit["stage_at"] = check_stage_at(value, n)
+            elif key == "HeadingAt" and kit["heading_at"] is None:
+                kit["heading_at"] = check_heading_at(value, n)
+            elif key == "GridUnits" and kit["grid_units"] is None:
+                kit["grid_units"] = check_grid_units(value, n)
             elif key == "MissionObjective":
                 objective = check_objective(value, n)
                 if len(kit["objectives"]) == MAX_OBJECTIVES:
@@ -262,8 +292,8 @@ def parse_kit(text):
                     raise KitError(f"line {n}: objective {objective['index']} comes twice")
                 kit["objectives"].append(objective)
             else:
-                raise KitError(f"line {n}: [Kit] has no key {key!r} (Title, Header, Hints, Mission and MissionStageAt "
-                               "once, MissionObjective)")
+                raise KitError(f"line {n}: [Kit] has no key {key!r} (Title, Header, Hints, Mission, MissionStageAt, "
+                               "HeadingAt and GridUnits once, MissionObjective)")
             continue
         if key == "Row":
             if len(page["rows"]) == MAX_PAGE_ROWS:

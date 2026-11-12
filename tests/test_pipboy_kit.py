@@ -78,7 +78,7 @@ class KitPagesTests(unittest.TestCase):
         self.assertEqual(pages[("DATA", "QUESTS")]["list"], "quests")    # FAL-431: our mission first
         self.assertEqual(self.k["mission"], {"file": "FO4SFMission.esm", "local_id": 0x800})   # FO4SF_Min00
         self.assertEqual([value for _, value in pages[("MAP", "WORLD")]["rows"]],   # the map's first content, no picture
-                         ["world", "cell", "position", "time", "days"])
+                         ["world", "cell", "position", "heading", "grid", "time", "days"])   # FAL-595: heading, grid
         self.assertTrue(pages[("RADIO", "STATIONS")]["notice"])   # named, and saying what it waits for
         self.assertEqual(self.k["header"], "time")
         self.assertEqual(kit.signature(self.k), "FO4SF KIT 1 16 STAT,INV,DATA,MAP,RADIO")
