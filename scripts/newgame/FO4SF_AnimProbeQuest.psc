@@ -16,6 +16,8 @@ Scriptname FO4SF_AnimProbeQuest extends Quest
  One name per stage so each is its own line: set the next stage only after the 15 s window of the last one has closed (its "quiet" or
  "listened" line), because one window is open at a time. An event is logged with stage=<the open window's stage>, or stage=0 when no
  window is open (an event from the registration, the spawn or a late one is then not counted for any name). NEVER the wait form (it never returns when the graph sends no end event).
+ Every log line that matters also shows as a short on-screen notification beginning "AP " (Say), so a session with script logging off
+ can still be read from the screen (screenshot or video; a notification lasts a few seconds, so the 15 s windows end with W lines).
  Optional natives are lines that begin with ";OPT <Base.Name> ": scripts/newgame/make_anim_probe.py stage compiles each on its own
  and keeps the ones that compile. ";VOID " lines are the register call's second shape (no return value): the stager keeps them
  instead of the bool-return line when the base scripts declare RegisterForAnimationEvent without a return. One line per finding in the user log "FO4SFAnim" (My Games\\Starfield\\Logs\\Script\\User\\
@@ -110,6 +112,13 @@ Function Trace(string msg)
     endif
 EndFunction
 
+Function Say(string msg)
+    {The on-screen twin of a log line, for a session with script logging off (variant A ran so, 12 Nov): a short Debug.Notification
+     the person at the keyboard can read. Prefixes: REG n/m (register calls that returned true), PLAY sN name ok=..., EV name wN (an
+     event, w = the open window's stage, w0 = none), W sN quiet / W sN heard n (a window closed).}
+    Debug.Notification("AP " + msg)
+EndFunction
+
 string Function Id(Form f)
     {"<signed decimal form id>" or "none".}
     if f == None
@@ -123,6 +132,7 @@ EndFunction
 Event OnAnimationEvent(ObjectReference akSource, string asEventName)
     float now = Utility.GetCurrentRealTime()
     Trace("event name=" + asEventName + " src=" + Id(akSource) + " stage=" + ListenStage + " since=" + (now - LastEventRt))
+    Say("EV " + asEventName + " w" + ListenStage)
     LastEventRt = now
     if ListenStage != 0
         WindowEvents += 1
@@ -143,11 +153,16 @@ Function RegisterAll(int stage)
         return
     endif
     int i = 0
+    int okCount = 0
     while i < EventNames.Length
         string res = Reg(TestRef, EventNames[i])
         Trace("register stage=" + stage + " name=" + EventNames[i] + " ref=" + Id(TestRef) + " ok=" + res)
+        if res == "true"
+            okCount += 1
+        endif
         i += 1
     endwhile
+    Say("REG s" + stage + " " + okCount + "/" + EventNames.Length + " true")
 EndFunction
 
 ; ---------------------------------------------------------------- readings and spawning
@@ -192,8 +207,10 @@ Event OnTimer(int aiTimerID)
         int stage = aiTimerID - TIMER_QUIET
         if WindowEvents == 0
             Trace("quiet stage=" + stage + " seconds=" + LISTEN_S)
+            Say("W s" + stage + " quiet")
         else
             Trace("listened stage=" + stage + " events=" + WindowEvents + " seconds=" + LISTEN_S)
+            Say("W s" + stage + " heard " + WindowEvents)
         endif
         if ListenStage == stage
             ListenStage = 0
@@ -240,6 +257,7 @@ Function PlayOne(int stage, string n)
     WindowEvents = 0
     bool ok = TestRef.PlayAnimation(n)
     Trace("play stage=" + stage + " name=" + n + " ref=" + Id(TestRef) + " ok=" + ok)
+    Say("PLAY s" + stage + " " + n + " ok=" + ok)
     StartTimer(LISTEN_S, TIMER_QUIET + stage)
 EndFunction
 
@@ -253,6 +271,7 @@ Function ActivateOnce(int stage)
     WindowEvents = 0
     TestRef.Activate(Game.GetPlayer(), false)
     Trace("step stage=" + stage + " call=Activate ref=" + Id(TestRef))
+    Say("ACTIVATE s" + stage)
     StartTimer(LISTEN_S, TIMER_QUIET + stage)
 EndFunction
 

@@ -48,7 +48,7 @@ REQUIRED = {
     "ObjectReference": ["PlayAnimation", "Activate", "Is3DLoaded", "IsDisabled", "Disable", "GetBaseObject"],
     "Math": ["Sin", "Cos"],
     "Game": ["GetPlayer", "GetFormFromFile", "IsPluginInstalled"],
-    "Debug": ["OpenUserLog", "TraceUser"],
+    "Debug": ["OpenUserLog", "TraceUser", "Notification"],
     "Utility": ["GetCurrentRealTime"],
     "Quest": ["GetStageDone"],
     "ScriptObject": ["StartTimer", "RegisterForAnimationEvent"],

@@ -53,6 +53,11 @@ Set each of stages 21 to 28 only after the last one's `quiet` / `listened` line 
 **Screenshot before and after each of stages 21 to 28** (does the object move?): Papyrus cannot read that. The user log
 `My Games\Starfield\Logs\Script\User\FO4SFAnim.0.log` says what each call returned and which events came.
 
+**With script logging off** (variant A's first session, 12 Nov: no user log was written) the same findings show on screen as short
+notifications beginning `AP `: `REG s10 22/22 true` (register calls that returned true), `PLAY s21 Play01 ok=true`, `EV Trans01 w21` (an event; `w` = the
+open window's stage, `w0` = none), `W s21 quiet` / `W s21 heard 2` (the window closed), `ACTIVATE s30`. A notification lasts a few seconds: read them
+from a screenshot or a video; the `W` line closes each 15 s window. Turning script logging on (the launcher setting) still gives the full log.
+
 Read it with `python scripts\newgame\make_anim_probe.py log`: verdict `EVENTS ARRIVE` (a true `PlayAnimation` and an event inside that name's own window), `PLAY, NO EVENTS`, `NO PLAY` or `INCONCLUSIVE`
 (exit 0 when the activator was spawned). THROWAWAY STATE ONLY, NO SAVE (the spawned reference is persistent).
 

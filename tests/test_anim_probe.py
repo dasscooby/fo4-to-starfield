@@ -94,7 +94,7 @@ class ScriptTests(unittest.TestCase):
 
     def test_the_required_list_has_every_native_called_outside_an_optional_line(self):
         for base, names in {"Actor": ["PlaceAtMe"], "ObjectReference": ["PlayAnimation", "Activate", "Disable"],
-                            "ScriptObject": ["RegisterForAnimationEvent", "StartTimer"], "Debug": ["TraceUser"]}.items():
+                            "ScriptObject": ["RegisterForAnimationEvent", "StartTimer"], "Debug": ["TraceUser", "Notification"]}.items():
             for n in names:
                 self.assertIn(n, map_.REQUIRED[base])
 
@@ -110,7 +110,8 @@ BASES = {
     "Actor": "Scriptname Actor extends ObjectReference\n",
     "Game": "Scriptname Game\nActor Function GetPlayer() native global\nForm Function GetFormFromFile(int i, string p) native global\n"
             "bool Function IsPluginInstalled(string p) native global\n",
-    "Debug": "Scriptname Debug\nbool Function OpenUserLog(string n) native global\nbool Function TraceUser(string n, string t) native global\n",
+    "Debug": "Scriptname Debug\nbool Function OpenUserLog(string n) native global\nbool Function TraceUser(string n, string t) native global\n"
+             "Function Notification(string s) native global\n",
     "Utility": "Scriptname Utility\nfloat Function GetCurrentRealTime() native global\n",
     "Math": "Scriptname Math\nfloat Function Sin(float f) native global\nfloat Function Cos(float f) native global\n",
     "ScriptObject": "Scriptname ScriptObject\nFunction StartTimer(float f, int i) native\n"
@@ -368,6 +369,16 @@ class LogTests(unittest.TestCase):
         self.assertIn('Trace("quiet stage=" + stage + " seconds=" + LISTEN_S)', PSC)
         self.assertIn('Trace("listened stage=" + stage + " events=" + WindowEvents', PSC)
         self.assertIn("if WindowEvents == 0", PSC)
+
+    def test_every_finding_also_shows_on_screen_for_a_session_with_logging_off(self):
+        """FAL-489, 12 Nov: variant A ran with script logging off; the screen is then the only readout."""
+        self.assertIn('Debug.Notification("AP " + msg)', PSC)
+        for what in ('Say("EV " + asEventName + " w" + ListenStage)', 'Say("PLAY s" + stage + " " + n + " ok=" + ok)',
+                     'Say("W s" + stage + " quiet")', 'Say("W s" + stage + " heard " + WindowEvents)',
+                     'Say("REG s" + stage + " " + okCount + "/" + EventNames.Length + " true")', 'Say("ACTIVATE s" + stage)'):
+            self.assertIn(what, PSC)
+        self.assertEqual(PSC.count("Say(\"EV "), 1)
+        self.assertIn("Notification", map_.REQUIRED["Debug"])
 
     def test_play_true_and_no_events(self):
         s = alog.summarize(self.lines("spawn stage=10 base=77 ref=99 moved=true persist=true", "register stage=10 name=Trans01 ref=99 ok=true",
