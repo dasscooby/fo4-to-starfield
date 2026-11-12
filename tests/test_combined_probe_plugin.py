@@ -17,6 +17,7 @@ import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
+import dotnet_fast  # noqa: E402,F401  (FAL-558: stager `dotnet run` calls use the built dll)
 import test_terrain_reference_identity as tri  # noqa: E402
 import test_terrain_lights_writer as tlw  # noqa: E402
 from test_map_markers_plugin import MapMarkersPluginTests, build  # noqa: E402

@@ -15,6 +15,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
+import dotnet_fast  # noqa: E402,F401  (FAL-558: stager `dotnet run` calls use the built dll)
 sys.path.insert(0, str(ROOT / "scripts" / "planet"))
 sys.path.insert(0, str(ROOT / "src"))
 import make_rads_probe as mrp  # noqa: E402

@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
 sys.path.insert(0, str(ROOT / "scripts" / "planet"))
 sys.path.insert(0, str(ROOT / "src"))
+import dotnet_fast  # noqa: E402,F401  (FAL-558: the stager's `dotnet run` calls use the built dll)
 import make_build_pieces as mbp  # noqa: E402
 
 PSC = (ROOT / "scripts" / "planet" / "FO4SF_BPQuest.psc").read_text(encoding="utf-8")

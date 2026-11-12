@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""Test-only `dotnet` stand-in (see tests/dotnet_fast.py). `dotnet run -c Release --project P -- args` re-checks the build on
+every call (about 1.2 s on a fast machine, several on a CI runner) and the stager tests make dozens of calls; when P's Release
+build is already newer than every source under dotnet/, run its dll directly (0.03 s). Anything else goes to the real dotnet."""
+import glob
+import os
+import re
+import shutil
+import sys
+
+
+def real_dotnet():
+    here = os.path.dirname(os.path.abspath(__file__))
+    paths = [p for p in os.environ.get("PATH", "").split(os.pathsep) if p and os.path.abspath(p) != here]
+    found = shutil.which("dotnet", path=os.pathsep.join(paths))
+    return found or os.path.join(os.path.expanduser("~"), ".dotnet", "dotnet")
+
+
+def newest_source(root):
+    newest = 0.0
+    for dirpath, dirnames, files in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in ("bin", "obj")]
+        for f in files:
+            if f.endswith((".cs", ".csproj", ".props", ".targets", ".json")):
+                newest = max(newest, os.path.getmtime(os.path.join(dirpath, f)))
+    return newest
+
+
+def direct_dll(args):
+    """The dll to run instead of `dotnet run`, and the tool's own arguments; None when this is any other command."""
+    if not args or args[0] != "run" or "--project" not in args:
+        return None
+    cut = args.index("--") if "--" in args else len(args)
+    flags, rest = args[1:cut], args[cut + 1:]
+    i = flags.index("--project")
+    if i + 1 >= len(flags):
+        return None
+    proj = flags[i + 1]
+    others = flags[:i] + flags[i + 2:]
+    if others not in ([], ["-c", "Release"], ["--configuration", "Release"]):
+        return None
+    csproj = glob.glob(os.path.join(proj, "*.csproj"))
+    if len(csproj) != 1:
+        return None
+    name = os.path.basename(csproj[0])[:-len(".csproj")]
+    m = re.search(r"<AssemblyName>([^<]+)</AssemblyName>", open(csproj[0], encoding="utf-8").read())
+    name = m.group(1) if m else name
+    dlls = glob.glob(os.path.join(proj, "bin", "Release", "*", name + ".dll"))
+    if not dlls:
+        return None
+    dll = max(dlls, key=os.path.getmtime)
+    if os.path.getmtime(dll) < newest_source(os.path.dirname(os.path.abspath(proj))):
+        return None
+    return dll, rest
+
+
+def main():
+    real = real_dotnet()
+    hit = direct_dll(sys.argv[1:])
+    if hit:
+        os.execv(real, [real, hit[0]] + hit[1])
+    os.execv(real, [real] + sys.argv[1:])
+
+
+main()
