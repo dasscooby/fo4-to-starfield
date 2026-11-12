@@ -32,12 +32,14 @@ def direct_dll(args):
         return None
     cut = args.index("--") if "--" in args else len(args)
     flags, rest = args[1:cut], args[cut + 1:]
+    if "--project" not in flags:                                    # also when "--project" only follows the "--" (the tool's own argument)
+        return None
     i = flags.index("--project")
     if i + 1 >= len(flags):
         return None
     proj = flags[i + 1]
     others = flags[:i] + flags[i + 2:]
-    if others not in ([], ["-c", "Release"], ["--configuration", "Release"]):
+    if others not in (["-c", "Release"], ["--configuration", "Release"]):   # exactly Release: no flags means Debug
         return None
     csproj = glob.glob(os.path.join(proj, "*.csproj"))
     if len(csproj) != 1:
