@@ -176,7 +176,7 @@ def check_stage_at(value, line):
 
 
 HEADING_AT = ("80", "84", "88")         # the player's OBJ_REFR::angle floats (kAngleAt), in its F11 dump
-GRID_UNITS = (256, 65536)                # [Kit] GridUnits= (kGridUnitsMin, kGridUnitsMax)
+GRID_UNITS = (1, 65536)                  # [Kit] GridUnits= (kGridUnitsMin, kGridUnitsMax)
 
 
 def check_heading_at(value, line):
@@ -190,7 +190,7 @@ def check_heading_at(value, line):
 
 
 def check_grid_units(value, line):
-    """<decimal>: a cell's width in game units, 256 to 65536, as scripts/ui/pipboy_map_bytes.py prints it (FAL-595).
+    """<decimal>: a cell's width in game units, 1 to 65536, as scripts/ui/pipboy_map_bytes.py prints it (FAL-595).
     The plugin's KitGridUnits reads the same."""
     if not re.fullmatch(r"[0-9]{1,5}", value) or not GRID_UNITS[0] <= int(value) <= GRID_UNITS[1]:
         raise KitError(f"line {line}: GridUnits {value!r} is not a number from {GRID_UNITS[0]} to {GRID_UNITS[1]}")

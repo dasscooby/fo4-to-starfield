@@ -13,11 +13,16 @@ two stayed (within 3 degrees) and the position stayed (within 64 units). When ex
 for [Kit], `HeadingAt=<80|84|88>`, with '-' before the offset when the float fell as the player turned right: the MAP
 page's HEADING then shows it in compass degrees.
 
-Grid (--grid): F11 in one cell, walk until POSITION's x or y on the MAP page has crossed a multiple of --units (4096,
-the hypothesis) by a few hundred units, F11 again. For each dump in a cell with a worldspace it compares the cell's own
-grid with POSITION's x and y over --units, rounded down. When every such dump matches and they cover two cells or more
+Grid (--grid): F11 in one cell, walk until POSITION's x or y on the MAP page has crossed a multiple of --units (100:
+the PC's presses, 12 Nov, read cell_x as x over 100; Starfield's units, not Fallout 4's 4096) by 30 to 60, F11 again.
+For each dump in a cell whose flags lack libxse's kInterior bit (1) it compares the cell's own grid with POSITION's x
+and y over --units, rounded down. When every such dump matches and they cover two cells or more
 it prints `GridUnits=<units>`: the MAP page's GRID then shows POSITION over it. If the cell's grid was unreadable it
 says whether the cell's address changed exactly where the rounded position did, which is weaker and prints nothing.
+World (--world): F11 also logs each word of the cell from +0x38 to +0x200 that points to a TESWorldSpace by its RTTI,
+`step=kit_map_world n= at=+<offset> world=<addr> name="<name>"`, then `step=kit_map_worlds n= cell= found=<k>`. Press
+F11 outdoors in two cells and once indoors; this prints the offsets found in every outdoor press and none indoors, the
+place WORLD should read (libxse's +0x118 read 0 outdoors on the PC, 12 Nov).
 Reads the log only; pure Python, test tests/test_pipboy_map_bytes.py."""
 import argparse
 import math
@@ -27,6 +32,8 @@ import sys
 BYTES = re.compile(r"step=kit_map_bytes n=(\d+) at=\+080 bytes=\S+ floats=([-0-9.,a-z]+)")
 CELL = re.compile(r"step=kit_map_cell n=(\d+) cell=(0x[0-9a-f]+) world=(\S+) flags=(\S+) data=(0x[0-9a-f]+) "
                   r"(?:cell_x=(-?\d+) cell_y=(-?\d+)|cell_xy=unreadable)")
+WORLD = re.compile(r"step=kit_map_world n=(\d+) at=\+([0-9A-F]+) world=(0x[0-9a-f]+)")
+WORLDS = re.compile(r"step=kit_map_worlds n=(\d+) cell=(0x[0-9a-f]+) found=(\d+)")
 ANGLES = (0x80, 0x84, 0x88)              # the plugin's kAngleAt and the two floats after it
 TURN = (math.radians(45), math.radians(135))
 STILL = math.radians(3)
@@ -34,21 +41,39 @@ STEP = 64.0                              # game units the position may move whil
 
 
 def dumps(lines):
-    """{n: {"floats": [6 floats] or None, "cell": {...} or None}} from the log's kit_map lines."""
+    """{n: {"floats": [6 floats] or None, "cell": {...} or None, "worlds": {offset: addr}, "scanned": bool}} from the
+    log's kit_map lines."""
     found = {}
     for line in lines:
         match = BYTES.search(line)
         if match:
             parts = match[2].split(",")
             floats = [float(p) for p in parts] if len(parts) == 6 and match[2] != "unreadable" else None
-            found.setdefault(int(match[1]), {"floats": None, "cell": None})["floats"] = floats
+            _entry(found, match[1])["floats"] = floats
+            continue
+        match = WORLD.search(line)
+        if match:
+            _entry(found, match[1])["worlds"][int(match[2], 16)] = match[3]
+            continue
+        match = WORLDS.search(line)
+        if match:
+            _entry(found, match[1])["scanned"] = True
             continue
         match = CELL.search(line)
         if match:
             cell = {"cell": match[2], "world": match[3], "flags": match[4], "data": match[5],
                     "xy": (int(match[6]), int(match[7])) if match[6] is not None else None}
-            found.setdefault(int(match[1]), {"floats": None, "cell": None})["cell"] = cell
+            _entry(found, match[1])["cell"] = cell
     return found
+
+
+def _entry(found, n):
+    return found.setdefault(int(n), {"floats": None, "cell": None, "worlds": {}, "scanned": False})
+
+
+def interior(cell):
+    """libxse's kInterior bit in the cell's flags; None when the flags were unreadable."""
+    return None if cell["flags"] == "unreadable" else bool(int(cell["flags"], 16) & 1)
 
 
 def turned(a, b):
@@ -83,12 +108,12 @@ def heading_line(rows, moved):
 
 
 def grid(found, units):
-    """[(n, x, y, (floor x, floor y), cell grid or None, cell address, matches)] for each dump in a cell with a
-    worldspace whose floats were read."""
+    """[(n, x, y, (floor x, floor y), cell grid or None, cell address, matches)] for each dump in a cell whose flags
+    were read and lack the interior bit, whose floats were read."""
     rows = []
     for n in sorted(found):
         floats, cell = found[n]["floats"], found[n]["cell"]
-        if not floats or not cell or cell["world"] in ("0x0", "unreadable"):
+        if not floats or not cell or interior(cell) is not False:
             continue
         x, y = floats[3], floats[4]
         rounded = (math.floor(x / units), math.floor(y / units))
@@ -111,20 +136,46 @@ def cell_changes_agree(rows):
         all((a[3] != b[3]) == (a[5] != b[5]) for a, b in pairs)
 
 
+def world(found):
+    """(outdoor offsets: [(n, {offset: addr})], indoor: [(n, {offset: addr})], offsets found in every outdoor press and
+    in no indoor one) over the presses whose cell scan was logged and whose flags were read."""
+    outdoor, indoor = [], []
+    for n in sorted(found):
+        entry = found[n]
+        if not entry["scanned"] or not entry["cell"] or interior(entry["cell"]) is None:
+            continue
+        (indoor if interior(entry["cell"]) else outdoor).append((n, entry["worlds"]))
+    common = set.intersection(*(set(w) for _, w in outdoor)) if outdoor else set()
+    common -= {at for _, w in indoor for at in w}
+    return outdoor, indoor, sorted(common)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("log", help="the plugin's log (FO4SFPipboyMenu.log)")
     parser.add_argument("--before", type=int, help="the first dump's n (default: the first in the log)")
     parser.add_argument("--after", type=int, help="the second dump's n (default: the last in the log)")
     parser.add_argument("--grid", action="store_true", help="the cell's width instead of the heading")
-    parser.add_argument("--units", type=int, default=4096, help="the cell width to test (default 4096)")
+    parser.add_argument("--world", action="store_true", help="where the cell keeps its worldspace")
+    parser.add_argument("--units", type=int, default=100, help="the cell width to test (default 100)")
     args = parser.parse_args(argv)
     with open(args.log, encoding="utf-8", errors="replace") as f:
         found = dumps(f)
+    if args.world:
+        outdoor, indoor, common = world(found)
+        for kind, presses in (("outdoors", outdoor), ("indoors", indoor)):
+            for n, worlds in presses:
+                print(f"n={n} {kind} " + (" ".join(f"+{at:03X}={addr}" for at, addr in sorted(worlds.items())) or "none"))
+        if len(outdoor) >= 2 and indoor and len(common) == 1:
+            print(f"the worldspace is at +{common[0]:03X} (every outdoor press, no indoor one)")
+            return 0
+        print("no single place: press F11 outdoors in two cells and once indoors" if len(outdoor) < 2 or not indoor
+              else f"no single place: {', '.join(f'+{at:03X}' for at in common) or 'none'} in every outdoor press")
+        return 1
     if args.grid:
         rows = grid(found, args.units)
         if not rows:
-            print("no kit_map_bytes and kit_map_cell pair in a cell with a worldspace")
+            print("no kit_map_bytes and kit_map_cell pair in a cell whose flags say exterior")
             return 1
         for n, x, y, rounded, xy, cell, ok in rows:
             print(f"n={n} x={x:.1f} y={y:.1f} over {args.units}={rounded[0]},{rounded[1]} "

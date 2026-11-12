@@ -26,7 +26,7 @@ class MapPlanTests(unittest.TestCase):
         self.assertIn("kParentCellAt = 0xB0;", self.main)
         self.assertIn("`+0x80 + 0x0C`", self.plan)
         self.assertIn("`+0xB0`", self.plan)
-        self.assertIn('return { cellText, "NONE (INTERIOR)" };', self.main)
+        self.assertIn('reason=world_null at=+{:03X}', self.main)          # FAL-595: 0 outdoors too, so ? not INTERIOR
 
     def test_the_plan_keeps_its_rules(self):
         for text in ("**A plan, no code.**", "**hypothesis**", "`Pause=0`", "No game files in Git",

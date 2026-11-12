@@ -165,13 +165,15 @@ namespace
 	constexpr std::size_t   kAvifEditorIdAt = 0x40;          // libxse RE::ActorValueInfo::editorID
 	constexpr std::size_t   kBaseObjectAt = 0x80 + 0x18;     // libxse RE::TESObjectREFR::data, OBJ_REFR::objectReference
 	constexpr std::size_t   kParentCellAt = 0xB0;            // libxse RE::TESObjectREFR::parentCell
-	constexpr std::size_t   kCellWorldAt = 0x118;            // libxse RE::TESObjectCELL::cellWorldspace
+	constexpr std::size_t   kCellWorldAt = 0x118;            // libxse RE::TESObjectCELL::cellWorldspace: 0 outdoors on the PC (FAL-595)
+	constexpr std::size_t   kCellScanEnd = 0x200;            // FAL-595: F11 looks for the worldspace in the cell's +0x38 to here
 	constexpr std::size_t   kAngleAt = 0x80;                 // FAL-595: libxse OBJ_REFR::angle, three floats (radians)
 	constexpr std::size_t   kMapDumpBytes = 0x40;            // F11: the player's +0x80 to +0xC0 (angle, location, ... parentCell)
 	constexpr std::size_t   kCellFlagsAt = 0x40;             // libxse RE::TESObjectCELL::cellFlags (kInterior = 1)
 	constexpr std::size_t   kCellDataAt = 0x58;              // libxse RE::TESObjectCELL::cellData: EXTERIOR_DATA*, cellX, cellY
-	constexpr std::uint32_t kGridUnitsMin = 256;             // [Kit] GridUnits=: a cell's width in game units, 256 ...
-	constexpr std::uint32_t kGridUnitsMax = 65536;           // ... to 65536 (Fallout 4's and the hypothesis: 4096)
+	constexpr std::uint32_t kCellInterior = 0x1;             // libxse TESObjectCELL::Flag::kInterior, in cellFlags
+	constexpr std::uint32_t kGridUnitsMin = 1;               // [Kit] GridUnits=: a cell's width in game units, 1 ...
+	constexpr std::uint32_t kGridUnitsMax = 65536;           // ... to 65536 (the PC, 12 Nov: cell_x is x over 100)
 	constexpr std::size_t   kLevelAt = 0x08 + 0x06;          // libxse RE::TESActorBaseData::actorData, ACTOR_BASE_DATA::level
 	constexpr std::size_t   kFullNameAt = 0x08;              // libxse RE::TESFullName::fullName (a BSFixedStringCS)
 	constexpr std::size_t   kPageLines = 7;                  // make_probe_swf.py PAGE_LINES
@@ -1393,8 +1395,9 @@ namespace
 		if (!Peek(cell + kCellWorldAt, world)) {
 			return { cellText, Unknown("world", "reason=fault") };
 		}
-		if (!world) {
-			return { cellText, "NONE (INTERIOR)" };
+		if (!world) {   // FAL-595: read 0 outdoors too (the PC, 12 Nov), so it says nothing about an interior
+			return { cellText, Unknown("world", std::format("reason=world_null at=+{:03X} (step=kit_map_world on F11 finds it)",
+								   kCellWorldAt)) };
 		}
 		if (!IsType(world, "TESWorldSpace@@", worldType)) {
 			return { cellText, Unknown("world", std::format("reason=type world={} type={}", Hex(world),
@@ -1857,7 +1860,7 @@ namespace
 		return true;
 	}
 
-	// parse_kit's check_grid_units (FAL-595): <decimal>, a cell's width in game units (256 to 65536), as
+	// parse_kit's check_grid_units (FAL-595): <decimal>, a cell's width in game units (1 to 65536), as
 	// scripts/ui/pipboy_map_bytes.py names it from F11 dumps in two cells
 	bool KitGridUnits(std::string_view a_text)
 	{
@@ -2178,14 +2181,22 @@ namespace
 	}
 
 	// FAL-595: the player's cell on the grid, POSITION's x and y over [Kit] GridUnits=, rounded down (? without the
-	// setting; NONE (INTERIOR) in a cell without a worldspace, as WORLD); logged at the first read and at each change:
+	// setting; NONE (INTERIOR) when the cell's flags say so); logged at the first read and at each change:
 	// step=kit_grid units= x= y=
 	std::string GridText()
 	{
 		if (!g_kit.gridUnits) {
 			return Unknown("grid", "reason=no_grid_units (GridUnits= in [Kit])");
 		}
-		if (PlaceText().second == "NONE (INTERIOR)") {
+		std::uintptr_t cell = 0;
+		std::uint32_t  flags = 0;
+		ObjectType     cellType;
+		if (!CheckSingleton("PlayerCharacter", kPlayerSingleton, kPlayerRtti, g_playerOk) ||
+			!Peek(Singleton(kPlayerSingleton) + kParentCellAt, cell) || !IsType(cell, "TESObjectCELL@@", cellType) ||
+			!Peek(cell + kCellFlagsAt, flags)) {
+			return Unknown("grid", "reason=cell");
+		}
+		if (flags & kCellInterior) {   // libxse's cellFlags; the F11 kit_map_cell line shows it indoors and out
 			return "NONE (INTERIOR)";
 		}
 		std::array<float, 3> xyz{};
@@ -2741,6 +2752,20 @@ namespace
 		const bool                   gotXy = Peek(cell + kCellDataAt, data) && data && Peek(data, xy);
 		REX::INFO("step=kit_map_cell n={} cell={} world={} flags={} data={} {}", n, Hex(cell), gotWorld ? Hex(world) : "unreadable",
 			gotFlags ? Hex(flags) : "unreadable", Hex(data), gotXy ? std::format("cell_x={} cell_y={}", xy[0], xy[1]) : "cell_xy=unreadable");
+		// FAL-595: where the cell keeps its worldspace (+0x118 read 0 outdoors): each 8-byte word from +0x38 to +0x200 that
+		// is a heap object whose RTTI is TESWorldSpace, step=kit_map_world n= at=+<offset> world=<addr> name="<name>";
+		// then step=kit_map_worlds n= found=<k>. Peek and VirtualQuery only
+		std::size_t found = 0;
+		for (auto at = std::size_t{ 0x38 }; at < kCellScanEnd; at += 8) {
+			std::uintptr_t word = 0;
+			ObjectType     worldType;
+			if (!Peek(cell + at, word) || !Followable(word) || !IsType(word, "TESWorldSpace@@", worldType)) {
+				continue;
+			}
+			++found;
+			REX::INFO("step=kit_map_world n={} at=+{:03X} world={} name=\"{}\"", n, at, Hex(word), NameText("world_name", word, worldType));
+		}
+		REX::INFO("step=kit_map_worlds n={} cell={} found={}", n, Hex(cell), found);
 	}
 
 	// a_text in lines of at most a_columns, each broken after its last space, '_', '-', '/' or '|' when the rest does

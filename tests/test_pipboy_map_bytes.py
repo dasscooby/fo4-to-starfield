@@ -22,14 +22,18 @@ def function(text, signature):
     return text[start:text.index("\n\t}\n", start)]
 
 
-def map_lines(n, floats, cell=0x2a0001000, world=0x2b0002000, xy=(-1, 0)):
-    """The plugin's two F11 lines for one press: six floats at +0x80, then the cell (xy None: unreadable)."""
+def map_lines(n, floats, cell=0x2a0001000, world=0x0, xy=(-1, 0), flags=0x0, worlds=None):
+    """The plugin's F11 lines for one press: six floats at +0x80, the cell (xy None: unreadable), then the worldspace
+    scan (worlds: {offset: address}; None: no scan logged). world=0x0 is what the PC read outdoors."""
     raw = struct.pack("<6f", *floats) + bytes(0x40 - 24)
     hexes = ",".join(raw[j:j + 8].hex() for j in range(0, len(raw), 8))
     text = ",".join(f"{f:.4f}" for f in floats)
     grid = "cell_xy=unreadable" if xy is None else f"cell_x={xy[0]} cell_y={xy[1]}"
     return [f"[info] step=kit_map_bytes n={n} at=+080 bytes={hexes} floats={text}\n",
-            f"[info] step=kit_map_cell n={n} cell={cell:#x} world={world:#x} flags=0x0 data=0x2c0003000 {grid}\n"]
+            f"[info] step=kit_map_cell n={n} cell={cell:#x} world={world:#x} flags={flags:#x} data=0x2c0003000 {grid}\n"] + \
+        ([] if worlds is None else [f'[info] step=kit_map_world n={n} at=+{at:03X} world={addr:#x} name="X (00000001)"\n'
+                                    for at, addr in worlds.items()] +
+         [f"[info] step=kit_map_worlds n={n} cell={cell:#x} found={len(worlds)}\n"])
 
 
 class PluginTests(unittest.TestCase):
@@ -45,6 +49,8 @@ class PluginTests(unittest.TestCase):
         self.assertIn("kMapDumpBytes = 0x40;", self.main)             # +0x80 to +0xC0: parentCell at +0xB0 inside
         self.assertIn("kCellFlagsAt = 0x40;", self.main)
         self.assertIn("kCellDataAt = 0x58;", self.main)               # TESObjectCELL::cellData, EXTERIOR_DATA*
+        self.assertIn("kCellInterior = 0x1;", self.main)
+        self.assertIn("kCellScanEnd = 0x200;", self.main)
 
     def test_f11_dumps_the_player_and_its_cell_peek_only(self):
         dump = function(self.main, "void LogKitMapBytes(")
@@ -54,6 +60,10 @@ class PluginTests(unittest.TestCase):
         self.assertLess(dump.index('IsType(cell, "TESObjectCELL@@", cellType)'), dump.index("cell + kCellDataAt"))
         self.assertIn("Peek(cell + kCellDataAt, data) && data && Peek(data, xy)", dump)
         self.assertIn('"step=kit_map_cell n={} cell={} world={} flags={} data={} {}"', dump)
+        scan = dump[dump.index("for (auto at = std::size_t{ 0x38 }; at < kCellScanEnd; at += 8) {"):]
+        self.assertLess(scan.index("Followable(word)"), scan.index('IsType(word, "TESWorldSpace@@", worldType)'))
+        self.assertIn('"step=kit_map_world n={} at=+{:03X} world={} name=\\"{}\\""', dump)
+        self.assertIn('"step=kit_map_worlds n={} cell={} found={}"', dump)
         for call in ("FormById(", "REL::", "LookupByID", "GetActorValue"):
             self.assertNotIn(call, dump)                                # no call into the game
         key = self.main[self.main.index('Snapshot("key", true);'):]
@@ -79,11 +89,16 @@ class PluginTests(unittest.TestCase):
         self.assertIn('Unknown("grid", "reason=no_grid_units (GridUnits= in [Kit])");', text)
         self.assertLess(text.index("if (!g_kit.gridUnits) {"), text.index("ReadPosition(xyz)"))
         self.assertIn('return "NONE (INTERIOR)";', text)
+        self.assertIn("if (flags & kCellInterior) {", text)                # the cell's flags, not the world pointer
+        self.assertNotIn("PlaceText()", text)
+        place = function(self.main, "std::pair<std::string, std::string> PlaceText(")
+        self.assertNotIn('"NONE (INTERIOR)"', place)                      # 0 outdoors too (the PC, 12 Nov)
+        self.assertIn("reason=world_null", place)
         self.assertIn("std::floor(xyz[0] / static_cast<double>(g_kit.gridUnits))", text)
         self.assertIn('"step=kit_grid units={} x={} y={}"', text)
         parse = function(self.main, "bool KitGridUnits(")
         self.assertIn("units < kGridUnitsMin || units > kGridUnitsMax", parse)
-        self.assertIn("kGridUnitsMin = 256;", self.main)
+        self.assertIn("kGridUnitsMin = 1;", self.main)
         self.assertIn("kGridUnitsMax = 65536;", self.main)
         self.assertIn('key == "GridUnits" && !g_kit.gridUnits && KitGridUnits(value)', self.main)
 
@@ -99,13 +114,13 @@ class PluginTests(unittest.TestCase):
         self.assertIn(("HEADING", "heading"), rows)
         self.assertIn(("GRID", "grid"), rows)
 
-    def test_ships_without_the_settings(self):
-        self.assertNotRegex(self.ini, r"\nHeadingAt=")
+    def test_ships_heading_at_88_and_no_grid_units(self):
+        self.assertRegex(self.ini, r"\nHeadingAt=88\n")                   # verified on the PC, 12 Nov (e2e551c8)
         self.assertNotRegex(self.ini, r"\nGridUnits=")
         self.assertIn("; [Kit] HeadingAt=[-]<80, 84 or 88>", self.ini)
         self.assertIn("[Kit] GridUnits=<decimal>", self.ini)
         kit_now = kit.read_kit()
-        self.assertIsNone(kit_now["heading_at"])
+        self.assertEqual(kit_now["heading_at"], {"at": 0x88, "down": False})
         self.assertIsNone(kit_now["grid_units"])
         for text in ("`heading`", "`grid`", "HeadingAt=", "GridUnits=", "step=kit_map_bytes", "step=kit_map_cell",
                      "scripts/ui/pipboy_map_bytes.py"):
@@ -126,9 +141,9 @@ class KitTests(unittest.TestCase):
             kit.parse_kit("[Kit]\nHeadingAt=88\nHeadingAt=88\n" + self.PAGE)   # once
 
     def test_grid_units(self):
-        for value in ("256", "4096", "65536"):
+        for value in ("1", "100", "4096", "65536"):
             self.assertEqual(kit.parse_kit(f"[Kit]\nGridUnits={value}\n" + self.PAGE)["grid_units"], int(value))
-        for value in ("", "255", "65537", "4096.0", "-4096", "0x1000", "100000"):
+        for value in ("", "0", "65537", "4096.0", "-4096", "0x1000", "100000"):
             with self.assertRaises(kit.KitError, msg=value):
                 kit.check_grid_units(value, 1)
         with self.assertRaises(kit.KitError):
@@ -179,34 +194,51 @@ class HelperTests(unittest.TestCase):
         self.assertTrue(out[-1].startswith("no line"))
 
     def test_grid_units_over_two_cells(self):
-        lines = map_lines(1, [0, 0, 0, -989.0, 1146.0, 107.0], cell=0x2a0001000, xy=(-1, 0)) + \
-            map_lines(2, [0, 0, 0, 210.0, 1150.0, 107.0], cell=0x2a0005000, xy=(0, 0))
+        # the PC's presses (12 Nov): -2189.06 in cell -22, 10252.89 in 102; world=0x0 outdoors does not matter
+        lines = map_lines(1, [0, 0, 0, -2189.06, 1146.0, 107.0], cell=0x2a0001000, xy=(-22, 11)) + \
+            map_lines(2, [0, 0, 0, 10252.89, 1150.0, 107.0], cell=0x2a0005000, xy=(102, 11))
         code, out = self.run_log(lines, "--grid")
         self.assertEqual(code, 0)
-        self.assertEqual(out[-1], "GridUnits=4096")
+        self.assertEqual(out[-1], "GridUnits=100")
         self.assertIn("match", out[0])
+        self.assertEqual(self.run_log(lines, "--grid", "--units", "4096")[0], 1)
 
     def test_grid_needs_two_cells_and_matching_grids(self):
-        one = map_lines(1, [0, 0, 0, -989.0, 1146.0, 107.0]) + map_lines(2, [0, 0, 0, -500.0, 1146.0, 107.0])
+        one = map_lines(1, [0, 0, 0, -89.0, 46.0, 107.0], xy=(-1, 0)) + map_lines(2, [0, 0, 0, -50.0, 46.0, 107.0], xy=(-1, 0))
         code, out = self.run_log(one, "--grid")
         self.assertEqual((code, out[-1]), (1, "one cell only: walk across a border and press F11 again"))
-        wrong = map_lines(1, [0, 0, 0, -989.0, 1146.0, 107.0], xy=(-1, 0)) + \
-            map_lines(2, [0, 0, 0, 210.0, 1150.0, 107.0], cell=0x2a0005000, xy=(-1, 0))
+        wrong = map_lines(1, [0, 0, 0, -89.0, 46.0, 107.0], xy=(-1, 0)) + \
+            map_lines(2, [0, 0, 0, 10.0, 50.0, 107.0], cell=0x2a0005000, xy=(-1, 0))
         code, out = self.run_log(wrong, "--grid")
         self.assertEqual(code, 1)
         self.assertIn("DIFFERS", out[1])
-        self.assertEqual(self.run_log(wrong, "--grid", "--units", "8192")[0], 1)   # one cell over 8192
 
     def test_grid_without_the_cells_grid_prints_no_line(self):
-        lines = map_lines(1, [0, 0, 0, -989.0, 1146.0, 107.0], xy=None) + \
-            map_lines(2, [0, 0, 0, 210.0, 1150.0, 107.0], cell=0x2a0005000, xy=None)
+        lines = map_lines(1, [0, 0, 0, -89.0, 46.0, 107.0], xy=None) + \
+            map_lines(2, [0, 0, 0, 10.0, 50.0, 107.0], cell=0x2a0005000, xy=None)
         code, out = self.run_log(lines, "--grid")
         self.assertEqual(code, 1)
         self.assertIn("weaker: no line printed", out[-1])
 
-    def test_interiors_are_left_out(self):
-        lines = map_lines(1, [0, 0, 0, 10.0, 10.0, 0], world=0)
-        self.assertEqual(pmb.grid(pmb.dumps(lines), 4096), [])
+    def test_interiors_are_left_out_by_their_flags(self):
+        lines = map_lines(1, [0, 0, 0, 10.0, 10.0, 0], flags=0x1)
+        self.assertEqual(pmb.grid(pmb.dumps(lines), 100), [])
+        self.assertEqual(len(pmb.grid(pmb.dumps(map_lines(1, [0, 0, 0, 10.0, 10.0, 0])), 100)), 1)
+
+    def test_world_is_the_offset_found_outdoors_and_not_indoors(self):
+        lines = map_lines(1, [0] * 6, worlds={0x110: 0x2d0001000, 0x1A0: 0x2d0001000}) + \
+            map_lines(2, [0] * 6, cell=0x2a0005000, worlds={0x110: 0x2d0001000}) + \
+            map_lines(3, [0] * 6, cell=0x2a0009000, flags=0x1, worlds={})
+        code, out = self.run_log(lines, "--world")
+        self.assertEqual(code, 0)
+        self.assertEqual(out[-1], "the worldspace is at +110 (every outdoor press, no indoor one)")
+        self.assertIn("n=3 indoors none", out)
+        code, out = self.run_log(lines[:-2], "--world")               # no indoor press
+        self.assertEqual(code, 1)
+        self.assertEqual(out[-1], "no single place: press F11 outdoors in two cells and once indoors")
+        both = map_lines(1, [0] * 6, worlds={0x110: 1, 0x1A0: 1}) + map_lines(2, [0] * 6, worlds={0x110: 1, 0x1A0: 1}) + \
+            map_lines(3, [0] * 6, flags=0x1, worlds={})
+        self.assertEqual(self.run_log(both, "--world")[1][-1], "no single place: +110, +1A0 in every outdoor press")
 
 
 if __name__ == "__main__":
