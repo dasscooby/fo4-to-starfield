@@ -28,6 +28,11 @@ PLUGIN = "FO4SFAnimConsole.esm"
 MODEL_IN_PORT = "Meshes/fo4port/interiors/vault/props/console01.nif"
 
 
+def norm(text):
+    """Tool output in one normal form: forward slashes (the tool prints a path as it was given, Windows or not)."""
+    return text.replace("\\", "/")
+
+
 class ScriptTests(unittest.TestCase):
     def test_ids_stages_log_and_layout_match_the_tool_and_the_reader(self):
         self.assertTrue(PSC.startswith("Scriptname FO4SF_AnimConsoleQuest extends Quest"))
@@ -181,18 +186,21 @@ class StageTests(unittest.TestCase):
         info = self.run_tool("info", port, sf)
         self.assertEqual(info.returncode, 0, info.stderr)
         self.assertEqual(mac.parse_info(info.stdout), {"base_id": "001234", "model": MODEL_IN_PORT})
-        out = self.root / "b1"
-        proc = self.run_tool("build", port, sf, out, *self.margs)
+        out_dir = self.root / "b1"
+        proc = self.run_tool("build", port, sf, out_dir, *self.margs)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        check = self.run_tool("check", out / PLUGIN, port, sf, *self.margs)
+        check = self.run_tool("check", out_dir / PLUGIN, port, sf, *self.margs)
         self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
-        self.assertIn("masters [Starfield.esm, FO4Port.esm]", check.stdout)
-        self.assertIn("override: ACTI 001234:FO4Port.esm FO4Port_acti_091a48_fallout4 name 'Vault Door Controls'", check.stdout)
-        self.assertIn("ANAM AnimTextData\\Tables\\Graphs\\ActivatorStateGraph01.agx BNAM fo4port\\r\\skeleton.rig CNAM fo4port\\r\\animations", check.stdout)
-        self.assertIn("scripts [FO4SF_AnimConsoleQuest (0 properties)]", check.stdout)
-        wrong = self.run_tool("check", out / PLUGIN, port, sf, "--model", "other.nif", "--rig", "fo4port\\r\\skeleton.rig", "--anims", "fo4port\\r\\animations")
+        out = norm(check.stdout)
+        self.assertIn("masters [Starfield.esm, FO4Port.esm]", out)
+        self.assertIn("override: ACTI 001234:FO4Port.esm FO4Port_acti_091a48_fallout4 name 'Vault Door Controls'", out)
+        self.assertIn(norm("ANAM AnimTextData\\Tables\\Graphs\\ActivatorStateGraph01.agx BNAM fo4port\\r\\skeleton.rig CNAM fo4port\\r\\animations"), out)
+        self.assertIn("scripts [FO4SF_AnimConsoleQuest (0 properties)]", out)
+        wrong = self.run_tool("check", out_dir / PLUGIN, port, sf, "--model", "other.nif", "--rig", "fo4port\\r\\skeleton.rig", "--anims", "fo4port\\r\\animations")
         self.assertEqual(wrong.returncode, 1)
-        self.assertIn("the model is not Meshes/other.nif", wrong.stdout)
+        self.assertIn("the model is not Meshes/other.nif", norm(wrong.stdout))
+        backslash = self.run_tool("check", out_dir / PLUGIN, port, sf, "--model", "other\\sub.nif", "--rig", "fo4port\\r\\skeleton.rig", "--anims", "fo4port\\r\\animations")
+        self.assertIn("the model is not Meshes/other/sub.nif", norm(backslash.stdout))        # a backslash model compares in the same form
 
     def test_the_plugin_is_one_override_and_one_quest_raw(self):
         """Raw bytes: ACTI carries the FO4Port load index (1), the quest ours (2); the master list is Starfield.esm, FO4Port.esm."""
