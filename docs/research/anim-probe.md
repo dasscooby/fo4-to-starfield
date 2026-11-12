@@ -77,3 +77,8 @@ precheck proves the name, not the return type; the compile is the test); whether
 signature (the precheck reads the declaration's return type only); whether a quest can register for events from another reference; whether
 `PlayAnimation` takes a graph event name or a clip name (stages 21 to 28 send both kinds on purpose); the stage and event lists are guesses from
 the `.agx` reads of #744/#745.
+
+## What the two PC sessions showed (Claude, 12 Nov, reviewed heads 319b4e55 and 9865544b)
+Session 1 (no log): a spawned vanilla `001CCAC2` shows its own prompt "DISPLAY / ACTIVATE [E]"; `Play01` opens it, `Play02` closes it, `TurnOff` opens, `StateB_Play` closes, script `Activate(player)` opens; `StateA_Play`, `Trans01`, `TurnOn`, `Trans02` change nothing. Session 2 (the `AP` notices, logging still off): `REG S10 22/22 TRUE`; each `PlayAnimation` that moves it returns true and delivers three events: `Trans01`, `IsOff`, `Done` (opening) or `Trans02`, `IsOn`, `Done` (closing); script `Activate(player)` the same as opening. So the call plays, the object moves and `Done` tells the script a clip ended. Variant A passes in full.
+
+Two readings of the notices, for the next session: a **false** `PlayAnimation` does show: the notice is `AP PLAY s<N> <name> ok=False` (the script says it for every call, true or false; the game prints the bool as it does for any concatenated bool, so expect `False`/`FALSE` in the capital the game picks). No `W` notice was ever caught: a later notification replaces the earlier one and the `W` line comes 15 s after the call, when the last event notices have long left the screen or a newer one has taken the place; the events themselves are the finding. A notification is not a log: use script logging for a count.
