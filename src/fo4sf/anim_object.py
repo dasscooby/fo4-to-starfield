@@ -60,9 +60,9 @@ def fill_static_tracks(plan):
 
     Why (PC dump of the staged console, 12 Nov): CALUMI's read-back lists an .af's blocks in the order they were added, and each .af
     had only the 2 blocks of the moving bones (Lid, Button) against a 3-bone rig (root, Lid, Button), so a block's POSITION (0, 1)
-    differed from its bone's rig index (1, 2). Whether the game pairs a block with a bone by position or by name is unread, and the
-    sessions fit a by-position pairing off by one; the oracle script that CALUMI's author pattern follows writes a block for every
-    bone, root included. This writes the same: block i is rig bone i, name and position agree. Only objects built through
+    differed from its bone's rig index (1, 2). Whether the game pairs a block with a bone by position or by name is unread (the PC's
+    session reading is an inference that does not settle it either); the oracle script that CALUMI's author pattern follows writes a block
+    for every bone, root included. This writes the same: block i is rig bone i, name and position agree. Only objects built through
     anim_object get it; the door path is unchanged. The static sample carries the bone's own bind (so predictions agree) and
     native_door.prepare writes identity for it."""
     bones = plan["bones"]
