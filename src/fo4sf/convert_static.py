@@ -550,6 +550,54 @@ def rigid_skinned_parts(src, shape, bones):
     return parts
 
 
+def _rot_from_quat(q):
+    w, x, y, z = q
+    return (1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y), 2 * (x * y + w * z), 1 - 2 * (x * x + z * z),
+            2 * (y * z - w * x), 2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y))
+
+
+def _pose_boxes(plan, local_pts, unit_scale):
+    """Where the model's attachments sit in model space (metres), at rest and at the last sample of every clip, as an
+    axis-aligned box per attachment key: ({key: [[lo], [hi]]}, {clip: {key: [[lo], [hi]]}}). It is what the written rig and clip
+    PREDICT: a bone with a track in the clip takes that track's last sample (translation x unit_scale, rotation), any other
+    bone its bind. Compare it with a screenshot: it does not read the game."""
+    from . import nif as nifmod
+    bones = plan["bones"]
+
+    def worlds(local_of):
+        out = []
+        for i, bn in enumerate(bones):
+            t, r = local_of(i, bn)
+            loc = (t, r, 1.0)
+            out.append(loc if bn["parent"] == -1 else nifmod._compose(out[bn["parent"]], loc))
+        return out
+
+    def bind_local(i, bn):
+        b = bn["bind"]
+        return tuple(v * unit_scale for v in b["translation_source_units"]), _rot_from_quat(b["quaternion_wxyz"])
+
+    def boxes(world):
+        res = {}
+        for a in plan["attachments"]:
+            lt = a["local_transform"]
+            attach = (tuple(v * unit_scale for v in lt["translation_source_units"]), tuple(lt["rotation_row_major"]), lt["scale"])
+            pts = [_apply(world[a["bone"]], _apply(attach, p)) for p in local_pts[a["shape"]]]
+            res[str(a["shape"])] = [[round(min(p[k] for p in pts), 4) for k in range(3)], [round(max(p[k] for p in pts), 4) for k in range(3)]]
+        return res
+    rest = boxes(worlds(bind_local))
+    ends = {}
+    for clip in plan["clips"]:
+        last = {t["node"]: t["samples"][-1] for t in clip["tracks"]}
+
+        def local_of(i, bn, last=last):
+            smp = last.get(bn.get("node"))
+            if smp is None:
+                return bind_local(i, bn)
+            return tuple(v * unit_scale for v in smp["translation_source_units"]), _rot_from_quat(smp["quaternion_wxyz"])
+        ends[clip["name"]] = boxes(worlds(local_of))
+    return rest, ends
+
+
 def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, clip_files, unit_scale: float = UNIT_SCALE,
                            collision_template: bytes = None, leaf_physics_donor: bytes = None,
                            rest_pose_check: bool = False, aliases: dict = None,
@@ -712,4 +760,12 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
             report.append({"shape": name, "skinned": bool(s.skinned), "material": m, "fate": fate,
                            "bones": sorted({bone_of[k] for k in keys})})
         door["shapes"] = report
+        door["rig"] = [{"index": i, "name": bn["name"], "parent": bn["parent"],
+                        "bind_t_m": [round(v * unit_scale, 4) for v in bn["bind"]["translation_source_units"]]}
+                       for i, bn in enumerate(bones)]
+        door["attachments"] = [{"shape": shape_name(a["shape"] if isinstance(a["shape"], int) else int(str(a["shape"]).split(".")[0]),
+                                                    kept[a["shape"]][0]), "key": str(a["shape"]), "bone_index": a["bone"],
+                                "bone": bones[a["bone"]]["name"]} for a in plan["attachments"]]
+        rest, ends = _pose_boxes(plan, local_pts, unit_scale)
+        door["pose_boxes_m"] = {"rest": rest, "end_of_clip": ends}
     return files, door

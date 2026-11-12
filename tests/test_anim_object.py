@@ -205,6 +205,37 @@ class BuilderTests(unittest.TestCase):
         self.assertEqual(len(kept), len(rows) - 1)
         self.assertTrue(all(r["bones"] for r in kept))                                               # the others keep their bones
 
+    def test_the_rig_tracks_and_model_nodes_agree_on_every_bone_index(self):
+        """Rig bone order, the track index a clip files its block under, and the model's node order all come from plan['bones']:
+        a swap between them (the lid's turn landing on the button) must be impossible on a fixture, and is what `inspect` checks
+        on the real stage."""
+        (files, anim), plan = self.build()
+        anim = {**anim, "clips": anim_object.clip_table(plan, convert_static.UNIT_SCALE)}
+        rig = anim["rig"]
+        self.assertEqual([r["name"] for r in rig], [b["name"] for b in plan["bones"]])
+        model = nif.parse(files["meshes/fo4port/vault/console_anim.nif"])
+        order = [model.strings[struct.unpack_from("<i", model.blocks[i])[0]].decode() for i in range(len(model.blocks)) if model.type_of(i) == "NiNode"]
+        self.assertEqual([n for n in order if n in {r["name"] for r in rig}], [r["name"] for r in rig])
+        for c in anim["clips"]:
+            for t in c["tracks"]:
+                self.assertEqual(rig[t["bone_index"]]["name"], t["bone"])
+        att = {x["key"]: x for x in anim["attachments"]}
+        self.assertEqual({x["bone"] for x in att.values()}, {"Root", "LeafA", "LeafB"})
+        for x in att.values():
+            self.assertEqual(rig[x["bone_index"]]["name"], x["bone"])
+
+    def test_predicted_end_boxes_move_only_the_shapes_on_animated_bones(self):
+        (_, anim), _ = self.build()
+        rest, ends = anim["pose_boxes_m"]["rest"], anim["pose_boxes_m"]["end_of_clip"]
+        att = {x["key"]: x["bone"] for x in anim["attachments"]}
+        play = ends["StateA_Play"]
+        for k, box in play.items():
+            if att[k] == "Root":
+                self.assertEqual(box, rest[k])                       # a static shape never moves
+            else:
+                self.assertNotEqual(box, rest[k])                    # the leaves swing in the fixture's first clip
+        self.assertEqual(ends["StateA_Idle"], ends["StateA_Play"])   # the hold stays where the clip ended
+
     def test_a_shape_without_a_material_is_reported_as_left_out(self):
         f = console_nif()
         count = len([s for s in nif.fo4_trishapes(f) if s.positions and s.triangles])

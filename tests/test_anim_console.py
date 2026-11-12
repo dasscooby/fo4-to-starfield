@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT / "scripts" / "newgame"))
 sys.path.insert(0, str(ROOT / "scripts" / "planet"))
 sys.path.insert(0, str(ROOT / "src"))
 import make_anim_console as mac  # noqa: E402
-from fo4sf import anim_object, nif  # noqa: E402
+from fo4sf import anim_object, convert_static, nif  # noqa: E402
 from test_anim_object import STATES, console_nif  # noqa: E402
 from test_anim_probe import BASES, fake_compiler, fake_sources  # noqa: E402
 
@@ -185,9 +185,11 @@ class FakeConv:
             p = os.path.join(self.staging, *rel.split("/"))
             os.makedirs(os.path.dirname(p), exist_ok=True)
             Path(p).write_bytes(data)
-        clips = [{"name": n, "seconds": 1.0 if "Play" in n else 0.0, "frames": 30 if "Play" in n else 0, "bones": ["LeafA"],
-                  "hold_of": None if "Play" in n else n.replace("Idle", "Play"), "sound_keys": []} for n in anim_object.slot_names(states)]
-        return {"ok": True, "out_name": out, "anim": {"skeleton": out.replace("/", "\\") + "\\characterassets\\skeleton.rig",
+        from test_anim_object import BuilderTests
+        (built, anim), plan = BuilderTests().build()                      # a real conversion of the fixture: rig, tracks, shapes, poses
+        Path(os.path.join(self.staging, *f"meshes/{out}.nif".split("/"))).write_bytes(built["meshes/fo4port/vault/console_anim.nif"])
+        clips = anim_object.clip_table(plan, convert_static.UNIT_SCALE)
+        return {"ok": True, "out_name": out, "anim": {**anim, "skeleton": out.replace("/", "\\") + "\\characterassets\\skeleton.rig",
                                                       "animations": out.replace("/", "\\") + "\\animations", "clips": clips, "states": dict(states)}}
 
 
@@ -346,6 +348,63 @@ class StageTests(unittest.TestCase):
         with self.assertRaises(SystemExit) as ctx:
             mac.stage(self.args(self.root / "staged-n"), converter=lambda a, st: (Nothing(b""), FakeConv(st)))
         self.assertIn("name it with --model", str(ctx.exception))
+
+    def test_inspect_reads_the_staged_rig_tracks_nodes_and_predicted_poses(self):
+        import contextlib
+        import io
+        make, _ = self.converter()
+        out = self.root / "staged-i"
+        mac.stage(self.args(out), converter=make)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = mac.main(["inspect", "--stage", str(out)])
+        text = buf.getvalue()
+        self.assertIn("rig bones (index: name", text)
+        self.assertIn("matches the rig order: yes", text)
+        self.assertIn("StateA_Play: moves Root[3]@LeafA, Root[4]@LeafB", text)
+        self.assertIn("StateB_Play: moves nothing", text)
+        self.assertEqual(code, 0)
+
+    def test_inspect_catches_a_track_filed_under_the_wrong_rig_index_and_a_swapped_model_order(self):
+        import contextlib
+        import io
+        from test_anim_object import BuilderTests
+        (files, anim), plan = BuilderTests().build()
+        anim = {**anim, "clips": anim_object.clip_table(plan, convert_static.UNIT_SCALE)}
+        names = [r["name"] for r in anim["rig"]]
+        model = nif.serialize(console_nif())
+        order, _all = mac.model_bone_order(model, names)
+        self.assertIsInstance(order, list)
+        stage_dir = self.root / "staged-sw"
+        (stage_dir / "Data" / "meshes" / "fo4port" / "vault").mkdir(parents=True)
+        (stage_dir / "Data" / "meshes" / "fo4port" / "vault" / "console_anim.nif").write_bytes(files["meshes/fo4port/vault/console_anim.nif"])
+        good = {"original": "x", "model": "fo4port\\vault\\console_anim.nif", "states": STATES, "anim": anim}
+        (stage_dir / "anim_manifest.json").write_text(json.dumps(good))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.assertEqual(mac.main(["inspect", "--stage", str(stage_dir)]), 0)
+        text = buf.getvalue()
+        self.assertIn("matches the rig order: yes", text)
+        self.assertIn("StateA_Play (1.0 s): ", text)
+        self.assertRegex(text, r"LeafA -> 1 \(\d+ keys\)")
+        self.assertIn("StateA_Play: moves Root[3]@LeafA, Root[4]@LeafB", text)    # a clip that moves nothing says so, one that moves says what
+        self.assertIn("StateB_Play: moves nothing", text)
+        bad = json.loads(json.dumps(good))
+        for c in bad["anim"]["clips"]:
+            for t in c["tracks"]:
+                t["bone_index"] = 2 if t["bone"] == "LeafA" else 1             # a swap of the two bone indices
+        (stage_dir / "anim_manifest.json").write_text(json.dumps(bad))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.assertEqual(mac.main(["inspect", "--stage", str(stage_dir)]), 1)
+        self.assertIn("track LeafA filed under rig index 2 = LeafB", buf.getvalue())
+        bad2 = json.loads(json.dumps(good))
+        bad2["anim"]["rig"][1]["name"], bad2["anim"]["rig"][2]["name"] = "LeafB", "LeafA"
+        (stage_dir / "anim_manifest.json").write_text(json.dumps(bad2))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.assertEqual(mac.main(["inspect", "--stage", str(stage_dir)]), 1)
+        self.assertIn("model node order differs from rig order", buf.getvalue())
 
     def test_a_changed_stage_or_starfield_esm_is_refused_by_verify(self):
         make, _ = self.converter()

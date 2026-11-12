@@ -23,6 +23,10 @@ usage:
          compile; the register call in the shape the game declares; BaseId written into the script), plan.json with a
          SHA-256 of every file, anim_manifest.json (the clip table, the state map, the files) and README.txt. Built in a new
          <out>.partial-<time>-<pid> and renamed to <out> only when every step passed.
+  python make_anim_console.py inspect --stage <staged kit folder>
+      read only, offline: the rig's bone order, which rig index every clip track is filed under, the written model's node order
+      (is it the rig's?), which bone every shape rides and its box, and the PREDICTED end-of-clip box of every shape per clip.
+      It reads anim_manifest.json and the model NIF; it does not read the .rig/.af (CALUMI's files) or the game.
   python make_anim_console.py log [--file <FO4SFAnimD.0.log>]
       the run's user log as one table and a verdict (src/fo4sf/anim_probe_log.py, the same reader as variant A).
 Nothing here installs anything: scripts/newgame/anim_console_install.py does, on the owner's word, game closed. Needs numpy, the
@@ -323,6 +327,73 @@ Session card: docs/research/anim-console-probe.md. THROWAWAY STATE ONLY, NO SAVE
     return 0
 
 
+def model_bone_order(nif_bytes, rig_names):
+    """The names of the written model's NiNode blocks that are rig bones, in file order (door_model.build adds the bones in rig
+    order, so a different order here would be a swap between the rig's indices and the model's nodes)."""
+    from fo4sf import nif
+    f = nif.parse(nif_bytes)
+    names = []
+    for i in range(len(f.blocks)):
+        if f.type_of(i) == "NiNode":
+            idx = struct.unpack_from("<i", f.blocks[i])[0]
+            names.append(f.strings[idx].decode("latin-1") if 0 <= idx < len(f.strings) else "")
+    return [n for n in names if n in set(rig_names)], names
+
+
+def inspect_stage(a):
+    """Read-only: what a staged kit's rig, tracks, model nodes and shapes say, with the predicted pose of every shape at the end of
+    each clip. No game, no CALUMI: it reads anim_manifest.json and the model NIF the stage wrote."""
+    with open(os.path.join(a.stage, "anim_manifest.json"), encoding="utf-8") as f:
+        man = json.load(f)
+    anim = man["anim"]
+    rig = anim.get("rig")
+    if not rig:
+        print("this stage's manifest has no rig table (staged by an older head): re-stage")
+        return 2
+    print(f"original {man['original']}  model {man['model']}  states {man['states']}")
+    print("rig bones (index: name, parent, bind in m):")
+    for r in rig:
+        print(f"  {r['index']}: {r['name']} (parent {r['parent']}) {r['bind_t_m']}")
+    model = os.path.join(a.stage, "Data", "meshes", *man["model"].replace("\\", "/").split("/"))
+    problems = []
+    if os.path.isfile(model):
+        want = [r["name"] for r in rig]
+        try:
+            order, _all = model_bone_order(open(model, "rb").read(), want)
+        except Exception as e:                      # noqa: BLE001  (a model our parser cannot read is said, not hidden)
+            order = None
+            problems.append(f"the model could not be parsed: {type(e).__name__}: {e}")
+        if order is not None:
+            print(f"model NiNode order (bones only): {order}")
+            print("  matches the rig order: " + ("yes" if order == want else f"NO (rig {want})"))
+            if order != want:
+                problems.append("model node order differs from rig order")
+    else:
+        print(f"model file {model} not found")
+    print("clip tracks (clip: bone -> rig index, keys):")
+    for c in anim["clips"]:
+        print(f"  {c['name']} ({c['seconds']} s): " + (", ".join(f"{t['bone']} -> {t['bone_index']} ({t['keys']} keys)" for t in c.get("tracks", [])) or "no tracks"))
+        for t in c.get("tracks", []):
+            if rig[t["bone_index"]]["name"] != t["bone"]:
+                problems.append(f"{c['name']}: track {t['bone']} filed under rig index {t['bone_index']} = {rig[t['bone_index']]['name']}")
+    print("shapes (name: fate, bone, rest box in m):")
+    boxes = anim.get("pose_boxes_m", {})
+    atts = {x["key"]: x for x in anim.get("attachments", [])}
+    for k, x in atts.items():
+        print(f"  {x['shape']} [{k}]: rides {x['bone']} (rig {x['bone_index']}), rest {boxes.get('rest', {}).get(k)}")
+    print("predicted end-of-clip box per shape (differs from rest = the shape moves in that clip):")
+    for clip, per in boxes.get("end_of_clip", {}).items():
+        moved = [f"{atts[k]['shape']}[{k}]@{atts[k]['bone']}" for k, b in per.items() if b != boxes["rest"][k]]
+        print(f"  {clip}: moves {', '.join(moved) or 'nothing'}")
+        for k in per:
+            if per[k] != boxes["rest"][k]:
+                print(f"      {atts[k]['shape']}[{k}]@{atts[k]['bone']} {boxes['rest'][k]} -> {per[k]}")
+    for p in problems:
+        print("FAIL  " + p)
+    print("inspect: " + ("ok" if not problems else f"{len(problems)} problem(s)"))
+    return 0 if not problems else 1
+
+
 def log(a):
     if not os.path.isfile(a.file):
         print(f"no log at {a.file}")
@@ -376,10 +447,12 @@ def main(argv=None):
     s.add_argument("--foley", default="", help="a Starfield foley name for the clips' sound frames (default: none, no sound)")
     s.add_argument("--model", default="")
     s.add_argument("--edid", default=EDID)
+    i = sub.add_parser("inspect")
+    i.add_argument("--stage", required=True, help="a staged kit folder (make_anim_console.py stage --out)")
     g = sub.add_parser("log")
     g.add_argument("--file", default=LOG)
     a = p.parse_args(argv)
-    return {"precheck": precheck, "clips": clips, "stage": stage, "log": log}[a.cmd](a)
+    return {"precheck": precheck, "clips": clips, "stage": stage, "inspect": inspect_stage, "log": log}[a.cmd](a)
 
 
 if __name__ == "__main__":
