@@ -12,6 +12,9 @@ Third head: the DOOR record's ANAM (graph .agx), BNAM (.rig) and CNAM (animation
 named (no Meshes prefix), its strings printed; the folder listed and each .af / .afx / .rig / .agx under it read. The game's own
 graph lives in Starfield's archives: add them with --game-archive.
 
+Fourth head: each .agx file read also gets the values of its fields Event, Send Event On End, Enter Events, Exit Events printed
+(format-blind: the strings after each field name and the raw bytes; the .agx layout is not yet read).
+
 Also (FAL-476 second head): every subrecord of the base record is printed (signature, size, first bytes, text) and each 4-byte
 one that holds a form id of this plugin is followed one hop (the DOOR record's sound and other links, with any file they
 name); the Fallout 4 original of each model is looked up by the port path with its prefix removed and else by file name
@@ -219,6 +222,40 @@ def read_nif(data):
     return lines, (n, graphs)
 
 
+AGX_FIELDS = ("Event", "Send Event On End", "Enter Events", "Exit Events")
+AGX_SHOWN = 12       # occurrences of one field printed
+AGX_AFTER = 160      # bytes after a field name that are read
+
+
+def agx_pattern(field):
+    """A field name as written with a space, an underscore or nothing between its words, any case, not inside a longer word."""
+    words = field.split()
+    return re.compile(rb"(?<![A-Za-z0-9])" + rb"[ _]?".join(re.escape(w.encode()) for w in words) + rb"(?![a-z])", re.I)
+
+
+def agx_field_lines(data):
+    """Values of the .agx fields Event, Send Event On End, Enter Events, Exit Events, read format-blind (the layout is unread):
+    for each occurrence of a field name, the printable strings that follow it (split at control bytes) and the raw bytes.
+    A bare Event hit inside another field's name (Send Event On End) is marked, not dropped."""
+    out = [f"  .agx fields {', '.join(AGX_FIELDS)} (format-blind: strings after each name, then raw hex; nothing is a verdict):"]
+    longer = [m.span() for other in AGX_FIELDS[1:] for m in agx_pattern(other).finditer(data)]
+    for field in AGX_FIELDS:
+        hits = list(agx_pattern(field).finditer(data))
+        if not hits:
+            out.append(f"    {field}: not found in the file")
+            continue
+        out.append(f"    {field}: {len(hits)} occurrence(s)" + (f", first {AGX_SHOWN} shown" if len(hits) > AGX_SHOWN else ""))
+        for m in hits[:AGX_SHOWN]:
+            tail = data[m.end():m.end() + AGX_AFTER]
+            before = data[max(0, m.start() - 24):m.start()]
+            vals = [t.decode("latin-1") for t in re.findall(rb"[\x20-\x7e]{2,}", tail)]
+            ahead = [t.decode("latin-1") for t in re.findall(rb"[\x20-\x7e]{2,}", before)]
+            inside = field == AGX_FIELDS[0] and any(a <= m.start() and m.end() <= b for a, b in longer)
+            out.append(f"      @{m.start()} matched {m.group().decode('latin-1')!r}{' (inside a longer field name)' if inside else ''}; before: {' | '.join(ahead[-2:]) or '-'}; after: {' | '.join(vals[:6]) or '-'}")
+            out.append(f"        hex after: {tail[:32].hex(' ')}")
+    return out
+
+
 def hkx_lines(name, data):
     strings = []
     seen = set()
@@ -356,6 +393,8 @@ def file_report(archives, path, label, fo4):
         out.append(f"  {label}: read from {where}: {len(data)} bytes")
         if low.endswith(".hkx") or anim:
             out += hkx_lines(model + " in " + where, data)
+            if low.endswith(".agx"):
+                out += agx_field_lines(data)
         elif low.endswith(".kf"):
             out.append("  a .kf clip: strings " + " | ".join(ascii_strings(data, 3)[:60]))
         else:
