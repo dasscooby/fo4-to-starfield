@@ -15,6 +15,9 @@ Probe kit only: nothing goes into the owner's install; Claude runs it for one se
   enabled, stages 10 20 21..29 30 40 60, no properties) and ACTI `FO4SF_AnimGenericControl` (0x801): a **copy** of the vanilla holder `001CCAC2`
   (`IndIntAddonArtifactHolder01`; same model, same rig, every other field and component) under our form id, whose animation graph component names
   `genericstategraph01` and whose clip folder (CNAM) is ours. `001CCAC2` itself is not overridden (that would retarget every holder while the plugin is loaded).
+  The copy changes **only** the component's ANAM and CNAM: BNAM, DNAM, ENAM and anything else it carries stay the vanilla record's, and `check` compares BNAM, DNAM and ENAM with the vanilla
+  record's (the Courier's FAL-579 hold: an earlier build rebuilt the component and dropped DNAM and ENAM). Supported (Claude, PC, 12 Nov 21:37 UTC, not replayed here): the real `001CCAC2` component has ANAM, BNAM,
+  CNAM only, no DNAM or ENAM, so nothing was lost on this record; the fix keeps the tool correct for a record that does carry them.
   Commands `info`, `build`, `check`, `fixture`; `build` refuses a graph that is not `genericstategraph01` and a clip folder that is the vanilla holder's; `check`
   reads the plugin back (exactly two records, own form keys, masters exactly `[Starfield.esm]`, one graph component with the given ANAM/CNAM and the vanilla rig).
 - `scripts/newgame/FO4SF_AnimGenericQuest.psc` (new): variant A's quest (PR #746) with the spawn pointed at ACTI 0x801 of our plugin and the call and event lists below.
@@ -44,7 +47,8 @@ inside an `.af` is the vanilla one is **unread**. The copied files are the game'
 
 Set the next stage only after the previous window has closed (its `W sN quiet` / `W sN heard n` notice). Stages are one-shot: a stage set twice runs once.
 Events registered (the Scribe's list, `Trans03` (an Exit Event of the graph's summary), and `Play05`, `TurnOn`, `TurnOff`, `Opened`, which the real links name): `Trans01`, `Done`, `Trans02`, `Trans03`, `IsOn`, `IsOff`, `AnimFinish`, `IdleStop`,
-`StateA_Idle` .. `StateD_Play`, `Play01` .. `Play05`. Every call's return and every event with its time is a line in the user log `FO4SFAnimG`
+`StateA_Idle`, `StateA_Play`, `StateB_Idle`, `StateB_Play`, `StateC_Idle`, `StateC_Play`, `StateD_Idle`, `StateD_Play`, `Play01`, `Play02`, `Play03`, `Play04`, `Play05`,
+`TurnOn`, `TurnOff`, `Opened` (24 names, in the quest's order). Every call's return and every event with its time is a line in the user log `FO4SFAnimG`
 (`make_anim_generic.py log` reads it); every finding also shows as an `AP ...` notice, for a session with script logging off. The log cannot say whether the object moved or
 held a pose: that is a screenshot before and after each name.
 
