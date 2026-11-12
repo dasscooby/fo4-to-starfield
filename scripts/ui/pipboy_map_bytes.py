@@ -15,7 +15,8 @@ page's HEADING then shows it in compass degrees.
 
 Grid (--grid): F11 in one cell, walk until POSITION's x or y on the MAP page has crossed a multiple of --units (100:
 the PC's presses, 12 Nov, read cell_x as x over 100; Starfield's units, not Fallout 4's 4096) by 30 to 60, F11 again.
-For each dump in a cell whose flags lack libxse's kInterior bit (1) it compares the cell's own grid with POSITION's x
+For each outdoor dump (one whose worldspace scan found a TESWorldSpace, or without a scan, whose cell's world= is not
+0x0: the PC's indoor press had libxse's kInterior bit clear, 12 Nov) it compares the cell's own grid with POSITION's x
 and y over --units, rounded down. When every such dump matches and they cover two cells or more
 it prints `GridUnits=<units>`: the MAP page's GRID then shows POSITION over it. If the cell's grid was unreadable it
 says whether the cell's address changed exactly where the rounded position did, which is weaker and prints nothing.
@@ -71,9 +72,14 @@ def _entry(found, n):
     return found.setdefault(int(n), {"floats": None, "cell": None, "worlds": {}, "scanned": False})
 
 
-def interior(cell):
-    """libxse's kInterior bit in the cell's flags; None when the flags were unreadable."""
-    return None if cell["flags"] == "unreadable" else bool(int(cell["flags"], 16) & 1)
+def indoors(entry):
+    """True for a press indoors: its worldspace scan found none (or, without a scan, the cell's world= read 0x0);
+    None when neither was logged."""
+    if entry["scanned"]:
+        return not entry["worlds"]
+    if entry["cell"] and entry["cell"]["world"] != "unreadable":
+        return entry["cell"]["world"] == "0x0"
+    return None
 
 
 def turned(a, b):
@@ -108,12 +114,12 @@ def heading_line(rows, moved):
 
 
 def grid(found, units):
-    """[(n, x, y, (floor x, floor y), cell grid or None, cell address, matches)] for each dump in a cell whose flags
-    were read and lack the interior bit, whose floats were read."""
+    """[(n, x, y, (floor x, floor y), cell grid or None, cell address, matches)] for each outdoor dump (indoors() is
+    False) whose floats were read."""
     rows = []
     for n in sorted(found):
         floats, cell = found[n]["floats"], found[n]["cell"]
-        if not floats or not cell or interior(cell) is not False:
+        if not floats or not cell or indoors(found[n]) is not False:
             continue
         x, y = floats[3], floats[4]
         rounded = (math.floor(x / units), math.floor(y / units))
@@ -138,13 +144,13 @@ def cell_changes_agree(rows):
 
 def world(found):
     """(outdoor offsets: [(n, {offset: addr})], indoor: [(n, {offset: addr})], offsets found in every outdoor press and
-    in no indoor one) over the presses whose cell scan was logged and whose flags were read."""
+    in no indoor one) over the presses whose cell scan was logged; a press whose scan found none counts as indoors."""
     outdoor, indoor = [], []
     for n in sorted(found):
         entry = found[n]
-        if not entry["scanned"] or not entry["cell"] or interior(entry["cell"]) is None:
+        if not entry["scanned"]:
             continue
-        (indoor if interior(entry["cell"]) else outdoor).append((n, entry["worlds"]))
+        (indoor if indoors(entry) else outdoor).append((n, entry["worlds"]))
     common = set.intersection(*(set(w) for _, w in outdoor)) if outdoor else set()
     common -= {at for _, w in indoor for at in w}
     return outdoor, indoor, sorted(common)
@@ -175,7 +181,7 @@ def main(argv=None):
     if args.grid:
         rows = grid(found, args.units)
         if not rows:
-            print("no kit_map_bytes and kit_map_cell pair in a cell whose flags say exterior")
+            print("no kit_map_bytes and kit_map_cell pair outdoors")
             return 1
         for n, x, y, rounded, xy, cell, ok in rows:
             print(f"n={n} x={x:.1f} y={y:.1f} over {args.units}={rounded[0]},{rounded[1]} "

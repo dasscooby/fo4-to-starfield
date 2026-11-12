@@ -165,13 +165,13 @@ namespace
 	constexpr std::size_t   kAvifEditorIdAt = 0x40;          // libxse RE::ActorValueInfo::editorID
 	constexpr std::size_t   kBaseObjectAt = 0x80 + 0x18;     // libxse RE::TESObjectREFR::data, OBJ_REFR::objectReference
 	constexpr std::size_t   kParentCellAt = 0xB0;            // libxse RE::TESObjectREFR::parentCell
-	constexpr std::size_t   kCellWorldAt = 0x118;            // libxse RE::TESObjectCELL::cellWorldspace: 0 outdoors on the PC (FAL-595)
+	constexpr std::size_t   kCellWorldAt = 0x110;            // FAL-595, PC at 4d1e7641: kit_map_world at=+110 "Mars" outdoors in two
+	                                                         // cells, found=0 indoors (libxse names +0x118, which read 0)
 	constexpr std::size_t   kCellScanEnd = 0x200;            // FAL-595: F11 looks for the worldspace in the cell's +0x38 to here
 	constexpr std::size_t   kAngleAt = 0x80;                 // FAL-595: libxse OBJ_REFR::angle, three floats (radians)
 	constexpr std::size_t   kMapDumpBytes = 0x40;            // F11: the player's +0x80 to +0xC0 (angle, location, ... parentCell)
 	constexpr std::size_t   kCellFlagsAt = 0x40;             // libxse RE::TESObjectCELL::cellFlags (kInterior = 1)
 	constexpr std::size_t   kCellDataAt = 0x58;              // libxse RE::TESObjectCELL::cellData: EXTERIOR_DATA*, cellX, cellY
-	constexpr std::uint32_t kCellInterior = 0x1;             // libxse TESObjectCELL::Flag::kInterior, in cellFlags
 	constexpr std::uint32_t kGridUnitsMin = 1;               // [Kit] GridUnits=: a cell's width in game units, 1 ...
 	constexpr std::uint32_t kGridUnitsMax = 65536;           // ... to 65536 (the PC, 12 Nov: cell_x is x over 100)
 	constexpr std::size_t   kLevelAt = 0x08 + 0x06;          // libxse RE::TESActorBaseData::actorData, ACTOR_BASE_DATA::level
@@ -1395,9 +1395,8 @@ namespace
 		if (!Peek(cell + kCellWorldAt, world)) {
 			return { cellText, Unknown("world", "reason=fault") };
 		}
-		if (!world) {   // FAL-595: read 0 outdoors too (the PC, 12 Nov), so it says nothing about an interior
-			return { cellText, Unknown("world", std::format("reason=world_null at=+{:03X} (step=kit_map_world on F11 finds it)",
-								   kCellWorldAt)) };
+		if (!world) {   // FAL-595: 0 at +0x110 indoors, a TESWorldSpace outdoors (the PC, 12 Nov)
+			return { cellText, "NONE (INTERIOR)" };
 		}
 		if (!IsType(world, "TESWorldSpace@@", worldType)) {
 			return { cellText, Unknown("world", std::format("reason=type world={} type={}", Hex(world),
@@ -2181,23 +2180,23 @@ namespace
 	}
 
 	// FAL-595: the player's cell on the grid, POSITION's x and y over [Kit] GridUnits=, rounded down (? without the
-	// setting; NONE (INTERIOR) when the cell's flags say so); logged at the first read and at each change:
+	// setting; NONE (INTERIOR) where WORLD says so: the PC's indoor press had libxse's kInterior clear); logged at the
+	// first read and at each change:
 	// step=kit_grid units= x= y=
 	std::string GridText()
 	{
 		if (!g_kit.gridUnits) {
 			return Unknown("grid", "reason=no_grid_units (GridUnits= in [Kit])");
 		}
-		std::uintptr_t cell = 0;
-		std::uint32_t  flags = 0;
-		ObjectType     cellType;
-		if (!CheckSingleton("PlayerCharacter", kPlayerSingleton, kPlayerRtti, g_playerOk) ||
-			!Peek(Singleton(kPlayerSingleton) + kParentCellAt, cell) || !IsType(cell, "TESObjectCELL@@", cellType) ||
-			!Peek(cell + kCellFlagsAt, flags)) {
-			return Unknown("grid", "reason=cell");
+		if (!CheckSingleton("PlayerCharacter", kPlayerSingleton, kPlayerRtti, g_playerOk)) {
+			return Unknown("grid", "reason=no_player");
 		}
-		if (flags & kCellInterior) {   // libxse's cellFlags; the F11 kit_map_cell line shows it indoors and out
-			return "NONE (INTERIOR)";
+		const auto world = PlaceText().second;
+		if (world == "NONE (INTERIOR)") {
+			return world;
+		}
+		if (world == "?") {
+			return Unknown("grid", "reason=world");
 		}
 		std::array<float, 3> xyz{};
 		if (!ReadPosition(xyz) || !std::isfinite(xyz[0]) || !std::isfinite(xyz[1])) {

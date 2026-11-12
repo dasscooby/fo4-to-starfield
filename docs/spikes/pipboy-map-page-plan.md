@@ -10,11 +10,11 @@ beside it. The pause default (`Pause=0`) does not change.
 
 | Row | Value | Read |
 |---|---|---|
-| WORLD | the worldspace's name (`NameText`); `?` when the pointer reads 0 (FAL-595: it does outdoors too) | the player's `parentCell` (`+0xB0`), its worldspace |
+| WORLD | the worldspace's name (`NameText`), or `NONE (INTERIOR)` (FAL-595: read at `+0x110`, found on the PC) | the player's `parentCell` (`+0xB0`), its worldspace |
 | CELL | the cell's name (`NameText`) | the same cell |
 | POSITION | `x y z`, whole game units | `ReadPosition`: the player's `OBJ_REFR::location` at `+0x80 + 0x0C` (Peek) |
 | HEADING | compass degrees, `0` to `359`; `HeadingAt=88` verified on the PC (12 Nov) and shipped | the angle float `HeadingAt=` names (Peek) |
-| GRID | `x y`, POSITION over a cell's width, rounded down; `NONE (INTERIOR)` by the cell's flags; `?` until `[Kit] GridUnits=` is set | `ReadPosition` |
+| GRID | `x y`, POSITION over a cell's width, rounded down; `NONE (INTERIOR)` as WORLD; `GridUnits=100` verified on the PC and shipped | `ReadPosition` |
 | TIME | the game hour | `GameHour` |
 | DAYS PASSED | the day count | `GameDaysPassed` |
 
@@ -64,7 +64,8 @@ Two rows on MAP/WORLD, each `?` with one `step=page_unknown` line saying why unt
   `0.0000` to `1.5708`, radians rising to the right). Positions are Starfield's units: `cell_x` was x over 100 on five
   presses (Fallout 4's 4096 and the border notes' warning). `world=0x0` on every outdoor `kit_map_cell` line, so
   libxse's `cellWorldspace` at `+0x118` is not where this runtime keeps it; F11 now looks for it (`step=kit_map_world`,
-  the helper's `--world`).
+  the helper's `--world`). At `4d1e7641` (PC, 12 Nov) it found Mars at `+0x110` on every outdoor press and nothing
+  indoors, `cell_y` followed y over 100 (`modpos y 60`: -16 to -15), and HEADING read `270` on the page.
 - **R2:** `coc FO4Core_RedRocketSpawn` and read POSITION. Compare it with the Red Rocket spawn marker's local
   position in `map-markers.md` (`-989.257, 1146.514, 107.143`) to fix the units and the offset between the overlay
   and Fallout 4's Commonwealth grid. Do the same once at Sanctuary.
