@@ -48,7 +48,8 @@ def prepare(plan, unit_scale, fps=30):
             if source['node'] not in index:
                 raise NifError('door clip track has no rig bone')
             bone_index=index[source['node']];bone=bones[bone_index];bind=bone['bind']
-            if not door_rig.is_identity_rotation(bind['quaternion_wxyz']):
+            static=bool(source.get('static'))        # anim_object.fill_static_tracks: a bone that stays at its bind pose, still given its block
+            if not static and not door_rig.is_identity_rotation(bind['quaternion_wxyz']):
                 raise NifError('animated door bone needs an identity bind rotation (door_rig.animated_identity_binds)')
             frames={};previous=None
             for sample in source['samples']:
@@ -57,14 +58,14 @@ def prepare(plan, unit_scale, fps=30):
                     raise NifError('native door sample is not on the 30 fps grid')
                 if abs(sample['scale']-1)>1e-5:
                     raise NifError('animated door scale is not supported')
-                q=list(sample['quaternion_wxyz']);length=math.sqrt(sum(x*x for x in q))
+                q=[1.0,0.0,0.0,0.0] if static else list(sample['quaternion_wxyz']);length=math.sqrt(sum(x*x for x in q))
                 q=[x/length for x in q]
                 if previous is not None and sum(a*b for a,b in zip(q,previous))<0:
                     q=[-x for x in q]                    # keep one hemisphere: no spurious 360 degree spin
                 previous=q
                 frames[frame]={'frame':frame,'quaternion_wxyz':q,
                                'translation':[(a-b)*unit_scale for a,b in zip(sample['translation_source_units'],
-                                                                             bind['translation_source_units'])]}
+                                                                             bind['translation_source_units'])] if not static else [0.0,0.0,0.0]}
             keys=[frames[f] for f in sorted(frames)]
             moves=any(abs(x)>MOVE_EPSILON for k in keys for x in k['translation'])
             tracks.append({'name':bone['name'],'bone':bone_index,'keys':keys,

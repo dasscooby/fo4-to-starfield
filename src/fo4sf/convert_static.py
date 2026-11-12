@@ -587,7 +587,7 @@ def _pose_boxes(plan, local_pts, unit_scale):
     rest = boxes(worlds(bind_local))
     ends = {}
     for clip in plan["clips"]:
-        last = {t["node"]: t["samples"][-1] for t in clip["tracks"]}
+        last = {t["node"]: t["samples"][-1] for t in clip["tracks"] if not t.get("static")}
 
         def local_of(i, bn, last=last):
             smp = last.get(bn.get("node"))
@@ -695,7 +695,7 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
              2 * (y * z - w * x), 2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y))
         local = (tuple(v * unit_scale for v in b["translation_source_units"]), r, b["scale"])
         world.append(local if bone["parent"] == -1 else nifmod._compose(world[bone["parent"]], local))
-    animated = {t["node"] for clip in plan["clips"] for t in clip["tracks"]}
+    animated = {t["node"] for clip in plan["clips"] for t in clip["tracks"] if not t.get("static")}      # a static track moves nothing
     moving = set()
     for i, bone in enumerate(bones):
         if bone["node"] in animated or (bone["parent"] != -1 and bone["parent"] in moving):

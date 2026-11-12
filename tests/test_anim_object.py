@@ -121,7 +121,7 @@ class BuilderTests(unittest.TestCase):
         seen = {}
 
         def hook(plan):
-            seen["plan"] = anim_object.add_holds(plan)
+            seen["plan"] = anim_object.add_holds(anim_object.fill_static_tracks(plan))
             return seen["plan"]
 
         def clip_files(plan, scale):
@@ -155,7 +155,7 @@ class BuilderTests(unittest.TestCase):
         self.assertEqual([r["bone"] for r in anim["open_motion"]], ["LeafA", "LeafB"])    # reported for StateA_Play
         self.assertIn("meshes/fo4port/vault/console_anim.nif", files)
         self.assertEqual(set(node_names(nif.parse(files["meshes/fo4port/vault/console_anim.nif"]))) >= {"LeafA", "LeafB"}, True)
-        self.assertEqual(files[base + "animations/StateA_Idle.af"], b"LeafA,LeafB|2")     # one key per track: the hold
+        self.assertEqual(files[base + "animations/StateA_Idle.af"], b"Root,LeafA,LeafB|3")     # one block per rig bone, in rig order, one key each: the hold
 
     def test_the_manifest_says_what_became_of_every_shape_and_which_track_moves(self):
         (_, anim), plan = self.build()
@@ -235,6 +235,44 @@ class BuilderTests(unittest.TestCase):
             else:
                 self.assertNotEqual(box, rest[k])                    # the leaves swing in the fixture's first clip
         self.assertEqual(ends["StateA_Idle"], ends["StateA_Play"])   # the hold stays where the clip ended
+
+    def test_every_clip_has_one_block_per_rig_bone_in_rig_order_and_the_static_ones_move_nothing(self):
+        """PC dump (12 Nov): the .af files had 2 blocks for a 3-bone rig, so a block's position differed from its bone's rig index."""
+        (files, anim), plan = self.build()
+        rig = [r["name"] for r in anim["rig"]]
+        for c in plan["clips"]:
+            self.assertEqual([t["name"] for t in c["tracks"]], rig, c["name"])              # one track per bone, rig order
+        statics = {(c["name"], t["name"]) for c in plan["clips"] for t in c["tracks"] if t.get("static")}
+        self.assertEqual(statics, {(c["name"], "Root") for c in plan["clips"]})            # only the unanimated root is static
+        prepared = native_door.prepare(plan, convert_static.UNIT_SCALE)
+        for c in prepared["clips"]:
+            self.assertEqual([t["bone"] for t in c["tracks"]], [0, 1, 2], c["name"])         # block i is rig bone i
+            root = c["tracks"][0]
+            self.assertTrue(all(k["quaternion_wxyz"] == [1.0, 0.0, 0.0, 0.0] and k["translation"] == [0.0, 0.0, 0.0] for k in root["keys"]))
+            self.assertEqual(root["channels"], ["rotation"])
+        self.assertEqual(files["meshes/fo4port/vault/console_anim/animations/StateA_Play.af"], b"Root,LeafA,LeafB|" + b"%d" % (2 + 31 + 31))   # keys: root 2 (first and last frame), two leaves 31 each
+        table = {c["name"]: c for c in anim_object.clip_table(plan, convert_static.UNIT_SCALE)}
+        self.assertEqual(table["StateA_Play"]["bones"], ["LeafA", "LeafB"])                 # 'bones' still lists the moving ones
+        self.assertEqual([t["bone"] for t in table["StateA_Play"]["tracks"]], rig)
+        self.assertEqual([t["static"] for t in table["StateA_Play"]["tracks"]], [True, False, False])
+        self.assertEqual([m["bone"] for m in table["StateA_Play"]["motion"]], ["LeafA", "LeafB"])   # a static track moves nothing and is not listed
+        self.assertEqual(anim["animated_bones"], ["LeafA", "LeafB"])
+        self.assertEqual(anim["moving_bodies"], 2)                                          # the root's shape is still static geometry
+
+    def test_a_rig_bone_without_a_source_node_is_refused_not_misaligned(self):
+        plan = door_rig.animated_identity_binds(door_rig.plan(console_nif(), placed=True, aliases=STATES, allowed=tuple(STATES.values())))
+        broken = {**plan, "bones": [dict(b, node=None) if i == 0 else b for i, b in enumerate(plan["bones"])]}
+        with self.assertRaisesRegex(ValueError, "no source node"):
+            anim_object.fill_static_tracks(broken)
+
+    def test_door_clips_are_written_exactly_as_before(self):
+        """The door path never fills static tracks: a door's .af keeps only the tracks it had (same bytes as the parent commit)."""
+        f = door_nif(two_leaves())
+        plan = door_rig.animated_identity_binds(door_rig.plan(f, placed=True))
+        names = [t["name"] for c in plan["clips"] for t in c["tracks"]]
+        self.assertFalse(any(t.get("static") for c in plan["clips"] for t in c["tracks"]))
+        prepared = native_door.prepare(plan, convert_static.UNIT_SCALE)
+        self.assertEqual(sorted({t["name"] for c in prepared["clips"] for t in c["tracks"]}), sorted(set(names)))
 
     def test_a_shape_without_a_material_is_reported_as_left_out(self):
         f = console_nif()

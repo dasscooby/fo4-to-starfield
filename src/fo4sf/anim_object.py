@@ -54,6 +54,39 @@ def hold_clip(clip, name):
     return {**clip, "name": name, "duration": 0.0, "events": [], "tracks": tracks, "hold_of": clip["name"]}
 
 
+def fill_static_tracks(plan):
+    """plan -> plan whose every clip has ONE TRACK PER RIG BONE, in rig order: a bone the clip does not move gets a 'static' track
+    (identity relative to its bind, zero travel).
+
+    Why (PC dump of the staged console, 12 Nov): CALUMI's read-back lists an .af's blocks in the order they were added, and each .af
+    had only the 2 blocks of the moving bones (Lid, Button) against a 3-bone rig (root, Lid, Button), so a block's POSITION (0, 1)
+    differed from its bone's rig index (1, 2). Whether the game pairs a block with a bone by position or by name is unread, and the
+    sessions fit a by-position pairing off by one; the oracle script that CALUMI's author pattern follows writes a block for every
+    bone, root included. This writes the same: block i is rig bone i, name and position agree. Only objects built through
+    anim_object get it; the door path is unchanged. The static sample carries the bone's own bind (so predictions agree) and
+    native_door.prepare writes identity for it."""
+    bones = plan["bones"]
+    clips = []
+    for clip in plan["clips"]:
+        by_node = {t["node"]: t for t in clip["tracks"]}
+        every = sorted({s["elapsed"] for t in clip["tracks"] for s in t["samples"]}) or [0.0]
+        times = sorted({every[0], every[-1]})            # a key at the first and the last frame is enough for a bone that stays
+        tracks = []
+        for bone in bones:
+            if bone["node"] in by_node:
+                tracks.append(by_node[bone["node"]])
+                continue
+            if bone.get("node") is None:                   # a '<name>_Bind' parent bone made by animated_identity_binds
+                raise ValueError(f"rig bone {bone['name']!r} has no source node: a block for it cannot be written (rotated-bind animated bone)")
+            node = bone["node"]
+            b = bone["bind"]
+            tracks.append({"node": node, "name": bone["name"], "static": True, "target": bone["name"],
+                           "samples": [{"elapsed": t, "translation_source_units": list(b["translation_source_units"]),
+                                        "quaternion_wxyz": list(b["quaternion_wxyz"]), "scale": 1.0} for t in times]})
+        clips.append({**clip, "tracks": tracks})
+    return {**plan, "clips": clips}
+
+
 def add_holds(plan):
     """plan -> plan with a hold clip after every Play slot it holds (the plan_hook of convert_multipart_door)."""
     clips = list(plan["clips"])
@@ -111,8 +144,9 @@ def clip_table(plan, unit_scale):
     rows = []
     for clip in plan["clips"]:
         rows.append({"name": clip["name"], "seconds": round(clip["duration"], 4), "frames": round(clip["duration"] * FPS),
-                     "bones": sorted(t["name"] for t in clip["tracks"]), "hold_of": clip.get("hold_of"),
-                     "tracks": [{"bone": t["name"], "bone_index": index[t["node"]], "keys": len(t["samples"])} for t in clip["tracks"]],
+                     "bones": sorted(t["name"] for t in clip["tracks"] if not t.get("static")), "hold_of": clip.get("hold_of"),
+                     "tracks": [{"bone": t["name"], "bone_index": index[t["node"]], "keys": len(t["samples"]), "static": bool(t.get("static"))}
+                            for t in clip["tracks"]],
                      "motion": door_rig.open_motion(plan, unit_scale, clip["name"]),
                      "sound_keys": [round(e["elapsed"], 3) for e in clip.get("events", [])
                                     if str(e.get("text", e.get("name", ""))).lower().startswith("sound")]})

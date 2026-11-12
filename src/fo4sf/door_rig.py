@@ -191,6 +191,7 @@ def open_motion(plan, unit_scale, clip_name='Open'):
     for clip in plan['clips']:
         if clip['name']!=clip_name:continue
         for track in clip['tracks']:
+            if track.get('static'):continue        # anim_object.fill_static_tracks: written for the block order, moves nothing
             i=index[track['node']];parent=bones[i]['parent']
             frame=world[parent] if parent!=-1 else [1.0,0.0,0.0,0.0]
             scale=world_scale[parent] if parent!=-1 else 1.0         # keys are in the parent's frame, its scale included

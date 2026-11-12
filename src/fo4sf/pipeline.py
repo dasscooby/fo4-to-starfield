@@ -810,7 +810,7 @@ class Converter:
             holder = {}
 
             def hook(plan):
-                plan = anim_object.add_holds(plan)
+                plan = anim_object.add_holds(anim_object.fill_static_tracks(plan))
                 holder["plan"] = plan
                 return plan
 
