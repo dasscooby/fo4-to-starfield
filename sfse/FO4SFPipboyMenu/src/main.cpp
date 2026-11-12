@@ -211,6 +211,7 @@ namespace
 	constexpr std::uint32_t kPauseFlag = 0x2;                // Pause=1 at stages d and e (FAL-446): the PC's sweep at 14176a5e
 	constexpr std::size_t   kQuestDumpAt = 0x38;            // F11 at stage e (FAL-446): libxse RE::TESQuest's pad038 ...
 	constexpr std::size_t   kQuestDumpEnd = 0x338;           // ... to the end of its startEventData (+0x330), 64 to a line
+	constexpr std::size_t   kQuestStageLast = kQuestDumpEnd - 2;   // [Kit] MissionStageAt=: a u16 inside the F11 dump
 	constexpr std::string_view kKitChars = " !#%&'()*+,-./0123456789:;<=>?ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_";   // KIT_FONT
 	constexpr auto          kKitTitle = "fo4sfTitle";        // NAMES
 	constexpr auto          kKitHeader = "fo4sfHeaderInfo";
@@ -1625,6 +1626,7 @@ namespace
 		std::string                                    hints;
 		std::string                                    missionFile;   // Mission=: our mission's plugin file, or ""
 		std::uint32_t                                  missionId = 0;   // and its form's local id in that file
+		std::size_t                                    missionStageAt = 0;   // MissionStageAt=: its stage's u16, or 0 (STAGE ?)
 		std::vector<KitPage>                           pages;
 		std::vector<std::string>                       tabs;     // in the order of their first page
 		std::array<std::vector<std::size_t>, kKitTabs> subs;     // each tab's pages, in order
@@ -1776,6 +1778,22 @@ namespace
 		return true;
 	}
 
+	// parse_kit's check_stage_at (FAL-527): <1 to 3 hex digits>, the offset of the mission's current stage (a u16) as
+	// scripts/ui/pipboy_quest_bytes.py names it from two F11 dumps; even, inside the dump (+0x38 to +0x336)
+	bool KitStageAt(std::string_view a_text)
+	{
+		if (a_text.empty() || a_text.size() > 3 ||
+			!std::ranges::all_of(a_text, [](char a_c) { return std::isxdigit(static_cast<unsigned char>(a_c)) != 0; })) {
+			return false;
+		}
+		const auto at = static_cast<std::size_t>(std::strtoul(std::string(a_text).c_str(), nullptr, 16));
+		if (at < kQuestDumpAt || at > kQuestStageLast || at % 2 != 0) {
+			return false;
+		}
+		g_kit.missionStageAt = at;
+		return true;
+	}
+
 	std::string KitSignature()   // make_pipboy_kit.py signature(): the movie's fo4sfKitId
 	{
 		std::string tabs;
@@ -1857,6 +1875,8 @@ namespace
 					g_kit.hints = value;
 				} else if (key == "Mission" && g_kit.missionFile.empty() && KitMission(value)) {
 					// KitMission kept it
+				} else if (key == "MissionStageAt" && !g_kit.missionStageAt && KitStageAt(value)) {
+					// KitStageAt kept it
 				} else {
 					return KitRefuse(n, std::format("kit_key key={}", key));
 				}
@@ -2247,7 +2267,8 @@ namespace
 	// file and local id (KitFileForm), accepted by its RTTI (TESQuest); its name (TESFullName, at +0x40 in Starfield's
 	// RTTI) and its QUEST_DATA flags as read (u16 at +0x10C, the running and completed bits not named until the PC's
 	// log does). The first read logs the quest's bytes from +0x100 once (step=kit_quest), where the flags and the
-	// current stage are; the stage shows ? until then. Starfield's own quests are not listed yet
+	// current stage are; the stage shows ? until [Kit] MissionStageAt= names its offset (FAL-527). Starfield's own
+	// quests are not listed yet
 	std::vector<KitRow> KitQuestRows()
 	{
 		static std::uint32_t formId = 0;
@@ -2290,16 +2311,32 @@ namespace
 				"bytes100={} {}", g_kit.missionFile, g_kit.missionId, formId, Hex(quest), type.name, at ? Hex(*at) : "none", name,
 				flagged ? std::format("{:04x}", flags) : "unreadable", KitBytes(quest + kQuestBytesAt, 0x40), detail);
 		}
+		// FAL-527: the stage, a u16 at [Kit] MissionStageAt= (read with Peek only; ? without the setting), logged at
+		// the first read and at each change: step=kit_quest_stage form= stage_at=+<offset> stage=<n>
+		static int    loggedStage = -1;
+		std::uint16_t stage = 0;
+		std::string   stageText = "?";
+		if (!g_kit.missionStageAt) {
+			Unknown("quest_stage", "reason=no_stage_at (MissionStageAt= in [Kit])");
+		} else if (!Peek(quest + g_kit.missionStageAt, stage)) {
+			Unknown("quest_stage", std::format("reason=unreadable stage_at=+{:03X}", g_kit.missionStageAt));
+		} else {
+			stageText = std::to_string(stage);
+			if (loggedStage != stage) {
+				loggedStage = stage;
+				REX::INFO("step=kit_quest_stage form={:08X} stage_at=+{:03X} stage={}", formId, g_kit.missionStageAt, stage);
+			}
+		}
 		std::string file = g_kit.missionFile;
 		std::ranges::transform(file, file.begin(), [](unsigned char a_c) { return static_cast<char>(std::toupper(a_c)); });
 		return { { name, "", { { "FORM", std::format("{:08X}", formId) }, { "FILE", file },
-			{ "FLAGS", flagged ? std::format("{:04X}", flags) : "?" }, { "STAGE", "?" } } } };
+			{ "FLAGS", flagged ? std::format("{:04X}", flags) : "?" }, { "STAGE", stageText } } } };
 	}
 
 	// FAL-446, main thread, on the snapshot key at stage (e): the mission's bytes from +0x38 to +0x338, 64 to a line
 	// (step=kit_quest_bytes n=<snapshot> form= at=+<offset> bytes=), so two presses with the mission at two stages (the
 	// console's setstage between them) show where the current stage is. The quest is the one the quests page last
-	// accepted, checked again by its RTTI; no call into the game. Until the PC names the offset STAGE shows ?
+	// accepted, checked again by its RTTI; no call into the game. STAGE shows ? until [Kit] MissionStageAt= names it
 	void LogKitQuestBytes()
 	{
 		const auto n = g_snapshots.load();

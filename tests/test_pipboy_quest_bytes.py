@@ -1,5 +1,5 @@
 """FAL-446: the mission's bytes on F11 at the Pip-Boy kit's stage (e), and the helper that names the current stage's
-offset from two dumps (scripts/ui/pipboy_quest_bytes.py). The plugin's side is checked as text (no compiler here: the
+offset from two dumps (scripts/ui/pipboy_quest_bytes.py); FAL-527: [Kit] MissionStageAt=, the quest page's STAGE. The plugin's side is checked as text (no compiler here: the
 PC build is the compile check); the helper on a made-up log in the plugin's format."""
 import os
 import re
@@ -11,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "sfse" / "FO4SFPipboyMenu"
 sys.path.insert(0, os.path.join(ROOT, "scripts", "ui"))
+import make_pipboy_kit as kit  # noqa: E402
 import pipboy_quest_bytes as pqb  # noqa: E402
 
 
@@ -48,7 +49,7 @@ class PluginTests(unittest.TestCase):
         rows = function(self.main, "std::vector<KitRow> KitQuestRows(")
         self.assertLess(rows.index('if (!IsType(quest, "TESQuest@@", type)) {'), rows.index("g_kitQuest = quest;"))
         self.assertIn("g_kitQuest = 0;", rows)
-        self.assertIn('{ "STAGE", "?" }', rows)                                  # until the PC names the offset
+        self.assertIn('{ "STAGE", stageText }', rows)                             # ? until MissionStageAt= names it
         key = function(self.main, "std::uint32_t KeyThread(")
         snap = key[key.index('Snapshot("key", true);'):]
         self.assertLess(snap.index("if (g_stage == 5) {"), snap.index("LogKitQuestBytes();"))
@@ -69,9 +70,61 @@ class PluginTests(unittest.TestCase):
         self.assertRegex(ini, r"\nPause=0\n")                                    # ships not pausing
         self.assertIn("`Pause=1`", self.readme)
 
+    def test_the_stage_reads_the_offset_mission_stage_at_names(self):
+        """FAL-527: the u16 at MissionStageAt=, read with Peek only, ? and one page_unknown line without it."""
+        self.assertIn("kQuestStageLast = kQuestDumpEnd - 2;", self.main)
+        self.assertIn("std::size_t                                    missionStageAt = 0;", self.main)
+        check = function(self.main, "bool KitStageAt(")
+        for part in ("a_text.size() > 3", "std::isxdigit", "at < kQuestDumpAt || at > kQuestStageLast || at % 2 != 0",
+                     "g_kit.missionStageAt = at;"):
+            self.assertIn(part, check, part)
+        self.assertLess(check.index("return false;"), check.index("g_kit.missionStageAt = at;"))
+        read = function(self.main, "bool ReadKit(")
+        self.assertIn('key == "MissionStageAt" && !g_kit.missionStageAt && KitStageAt(value)', read)   # once
+        rows = function(self.main, "std::vector<KitRow> KitQuestRows(")
+        stage = rows[rows.index("static int    loggedStage = -1;"):]
+        self.assertIn('std::string   stageText = "?";', stage)
+        self.assertIn('Unknown("quest_stage", "reason=no_stage_at (MissionStageAt= in [Kit])");', stage)
+        self.assertIn("Peek(quest + g_kit.missionStageAt, stage)", stage)
+        self.assertIn("stageText = std::to_string(stage);", stage)
+        self.assertIn('"step=kit_quest_stage form={:08X} stage_at=+{:03X} stage={}"', stage)
+        self.assertLess(stage.index("if (loggedStage != stage) {"), stage.index("step=kit_quest_stage"))
+        self.assertNotIn("FormById(", stage)
+        self.assertNotIn("REL::", stage)
+        ini = (PLUGIN / "FO4SFPipboyMenu.ini").read_text(encoding="utf-8")
+        self.assertNotRegex(ini, r"\nMissionStageAt=")                            # ships without it: STAGE ?
+        self.assertIn("; [Kit] MissionStageAt=<hex offset>", ini)
+        self.assertIn("MissionStageAt=", self.readme)
+        self.assertIn("step=kit_quest_stage", self.readme)
+
     def test_the_readme_names_the_dump_and_the_helper(self):
         self.assertIn("step=kit_quest_bytes", self.readme)
         self.assertIn("scripts/ui/pipboy_quest_bytes.py", self.readme)
+
+
+class StageAtTests(unittest.TestCase):
+    """parse_kit's MissionStageAt=, the same check as the plugin's KitStageAt."""
+    PAGE = "[Page DATA/QUESTS]\nList=quests\n"
+
+    def test_good(self):
+        for value, at in (("38", 0x38), ("1A4", 0x1A4), ("1a4", 0x1A4), ("336", 0x336), ("0038", None)):
+            text = f"[Kit]\nMission=FO4SFMission.esm|800\nMissionStageAt={value}\n" + self.PAGE
+            if at is None:
+                with self.assertRaises(kit.KitError):                              # more than 3 digits
+                    kit.parse_kit(text)
+            else:
+                self.assertEqual(kit.parse_kit(text)["stage_at"], at, value)
+
+    def test_bad(self):
+        for value in ("", "36", "1A5", "338", "+1A4", "0x1A4", "1G4", "1A 4"):   # outside, odd, not bare hex
+            with self.assertRaises(kit.KitError, msg=value):
+                kit.check_stage_at(value, 1)
+        twice = "[Kit]\nMissionStageAt=1A4\nMissionStageAt=1A4\n" + self.PAGE
+        with self.assertRaises(kit.KitError):
+            kit.parse_kit(twice)
+
+    def test_the_shipped_ini_has_none(self):
+        self.assertIsNone(kit.read_kit()["stage_at"])
 
 
 class HelperTests(unittest.TestCase):
@@ -97,6 +150,10 @@ class HelperTests(unittest.TestCase):
         self.assertEqual([row[0] for row in rows], [0x1A4, 0x200])
         self.assertEqual(rows[0], (0x1A4, 20, 30, True))
         self.assertFalse(rows[1][3])
+        self.assertEqual(pqb.stage_line(rows), "MissionStageAt=1A4")              # FAL-527: the [Kit] line
+        self.assertEqual(kit.check_stage_at(pqb.stage_line(rows).split("=")[1], 1), 0x1A4)
+        self.assertIsNone(pqb.stage_line(pqb.changed(found[4][1], found[7][1], (1, 2))))   # none marked
+        self.assertIsNone(pqb.stage_line(rows + [(0x1B0, 20, 30, True)]))         # several marked
 
     def test_an_unreadable_line_is_left_out(self):
         lines = dump_lines(4, "07000800", self.before)

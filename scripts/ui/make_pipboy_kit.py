@@ -9,7 +9,8 @@ A page is a section of the plugin's own ini, read by this script (to draw the ma
 fill them); adding or changing a page is an edit of that file and a re-stage, no new code and no new movie by hand:
 
   [Kit]                     Title=<text>, Header=<value> (the title bar's right side), Hints=<text> (the key hints),
-                            Mission=<plugin file>|<local id hex> (our mission, the first row of List=quests)
+                            Mission=<plugin file>|<local id hex> (our mission, the first row of List=quests),
+                            MissionStageAt=<hex offset> (its current stage, a u16: pipboy_quest_bytes.py names it)
   [Page <TAB>/<SUB>]        one page: the main tab it sits under and its sub-tab, in the order the sections come; then
                             exactly one of
     Row=<label>|<value>       a row of the list, its value from a value provider (any number, scrolled 16 at a time)
@@ -155,6 +156,20 @@ def check_mission(value, line):
     return {"file": file, "local_id": int(local, 16)}
 
 
+QUEST_DUMP = (0x38, 0x338)               # the plugin's F11 dump of the mission (kQuestDumpAt, kQuestDumpEnd)
+
+
+def check_stage_at(value, line):
+    """<1 to 3 hex digits>: the offset of the mission's current stage, a u16 inside the F11 dump (even, +0x38 to
+    +0x336), as scripts/ui/pipboy_quest_bytes.py prints it (FAL-527). The plugin's KitStageAt reads the same."""
+    if not re.fullmatch(r"[0-9A-Fa-f]{1,3}", value):
+        raise KitError(f"line {line}: MissionStageAt {value!r} is not 1 to 3 hex digits")
+    at = int(value, 16)
+    if not QUEST_DUMP[0] <= at <= QUEST_DUMP[1] - 2 or at % 2:
+        raise KitError(f"line {line}: MissionStageAt {value!r} is not an even offset from 38 to 336")
+    return at
+
+
 def _cell(value, line, columns, what):
     if value.count("|") != 1:
         raise KitError(f"line {line}: {what} needs <label>|<value>")
@@ -165,7 +180,7 @@ def _cell(value, line, columns, what):
 def parse_kit(text):
     """The [Kit] section and the [Page <TAB>/<SUB>] sections of the ini, checked; other sections are skipped. The
     plugin's ReadKit (main.cpp) reads the same grammar with the same checks."""
-    kit = {"title": "FO4SF PIP-BOY", "header": "", "hints": "", "mission": None, "pages": []}
+    kit = {"title": "FO4SF PIP-BOY", "header": "", "hints": "", "mission": None, "stage_at": None, "pages": []}
     section = None
     page = None
     for n, raw in enumerate(text.splitlines(), 1):
@@ -207,8 +222,11 @@ def parse_kit(text):
                 kit["hints"] = _fits(value, HINT_COLUMNS, "hints", n)
             elif key == "Mission" and kit["mission"] is None:
                 kit["mission"] = check_mission(value, n)
+            elif key == "MissionStageAt" and kit["stage_at"] is None:
+                kit["stage_at"] = check_stage_at(value, n)
             else:
-                raise KitError(f"line {n}: [Kit] has no key {key!r} (Title, Header, Hints, Mission once)")
+                raise KitError(f"line {n}: [Kit] has no key {key!r} (Title, Header, Hints, Mission and MissionStageAt "
+                               "once)")
             continue
         if key == "Row":
             if len(page["rows"]) == MAX_PAGE_ROWS:
@@ -521,7 +539,7 @@ def main(argv=None):
         if a.check:
             kit = read_kit(a.ini)
             print(json.dumps({"signature": signature(kit), "tabs": tabs_of(kit), "mission": kit["mission"],
-                              "pages": kit["pages"]}, indent=1))
+                              "stage_at": kit["stage_at"], "pages": kit["pages"]}, indent=1))
             return 0
         if not a.out:
             ap.error("--out or --check is needed")

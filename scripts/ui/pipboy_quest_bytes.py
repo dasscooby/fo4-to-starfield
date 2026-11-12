@@ -6,7 +6,8 @@ At stage (e) (`Stage=5`) the snapshot key (F11) logs the mission's bytes from +0
 press F11, set the mission to another stage in the console, press F11 again; then run this on the plugin's log. It
 lists every 2-byte word that differs between two dumps (the first and the last in the log, or --before/--after), with
 both values in decimal, and marks a word that went from the first stage to the second (--stages 20,30) as `stage?`.
-Reads the log only; pure Python, test tests/test_pipboy_quest_bytes.py."""
+When exactly one word is marked it prints the line for the plugin's ini, `MissionStageAt=<hex>` in [Kit] (FAL-527):
+the quests page's STAGE then reads that word. Reads the log only; pure Python, test tests/test_pipboy_quest_bytes.py."""
 import argparse
 import re
 import sys
@@ -43,6 +44,12 @@ def changed(before, after, stages=None):
     return rows
 
 
+def stage_line(rows):
+    """The [Kit] line for the one word marked as the stage, else None (none marked, or several)."""
+    marked = [at for at, _, _, is_stage in rows if is_stage]
+    return f"MissionStageAt={marked[0]:X}" if len(marked) == 1 else None
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("log", help="the plugin's log (FO4SFPipboyMenu.log)")
@@ -71,6 +78,10 @@ def main(argv=None):
     print(f"form={found[before][0]} n={before} -> n={after}: {len(rows)} words differ")
     for at, a, b, is_stage in rows:
         print(f"+0x{at:03X} {a} -> {b}{'  stage?' if is_stage else ''}")
+    if stages is not None:
+        line = stage_line(rows)
+        print(f"in [Kit] of FO4SFPipboyMenu.ini: {line}" if line else
+              f"{sum(row[3] for row in rows)} words marked: no MissionStageAt line (one is needed)")
     return 0
 
 
