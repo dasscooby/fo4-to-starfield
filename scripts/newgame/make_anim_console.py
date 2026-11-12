@@ -27,6 +27,12 @@ usage:
       read only, offline: the rig's bone order, which rig index every clip track is filed under, the written model's node order
       (is it the rig's?), which bone every shape rides and its box, and the PREDICTED end-of-clip box of every shape per clip.
       It reads anim_manifest.json and the model NIF; it does not read the .rig/.af (CALUMI's files) or the game.
+  python make_anim_console.py dump --stage <staged kit folder> --dll <CALUMI.Animation.dll>
+      read only, offline: reads the WRITTEN skeleton.rig and every .af back through CALUMI (LoadAnimationSceneFromSFBGSFormatC) and
+      prints the rig bones in file order and, per clip, every track's position, the bone name it is filed under, its key count, and its
+      first and last rotation as angle and axis (degrees). Exit 1 when a track's bone name is not the rig bone at that index or a
+      clip's block names a bone the rig lacks. Translation values are not read (only their count): the read-back names for them are
+      not in the repo. It cannot say how the GAME applies a track.
   python make_anim_console.py log [--file <FO4SFAnimD.0.log>]
       the run's user log as one table and a verdict (src/fo4sf/anim_probe_log.py, the same reader as variant A).
 Nothing here installs anything: scripts/newgame/anim_console_install.py does, on the owner's word, game closed. Needs numpy, the
@@ -36,6 +42,7 @@ import argparse
 import datetime
 import glob
 import json
+import math
 import os
 import re
 import shutil
@@ -394,6 +401,112 @@ def inspect_stage(a):
     return 0 if not problems else 1
 
 
+def quat_angle_axis(xyzw):
+    """(degrees, (x, y, z) unit axis or None) of a unit quaternion given as (x, y, z, w); the angle is the shorter way round (0 to 180)."""
+    x, y, z, w = xyzw
+    n = math.sqrt(x * x + y * y + z * z + w * w) or 1.0
+    x, y, z, w = x / n, y / n, z / n, w / n
+    if w < 0:
+        x, y, z, w = -x, -y, -z, -w
+    s = math.sqrt(max(0.0, 1 - w * w))
+    angle = math.degrees(2 * math.acos(max(-1.0, min(1.0, w))))
+    return round(angle, 3), (None if s < 1e-6 else tuple(round(v / s, 4) for v in (x, y, z)))
+
+
+class CalumiReader:
+    """Reads a written .rig and .af back with the CALUMI library (the calls scripts/oracles/native_door_animation.py already uses).
+    read(rig_path, af_path) -> {"bones": [(name, parent)], "blocks": [{"position", "bone", "rot": [(frame, xyzw)], "trans_count"}]}."""
+    def __init__(self, dll):
+        import ctypes as c
+        self.c = c
+        self.lib = c.CDLL(str(os.path.abspath(dll)))
+
+    def _bind(self, name, args, result):
+        fn = getattr(self.lib, name)
+        fn.argtypes, fn.restype = args, result
+        return fn
+
+    def read(self, rig_path, af_path):
+        c, p = self.c, self.c.c_void_p
+        b = self._bind
+        err = b("CreateStringContainerC", [], p)()
+        msg = b("GetStringFromContainerC", [p], c.c_char_p)
+        try:
+            scene = b("LoadAnimationSceneFromSFBGSFormatC", [c.POINTER(c.c_wchar_p), c.c_int, p], p)((c.c_wchar_p * 2)(str(rig_path), str(af_path)), 2, err)
+            if not scene:
+                raise RuntimeError(f"CALUMI could not read {af_path}: {(msg(err) or b'').decode(errors='replace')}")
+            try:
+                rig = b("GetSkeletonRigC", [p], p)(scene)
+                bones = []
+                for i in range(b("GetSkeletonRigBoneCountC", [p], c.c_size_t)(rig)):
+                    bone = b("GetSkeletonBoneC", [p, c.c_int, p], p)(rig, i, err)
+                    bones.append((b("GetSkeletonBoneNameC", [p], c.c_char_p)(bone).decode("latin-1"),
+                                  b("GetSkeletonBoneParentIndexC", [p], c.c_int)(bone)))
+                anim = b("GetAnimationC", [p, c.c_int, p], p)(scene, 0, err)
+                blocks = []
+                for k in range(b("GetAnimationBlockCountC", [p], c.c_size_t)(anim)):
+                    block = b("GetAnimationBlockC", [p, c.c_int, p], p)(anim, k, err)
+                    rot = []
+                    for j in range(b("GetRotationSqSizeC", [p], c.c_size_t)(block)):
+                        entry = b("GetRotationFromSqC", [p, c.c_int, p], p)(block, j, err)
+                        q = b("GetValueFromRotationEntryC", [p], p)(entry)
+                        rot.append((b("GetFrameFromRotationEntryC", [p], c.c_uint16)(entry),
+                                    tuple(b("GetQuaternion" + ax, [p], c.c_float)(q) for ax in "XYZW")))
+                    blocks.append({"position": k, "bone": b("GetAnimBlockBoneNameC", [p], c.c_char_p)(block).decode("latin-1"),
+                                   "rot": rot, "trans_count": b("GetTranslationSqSizeC", [p], c.c_size_t)(block)})
+                return {"bones": bones, "blocks": blocks}
+            finally:
+                b("DeleteAnimationSceneC", [p], c.c_bool)(scene)
+        finally:
+            b("DeleteStringContainerC", [p], None)(err)
+
+
+def dump_stage(a, reader=None):
+    """Read-only: the written rig and every .af of a staged kit, read back, with the track-to-bone checks (see the usage text)."""
+    with open(os.path.join(a.stage, "anim_manifest.json"), encoding="utf-8") as f:
+        man = json.load(f)
+    folder = os.path.join(a.stage, "Data", "meshes", *man["model"].replace("\\", "/").rsplit(".", 1)[0].split("/"))
+    rig_path = os.path.join(folder, "characterassets", "skeleton.rig")
+    afs = sorted(glob.glob(os.path.join(folder, "animations", "*.af")))
+    if not os.path.isfile(rig_path) or not afs:
+        print(f"no rig or no .af under {folder}")
+        return 2
+    reader = reader or CalumiReader(a.dll)
+    problems, rig_names = [], None
+    print(f"rig file {os.path.relpath(rig_path, a.stage)} ({os.path.getsize(rig_path)} bytes)")
+    for af in afs:
+        data = reader.read(rig_path, af)
+        names = [n for n, _ in data["bones"]]
+        if rig_names is None:
+            rig_names = names
+            print("rig bones in file order (index: name, parent):")
+            for i, (n, par) in enumerate(data["bones"]):
+                print(f"  {i}: {n} (parent {par})")
+        elif names != rig_names:
+            problems.append(f"{os.path.basename(af)}: the rig read with this clip differs from the first")
+        print(f"{os.path.basename(af)} ({os.path.getsize(af)} bytes), {len(data['blocks'])} blocks:")
+        for blk in data["blocks"]:
+            rot = blk["rot"]
+            if rot:
+                a0, ax0 = quat_angle_axis(rot[0][1])
+                a1, ax1 = quat_angle_axis(rot[-1][1])
+                shown = f"first {a0} deg about {ax0}, last {a1} deg about {ax1}, frames {rot[0][0]}..{rot[-1][0]}"
+            else:
+                shown = "no rotation keys"
+            pos = blk["position"]
+            rig_at = names[pos] if pos < len(names) else None
+            ok = "" if rig_at == blk["bone"] else f"  <-- rig index {pos} is {rig_at!r}"
+            print(f"  block {pos}: bone {blk['bone']!r}, {len(rot)} rotation keys, {blk['trans_count']} translation keys; {shown}{ok}")
+            if blk["bone"] not in names:
+                problems.append(f"{os.path.basename(af)}: block names {blk['bone']!r}, which the rig lacks")
+            elif rig_at != blk["bone"]:
+                problems.append(f"{os.path.basename(af)}: block at position {pos} is {blk['bone']!r}, the rig has {rig_at!r} there")
+    for p in problems:
+        print("FAIL  " + p)
+    print("dump: " + ("ok (positions and names agree; how the game applies a track is not read)" if not problems else f"{len(problems)} problem(s)"))
+    return 0 if not problems else 1
+
+
 def log(a):
     if not os.path.isfile(a.file):
         print(f"no log at {a.file}")
@@ -449,10 +562,13 @@ def main(argv=None):
     s.add_argument("--edid", default=EDID)
     i = sub.add_parser("inspect")
     i.add_argument("--stage", required=True, help="a staged kit folder (make_anim_console.py stage --out)")
+    d = sub.add_parser("dump")
+    d.add_argument("--stage", required=True)
+    d.add_argument("--dll", required=True, help="CALUMI.Animation.dll (the library the stage used)")
     g = sub.add_parser("log")
     g.add_argument("--file", default=LOG)
     a = p.parse_args(argv)
-    return {"precheck": precheck, "clips": clips, "stage": stage, "inspect": inspect_stage, "log": log}[a.cmd](a)
+    return {"precheck": precheck, "clips": clips, "stage": stage, "inspect": inspect_stage, "dump": dump_stage, "log": log}[a.cmd](a)
 
 
 if __name__ == "__main__":

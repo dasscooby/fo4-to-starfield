@@ -406,6 +406,63 @@ class StageTests(unittest.TestCase):
             self.assertEqual(mac.main(["inspect", "--stage", str(stage_dir)]), 1)
         self.assertIn("model node order differs from rig order", buf.getvalue())
 
+    def test_dump_prints_the_written_tracks_and_catches_a_block_under_the_wrong_name(self):
+        import contextlib
+        import io
+        import math as m
+        make, _ = self.converter()
+        out = self.root / "staged-d"
+        mac.stage(self.args(out), converter=make)
+        folder = out / "Data" / "meshes" / "fo4port" / "interiors" / "vault" / "props" / "console01_anim"
+        (folder / "characterassets").mkdir(parents=True, exist_ok=True)
+        (folder / "animations").mkdir(parents=True, exist_ok=True)
+        (folder / "characterassets" / "skeleton.rig").write_bytes(b"r" * 10)
+        for n in ("StateA_Play", "StateB_Play"):
+            (folder / "animations" / (n + ".af")).write_bytes(b"a" * 20)
+        half = m.radians(157) / 2
+        lid_turn = (m.sin(half), 0.0, 0.0, m.cos(half))                      # 157 degrees about x, as (x, y, z, w)
+        ident = (0.0, 0.0, 0.0, 1.0)
+
+        class Fake:
+            def __init__(self, swap):
+                self.swap = swap
+
+            def read(self, rig, af):
+                bones = [("Root", -1), ("Lid", 0), ("Button", 0)]
+                a = os.path.basename(str(af)).startswith("StateA")
+                turn = [(0, ident), (30, lid_turn)] if a else [(0, ident), (30, ident)]
+                lid = {"position": 1, "bone": "Lid", "rot": turn, "trans_count": 0}
+                btn = {"position": 2, "bone": "Button", "rot": [(0, ident), (30, ident)], "trans_count": 0 if a else 2}
+                if self.swap:
+                    lid["bone"], btn["bone"] = "Button", "Lid"                 # the two tracks reach each other's bone
+                return {"bones": bones, "blocks": [lid, btn]}
+        args = type("A", (), dict(stage=str(out), dll="x.dll"))()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.assertEqual(mac.dump_stage(args, Fake(False)), 0)
+        text = buf.getvalue()
+        self.assertIn("1: Lid (parent 0)", text)
+        self.assertIn("block 1: bone 'Lid', 2 rotation keys", text)
+        self.assertIn("last 157.0 deg about (1.0, 0.0, 0.0)", text)             # the lid's turn, read as angle and axis
+        self.assertIn("first 0.0 deg about None", text)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.assertEqual(mac.dump_stage(args, Fake(True)), 1)
+        text = buf.getvalue()
+        self.assertIn("block at position 1 is 'Button', the rig has 'Lid' there", text)
+        self.assertIn("<-- rig index 1 is 'Lid'", text)
+
+    def test_quaternion_angle_axis_and_a_stage_without_files(self):
+        import math as m
+        self.assertEqual(mac.quat_angle_axis((0.0, 0.0, 0.0, 1.0)), (0.0, None))
+        angle, axis = mac.quat_angle_axis((0.0, m.sin(m.radians(45)), 0.0, m.cos(m.radians(45))))
+        self.assertEqual((angle, axis), (90.0, (0.0, 1.0, 0.0)))
+        self.assertEqual(mac.quat_angle_axis((0.0, 0.0, 0.0, -1.0)), (0.0, None))      # the shorter way round: q and -q agree
+        import tempfile as t
+        with t.TemporaryDirectory() as d:
+            (Path(d) / "anim_manifest.json").write_text(json.dumps({"model": "a\\\\b.nif"}))
+            self.assertEqual(mac.dump_stage(type("A", (), dict(stage=d, dll="x"))(), object()), 2)
+
     def test_a_changed_stage_or_starfield_esm_is_refused_by_verify(self):
         make, _ = self.converter()
         out = self.root / "staged-v"
