@@ -41,7 +41,7 @@ FURN = [(0x03607F, "PowerCycle"), (0x0FEBB0, "COM_Quest_Andreja_Q01_SecretPanel"
 
 def body(name):
     """The text of one Function of the script (up to its EndFunction)."""
-    m = re.search(rf"^Function {name}\(.*?^EndFunction", PSC, re.M | re.S)
+    m = re.search(rf"^(?:\w+ )?Function {name}\(.*?^EndFunction", PSC, re.M | re.S)
     assert m, name
     return m.group(0)
 
@@ -166,7 +166,8 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(mpf.enable(PSC, []), PSC)
         self.assertEqual(mpf.optional_names(PSC), ["Actor.OnGetUp", "Actor.OnSit", "ObjectReference.OnEnterFurniture",
                                                    "ObjectReference.OnExitFurniture", "ObjectReference.MoveTo", "ObjectReference.SetAngle",
-                                                   "ObjectReference.GetScale", "ObjectReference.SetScale", "ObjectReference.Delete"])
+                                                   "Debug.MessageBox", "Game.ForceThirdPerson", "ObjectReference.GetScale",
+                                                   "ObjectReference.SetScale", "ObjectReference.Delete"])
         self.assertEqual(len(mpf.VOID.findall(PSC)), 2)
         self.assertIn(mpf.BOOL_LINE, PSC)
 
@@ -193,6 +194,21 @@ class ScriptTests(unittest.TestCase):
                            ("Event Actor.OnGetUp(", "(Actor akSender, ObjectReference akFurniture)")):
             self.assertIn(line + want[1:], PSC)
 
+    def test_stage_40_prints_one_summary_with_every_event_time_or_a_dash(self):
+        s = body("Summary")
+        for w in ("ENTER ", "SIT ", "GETUP ", "EXIT ", "IDLECHAIRSITTING ", "ANIMATIONCOMPLETE ", "IDLESTOP "):
+            self.assertRegex(s, r'"\s*' + w.strip() + r'\s*" \+ Fmt\(')
+        self.assertIn('return "-"', body("Fmt"))
+        for n in range(7):                                                  # every event stamps its time; four of them from the optional handlers
+            self.assertIn(f"Stamp({n})", PSC)
+        r = body("ReadAll")
+        self.assertIn("Notify(line)", r)
+        self.assertIn(";OPT Debug.MessageBox     Debug.MessageBox(msg)", body("Notify"))   # stays on screen
+        self.assertIn("Debug.Notification(msg)", body("Notify"))                           # the fallback
+        self.assertIn(";OPT Game.ForceThirdPerson     Game.ForceThirdPerson()", body("UseFurniture"))
+        use = body("UseFurniture")
+        self.assertIn("TEnter = -1.0", use)                                 # each use starts clean
+
     def test_the_required_list_has_every_native_called_outside_an_optional_line(self):
         for base, names in {"Actor": ["PlaceAtMe", "GetSitState"], "ObjectReference": ["Activate", "Disable"],
                             "ScriptObject": ["RegisterForAnimationEvent", "RegisterForRemoteEvent", "StartTimer"],
@@ -214,9 +230,9 @@ BASES = {
     "Actor": "Scriptname Actor extends ObjectReference\nint Function GetSitState() native\nEvent OnGetUp(ObjectReference f)\nEndEvent\n"
              "Event OnSit(ObjectReference f)\nEndEvent\n",
     "Game": "Scriptname Game\nActor Function GetPlayer() native global\nForm Function GetFormFromFile(int i, string p) native global\n"
-            "bool Function IsPluginInstalled(string p) native global\n",
+            "bool Function IsPluginInstalled(string p) native global\nFunction ForceThirdPerson() native global\n",
     "Debug": "Scriptname Debug\nbool Function OpenUserLog(string n) native global\nbool Function TraceUser(string n, string t) native global\n"
-             "Function Notification(string s) native global\n",
+             "Function Notification(string s) native global\nFunction MessageBox(string s) native global\n",
     "Utility": "Scriptname Utility\nfloat Function GetCurrentRealTime() native global\n",
     "Math": "Scriptname Math\nfloat Function Sin(float f) native global\nfloat Function Cos(float f) native global\n",
     "ScriptObject": "Scriptname ScriptObject\nFunction StartTimer(float f, int i) native\n"

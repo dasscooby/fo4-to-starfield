@@ -60,6 +60,13 @@ float UseStartRt = 0.0
 int CurIdx = -1
 int SitTicks = 0
 int LastSit = -1
+float TEnter = -1.0         ; seconds since the activate at which each event first arrived in the last use; -1 = none (the stage 40 summary prints "-")
+float TSit = -1.0
+float TGetUp = -1.0
+float TExit = -1.0
+float TIdleSit = -1.0
+float TAnimDone = -1.0
+float TIdleStop = -1.0
 
 ; ---------------------------------------------------------------- init
 
@@ -136,12 +143,53 @@ EndFunction
 Event OnAnimationEvent(ObjectReference akSource, string asEventName)
     Trace("event name=" + asEventName + " src=" + Id(akSource) + " use=" + CurIdx + " t=" + SinceUse())
     Say("EV " + asEventName + " t=" + SinceUse())
+    if asEventName == "IdleChairSitting"
+        Stamp(0)
+    elseif asEventName == "AnimationComplete"
+        Stamp(1)
+    elseif asEventName == "IdleStop"
+        Stamp(2)
+    endif
 EndEvent
+
+Function Stamp(int what)
+    {The first time each of the seven events arrives in a use: 0 IdleChairSitting, 1 AnimationComplete, 2 IdleStop, 3 OnEnterFurniture,
+     4 OnSit, 5 OnGetUp, 6 OnExitFurniture.}
+    float now = SinceUse()
+    if what == 0 && TIdleSit < 0.0
+        TIdleSit = now
+    elseif what == 1 && TAnimDone < 0.0
+        TAnimDone = now
+    elseif what == 2 && TIdleStop < 0.0
+        TIdleStop = now
+    elseif what == 3 && TEnter < 0.0
+        TEnter = now
+    elseif what == 4 && TSit < 0.0
+        TSit = now
+    elseif what == 5 && TGetUp < 0.0
+        TGetUp = now
+    elseif what == 6 && TExit < 0.0
+        TExit = now
+    endif
+EndFunction
+
+string Function Fmt(float t)
+    if t < 0.0
+        return "-"
+    endif
+    return "" + t
+EndFunction
+
+string Function Summary()
+    {One line for the last use: each event and its time since the activate, or "-" when it did not arrive.}
+    return "ENTER " + Fmt(TEnter) + " SIT " + Fmt(TSit) + " GETUP " + Fmt(TGetUp) + " EXIT " + Fmt(TExit) + " IDLECHAIRSITTING " + Fmt(TIdleSit) + " ANIMATIONCOMPLETE " + Fmt(TAnimDone) + " IDLESTOP " + Fmt(TIdleStop)
+EndFunction
 
 ;OPT Actor.OnGetUp Event Actor.OnGetUp(Actor akSender, ObjectReference akFurniture)
 ;OPT Actor.OnGetUp     Inside = false
 ;OPT Actor.OnGetUp     Trace("event name=OnGetUp furn=" + Id(akFurniture) + " use=" + CurIdx + " t=" + SinceUse())
 ;OPT Actor.OnGetUp     Say("GETUP t=" + SinceUse())
+;OPT Actor.OnGetUp     Stamp(5)
 ;OPT Actor.OnGetUp     EndUse("getup")
 ;OPT Actor.OnGetUp EndEvent
 
@@ -149,18 +197,21 @@ EndEvent
 ;OPT Actor.OnSit     Inside = true
 ;OPT Actor.OnSit     Trace("event name=OnSit furn=" + Id(akFurniture) + " use=" + CurIdx + " t=" + SinceUse())
 ;OPT Actor.OnSit     Say("SIT t=" + SinceUse())
+;OPT Actor.OnSit     Stamp(4)
 ;OPT Actor.OnSit EndEvent
 
 ;OPT ObjectReference.OnEnterFurniture Event ObjectReference.OnEnterFurniture(ObjectReference akSender, Actor akActionRef)
 ;OPT ObjectReference.OnEnterFurniture     Inside = true
 ;OPT ObjectReference.OnEnterFurniture     Trace("event name=OnEnterFurniture furn=" + Id(akSender) + " actor=" + Id(akActionRef) + " use=" + CurIdx + " t=" + SinceUse())
 ;OPT ObjectReference.OnEnterFurniture     Say("ENTER t=" + SinceUse())
+;OPT ObjectReference.OnEnterFurniture     Stamp(3)
 ;OPT ObjectReference.OnEnterFurniture EndEvent
 
 ;OPT ObjectReference.OnExitFurniture Event ObjectReference.OnExitFurniture(ObjectReference akSender, ObjectReference akActionRef)
 ;OPT ObjectReference.OnExitFurniture     Inside = false
 ;OPT ObjectReference.OnExitFurniture     Trace("event name=OnExitFurniture furn=" + Id(akSender) + " actor=" + Id(akActionRef) + " use=" + CurIdx + " t=" + SinceUse())
 ;OPT ObjectReference.OnExitFurniture     Say("EXIT t=" + SinceUse())
+;OPT ObjectReference.OnExitFurniture     Stamp(6)
 ;OPT ObjectReference.OnExitFurniture     EndUse("exit")
 ;OPT ObjectReference.OnExitFurniture EndEvent
 
@@ -271,13 +322,26 @@ Function Step(int stage)
     endif
 EndFunction
 
+Function Notify(string msg)
+    {A message that stays on screen until it is closed (the stage 40 summary: the notices scroll away); a plain notice when MessageBox is not there.}
+;OPT Debug.MessageBox     Debug.MessageBox(msg)
+;OPT Debug.MessageBox     return
+    Debug.Notification(msg)
+EndFunction
+
 Function ReadAll(int stage)
     int i = 0
     while i < Spawned.Length
         Reading("stage40", stage, i)
         i += 1
     endwhile
-    Say("S" + stage + " read, see the log")
+    int ci = CurIdx
+    if ci < 0
+        ci = 0
+    endif
+    string line = "PF SUMMARY " + FurnNames[ci] + ": " + Summary()
+    Trace("summary use=" + CurIdx + " " + Summary())
+    Notify(line)
 EndFunction
 
 ; ---------------------------------------------------------------- the use and its guards
@@ -303,6 +367,13 @@ Function UseFurniture(int stage, int idx)
     SitTicks = 0
     LastSit = -1
     UseStartRt = Utility.GetCurrentRealTime()
+    TEnter = -1.0
+    TSit = -1.0
+    TGetUp = -1.0
+    TExit = -1.0
+    TIdleSit = -1.0
+    TAnimDone = -1.0
+    TIdleStop = -1.0
     StartTimer(GUARD_S, TIMER_SAFETY + idx)            ; the safety, started before anything that can strand the player
     StartTimer(SIT_S, TIMER_SIT + idx)
     Trace("use stage=" + stage + " name=" + FurnNames[idx] + " guard=" + GUARD_S + " sit0=" + p.GetSitState())
@@ -322,6 +393,8 @@ Function UseFurniture(int stage, int idx)
     r.Activate(p, false)                               ; "put player in furniture" (SBPowerCollectionActivatorScript)
     Trace("step stage=" + stage + " call=Activate name=" + FurnNames[idx] + " ref=" + Id(r) + " t=" + SinceUse())
     Say("ACTIVATE s" + stage)
+;OPT Game.ForceThirdPerson     Game.ForceThirdPerson()
+;OPT Game.ForceThirdPerson     Trace("camera forced third person")
 EndFunction
 
 Function SitTick(int idx)
