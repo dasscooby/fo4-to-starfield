@@ -212,40 +212,179 @@ def _element_label(el):
     return el.tag + (" " + attrs if attrs else "") + (f" = {text!r}" if text else "")
 
 
+_ABSENT = object()
+
+
+def _inline(el):
+    """One element as one short string: its text, its attributes (@name=value) and its children (tag=...), nothing dropped."""
+    out = (el.text or "").strip()
+    if el.attrib:
+        out += (" " if out else "") + " ".join(f"@{k}={v!r}" for k, v in el.attrib.items())
+    if len(el):
+        out += (" " if out else "") + "<" + ", ".join(f"{c.tag}={_inline(c)}" for c in el) + ">"
+    return out
+
+
+def _extras(el, skip):
+    """{key: text} of everything on an element but the children named in skip: its attributes (@name), its own text (#text) and the other
+    children (tag: their inline form)."""
+    out = {"@" + k: v for k, v in el.attrib.items()}
+    if (el.text or "").strip():
+        out["#text"] = el.text.strip()
+    for c in el:
+        if c.tag not in skip:
+            out[c.tag] = _inline(c)
+    return out
+
+
+def _common(items):
+    """{key: the value most items have} (a key half or more of the items lack, or a tie, is left out): what is said once instead of on every cell."""
+    keys = sorted(set().union(*items)) if items else []
+    out = {}
+    for k in keys:
+        vals = [it.get(k, _ABSENT) for it in items]
+        top = max(set(vals), key=lambda v: (vals.count(v), str(v)))
+        if top is not _ABSENT and vals.count(top) * 2 > len(vals):         # strictly more than half, so "every" is never said of a tie
+            out[k] = top
+    return out
+
+
+def _deviation(common, item):
+    """{key: value or '<absent>'} where an item differs from the common values."""
+    d = {}
+    for k in sorted(set(common) | set(item)):
+        v = item.get(k, _ABSENT)
+        if v != common.get(k, _ABSENT):
+            d[k] = "<absent>" if v is _ABSENT else v
+    return d
+
+
+def _fmt_extras(d):
+    return "{" + ", ".join(f"{k}={v!r}" for k, v in d.items()) + "}"
+
+
+def _census_below(el, path, census):
+    for c in el:
+        cp = path + "/" + c.tag
+        census[cp] = census.get(cp, 0) + 1
+        _census_below(c, cp, census)
+
+
+def _key_of(node, name):
+    """A node's id-like value: the text of a child of that name, else an attribute of that name, else None."""
+    c = node.find(name)
+    if c is not None and (c.text or "").strip():
+        return c.text.strip()
+    return node.attrib.get(name)
+
+
+def _link_context(link, node, sibs):
+    """One line about a link (`node/input/link`): the node it sits on, its attributes, and which sibling nodes of the same graph its `node` number
+    could mean. What the number means is UNREAD by the author of this tool, so every plausible reading is printed, none is chosen."""
+    where = f"on node {_key_of(node, 'name') or (node.findtext('name') or '?')!r}" if node is not None else "on no node"
+    if node is not None:
+        bits = [f"type {node.findtext('node_type')!r}"] + [f"{k} {_key_of(node, k)!r}" for k in ("user_id", "id") if _key_of(node, k) is not None]
+        where += " (" + ", ".join(bits) + ")"
+    attrs = " ".join(f"{k}={v!r}" for k, v in link.attrib.items())
+    want = link.attrib.get("node")
+    reads = []
+    if want is not None and sibs:
+        def name(n):
+            return n.findtext("name") or "?"
+        for label, pick in (("child/attribute id", lambda i, n: _key_of(n, "id")), ("user_id", lambda i, n: _key_of(n, "user_id")),
+                            ("position from 0", lambda i, n: str(i)), ("position from 1", lambda i, n: str(i + 1))):
+            hit = [f"{name(n)!r}" for i, n in enumerate(sibs) if pick(i, n) == want]
+            reads.append(f"{label}: {', '.join(hit) if hit else 'none'}")
+    return (f"link {where}; attributes {attrs or 'none'}"
+            + (f"; node={want} could mean (readings, none chosen; {len(sibs)} node(s) in this graph): " + "; ".join(reads) if reads else ""))
+
+
+def _is_link_sheet(rows):
+    first = {(r.findall("prop")[0].findtext("value") or "").strip() for r in rows if r.findall("prop")}
+    return {"Event", "Transition Type"} <= first
+
+
 def dump_agx(data, max_rows=DUMP_MAX_ROWS, per_path=DUMP_PER_PATH):
-    """(lines, census {element path: count}) of the whole XML of one graph in file order: every element's tag, attributes and text; a
-    property_sheet as columns + all rows (empty cells left out, their number said). Raises ET.ParseError for a file that is not XML."""
+    """(lines, census {element path: count}) of the whole XML of one graph in file order: every element's tag, attributes and text. A
+    property_sheet is printed as a table (columns, then every row, empty cells left out) AND with everything inside it: the sheet's own
+    attributes, text and other children, each column's attributes and other children, each row's attributes and other children, each cell's
+    other children and attributes (type, flag, extra, ...). What every column, row or cell shares is said once on its line; a cell prints
+    only what differs ({...} after its value). The census counts every element inside a sheet too. A sheet whose rows include Event and
+    Transition Type is marked a transition link sheet, and a sheet under a `link` says which node it sits on and what the link's `node`
+    number could mean. Raises ET.ParseError for a file that is not XML."""
     root = ET.fromstring(data)
     lines, census, printed, skipped = [], {}, {}, {}
 
-    def walk(el, depth, path, quiet):
+    def sheet_lines(el, pad, p, ctx):
+        cols = el.findall("column")
+        headers = [_text(c, "header") for c in cols]
+        rows = el.findall("row")
+        out = []
+        cand = any(TRANSITION_HEADER.search(h) for h in headers)
+        mark = ("; a header names a transition word (by name only)" if cand else "") + ("; TRANSITION LINK SHEET (rows Event and Transition Type)" if _is_link_sheet(rows) else "")
+        own = _extras(el, {"column", "row"})
+        out.append(f"{pad}property_sheet {p}" + (" " + _fmt_extras(own) if own else "") + f": {len(headers)} column(s) {headers}; {len(rows)} row(s){mark}")
+        parent = ctx.get("parent")
+        if parent is not None and parent.tag == "link":
+            out.append(f"{pad}  " + _link_context(parent, ctx.get("node"), ctx.get("sibs")))
+        col_x = [_extras(c, {"header"}) for c in cols]
+        col_common = _common(col_x)
+        if col_common:
+            out.append(f"{pad}  every column also has {_fmt_extras(col_common)}")
+        for i, x in enumerate(col_x):
+            d = _deviation(col_common, x)
+            if d:
+                out.append(f"{pad}  column {i} ({headers[i]!r}) differs: {_fmt_extras(d)}")
+        row_x = [_extras(r, {"prop"}) for r in rows]
+        row_common = _common(row_x)
+        if row_common:
+            out.append(f"{pad}  every row also has {_fmt_extras(row_common)}")
+        cell_x = [[_extras(c, {"value", "listindex"}) for c in r.findall("prop")] for r in rows]
+        cell_common = _common([x for r in cell_x for x in r])
+        if cell_common:
+            out.append(f"{pad}  every cell also has {_fmt_extras(cell_common)}")
+        for ri, r in enumerate(rows[:max_rows]):
+            shown = []
+            for ci, c in enumerate(r.findall("prop")):
+                li = _text(c, "listindex")
+                h = headers[ci] if ci < len(headers) and headers[ci] else f"col{ci}"
+                h += f"[{li}]" if li.lstrip("-").isdigit() else ""
+                v = _text(c, "value")
+                d = _deviation(cell_common, cell_x[ri][ci])
+                if v != "" or d:
+                    shown.append(f"{h}={v!r}" + (" " + _fmt_extras(d) if d else ""))
+            rd = _deviation(row_common, row_x[ri])
+            ncell = len(cell_x[ri])
+            out.append(f"{pad}  row {ri}" + (" " + _fmt_extras(rd) if rd else "") + ": " + (" | ".join(shown) if shown else "(all cells empty)")
+                       + (f"  [{ncell} cell(s), {ncell - len(shown)} empty]" if len(shown) != ncell else ""))
+        if len(rows) > max_rows:
+            out.append(f"{pad}  ... {len(rows) - max_rows} more row(s) not printed")
+        return out
+
+    def walk(el, depth, path, quiet, ctx):
         p = path + "/" + el.tag
         census[p] = census.get(p, 0) + 1
         pad = "  " * depth
-        if quiet or printed.get(p, 0) >= per_path:                 # not printed: an ancestor or this path passed its cap
+        if el.tag == "property_sheet":
+            _census_below(el, p, census)                               # the interior is counted whether or not the sheet is printed
+        if quiet or printed.get(p, 0) >= per_path:                     # not printed: an ancestor or this path passed its cap
             skipped[p] = skipped.get(p, 0) + 1
             quiet = True
-        elif el.tag != "property_sheet":
+        else:
             printed[p] = printed.get(p, 0) + 1
-            lines.append(pad + _element_label(el))
+            lines.extend(sheet_lines(el, pad, p, ctx) if el.tag == "property_sheet" else [pad + _element_label(el)])
         if el.tag == "property_sheet":
-            headers, rows = _sheet(el)
-            if not quiet:
-                printed[p] = printed.get(p, 0) + 1
-                cand = any(TRANSITION_HEADER.search(h) for h in headers)
-                lines.append(f"{pad}property_sheet {p}: {len(headers)} column(s) {headers}; {len(rows)} row(s)"
-                             + ("; a header names a transition word (by name only)" if cand else ""))
-                for ri, cells in enumerate(rows[:max_rows]):
-                    shown = [f"{h}={v!r}" for h, v in _pairs(headers, cells) if v != ""]
-                    lines.append(f"{pad}  row {ri}: " + (" | ".join(shown) if shown else "(all cells empty)")
-                                 + (f"  [{len(cells)} cell(s), {len(cells) - len(shown)} empty]" if len(shown) != len(cells) else ""))
-                if len(rows) > max_rows:
-                    lines.append(f"{pad}  ... {len(rows) - max_rows} more row(s) not printed")
             return
+        sub = dict(ctx)
+        sub["parent"] = el
+        if el.findall("node"):
+            sub["sibs"] = el.findall("node")                           # the nodes of this graph: what a link's number may point at
+        if el.tag == "node":
+            sub["node"] = el
         for c in el:
-            walk(c, depth + 1, p, quiet)
+            walk(c, depth + 1, p, quiet, sub)
 
-    walk(root, 0, "", False)
+    walk(root, 0, "", False, {})
     for p, n in sorted(skipped.items()):
         lines.append(f"(path {p}: {n} element(s) not printed: this path or an ancestor's passed {per_path} printed; the census counts them)")
     return lines, census

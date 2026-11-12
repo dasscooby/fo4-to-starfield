@@ -121,7 +121,7 @@ class DumpTests(unittest.TestCase):
     def test_every_sheet_row_and_element_is_printed_whatever_its_columns(self):
         text = "\n".join(graphs.dump_lines("m.agx", "x", MACHINE))
         self.assertIn("COMPLETE DUMP", text)
-        self.assertIn("property_sheet /root/node/property_sheet: 3 column(s) ['From', 'To', 'Fires On']; 2 row(s)", text)
+        self.assertIn("property_sheet /root/node/property_sheet {num_columns='3'}: 3 column(s) ['From', 'To', 'Fires On']; 2 row(s)", text)   # its interior is printed now
         self.assertIn("a header names a transition word (by name only)", text)
         self.assertIn("row 0: From='StateA' | To='StateB' | Fires On='Trans01'", text)
         self.assertIn("row 1: From='StateB' | Fires On[2]='Done'  [3 cell(s), 1 empty]", text)      # an empty cell is counted, a listindex kept
@@ -147,6 +147,55 @@ class DumpTests(unittest.TestCase):
 
     def test_a_file_that_is_not_xml_says_so(self):
         self.assertIn("not XML", "\n".join(graphs.dump_lines("b.agx", "x", b"\0\1binary")))
+
+
+SHEET_XML = ("<root><node><node_type>NT_SM</node_type><name>Top</name><id>1</id><input><name>in</name><link node='2' output='0' hidden='false'>"
+             "<property_sheet id='9'>sheet-text<num_columns>2</num_columns>"
+             "<column kind='k'><header>Property</header><types>1</types></column><column kind='k'><header>Value</header><types>1</types></column><extra>E</extra>"
+             "<row r='1'><prop><type>1</type><value>Event</value></prop><prop><type>1</type><value>Play01</value><flag>F</flag></prop></row>"
+             "<row r='1'><prop><type>1</type><value>Transition Type</value></prop><prop><type>1</type><value></value></prop><transition_inside>q</transition_inside></row>"
+             "</property_sheet></link></input></node>"
+             "<node><node_type>NT_ANIM</node_type><name>StateA</name><id>2</id></node></root>").encode()
+
+
+class SheetInteriorTests(unittest.TestCase):
+    """The Courier's FAL-578 hold: everything inside a property_sheet is printed or counted, and a link sheet says what it is."""
+    def setUp(self):
+        lines, self.census = graphs.dump_agx(SHEET_XML)
+        self.text = "\n".join(lines)
+
+    def test_the_sheets_own_attributes_text_and_other_children_are_printed(self):
+        for want in ("@id='9'", "#text='sheet-text'", "num_columns='2'", "extra='E'"):
+            self.assertIn(want, self.text)
+
+    def test_column_attributes_and_children_are_printed_once_as_common(self):
+        self.assertIn("every column also has {@kind='k', types='1'}", self.text)
+
+    def test_row_attributes_and_children_and_cell_children_are_printed(self):
+        self.assertIn("row 1 {transition_inside='q'}: Property='Transition Type'", self.text)      # the one row that has the child says so
+        self.assertNotIn("every row also has {@r='1', transition_inside", self.text)   # one of two is not "every"
+        self.assertIn("every row also has {@r='1'}", self.text)
+        self.assertIn("every cell also has {type='1'}", self.text)
+        self.assertIn("Value='Play01' {flag='F'}", self.text)                   # a cell's own difference sits by the cell
+        self.assertIn("1 empty", self.text)
+
+    def test_the_census_counts_every_element_inside_a_sheet(self):
+        base = "/root/node/input/link/property_sheet"
+        for tail, n in (("", 1), ("/num_columns", 1), ("/column", 2), ("/column/types", 2), ("/extra", 1), ("/row", 2), ("/row/prop", 4),
+                        ("/row/prop/type", 4), ("/row/prop/flag", 1), ("/row/transition_inside", 1)):
+            self.assertEqual(self.census.get(base + tail), n, tail)
+
+    def test_a_sheet_with_event_and_transition_type_rows_is_marked_and_a_link_says_where_it_sits(self):
+        self.assertIn("TRANSITION LINK SHEET (rows Event and Transition Type)", self.text)
+        self.assertIn("link on node 'Top' (type 'NT_SM', id '1'); attributes node='2' output='0' hidden='false'", self.text)
+        self.assertIn("child/attribute id: 'StateA'", self.text)
+        self.assertIn("position from 1: 'StateA'", self.text)
+        self.assertIn("user_id: none", self.text)
+        self.assertIn("none chosen", self.text)                                 # every plausible reading, none picked
+
+    def test_an_ordinary_sheet_is_not_marked_a_link_sheet(self):
+        lines, _ = graphs.dump_agx(agx("Machine.agx", [("StateA", "Seq", "", "", "Trans01")]))
+        self.assertNotIn("TRANSITION LINK SHEET", "\n".join(lines))
 
 
 class NifFactsTests(unittest.TestCase):
