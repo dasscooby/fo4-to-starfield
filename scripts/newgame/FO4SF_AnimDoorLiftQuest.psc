@@ -93,10 +93,12 @@ Event OnInit()
     DoorEvents[5] = "IsOff"
     DoorEvents[6] = "Open"
     DoorEvents[7] = "Close"
-    LiftEvents = new string[3]
+    LiftEvents = new string[5]
     LiftEvents[0] = "TransitionComplete"
     LiftEvents[1] = "Stage1"
     LiftEvents[2] = "Stage2"
+    LiftEvents[3] = "Stage1NoTransition"
+    LiftEvents[4] = "Stage2NoTransition"
     Trace("init version=" + Version + " quest=" + GetFormID() + " installed=" + Game.IsPluginInstalled(ProbePlugin) + " doorcontrol=" + Id(Game.GetFormFromFile(DoorControlId, ProbePlugin)) + " lift=" + Id(Game.GetFormFromFile(LiftId, GamePlugin)) + " doorevents=" + DoorEvents.Length + " liftevents=" + LiftEvents.Length)
     StartTimer(POLL_S, TIMER_POLL)
 EndEvent

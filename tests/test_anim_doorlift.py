@@ -89,7 +89,16 @@ class ScriptTests(unittest.TestCase):
 
     def test_the_registered_events_are_the_pcs_read(self):
         self.assertEqual(strings("DoorEvents", PSC)[:6], ["Opened", "Closed", "Trans01", "Done", "IsOn", "IsOff"])
-        self.assertEqual(strings("LiftEvents", PSC), ["TransitionComplete", "Stage1", "Stage2"])
+        # the PC's read of the links (Claude, #755 1bfe5534): TransitionComplete, Stage1, Stage2, Stage1NoTransition, Stage2NoTransition; the last two are called at
+        # stages 33 and 34, so an arrival is logged. Stage1Transition / Stage2Transition (35, 36) are clip names, not events: not registered.
+        self.assertEqual(strings("LiftEvents", PSC), ["TransitionComplete", "Stage1", "Stage2", "Stage1NoTransition", "Stage2NoTransition"])
+        calls = strings("LiftCalls", PSC)
+        self.assertEqual((calls[2], calls[3]), ("Stage1NoTransition", "Stage2NoTransition"))              # stages 33 and 34
+        for stage_no, name in ((31, "Stage1"), (32, "Stage2"), (33, "Stage1NoTransition"), (34, "Stage2NoTransition")):
+            self.assertEqual(calls[stage_no - 31], name)
+            self.assertIn(name, strings("LiftEvents", PSC))                                               # every called event name is also registered
+        self.assertNotIn("Stage1Transition", strings("LiftEvents", PSC))
+        self.assertNotIn("Stage2Transition", strings("LiftEvents", PSC))
         self.assertNotIn("UNREAD here", PSC)                                          # the lift's events are read now
         self.assertIn("RegisterForAnimationEvent(r, n)", PSC)
         for lst in ("DoorEvents", "LiftEvents"):
@@ -274,8 +283,25 @@ class StageTests(ToolBase):
         self.assertIn(ANAM, readme)
         self.assertIn("MOVING PLATFORM", readme)
         self.assertIn("ShipQuickLift1", readme)
+        # the staged README's stage list is the quest's (the Courier's FAL-588 hold: it said 31..34 while the quest also ran 35 and 36)
+        m = re.search(r"stages ([\d. ]+?):", readme)
+        self.assertIsNotNone(m, readme[:400])
+        self.assertEqual(m.group(1), mad.stage_list(PSC))
+        self.assertEqual(m.group(1), "10 20..24 31..36 40 60")
+        ran = [int(x) for x in re.findall(r"StageList\[\d+\] = (\d+)", PSC)]
+        expanded = []
+        for tok in m.group(1).split():
+            lo, _, hi = tok.partition("..")
+            expanded += list(range(int(lo), int(hi or lo) + 1))
+        self.assertEqual(expanded, ran)                                                                  # the README's text expands to the quest's stages
+        tool_stages = re.search(r"QUST FO4SF_AnimDoorLiftQuest stages \[([\d,]+)\]", (out / "offline_check.txt").read_text())
+        self.assertEqual([int(x) for x in tool_stages.group(1).split(",")], ran)                         # and to what the tool wrote into the plugin
         with self.assertRaises(SystemExit):                                                              # an earlier stage is never overwritten
             mad.main(self.args(out, d))
+
+    def test_stage_list_compresses_runs_and_leaves_pairs_and_singles(self):
+        text = "".join(f"StageList[{i}] = {n}\n" for i, n in enumerate([10, 20, 21, 22, 23, 24, 31, 32, 40, 41, 42, 60]))
+        self.assertEqual(mad.stage_list(text), "10 20..24 31 32 40..42 60")
 
     def test_a_missing_graph_stops_the_stage_with_the_archive_to_pass(self):
         d = self.data_dir("d2", graph=False)

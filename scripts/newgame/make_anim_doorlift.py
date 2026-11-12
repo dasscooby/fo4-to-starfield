@@ -29,6 +29,7 @@ import datetime
 import glob
 import json
 import os
+import re
 import shutil
 import sys
 
@@ -63,6 +64,22 @@ def graph_anam(archives):
         return None, None
     entry = hits[0][1].replace("/", "\\")
     return (entry[len("Meshes\\"):] if entry.lower().startswith("meshes\\") else entry), entry
+
+
+def stage_list(psc_text):
+    """The quest's stages as the README and the card write them: runs of consecutive numbers as a..b, read from the script's StageList lines
+    (so the text cannot drift from the quest: 10 20..24 31..36 40 60)."""
+    nums = [int(n) for n in re.findall(r"StageList\[\d+\] = (\d+)", psc_text)]
+    out, i = [], 0
+    while i < len(nums):
+        j = i
+        while j + 1 < len(nums) and nums[j + 1] == nums[j] + 1:
+            j += 1
+        out.append(str(nums[i]) if j - i < 2 else f"{nums[i]}..{nums[j]}")
+        if j - i == 1:
+            out.append(str(nums[j]))
+        i = j + 1
+    return " ".join(out)
 
 
 def stage_files(out):
@@ -183,7 +200,7 @@ def stage(a):
     lift = f"{info.get('lift_type')} {info.get('lift_edid')}; graph: {info.get('lift_graph')}"
     with open(os.path.join(out, "README.txt"), "w", encoding="utf-8") as f:
         f.write(f"""Door and lift controls ({datetime.date.today().isoformat()}). docs/research/anim-doorlift-control.md
-{PLUGIN} (sha256 {plan['outputs'][PLUGIN]}): QUST FO4SF_AnimDoorLiftQuest (start game enabled, stages 10 20 21..24 31..34 40 60: place both,
+{PLUGIN} (sha256 {plan['outputs'][PLUGIN]}): QUST FO4SF_AnimDoorLiftQuest (start game enabled, stages {stage_list(text)}: place both,
 register for events, one call per stage with 15 s of listening, cleanup at 60) and ACTI FO4SF_AnimDoorControl: a new activator with the model,
 rig and clip folder of the vanilla door {info.get('door_edid')} (000AA24A) and the graph {anam}. The vanilla door is not placed. The lift is
 the vanilla ShipQuickLift1 (00010C35) placed unchanged, 40 m from the player (this Starfield.esm says it is: {lift}).

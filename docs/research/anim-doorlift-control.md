@@ -13,7 +13,7 @@ Claude runs it for one session on the PC after the Courier's CLEAR. **Nothing he
 ## What is built
 - The control's graph component is the vanilla door's WHOLE component (BNAM, CNAM, DNAM, ENAM and anything else it carries) with only the ANAM changed, and `check` compares them: the same flaw the Courier held on the generic control (FAL-579), fixed here the same way.
 - `dotnet/AnimDoorLiftControl` (new): `FO4SFAnimDoorLift.esm`, master `Starfield.esm` only, two records, overrides none. QUST `FO4SF_AnimDoorLiftQuest`
-  (0x800, start game enabled, stages 10 20 21..24 31..36 40 60, no properties) and ACTI `FO4SF_AnimDoorControl` (0x801): a **new** activator (a DOOR is not an ACTI, so there is
+  (0x800, start game enabled, stages 10 20..24 31..36 40 60, no properties) and ACTI `FO4SF_AnimDoorControl` (0x801): a **new** activator (a DOOR is not an ACTI, so there is
   nothing to duplicate) with the model, BNAM and CNAM of the vanilla DOOR `AK_Ext_Bld_WallA_DoorA_01_Alt02` `000AA24A` (read from the `Starfield.esm` given) and ANAM
   `genericopenclose01.agx` (its path read from the game's archives). One component only, the graph. The vanilla door is neither overridden nor placed.
   `info` / `build` / `check` / `fixture`; `build` refuses a graph that is not `genericopenclose01`, a door that is missing, has no graph component, no model, no rig or
@@ -22,7 +22,7 @@ Claude runs it for one session on the PC after the Courier's CLEAR. **Nothing he
   because the session places it whatever it is. What the real record is, is **unread** here.
 - `scripts/newgame/FO4SF_AnimDoorLiftQuest.psc`: places both, registers events on each, one call per stage, 15 s of listening, log `FO4SFAnimDL` (every line says `label=door|lift`).
 - `scripts/newgame/make_anim_doorlift.py` (`precheck`, `stage`, `log`) and `anim_doorlift_install.py` (own install record): variant A's way. **No clip is copied or written**: this kit holds no game asset.
-- Built on the generic control (PR #756): the stager reuses `make_anim_generic.py`'s archive helpers and the installer is its fork, so this branch sits on #756's head `0ba9282b`.
+- Built on the generic control (PR #756): the stager reuses `make_anim_generic.py`'s archive helpers and the installer is its fork, so this branch sits on #756's head `a70e6e69` (its DNAM/ENAM fix and event list; the held head was `0ba9282b`).
 
 ## The session
 | stage | what |
@@ -36,7 +36,7 @@ Claude runs it for one session on the PC after the Courier's CLEAR. **Nothing he
 
 Set the next stage only after the previous window has closed (`W sN quiet` / `W sN heard n`). **The lists are the PC's read of the real graphs (supported: Claude on #755 at `1bfe5534`, 12 Nov 21:15 UTC; not replayed here):**
 `twostages` takes `Stage1`, `Stage2`, `Stage1NoTransition`, `Stage2NoTransition` and sends `TransitionComplete`; `genericopenclose01` takes `Open`, `Close` and the direct `Opened`, `Closed` (states `Closed`,
-`Opening`, `Opened`, `Closing`; clip tags `Open` and `Close`). Registered on the door: `Opened`, `Closed`, `Trans01`, `Done`, `IsOn`, `IsOff`, `Open`, `Close`; on the lift: `TransitionComplete`, `Stage1`, `Stage2`.
+`Opening`, `Opened`, `Closing`; clip tags `Open` and `Close`). Registered on the door: `Opened`, `Closed`, `Trans01`, `Done`, `IsOn`, `IsOff`, `Open`, `Close`; on the lift: `TransitionComplete`, `Stage1`, `Stage2`, `Stage1NoTransition`, `Stage2NoTransition` (the last two are called at stages 33 and 34, so an arrival is logged; `Stage1Transition` and `Stage2Transition` at 35 and 36 are clip names, not events, and are not registered).
 What a `PlayAnimation` of those names DOES in the game is what the session shows: the read says which events enter which state, not that the call fires them.
 
 What the log cannot say: whether the door or the lift moved. That is a screenshot before and after each stage. The lift is a moving platform: stand well away from its spot.
@@ -44,7 +44,7 @@ What the log cannot say: whether the door or the lift moved. That is a screensho
 ## Unread, and what would change this kit
 - Whether a bare ACTI with only the door's model and a graph component behaves like the door (the real DOOR's other components are printed by `info` as `door_components`, none copied).
 - Whether `genericopenclose01` takes the door's own clips. **Supported** (Claude, PC, 12 Nov 21:37 UTC, not replayed here): the vanilla door's clip folder holds exactly `open.af(x)` and `close.af(x)`, which fits the graph's clip tags `Open` and `Close` up to case; whether the engine matches them case-blind, and whether the graph plays them, is unread.
-- What `ShipQuickLift1` is (ACTI/FURN/other) and whether it names `twostages` (`info` prints it at stage time). **Supported** (same source): it carries a script (VMAD). What that script does (it may start or stop the platform itself, or ignore a placed copy) is **unread**, so a call that returns true and a platform that does not move, or a move nobody called, are both possible readings; and so is what a disabled-then-enabled platform does.
+- **The lift, supported** (Claude, PC read of the real `Starfield.esm`, relayed in the FAL-489 thread, not replayed here): `ShipQuickLift1` is an ACTI, its graph is `TwoStages.agx`, its graph component has **no CNAM** (no clip folder of its own), and its VMAD is 64 bytes: it carries a script. Still **unread**: what that script does. It may start or stop the platform itself or ignore a placed copy, so a true return with no motion, or a motion nobody called, are both open readings. `info` prints the type and graph at stage time, so the real record is checked again there; and so is what a disabled-then-enabled platform does.
 - Whether `Stage1Transition` / `Stage2Transition` return false as the read predicts (stages 35 and 36 log it).
 - That `ObjectReference.Enable` exists as called (the compile on the PC decides; it is not an optional line).
 
