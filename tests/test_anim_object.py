@@ -114,6 +114,53 @@ class SlotsAndHoldsTests(unittest.TestCase):
         self.assertIsNone(ET.fromstring(d["StateA_Idle"]).find("audios"))
 
 
+class SwapSiblingsTests(unittest.TestCase):
+    """FAL-489 session 6: --swap-siblings exchanges the root's two children (Lid, Button) and nothing else."""
+    def base(self):
+        return door_rig.animated_identity_binds(door_rig.plan(console_nif(), placed=True, aliases=STATES, allowed=tuple(STATES.values())))
+
+    def test_the_two_siblings_trade_places_and_every_index_follows(self):
+        plan = self.base()
+        names = [b["name"] for b in plan["bones"]]
+        self.assertEqual(len(names), 3)
+        swapped = anim_object.swap_siblings(plan)
+        self.assertEqual([b["name"] for b in swapped["bones"]], [names[0], names[2], names[1]])
+        self.assertEqual([b["parent"] for b in swapped["bones"]], [-1, 0, 0])
+        for a_old, a_new in zip(plan["attachments"], swapped["attachments"]):          # an attachment keeps its bone BY NAME
+            self.assertEqual(plan["bones"][a_old["bone"]]["name"], swapped["bones"][a_new["bone"]]["name"])
+        by = {b["name"]: b for b in plan["bones"]}
+        for b in swapped["bones"]:                                                      # binds and nodes are untouched
+            self.assertEqual(b["bind"], by[b["name"]]["bind"])
+            self.assertEqual(b["node"], by[b["name"]]["node"])
+        self.assertEqual(anim_object.swap_siblings(swapped)["bones"], plan["bones"])    # twice is the original
+
+    def test_tracks_follow_the_new_order_and_the_clip_table_says_the_new_index(self):
+        plan = anim_object.add_holds(anim_object.fill_static_tracks(anim_object.swap_siblings(self.base())))
+        order = [b["name"] for b in plan["bones"]]
+        for clip in plan["clips"]:
+            self.assertEqual([t["name"] for t in clip["tracks"]], order)
+        table = anim_object.clip_table(plan, convert_static.UNIT_SCALE)
+        play = [c for c in table if c["name"] == "StateA_Play"][0]
+        moved = [t for t in play["tracks"] if not t.get("static")]
+        self.assertEqual([t["bone_index"] for t in moved], [order.index(t["bone"]) for t in moved])
+
+    def test_a_built_kit_writes_the_rig_and_the_manifest_in_the_swapped_order(self):
+        (built0, anim0), _ = BuilderTests().build()
+        (built1, anim1), plan1 = BuilderTests().build(swap=True)
+        n0 = [r["name"] for r in anim0["rig"]]
+        n1 = [r["name"] for r in anim1["rig"]]
+        self.assertEqual(n1, [n0[0], n0[2], n0[1]])
+        rig = lambda built: [v for k, v in built.items() if k.endswith("skeleton.rig")][0]      # noqa: E731
+        self.assertNotEqual(rig(built0), rig(built1))                                           # the rig file bytes differ
+        self.assertEqual([r["parent"] for r in anim1["rig"]], [-1, 0, 0])
+
+    def test_refuses_a_rig_without_exactly_one_pair(self):
+        plan = self.base()
+        flat = {**plan, "bones": plan["bones"][:2]}
+        with self.assertRaisesRegex(ValueError, "exactly one parent with exactly two children"):
+            anim_object.swap_siblings(flat)
+
+
 class BuilderTests(unittest.TestCase):
     def build(self, **kw):
         f = console_nif()
@@ -121,6 +168,8 @@ class BuilderTests(unittest.TestCase):
         seen = {}
 
         def hook(plan):
+            if kw.get("swap"):
+                plan = anim_object.swap_siblings(plan)
             seen["plan"] = anim_object.add_holds(anim_object.fill_static_tracks(plan))
             return seen["plan"]
 

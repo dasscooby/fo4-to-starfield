@@ -54,6 +54,30 @@ def hold_clip(clip, name):
     return {**clip, "name": name, "duration": 0.0, "events": [], "tracks": tracks, "hold_of": clip["name"]}
 
 
+def swap_siblings(plan):
+    """plan -> plan with the two sibling bones exchanged in the bone list (an experiment, FAL-489 session 6: does the game number the
+    root's two children in another order than the rig file?). Exactly one group of two bones may share a parent, else ValueError.
+    Bone i's position, every `parent` index and every attachment's `bone` index follow the exchange; nothing else changes (binds, tracks,
+    names). Everything written from plan['bones'] follows: the rig file, the .af blocks (rig order), the model's nodes and the attachments.
+    Apply BEFORE fill_static_tracks, which orders the tracks by the bone list."""
+    bones = plan["bones"]
+    groups = {}
+    for i, b in enumerate(bones):
+        if b["parent"] != -1:
+            groups.setdefault(b["parent"], []).append(i)
+    pairs = [g for g in groups.values() if len(g) >= 2]
+    if len(pairs) != 1 or len(pairs[0]) != 2:
+        raise ValueError(f"swap_siblings needs exactly one parent with exactly two children (found {[len(g) for g in pairs]})")
+    i, j = pairs[0]
+    perm = list(range(len(bones)))
+    perm[i], perm[j] = j, i                                          # old index -> new index
+    new = [None] * len(bones)
+    for old, b in enumerate(bones):
+        new[perm[old]] = {**b, "parent": b["parent"] if b["parent"] == -1 else perm[b["parent"]]}
+    attachments = [{**a, "bone": perm[a["bone"]]} for a in plan["attachments"]]
+    return {**plan, "bones": new, "attachments": attachments}
+
+
 def fill_static_tracks(plan):
     """plan -> plan whose every clip has ONE TRACK PER RIG BONE, in rig order: a bone the clip does not move gets a 'static' track
     (identity relative to its bind, zero travel).

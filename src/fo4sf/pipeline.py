@@ -785,7 +785,8 @@ class Converter:
             self.stats["failed"] += 1
         return res
 
-    def convert_anim_object(self, nif_name: str, states: dict, foley: Optional[str] = None, out_suffix: str = "_anim") -> dict:
+    def convert_anim_object(self, nif_name: str, states: dict, foley: Optional[str] = None, out_suffix: str = "_anim",
+                            swap_siblings: bool = False) -> dict:
         """An animated FO4 object that is no door (the Vault 111 console, FAL-489 variant D) as a model with its own rig and
         one clip per activator-graph slot, through the door path's multi-part builder: states maps FO4 sequence names to
         the Play slots (anim_object.parse_states), each Play slot also gets a one-frame Idle hold, every .afx is written in
@@ -810,6 +811,8 @@ class Converter:
             holder = {}
 
             def hook(plan):
+                if swap_siblings:                                  # the experiment of FAL-489 session 6: the two siblings' indices exchanged
+                    plan = anim_object.swap_siblings(plan)
                 plan = anim_object.add_holds(anim_object.fill_static_tracks(plan))
                 holder["plan"] = plan
                 return plan
@@ -824,6 +827,7 @@ class Converter:
             anim["states"] = dict(states)
             anim["clips"] = anim_object.clip_table(holder["plan"], convert_static.UNIT_SCALE)
             anim["foley"] = foley or ""
+            anim["swap_siblings"] = bool(swap_siblings)
             for relp, data in files.items():
                 write_staged(os.path.join(self.staging, *relp.split("/")), data)
             res.update(ok=True, out_name=out_name, shapes=len(shapes), materials=mats, anim=anim)

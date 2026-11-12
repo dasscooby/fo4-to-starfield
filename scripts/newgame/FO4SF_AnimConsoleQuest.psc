@@ -1,35 +1,36 @@
 Scriptname FO4SF_AnimConsoleQuest extends Quest
-{The animation probe, variant D (fo4-to-starfield, docs/research/anim-console-probe.md, FAL-489). Attached to QUST
- FO4SF_AnimConsoleQuest (0x800 of FO4SFAnimConsole.esm): start game enabled, stages set from the console, NO properties (every
- form is found with Game.GetFormFromFile at the moment it is read; a property would make a temporary reference persistent).
- The question: does OUR console (the port's Vault 111 console base, overridden by the plugin with its own rig, its own .af / .afx
- clips and the graph component of the vanilla activator graph activatorstategraph01) answer PlayAnimation the way the vanilla
- activator did in variant A? The script spawns a copy of that base with PlaceAtMe (the override is on the base, so a spawn
- anywhere has the new model), registers for the animation events FROM it, and sends it one name per stage:
-   10      PlaceAtMe of the console base AheadM (1.5 m) in front of the player and UpM (1.2 m) above the player's height, turned to face
-           the player when SetAngle compiles (persistent), reads it, registers every event name
-   20      registers every event name again
-   21..28  one PlayAnimation name each, then 15 s of listening. Variant A: Play01 opened the vanilla activator, Play02 closed it,
-           TurnOff opened, StateB_Play closed; the rest changed nothing. The names are in that order, the four that moved first.
-           Which clip our console shows for each name is the result: screenshots before and after each stage
-   11      a SECOND copy 0.9 m to the player's right of the first, turned a quarter circle from it, so one shot shows the front and the side
-   30      Activate(player) by script
-   31      QUIET: Play01 on both copies, no notification until the window closes (so shots every 0.3 s are not covered); 32: the same with Play02.
-           Play02 FIRST on a fresh load: set 10, then 32, and do not set 31 (stage 22 does the same on one copy with notifications)
-   40      a reading of the reference now
-   60      Disable and Delete the spawned reference
- One name per stage so each is its own line: set the next stage only after the 15 s window of the last one has closed (its "quiet"
- or "listened" line; the on-screen twin is "W ..."), because one window is open at a time. An event is logged with stage=<the open
- window's stage>, or stage=0 when no window is open, and with after=<seconds since that stage's PlayAnimation call>: variant A showed
- Done after a clip, so after= on Done is the clip's length as the engine plays it (the button clip should be near 0.633 s, the glass
- flip near 1.633 s: the original's own times, unread in game). NEVER the wait form.
- Every log line that matters also shows as a short on-screen notification beginning "AP " (Say), for a session with script logging off.
- Optional natives are lines that begin with ";OPT <Base.Name> ": scripts/newgame/make_anim_console.py stage compiles each on its own
- and keeps the ones that compile. ";VOID " lines are the register call's second shape (no return value): the stager keeps them
- instead of the bool-return line when the base scripts declare RegisterForAnimationEvent without a return. The ";BASE" line is the
- console base's local id in FO4Port.esm, written by the stager from the plugin tool's `info` (0 = not given: the script says so).
- One line per finding in the user log "FO4SFAnimD" (My Games\\Starfield\\Logs\\Script\\User\\FO4SFAnimD.0.log): FO4SFANIM rt=<real
- time s> <event> key=value ... end=true (form ids as Papyrus prints them: signed decimal, "none" for None).}
+{The animation probe, variant D (fo4-to-starfield, docs/research/anim-console-probe.md, FAL-489): attached to QUST FO4SF_AnimConsoleQuest, stages set from the console. The full description follows as ; comments (the compiler drops them; a doc comment over 3 KB is held to tests/test_papyrus_strings.py).}
+; The animation probe, variant D (fo4-to-starfield, docs/research/anim-console-probe.md, FAL-489). Attached to QUST
+; FO4SF_AnimConsoleQuest (0x800 of FO4SFAnimConsole.esm): start game enabled, stages set from the console, NO properties (every
+; form is found with Game.GetFormFromFile at the moment it is read; a property would make a temporary reference persistent).
+; The question: does OUR console (the port's Vault 111 console base, overridden by the plugin with its own rig, its own .af / .afx
+; clips and the graph component of the vanilla activator graph activatorstategraph01) answer PlayAnimation the way the vanilla
+; activator did in variant A? The script spawns a copy of that base with PlaceAtMe (the override is on the base, so a spawn
+; anywhere has the new model), registers for the animation events FROM it, and sends it one name per stage:
+; 10      PlaceAtMe of the console base AheadM (1.5 m) in front of the player and UpM (1.2 m) above the player's height, turned to face
+; the player when SetAngle compiles (persistent), reads it, registers every event name
+; 20      registers every event name again
+; 21..28  one PlayAnimation name each, then 15 s of listening. Variant A: Play01 opened the vanilla activator, Play02 closed it,
+; TurnOff opened, StateB_Play closed; the rest changed nothing. The names are in that order, the four that moved first.
+; Which clip our console shows for each name is the result: screenshots before and after each stage
+; 11      a SECOND copy 0.9 m to the player's right of the first, turned a quarter circle from it, so one shot shows the front and the side
+; 30      Activate(player) by script
+; 31      QUIET: Play01 on both copies, no notification until the window closes (so shots every 0.3 s are not covered); 32: the same with Play02.
+; Play02 FIRST on a fresh load: set 10, then 32, and do not set 31 (stage 22 does the same on one copy with notifications)
+; 40      a reading of the reference now
+; 60      Disable and Delete the spawned reference
+; One name per stage so each is its own line: set the next stage only after the 15 s window of the last one has closed (its "quiet"
+; or "listened" line; the on-screen twin is "W ..."), because one window is open at a time. An event is logged with stage=<the open
+; window's stage>, or stage=0 when no window is open, and with after=<seconds since that stage's PlayAnimation call>: variant A showed
+; Done after a clip, so after= on Done is the clip's length as the engine plays it (the button clip should be near 0.633 s, the glass
+; flip near 1.633 s: the original's own times, unread in game). NEVER the wait form.
+; Every log line that matters also shows as a short on-screen notification beginning "AP " (Say), for a session with script logging off.
+; Optional natives are lines that begin with ";OPT <Base.Name> ": scripts/newgame/make_anim_console.py stage compiles each on its own
+; and keeps the ones that compile. ";VOID " lines are the register call's second shape (no return value): the stager keeps them
+; instead of the bool-return line when the base scripts declare RegisterForAnimationEvent without a return. The ";BASE" line is the
+; console base's local id in FO4Port.esm, written by the stager from the plugin tool's `info` (0 = not given: the script says so).
+; One line per finding in the user log "FO4SFAnimD" (My Games\\Starfield\\Logs\\Script\\User\\FO4SFAnimD.0.log): FO4SFANIM rt=<real
+; time s> <event> key=value ... end=true (form ids as Papyrus prints them: signed decimal, "none" for None).
 
 ; ---------------------------------------------------------------- the layout (dotnet/AnimConsoleProbe/Program.cs)
 

@@ -261,7 +261,8 @@ def stage(a, converter=None):
     info = parse_info(run(tool + ["info", port_esm, sf_esm, "--edid", a.edid]).stdout)
     src, conv = (converter or build_converter)(a, staging)
     original, _raw = find_original(src, info["model"], a.model)
-    res = conv.convert_anim_object(original, states, a.foley or None)
+    res = (conv.convert_anim_object(original, states, a.foley or None, swap_siblings=True) if getattr(a, "swap_siblings", False)
+           else conv.convert_anim_object(original, states, a.foley or None))
     if not res.get("ok"):
         sys.exit(f"the console did not convert: {res.get('reason')} (attempt kept in {out})")
     anim = res["anim"]
@@ -361,6 +362,8 @@ def inspect_stage(a):
         print("this stage's manifest has no rig table (staged by an older head, or a door's \"native\" marker): re-stage")
         return 2
     print(f"original {man['original']}  model {man['model']}  states {man['states']}")
+    if anim.get("swap_siblings"):
+        print("SIBLINGS SWAPPED (--swap-siblings): the two children of one bone are written in exchanged order")
     print("rig bones (index: name, parent, bind in m):")
     for r in rig:
         print(f"  {r['index']}: {r['name']} (parent {r['parent']}) {r['bind_t_m']}")
@@ -567,6 +570,7 @@ def main(argv=None):
     s.add_argument("--compiler", default=os.path.join(STARFIELD, "Tools", "Papyrus Compiler", "PapyrusCompiler.exe"))
     s.add_argument("--states", required=True, help='FO4 sequence = Play slot, e.g. "Stage1=StateA_Play,Stage2=StateB_Play" (see `clips`)')
     s.add_argument("--foley", default="", help="a Starfield foley name for the clips' sound frames (default: none, no sound)")
+    s.add_argument("--swap-siblings", action="store_true", help="EXPERIMENT (FAL-489 session 6): write the root's two children (Lid, Button) with their indices exchanged: rig, .af blocks, model nodes and attachments; nothing else changes")
     s.add_argument("--model", default="")
     s.add_argument("--edid", default=EDID)
     i = sub.add_parser("inspect")

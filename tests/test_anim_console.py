@@ -201,8 +201,9 @@ class FakeConv:
     def __init__(self, staging, textures=()):
         self.staging, self.textures, self.calls = staging, textures, []
 
-    def convert_anim_object(self, name, states, foley=None):
+    def convert_anim_object(self, name, states, foley=None, swap_siblings=False):
         self.calls.append((name, dict(states), foley))
+        self.swapped = swap_siblings
         out = "fo4port/interiors/vault/props/console01_anim"
         files = {f"meshes/{out}.nif": b"nif", f"meshes/{out}/characterassets/skeleton.rig": b"rig", "geometries/ab/cd.mesh": b"mesh",
                  "materials/fo4port/x.mat": b"mat"}
@@ -359,6 +360,14 @@ class StageTests(unittest.TestCase):
         (port_dir / "FO4Port - Textures.ba2").write_bytes(general_archive({"textures\\fo4port\\c_d.dds": b"dds"}))
         self.assertEqual(mac.stage(self.args(self.root / "staged-t2", port_data=str(port_dir)), converter=make), 0)
         self.assertFalse(any("textures" in k for k in json.loads((self.root / "staged-t2" / "plan.json").read_text())["outputs"]))
+
+    def test_swap_siblings_is_off_by_default_and_reaches_the_converter_when_asked(self):
+        make, holder = self.converter()
+        self.assertEqual(mac.stage(self.args(self.root / "staged-sw0"), converter=make), 0)
+        self.assertFalse(holder["conv"].swapped)
+        make, holder = self.converter()
+        self.assertEqual(mac.stage(self.args(self.root / "staged-sw1", swap_siblings=True), converter=make), 0)
+        self.assertTrue(holder["conv"].swapped)
 
     def test_a_failed_conversion_and_a_bad_state_map_stop_before_anything_is_published(self):
         class Failing(FakeConv):
