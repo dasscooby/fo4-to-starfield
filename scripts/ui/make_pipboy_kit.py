@@ -10,7 +10,8 @@ fill them); adding or changing a page is an edit of that file and a re-stage, no
 
   [Kit]                     Title=<text>, Header=<value> (the title bar's right side), Hints=<text> (the key hints),
                             Mission=<plugin file>|<local id hex> (our mission, the first row of List=quests),
-                            MissionStageAt=<hex offset> (its current stage, a u16: pipboy_quest_bytes.py names it)
+                            MissionStageAt=<hex offset> (its current stage, a u16: pipboy_quest_bytes.py names it),
+                            MissionObjective=<n>|<path> (up to 8: an objective's state, pipboy_quest_bytes.py names it)
   [Page <TAB>/<SUB>]        one page: the main tab it sits under and its sub-tab, in the order the sections come; then
                             exactly one of
     Row=<label>|<value>       a row of the list, its value from a value provider (any number, scrolled 16 at a time)
@@ -170,6 +171,34 @@ def check_stage_at(value, line):
     return at
 
 
+OBJECTIVE_BLOCK = 0x40                   # the bytes the plugin's F11 dump reads behind each pointer (kObjectiveBlock)
+MAX_OBJECTIVES = 8                       # MissionObjective= lines (kKitObjectives)
+
+
+def check_objective(value, line):
+    """<index>|<path> (FAL-571): the objective's number (1 to 5 decimal digits, at most 65535) and where its state is,
+    as scripts/ui/pipboy_quest_bytes.py --objective prints it: 2 or 3 offsets of 1 to 3 hex digits joined by '/', the
+    first a pointer in the F11 dump (a multiple of 8, 38 to 330), a middle one a pointer in the 0x40 bytes behind it (a
+    multiple of 8, 0 to 38), the last the state's byte (0 to 3F). The plugin's KitObjectiveLine reads the same."""
+    if value.count("|") != 1:
+        raise KitError(f"line {line}: MissionObjective needs <index>|<path>")
+    number, path = value.split("|")
+    if not re.fullmatch(r"[0-9]{1,5}", number) or int(number) > 0xFFFF:
+        raise KitError(f"line {line}: MissionObjective's index {number!r} is not a number from 0 to 65535")
+    parts = path.split("/")
+    if not 2 <= len(parts) <= 3 or not all(re.fullmatch(r"[0-9A-Fa-f]{1,3}", part) for part in parts):
+        raise KitError(f"line {line}: MissionObjective's path {path!r} is not 2 or 3 hex offsets joined by /")
+    offsets = [int(part, 16) for part in parts]
+    first, last = offsets[0], offsets[-1]
+    if not QUEST_DUMP[0] <= first <= QUEST_DUMP[1] - 8 or first % 8:
+        raise KitError(f"line {line}: MissionObjective's first offset {parts[0]!r} is not a multiple of 8, 38 to 330")
+    if len(offsets) == 3 and (offsets[1] > OBJECTIVE_BLOCK - 8 or offsets[1] % 8):
+        raise KitError(f"line {line}: MissionObjective's middle offset {parts[1]!r} is not a multiple of 8, 0 to 38")
+    if last >= OBJECTIVE_BLOCK:
+        raise KitError(f"line {line}: MissionObjective's last offset {parts[-1]!r} is not from 0 to 3F")
+    return {"index": int(number), "path": offsets}
+
+
 def _cell(value, line, columns, what):
     if value.count("|") != 1:
         raise KitError(f"line {line}: {what} needs <label>|<value>")
@@ -180,7 +209,8 @@ def _cell(value, line, columns, what):
 def parse_kit(text):
     """The [Kit] section and the [Page <TAB>/<SUB>] sections of the ini, checked; other sections are skipped. The
     plugin's ReadKit (main.cpp) reads the same grammar with the same checks."""
-    kit = {"title": "FO4SF PIP-BOY", "header": "", "hints": "", "mission": None, "stage_at": None, "pages": []}
+    kit = {"title": "FO4SF PIP-BOY", "header": "", "hints": "", "mission": None, "stage_at": None, "objectives": [],
+           "pages": []}
     section = None
     page = None
     for n, raw in enumerate(text.splitlines(), 1):
@@ -224,9 +254,16 @@ def parse_kit(text):
                 kit["mission"] = check_mission(value, n)
             elif key == "MissionStageAt" and kit["stage_at"] is None:
                 kit["stage_at"] = check_stage_at(value, n)
+            elif key == "MissionObjective":
+                objective = check_objective(value, n)
+                if len(kit["objectives"]) == MAX_OBJECTIVES:
+                    raise KitError(f"line {n}: more than {MAX_OBJECTIVES} MissionObjective lines")
+                if any(o["index"] == objective["index"] for o in kit["objectives"]):
+                    raise KitError(f"line {n}: objective {objective['index']} comes twice")
+                kit["objectives"].append(objective)
             else:
                 raise KitError(f"line {n}: [Kit] has no key {key!r} (Title, Header, Hints, Mission and MissionStageAt "
-                               "once)")
+                               "once, MissionObjective)")
             continue
         if key == "Row":
             if len(page["rows"]) == MAX_PAGE_ROWS:
@@ -539,7 +576,8 @@ def main(argv=None):
         if a.check:
             kit = read_kit(a.ini)
             print(json.dumps({"signature": signature(kit), "tabs": tabs_of(kit), "mission": kit["mission"],
-                              "stage_at": kit["stage_at"], "pages": kit["pages"]}, indent=1))
+                              "stage_at": kit["stage_at"], "objectives": kit["objectives"],
+                              "pages": kit["pages"]}, indent=1))
             return 0
         if not a.out:
             ap.error("--out or --check is needed")

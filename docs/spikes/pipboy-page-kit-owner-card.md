@@ -70,6 +70,7 @@ of `docs/spikes/pipboy-channel-bridge-session.md`, sections 1 to 3, with these c
 | STAT / SPECIAL | STRENGTH to LUCK | `player.getav strength`, `player.getav perception`, `player.getav endurance`, `player.getav charisma`, `player.getav intelligence`, `player.getav agility`, `player.getav luck` |
 | DATA / KIT TEST | ROW n OF 30, KEY MOVES, CLICK MOVES | none: no game value |
 | DATA / QUESTS | FORM, STAGE | `getstage <id>` and `setstage <id> <n>`, `<id>` the mission's form id as FORM shows it (`07000800` on the PC's load order, 12 Nov: the first two digits are the plugin's load index, so read it off FORM); by its editor ID (`FO4SF_Min00`) the console refuses it ("not found for parameter Quest"). STAGE needs `MissionStageAt=` in `[Kit]` (README, `quests`), else `?` |
+| DATA / QUESTS | OBJECTIVE 10, 85, 86 | `setobjectivedisplayed <id> <n> 1` and `setobjectivecompleted <id> <n> 1`, `<id>` as for `setstage`, `<n>` the objective (10, 85, 86). Each row shows `NOT SHOWN`, `SHOWN` or `DONE` (0, 1, 3; another value raw as `STATE <n>`), read from the mission's own objectives with no setting (README, `quests`); `MissionObjective=<n>\|<path>` lines in `[Kit]` override that. `OBJECTIVES ?` if the objectives cannot be read whole |
 
 **What the log must show:** see `sfse/FO4SFPipboyMenu/README.md`, "PASS at (e)".
 
