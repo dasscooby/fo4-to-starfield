@@ -8,7 +8,8 @@ exp_install.py keeps exactly one experiment record (Data\\FO4SFExp.install.json,
 the same installer code against a record of its own, Data\\FO4SFPipboyProbe.install.json, so the probe rides along
 and the installed experiment is never read or changed (the pattern of scripts/planet/planet_probe_install.py).
 install first checks the stage: exactly one plugin, FO4SFPipboyProbe.esm, passing make_pipboy_probe.py check, and a
-Data tree holding exactly the movie Interface/FO4SF_PipboyMenu.swf, which must read back as a movie. It then
+Data tree holding the movie Interface/FO4SF_PipboyMenu.swf, which must read back as a movie, and nothing else but its
+twins (make_pipboy_probe.py twin, FAL-250): the same bytes at a vanilla movie's path under Interface/. It then
 activates the plugin and packs Data into "FO4SFPipboyProbe - Main.ba2" (loose files are not read on this install),
 the "*FO4SFPipboyProbe.esm" line appended to the end of Plugins.txt. Everything else is exp_install.py's behaviour:
 no existing game file is overwritten, every added file is recorded before it is published, uninstall removes exactly
@@ -56,13 +57,28 @@ def stage_problems(d):
     data = os.path.join(d, "Data")
     found = sorted(os.path.relpath(os.path.join(r, f), data).replace(os.sep, "/")
                    for r, _, fs in os.walk(data) for f in fs)
-    if found != [make_pipboy_probe.MOVIE]:
-        problems.append(f"Data holds {found}, expected [{make_pipboy_probe.MOVIE!r}]")
+    twins = [f for f in found if f != make_pipboy_probe.MOVIE]
+    if make_pipboy_probe.MOVIE not in found or any(make_pipboy_probe.twin_problem(t) for t in twins):
+        problems.append(f"Data holds {found}, expected [{make_pipboy_probe.MOVIE!r}] and twins under Interface/")
     else:
         try:
             make_probe_swf.read_movie(os.path.join(data, *make_pipboy_probe.MOVIE.split("/")))
         except (make_probe_swf.SwfError, OSError) as e:
             problems.append(f"the movie does not read back: {e}")
+        else:
+            problems += twin_problems(data, twins)
+    return problems
+
+
+def twin_problems(data, twins):
+    """Each twin must be the movie byte for byte: a twin that differs would not prove that our movie drew."""
+    with open(os.path.join(data, *make_pipboy_probe.MOVIE.split("/")), "rb") as f:
+        movie = f.read()
+    problems = []
+    for t in twins:
+        with open(os.path.join(data, *t.split("/")), "rb") as f:
+            if f.read() != movie:
+                problems.append(f"the twin {t} is not the movie byte for byte (re-run make_pipboy_probe.py twin)")
     return problems
 
 
