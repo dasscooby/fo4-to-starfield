@@ -593,11 +593,12 @@ class KitPluginTests(unittest.TestCase):
         self.assertNotIn("REL::Relocation", self.section)
         self.assertNotIn("REL::ID", self.section)
         self.assertNotIn("reinterpret_cast<", self.section)
-        self.assertEqual(self.main.count("FormById("), 6)                     # stage d's four and the quest list's two
+        self.assertEqual(self.main.count("FormById("), 8)                     # stage d's four, the quest list's four
         files = function(self.main, "std::uint32_t KitFileForm(")              # FAL-431: our mission, by its file
-        quests = function(self.main, "std::vector<KitRow> KitQuestRows(")
-        self.assertEqual((files.count("FormById("), quests.count("FormById(")), (1, 1))
-        self.assertEqual(self.section.count("FormById("), 2)
+        quests = function(self.main, "std::vector<KitRow> KitQuestRows(")      # FAL-584: and each other quest again
+        scan = function(self.main, "std::vector<std::uint32_t> KitFileQuests(")   # FAL-584: its file's quests, once
+        self.assertEqual((files.count("FormById("), quests.count("FormById("), scan.count("FormById(")), (1, 2, 1))
+        self.assertEqual(self.section.count("FormById("), 4)
         self.assertIn("if (IsType(form, a_type, formType)) {", files)        # only a form of the asked RTTI type
         self.assertIn('if (!IsType(quest, "TESQuest@@", type)) {', quests)
         self.assertEqual(self.main.count("reinterpret_cast<GetActorValue_t>"), 1)
@@ -773,7 +774,8 @@ class KitPluginTests(unittest.TestCase):
         bodies = "".join(function(self.main, f) for f in ("void KitCollect()", "std::string KitValueRead(",
                                                           "std::vector<KitRow> KitTestRows(",
                                                           "std::vector<KitRow> KitInventoryRows(",
-                                                          "std::vector<KitRow> KitQuestRows("))
+                                                          "std::vector<KitRow> KitQuestRows(",
+                                                          "KitRow KitQuestRow("))
         texts = [t for t in re.findall(r'"([^"]*)"', bodies) if t and t == t.upper()]
         self.assertGreaterEqual(len(texts), 8)
         for text in texts:
