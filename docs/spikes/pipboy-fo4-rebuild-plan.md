@@ -552,6 +552,33 @@ PASS: `step=code_obj_init ... found=1 called=1 ... code_obj=1 code_obj_type=8` (
 (`PipboyMenu.swf`); 2b then starts from D2's `PipboyMenu` names. `called=1 code_obj=0`: the page took the call but
 keeps the object elsewhere; the `code_call` lines show whether it uses it.
 
+**Proof 2a, the second run (owner PC, 13 Nov, 06:07 to 06:11 UTC, at `9858bc26`): PASS, verified.** `step=code_obj_init
+when=load try=1 name=InitCodeObj got=1 found=1 type=11 called=1 result_type=0 code_obj=1 code_obj_type=8`: the page
+has a public `InitCodeObj` and kept our object as its `codeObj`, which confirms the D2 reading. `set=16 of=17
+read_back=0` as expected for the sealed root. No `code_call` in 14 seconds with the page left alone, no `refuse`, no
+crash; the page shows its design-time contents. So the page's values do not come through any call it makes: the data
+arrives another way, which 2b has to find.
+
+**Proof 2b, step i, the card: what the page exposes (read-only).** Plugin code, so the PC rebuilds. D2's STAT page names
+a data path (`PipboyChangeEvent`, `PIPBOY_CHANGE_EVENT`, `onPipboyChangeEvent`, `onPipboyChangeEventInternal`,
+`DataObj`, `_DataObj`, `UpdateMask`, `Pipboy_DataObj`, `InvalidateData`, `onAnnounceDataChange`) and the values by name
+(`CurrHP`, `MaxHP`). The reading (not verified): Fallout 4's shell hands each page a `PipboyChangeEvent` carrying the
+data object and an update mask, and the page's `onPipboyChangeEvent` copies the values it needs. Before anything is
+pushed, this step reads which of those names are public on the page's root and of what type.
+`CodeObjProbe=<path>,...` (with `CodeObj=1` only; it ships empty): once per movie, right after the hand-over, each path
+(a root member, or members joined by `.`) is read with `GetMember` and logged as `step=code_obj_probe n= name= found=
+type= value=` (the value only for a boolean or a number). Nothing is set or called.
+1. Install and settings as for proof 2a's second run, plus
+   `CodeObjProbe=onPipboyChangeEvent,onPipboyChangeEventInternal,ProcessUserEvent,InvalidateData,onAnnounceDataChange,DataObj,_DataObj,UpdateMask,codeObj,bAcquiredByNativeCode,onAcquiredByNativeCode,ReleaseCodeObj,CurrHP,MaxHP,PlayerInfo,stage`.
+2. Outdoors: F10, wait 5 seconds, F10 again.
+3. Send every `step=code_obj_probe` line and the `step=code_obj_init` line.
+
+PASS: sixteen `code_obj_probe` lines, no crash. Types: 11 is a function, 8 an object, 10 a display object, 0 missing or
+undefined. What it decides: if `onPipboyChangeEvent` (or `onPipboyChangeEventInternal`) is a public function, step ii
+calls it with an event the plugin builds; if only `DataObj` or `_DataObj` is public, step ii writes `CurrHP` and `MaxHP`
+into it and calls `InvalidateData`; if neither, the hand-over of data belongs to the shell, and step ii loads
+`PipboyMenu.swf` around the page.
+
 **Proof 2, the outline (route A): the STAT page.** Each step has its own card once the one before it has run.
 - **2a, the page alone:** `Movie=FO4SF_Fo4Stats`, the player's `Pipboy_StatsPage.swf` installed with
   `--extra-movie FO4SF_Fo4Stats`, and `CodeObj=1` with the page's own names in `CodeObjNames`. Shows: the page's frame
@@ -657,6 +684,6 @@ delivery.
 2. Done: D2 and proof 1 (13 Nov): route A is alive.
 3. Done: proof 1b (13 Nov, third run) and proof 1c (13 Nov, `CodeObjHide=1`).
 4. Done: read D4 and proof 1d (13 Nov, the sounds by route S2, PASS by the log; the owner's ear still to hear it).
-5. Proof 2a, the STAT page alone: first run done (the page draws; the hand-over did not happen); the second run's
-   card is written (`CodeObjInit=` called whether or not `root.BGSCodeObj` takes the stand-in). Then 2b, HP by name, from 2a's log, with its
+5. Done: proof 2a, the STAT page alone (13 Nov, second run: the page draws and takes our object through
+   `InitCodeObj`). Proof 2b step i, what the page exposes (`CodeObjProbe=`, read-only): its card is written. Then 2b, HP by name, from 2a's log, with its
    own card, tests, a CARRY line, the Scribe's review, and the PC's run.

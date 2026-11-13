@@ -444,6 +444,8 @@ namespace
 	bool                                     g_codeObjHide = false;     // FAL-614 proof 1c: CodeObjHide=1, HideMenu closes our menu
 	bool                                     g_codeObjSound = false;    // FAL-614 proof 1d: CodeObjSound=1, PlaySound plays a file
 	std::string                              g_codeObjInit;             // FAL-614 proof 2a: CodeObjInit=<root function>, handed the stand-in
+	std::array<std::string, kMaxCodeNames>   g_probeNames;              // FAL-614 proof 2b-i: CodeObjProbe=, read once after the hand-over
+	std::size_t                              g_probeCount = 0;
 	std::filesystem::path                    g_soundDir;                // <dll folder>/FO4SFPipboyMenuSounds
 	std::atomic<std::uint32_t>               g_soundsPlaying{ 0 };
 	std::atomic<std::uint32_t>               g_soundLines{ 0 };
@@ -3595,6 +3597,34 @@ namespace
 		if (done) {
 			g_codeObjMovie = movie;
 		}
+		// FAL-614 proof 2b-i (CodeObjProbe=<path>,...): read-only. Once per movie, on the try that finished the
+		// hand-over, each path (a root member, or members joined by '.') is read with GetMember and its type logged,
+		// with the value only for a boolean or a number; nothing is set or called
+		for (std::size_t i = 0; done && i < g_probeCount; ++i) {
+			RE::Scaleform::GFx::Value at = top;
+			bool                      found = true;
+			for (std::size_t start = 0; found && start <= g_probeNames[i].size();) {
+				const auto end = std::min(g_probeNames[i].find('.', start), g_probeNames[i].size());
+				RE::Scaleform::GFx::Value next;
+				found = at.IsObject() || at.GetType() == RE::Scaleform::GFx::Value::ValueType::kClosure ?
+				            at.GetMember(g_probeNames[i].substr(start, end - start), &next) :
+				            false;
+				at = next;
+				start = end + 1;
+			}
+			std::string value;
+			if (found && at.IsBoolean()) {
+				value = std::format(" value={}", at.GetBoolean() ? 1 : 0);
+			} else if (found && at.IsInt()) {
+				value = std::format(" value={}", at.GetInt());
+			} else if (found && at.IsUInt()) {
+				value = std::format(" value={}", at.GetUInt());
+			} else if (found && at.IsNumber()) {
+				value = std::format(" value={}", at.GetNumber());
+			}
+			REX::INFO("step=code_obj_probe n={} name={} found={} type={}{}", i + 1, g_probeNames[i], found ? 1 : 0,
+				found ? TypeCode(at) : -1, value);
+		}
 		if (done || attempt <= kLoggedCodeObjTries || attempt == kMaxCodeObjTries) {
 			std::string names;
 			for (std::size_t i = 0; i < g_codeObjCount; ++i) {
@@ -4275,6 +4305,36 @@ namespace
 		return out;
 	}
 
+	// FAL-614 proof 2b-i: CodeObjProbe=<path>,<path>,... (empty: none), 1 to 16 paths of 1 to 64 letters, digits, '_'
+	// and '.', each part between dots not empty
+	bool ParseProbeNames(std::string_view a_list)
+	{
+		g_probeCount = 0;
+		if (a_list.empty()) {
+			return true;
+		}
+		const std::string list(a_list);
+		std::size_t       start = 0;
+		while (start <= list.size()) {
+			const auto end = std::min(list.find(',', start), list.size());
+			const auto name = list.substr(start, end - start);
+			const bool ok = !name.empty() && name.size() <= kMaxName && g_probeCount < kMaxCodeNames && name.front() != '.' &&
+			                name.back() != '.' && name.find("..") == std::string::npos &&
+			                std::ranges::all_of(name, [](char a_c) {
+				                return (a_c >= 'A' && a_c <= 'Z') || (a_c >= 'a' && a_c <= 'z') || (a_c >= '0' && a_c <= '9') ||
+				                       a_c == '_' || a_c == '.';
+			                });
+			if (!ok) {
+				Refuse("ini", std::format("code_obj_probe={} (with CodeObj=1 only; 1 to {} paths of letters, digits, _ and .)",
+					list, kMaxCodeNames));
+				return false;
+			}
+			g_probeNames[g_probeCount++] = name;
+			start = end + 1;
+		}
+		return true;
+	}
+
 	// FAL-614 proof 1b: CodeObjNames=<name>,<name>,... (empty: PlaySound,HideMenu), 1 to 16 names of 1 to 64 letters,
 	// digits and '_', none twice; each becomes one logging function on the stand-in BGSCodeObj
 	bool ParseCodeObjNames(std::string_view a_list)
@@ -4370,6 +4430,7 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	g_codeObjHide = ReadNumber(ini, L"CodeObjHide", 0) != 0;   // FAL-614 proof 1c: with CodeObj=1 only
 	g_codeObjSound = ReadNumber(ini, L"CodeObjSound", 0) != 0;   // FAL-614 proof 1d: with CodeObj=1 only
 	g_codeObjInit = ReadText(ini, L"CodeObjInit");   // FAL-614 proof 2a: with CodeObj=1 only
+	const auto probe = ReadText(ini, L"CodeObjProbe");   // FAL-614 proof 2b-i: with CodeObj=1 only
 	// FAL-414: up to four keyboard ids that close the menu while it is open (0 = unused)
 	g_cancelCodes = { ReadNumber(ini, L"CancelCode1", 0x1B), ReadNumber(ini, L"CancelCode2", 0x09), ReadNumber(ini, L"CancelCode3", 0),
 		ReadNumber(ini, L"CancelCode4", 0) };
@@ -4419,6 +4480,14 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 			return (a_c >= 'A' && a_c <= 'Z') || (a_c >= 'a' && a_c <= 'z') || (a_c >= '0' && a_c <= '9') || a_c == '_';
 		}))) {
 		Refuse("ini", std::format("code_obj_init={} (with CodeObj=1 only; 1 to 64 letters, digits and _)", g_codeObjInit));
+		return true;
+	}
+	if (!probe.empty() && !g_codeObj) {
+		Refuse("ini", std::format("code_obj_probe={} (with CodeObj=1 only; 1 to {} paths of letters, digits, _ and .)", probe,
+			kMaxCodeNames));
+		return true;
+	}
+	if (!ParseProbeNames(probe)) {
 		return true;
 	}
 	if (g_codeObjSound) {

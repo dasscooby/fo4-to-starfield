@@ -202,7 +202,7 @@ class RebuildPlanTests(unittest.TestCase):
         # FAL-614: proof 1d recorded; proof 2a hands the STAT page our stand-in by calling its root InitCodeObj once
         for text in ("**Proof 1d, the result (owner PC, 13 Nov, 05:26 to 05:31 UTC, at `e86d2059`): PASS by the log",
                      "**Proof 2a, the card: the STAT page alone.**", "`CodeObjInit=InitCodeObj`",
-                     "--extra-movie FO4SF_Fo4Stats", "set=17 of=17 read_back=1", "5. Proof 2a, the STAT page alone"):
+                     "--extra-movie FO4SF_Fo4Stats", "set=17 of=17 read_back=1", "5. Done: proof 2a, the STAT page alone"):
             self.assertIn(text, self.plan, text)
         names = self.plan[self.plan.index("`CodeObjNames=PlaySound,") + len("`CodeObjNames="):]
         names = names[:names.index("`")].split(",")
@@ -232,6 +232,31 @@ class RebuildPlanTests(unittest.TestCase):
                          r"\nCodeObjInit=\r?\n")
         readme = (ROOT / "sfse" / "FO4SFPipboyMenu" / "README.md").read_text(encoding="utf-8")
         for text in ("refuse step=ini code_obj_init=", "`CodeObjInit` (empty)", "step=code_obj_init when= try= name= got="):
+            self.assertIn(text, readme, text)
+
+    def test_code_obj_probe(self):
+        # FAL-614: proof 2a's second run recorded; proof 2b step i reads what the page exposes, setting and calling nothing
+        for text in ("**Proof 2a, the second run (owner PC, 13 Nov, 06:07 to 06:11 UTC, at `9858bc26`): PASS, verified.**",
+                     "**Proof 2b, step i, the card: what the page exposes (read-only).**", "`CodeObjProbe="):
+            self.assertIn(text, self.plan, text)
+        paths = self.plan[self.plan.index("`CodeObjProbe=onPipboyChangeEvent,") + len("`CodeObjProbe="):]
+        paths = paths[:paths.index("`")].split(",")
+        self.assertEqual(len(paths), 16)
+        self.assertEqual(len(set(paths)), 16)
+        install = self.main[self.main.index("bool CodeObjInstall("):]
+        install = install[:install.index("\n\t}\n")]
+        probe = install[install.index("for (std::size_t i = 0; done && i < g_probeCount; ++i) {"):]
+        probe = probe[:probe.index("step=code_obj_probe")]
+        self.assertIn(".GetMember(", probe)
+        for absent in ("SetMember(", "Invoke(", "CreateFunction("):   # read-only
+            self.assertNotIn(absent, probe, absent)
+        self.assertIn('const auto probe = ReadText(ini, L"CodeObjProbe");', self.main)
+        self.assertIn("if (!probe.empty() && !g_codeObj) {", self.main)
+        self.assertIn("bool ParseProbeNames(std::string_view a_list)", self.main)
+        self.assertRegex((ROOT / "sfse" / "FO4SFPipboyMenu" / "FO4SFPipboyMenu.ini").read_text(encoding="utf-8"),
+                         r"\nCodeObjProbe=\r?\n")
+        readme = (ROOT / "sfse" / "FO4SFPipboyMenu" / "README.md").read_text(encoding="utf-8")
+        for text in ("refuse step=ini code_obj_probe=", "`CodeObjProbe` (empty)", "step=code_obj_probe n= name= found="):
             self.assertIn(text, readme, text)
 
     def test_reads_recorded(self):
