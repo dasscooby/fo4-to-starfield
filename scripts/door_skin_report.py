@@ -84,7 +84,8 @@ def relative_motion(poses, a, b, unit=1.0 / 70.0):
     {"translation_m": largest change of b's position in a's frame, "rotation_deg": largest turn of b's orientation in a's frame}, or None when
     either bone is not in the plan. Both 0 means the pair keeps one fixed pose to each other, so a triangle across them is never stretched,
     whatever each does in the world; a pair that moves apart (two sliding panels) or folds (a hinge) reads above 0, which a per-bone
-    local translation cannot show."""
+    local translation cannot show. The metres are the model-space separation: the poses already carry every parent's scale, and nothing is divided
+    back out (a bone 1 m along under a parent of scale 2 is 2 m of model); only the rotation of a's frame is applied."""
     t_max = r_max = 0.0
     seen = False
     for clip in poses.values():
@@ -92,9 +93,9 @@ def relative_motion(poses, a, b, unit=1.0 / 70.0):
             return None
         seen = True
         rel = []
-        for (ta, qa, sa), (tb, qb, sb) in zip(clip[a], clip[b]):
+        for (ta, qa, _sa), (tb, qb, _sb) in zip(clip[a], clip[b]):
             qc = (qa[0], -qa[1], -qa[2], -qa[3])
-            rel.append((tuple(x / (sa or 1.0) for x in door_rig._qrotate(qc, [y - x for x, y in zip(ta, tb)])), tuple(door_rig._qmul(qc, qb))))
+            rel.append((tuple(door_rig._qrotate(qc, [y - x for x, y in zip(ta, tb)])), tuple(door_rig._qmul(qc, qb))))
         t0, q0 = rel[0]
         for tr, q in rel:
             t_max = max(t_max, sum((x - y) ** 2 for x, y in zip(tr, t0)) ** 0.5 * unit)

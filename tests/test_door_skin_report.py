@@ -99,6 +99,21 @@ class SpanTests(unittest.TestCase):
         self.assertAlmostEqual(dsr.relative_motion(poses, 2, 4)["translation_m"], 0.0, places=4)
         self.assertAlmostEqual(dsr.relative_motion(poses, 3, 4)["translation_m"], 1.0, places=4)
 
+    def test_a_parents_scale_stays_in_the_metres(self):
+        # the Courier's FAL-710 case: the root (node 1) has scale 2; a child (node 2) keyed 1 m along x moves 2 m in model space
+        plan = self._plan({2: [self._s(), self._s((70, 0, 0))]})
+        for bone in plan["bones"]:
+            if bone["node"] == 1:
+                bone["bind"] = {**bone["bind"], "scale": 2.0}
+        poses = dsr.bone_poses(plan)
+        self.assertAlmostEqual(dsr.relative_motion(poses, 3, 2)["translation_m"], 2.0, places=4)   # against a sibling that does not move
+        # a pair that both ride the scaled root and do not move: still 0, the scale alone moves nothing
+        still = self._plan({2: [self._s(), self._s()]})
+        for bone in still["bones"]:
+            if bone["node"] == 1:
+                bone["bind"] = {**bone["bind"], "scale": 2.0}
+        self.assertAlmostEqual(dsr.relative_motion(dsr.bone_poses(still), 3, 2)["translation_m"], 0.0, places=4)
+
     def test_a_bone_outside_the_plan_has_no_reading(self):
         plan = self._plan({2: [self._s(), self._s((70, 0, 0))]})
         self.assertIsNone(dsr.relative_motion(dsr.bone_poses(plan), 2, 99))
