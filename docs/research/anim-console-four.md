@@ -50,6 +50,8 @@ of supported facts. **Unread** = nobody has read it.
   synthetic console with the native writer replaced by a fake.
 
 ## The eight clips and the pose each Idle slot holds
+(This section and the next two describe the first session's map, button on `StateB_Play`. With the default of the second head the button clip is on `StateC_Play`, `StateD_Play` carries Stage4 and `StateB_Play` is the spare; the four poses the Idle slots hold are the same.)
+
 The console's sequences (**supported**, #747 `clips`): `Stage1` and `Stage1Loop` 0.033 s, `Stage2` 1.633 s (the lid), `Stage2Loop` 1.0 s, `Stage3` 0.633 s (the button),
 `Stage3Loop` 0.033 s (text key `Stage4`), `Stage4` 0.033 s. Bones `Lid` and `Button`. Map of the first session (the Scribe's rev 4): `Stage2=StateA_Play`, `Stage3=StateB_Play`, `Stage4=StateC_Play`; the default since the second head is in the section above.
 Each clip starts from the pose the one before it ended in (a bone a clip leaves standing is held at that pose, as `--idles toggle` does for slot B).
