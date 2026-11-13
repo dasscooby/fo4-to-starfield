@@ -85,7 +85,7 @@
 // front) and clicks (one listener on the movie's root, which reads the click's target name) move the selection, the
 // sub-tab and the main tab; CLOSE keeps stage d's handler. Stage (d)'s checks and ids; nothing new is called.
 //
-// Stage (e) with Device=1, FAL-714 (step 3b, the device raise; off by default): DeviceKey (F9) looks up the raise and
+// Stage (e) with Device=1, FAL-714 (step 3b, the device raise; off by default): DeviceKey (F7) looks up the raise and
 // lower idles by editor id (TESForm::LookupByEditorID, libxse id 47403, checked in the Address Library file like the
 // others), sends the raise idle's animation event to the player (IAnimationGraphManagerHolder at +0x60, slot 0x01
 // NotifyAnimationGraphImpl, checked by RTTI), opens the kit DeviceRaiseMs later with its root moved into DeviceBox, and
@@ -263,12 +263,16 @@ namespace
 	constexpr std::uint32_t kLookupByEditorId = 47403;       // libxse 9d090c4 ID::TESForm::LookupByEditorID (not in kIds)
 	constexpr std::size_t   kFormTypeAt = 0x2E;              // libxse RE::TESForm::formType (a u8)
 	constexpr std::uint8_t  kIdleType = 0x5C;                // libxse FormType kIDLE (TESIdleForm)
-	constexpr std::size_t   kIdleGraphAt = 0x60;             // libxse RE::TESIdleForm::behaviorGraphName (size 0x90)
-	constexpr std::size_t   kIdleEventAt = 0x68;             // libxse RE::TESIdleForm::animEventName
+	constexpr std::size_t   kIdleGraphAt = 0x68;             // 1.16.244, FAL-719, inferred from the 3b session; the Sep 2025 libxse header has 0x60/0x68
+	constexpr std::size_t   kIdleEventAt = 0x70;             // 1.16.244, FAL-719, inferred from the 3b session; the Sep 2025 libxse header has 0x60/0x68
+	constexpr std::size_t   kIdleSlotFirst = 0x58;           // FAL-719: step=device_idle_slots reads s58 to s80, 8 bytes apart
+	constexpr std::size_t   kIdleSlotLast = 0x80;
 	constexpr std::uint32_t kAnimHolderAt = 0x60;            // libxse RE::TESObjectREFR: IAnimationGraphManagerHolder base
 	constexpr std::size_t   kNotifyGraphSlot = 0x01;         // libxse IAnimationGraphManagerHolder::NotifyAnimationGraphImpl
 	constexpr std::size_t   kMaxIdleName = 96;               // an idle's editor id in the ini: letters, digits, '_'
 	constexpr std::uint32_t kMaxDeviceMs = 5000;             // DeviceRaiseMs and DeviceLowerMs, at most
+	constexpr std::uint32_t kQuickSaveKey = 0x74;            // FAL-719: F5, the game's Quick Save; DeviceKey refuses it
+	constexpr std::uint32_t kQuickLoadKey = 0x78;            //   and F9, its Quick Load (the 3b session at 6040290d)
 	constexpr double        kStageWidth = 1920.0;            // make_pipboy_kit.py STAGE: DeviceBox is in its fractions
 	constexpr double        kStageHeight = 1080.0;
 	constexpr double        kBoxReadBack = 0.05;             // a property read back this close (Scaleform keeps twips)
@@ -473,7 +477,7 @@ namespace
 
 	// FAL-714, the device raise (INI Device ... DeviceBox; read only at Stage=5, used only at Device=1)
 	bool                                     g_device = false;
-	std::uint32_t                            g_deviceKey = 0x78;       // F9
+	std::uint32_t                            g_deviceKey = 0x76;       // F7 (FAL-719: F9 is the game's Quick Load)
 	std::string                              g_deviceRaiseIdle;        // editor ids
 	std::string                              g_deviceLowerIdle;
 	std::uint32_t                            g_deviceRaiseMs = 900;
@@ -1683,6 +1687,20 @@ namespace
 	using LookupByEditorId_t = void* (*)(const RE::BSFixedString&);
 	using NotifyGraph_t = bool (*)(void*, const RE::BSFixedString&);
 
+	// FAL-719: an event name that looks like a file path: a '\' or '/', or ending .agx, .hkx or .hkt (any case)
+	bool EventIsPath(std::string_view a_event)
+	{
+		if (a_event.find_first_of("\\/") != std::string_view::npos) {
+			return true;
+		}
+		for (const std::string_view ext : { ".agx"sv, ".hkx"sv, ".hkt"sv }) {
+			if (a_event.size() >= ext.size() && SameText(a_event.substr(a_event.size() - ext.size()), ext)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	// one idle by its editor id, through the engine's lookup (libxse TESForm::LookupByEditorID, CheckDeviceId), on the
 	// main thread: a TESIdleForm by its RTTI, form type IDLE (+0x2E), with an animation event. Its form id, graph and
 	// event are logged: step 3a's playidle by form id showed nothing, and this line says what the editor id resolves to
@@ -1707,6 +1725,16 @@ namespace
 				a_which, a_editorId, formId, formType, type.name.empty() ? "unreadable" : type.name, SincePress()));
 			return 0;
 		}
+		// FAL-719: every pool-string slot from +0x58 to +0x80, once per idle, read only: the 3b session read the graph's
+		// .agx path at +0x68, where the Sep 2025 libxse header puts the event, so the layout is shown, not assumed
+		std::string slots;
+		for (std::size_t at = kIdleSlotFirst; at <= kIdleSlotLast; at += 8) {
+			std::uintptr_t entry = 0;
+			std::string    text;
+			const bool     read = Peek(form + at, entry) && ReadPoolString(entry, text);
+			slots += std::format(" s{:x}={}", at, read && !text.empty() ? text : "-");
+		}
+		REX::INFO("step=device_idle_slots which={} form={:08X}{} t_ms={}", a_which, formId, slots, SincePress());
 		std::uintptr_t graphEntry = 0;
 		std::uintptr_t eventEntry = 0;
 		std::string    graph;
@@ -1716,6 +1744,11 @@ namespace
 		if (!gotEvent || event.empty()) {
 			Refuse("device_idle", std::format("which={} editor_id={} reason=no_event form={:08X} type={:#x} graph={} t_ms={}",
 				a_which, a_editorId, formId, formType, gotGraph && !graph.empty() ? graph : "-", SincePress()));
+			return 0;
+		}
+		if (EventIsPath(event)) {   // FAL-719: a file path is not an animation event (6040290d sent the graph's .agx)
+			Refuse("device_idle", std::format("which={} editor_id={} reason=event_is_path slot={:#x} value={} form={:08X} t_ms={}",
+				a_which, a_editorId, kIdleEventAt, event, formId, SincePress()));
 			return 0;
 		}
 		REX::INFO("step=device_idle which={} editor_id={} form={:08X} type={:#x} graph={} event={} t_ms={}", a_which,
@@ -4107,7 +4140,13 @@ namespace
 		if (g_stage != 5) {
 			return Refuse("ini", std::format("reason=device_stage stage={} (Device=1 is read at Stage=5 only)", g_stage));
 		}
-		g_deviceKey = ReadNumber(a_ini, L"DeviceKey", 0x78);
+		g_deviceKey = ReadNumber(a_ini, L"DeviceKey", 0x76);
+		// FAL-719: the key thread only polls, so a closed-state press also reaches the game: F5 is Quick Save, F9 Quick
+		// Load (the 3b session at 6040290d loaded a save on F9)
+		if (g_deviceKey == kQuickSaveKey || g_deviceKey == kQuickLoadKey) {
+			return Refuse("ini", std::format("reason=device_key detail=game_bound device_key={} (F5 Quick Save, F9 Quick Load)",
+				Hex(g_deviceKey)));
+		}
 		const auto worldKey = ReadNumber(a_ini, L"WorldKey", 0x77);
 		bool       kitKey = false;
 		for (const auto& binding : g_kitKeys) {

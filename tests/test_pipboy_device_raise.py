@@ -22,11 +22,11 @@ class PipboyDeviceRaiseTest(unittest.TestCase):
         self.readme = (PLUGIN / "README.md").read_text(encoding="utf-8")
 
     def test_ini_ships_the_card_defaults_and_device_off(self):
-        for line in ("Device=0", "DeviceKey=0x78", "DeviceRaiseIdle=Human_1stPersonRoot_DataSlateOpen",
+        for line in ("Device=0", "DeviceKey=0x76","DeviceRaiseIdle=Human_1stPersonRoot_DataSlateOpen",
                      "DeviceLowerIdle=Human_1stPersonRoot_DataSlateClose", "DeviceRaiseMs=900", "DeviceLowerMs=700",
                      "DeviceBox=0.078,0.271,0.309", "Stage=0"):
             self.assertIn("\n" + line + "\n", self.ini, line)
-        for key, default in (("Device", "0"), ("DeviceKey", "0x78"), ("DeviceRaiseMs", "900"), ("DeviceLowerMs", "700")):
+        for key, default in (("Device", "0"), ("DeviceKey", "0x76"),("DeviceRaiseMs", "900"), ("DeviceLowerMs", "700")):
             self.assertIn(f'ReadNumber(a_ini, L"{key}", {default})', self.src, key)
         self.assertIn("std::array<double, 3>                    g_deviceBox{ 0.078, 0.271, 0.309 };", self.src)
         self.assertIn("bool                                     g_device = false;", self.src)
@@ -103,9 +103,64 @@ class PipboyDeviceRaiseTest(unittest.TestCase):
         self.assertIn("step=device_idle which={} editor_id={} form={:08X} type={:#x} graph={} event={}", idle)
         self.assertIn("constexpr std::uint32_t kLookupByEditorId = 47403;", self.src)
         self.assertIn("constexpr std::uint8_t  kIdleType = 0x5C;", self.src)
-        self.assertIn("constexpr std::size_t   kIdleEventAt = 0x68;", self.src)
         check = function(self.src, "bool CheckDeviceId(")
         self.assertIn("const auto viaLibrary = REL::ID(kLookupByEditorId).offset();", check)
+
+    def test_idle_offsets_are_the_3b_sessions(self):
+        # 1.16.244: at 6040290d +0x68 held the graph's .agx path; graph and event move 8 bytes on
+        note = "// 1.16.244, FAL-719, inferred from the 3b session; the Sep 2025 libxse header has 0x60/0x68"
+        self.assertIn("constexpr std::size_t   kIdleGraphAt = 0x68;             " + note, self.src)
+        self.assertIn("constexpr std::size_t   kIdleEventAt = 0x70;             " + note, self.src)
+        idle = function(self.src, "std::uintptr_t DeviceIdleForm(")
+        self.assertIn("Peek(form + kIdleGraphAt, graphEntry) && ReadPoolString(graphEntry, graph)", idle)
+        self.assertIn("Peek(form + kIdleEventAt, eventEntry) && ReadPoolString(eventEntry, event)", idle)
+        # DeviceNotify still sends the BSFixedString at kIdleEventAt
+        notify = function(self.src, "std::string DeviceNotify(")
+        self.assertIn("*reinterpret_cast<const RE::BSFixedString*>(a_idle + kIdleEventAt)", notify)
+        self.assertNotIn("0x70", notify)
+
+    def test_idle_slot_dump(self):
+        self.assertIn("constexpr std::size_t   kIdleSlotFirst = 0x58;", self.src)
+        self.assertIn("constexpr std::size_t   kIdleSlotLast = 0x80;", self.src)
+        idle = function(self.src, "std::uintptr_t DeviceIdleForm(")
+        self.assertIn("for (std::size_t at = kIdleSlotFirst; at <= kIdleSlotLast; at += 8) {", idle)
+        self.assertIn("const bool     read = Peek(form + at, entry) && ReadPoolString(entry, text);", idle)
+        self.assertIn('slots += std::format(" s{:x}={}", at, read && !text.empty() ? text : "-");', idle)
+        self.assertIn('"step=device_idle_slots which={} form={:08X}{} t_ms={}"', idle)
+        # after the type check, before the event is read; once per idle (DeviceResolve runs once)
+        self.assertLess(idle.index("formType != kIdleType"), idle.index("step=device_idle_slots"))
+        self.assertLess(idle.index("step=device_idle_slots"), idle.index("Peek(form + kIdleEventAt"))
+        self.assertEqual(self.src.count("DeviceIdleForm("), 3)   # the definition and the two calls in DeviceResolve
+        resolve = function(self.src, "bool DeviceResolve()")
+        self.assertIn("if (g_deviceState >= 0) {", resolve)
+        self.assertEqual(["s{:x}".format(a) for a in range(0x58, 0x81, 8)], ["s58", "s60", "s68", "s70", "s78", "s80"])
+
+    def test_event_that_is_a_path_is_refused(self):
+        guard = function(self.src, "bool EventIsPath(")
+        self.assertIn('a_event.find_first_of("\\\\/")', guard)
+        for ext in ('".agx"sv', '".hkx"sv', '".hkt"sv'):
+            self.assertIn(ext, guard)
+        idle = function(self.src, "std::uintptr_t DeviceIdleForm(")
+        self.assertIn("if (EventIsPath(event)) {", idle)
+        self.assertIn("reason=event_is_path slot={:#x} value={}", idle)
+        self.assertLess(idle.index("if (EventIsPath(event)) {"), idle.index('REX::INFO("step=device_idle which='))
+        self.assertIn("reason=event_is_path slot=0x70 value=", self.readme)
+        # the 3b session's value is refused, an event-like name is not
+        def is_path(event):
+            return "\\" in event or "/" in event or event.lower().endswith((".agx", ".hkx", ".hkt"))
+        self.assertTrue(is_path("AnimTextData\\Tables\\Graphs\\Human_1stPersonRoot.agx"))
+        self.assertFalse(is_path("DataSlateOpen"))
+
+    def test_device_key_refuses_game_bound_keys(self):
+        self.assertIn("constexpr std::uint32_t kQuickSaveKey = 0x74;", self.src)
+        self.assertIn("constexpr std::uint32_t kQuickLoadKey = 0x78;", self.src)
+        read = function(self.src, "bool ReadDevice(")
+        self.assertIn("if (g_deviceKey == kQuickSaveKey || g_deviceKey == kQuickLoadKey) {", read)
+        self.assertIn('Refuse("ini", std::format("reason=device_key detail=game_bound', read)
+        self.assertLess(read.index('L"DeviceKey", 0x76'), read.index("kQuickSaveKey"))
+        self.assertIn("detail=game_bound", self.readme)
+        self.assertIn("`0x76` (F7)", self.readme)
+        self.assertNotIn("DeviceKey=0x78", self.ini)
 
     def test_raise_is_the_idle_event_on_the_players_holder(self):
         holder = function(self.src, "int DeviceHolder()")

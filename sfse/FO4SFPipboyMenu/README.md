@@ -395,7 +395,7 @@ id, never by form id, and touches neither the camera nor the FOV.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `Device` | `0` | `1` = the device sequence on `DeviceKey` |
-| `DeviceKey` | `0x78` (F9) | 1 to 0xFE, not `Key`, `SnapshotKey`, `WorldKey` or any `Kit*` key (`refuse step=ini reason=device_key`) |
+| `DeviceKey` | `0x76` (F7) | 1 to 0xFE, not `Key`, `SnapshotKey`, `WorldKey` or any `Kit*` key (`refuse step=ini reason=device_key`), and not `0x74` (F5, the game's Quick Save) or `0x78` (F9, its Quick Load): `reason=device_key detail=game_bound`. The key thread only polls, so a press with the menu closed also reaches the game (at 6040290d, F9 loaded a save) |
 | `DeviceRaiseIdle` | `Human_1stPersonRoot_DataSlateOpen` | the raise idle's editor id |
 | `DeviceLowerIdle` | `Human_1stPersonRoot_DataSlateClose` | the lower idle's editor id |
 | `DeviceRaiseMs` | `900` | hold before the kit opens (Fallout 4's 0.867 s up, rounded to the 30 ms poll); 0 to 5000 |
@@ -413,9 +413,14 @@ list so that `Device=0` reads and logs exactly the ids it did before. No SFSE ad
 2. Main thread, once, on the first press with a player: the player's `IAnimationGraphManagerHolder` (libxse:
    TESObjectREFR's base at +0x60) from PlayerCharacter's RTTI hierarchy, its vtable naming PlayerCharacter there, slot
    0x00 the adjustor thunk to the player's destructor and slot 0x01 (`NotifyAnimationGraphImpl`) inside the image:
-   `step=device_holder ...`. Then both idles by editor id: a `TESIdleForm` by RTTI, form type IDLE (0x5C at +0x2E),
-   with its `behaviorGraphName` (+0x60) and `animEventName` (+0x68): `step=device_idle which=raise|lower editor_id=
-   form= type= graph= event=`. This line also says which form id the console's numeric `playidle` should have reached.
+   `step=device_holder ...`. Then both idles by editor id: a `TESIdleForm` by RTTI, form type IDLE (0x5C at +0x2E).
+   For each, one read-only line of every pool string from +0x58 to +0x80 (`step=device_idle_slots which= form= s58=
+   s60= s68= s70= s78= s80= t_ms=`, `-` where unreadable or empty), then its graph (+0x68) and event (+0x70):
+   `step=device_idle which=raise|lower editor_id= form= type= graph= event=`. The offsets are 1.16.244's as inferred
+   from the 3b session at 6040290d, where +0x68 (the Sep 2025 libxse header's `animEventName`) held the graph's `.agx`
+   path and the raise gave `result=0`; the Sep 2025 header has 0x60/0x68. An event that looks like a path (a `\` or
+   `/`, or ending `.agx`, `.hkx` or `.hkt`) is refused: `refuse step=device_idle ... reason=event_is_path slot=0x70
+   value=`. This line also says which form id the console's numeric `playidle` should have reached.
 3. The raise: the idle's own animation event to the player, `step=device_raise n= result=1|0 t_ms=`.
 4. `DeviceRaiseMs` later: `step=device_show n= sent=show t_ms=` (the usual `step=toggle` with it), and in our kShow
    handling, after the kit's own: `step=device_box by=device root=1 set=4 back=4 x=149.76 y=292.68 scale=0.309`.
@@ -755,10 +760,11 @@ menu and the pause menu open.
 | `step=listen name=root ... added=0` | (e): no listener on the root, so clicks do nothing; the keys still work | report the line |
 | `step=kit_click ... target=0` or `name=-` | (e): the click's event had no target or no name | report: one listener per object is the fallback |
 | `step=kit_av av:<id>:...:refused` | (e): that form id gave no `ActorValueInfo`; its row prints `?` | report the line |
-| `refuse step=ini reason=device_key` / `device_idle` / `device_ms` / `device_box` / `device_stage` | (e), `Device=1`: that device key is wrong; the plugin stays idle | fix the ini |
+| `refuse step=ini reason=device_key` / `device_idle` / `device_ms` / `device_box` / `device_stage` | (e), `Device=1`: that device key is wrong; the plugin stays idle (`device_key detail=game_bound`: F5 or F9, the game's Quick Save or Quick Load) | fix the ini |
 | `refuse step=device_id ...` | (e), `Device=1`: libxse's `TESForm::LookupByEditorID` id is beyond the file, zero, outside the image or another offset through libxse; the plugin stays idle | `NEEDS-PC lookup 47403` |
 | `refuse step=device_holder reason=...` | (e), `Device=1`: the player's animation-graph holder is not at +0x60 or its slots are not as declared; no raise or lower is sent, and the kit does not open on `DeviceKey` | report the line (its slots and targets) |
 | `refuse step=device_idle which=<w> reason=not_found` / `not_idle` / `no_event` | (e), `Device=1`: that editor id gave no form, another type, or no animation event | report the line |
+| `refuse step=device_idle ... reason=event_is_path slot=0x70 value=<v>` | (e), `Device=1`: the slot read as the event holds a file path, so the offset is wrong for this build | read `step=device_idle_slots`: the slot that holds an event-like name is where `kIdleEventAt` goes |
 | `step=device_raise ... result=0` | (e): the player's graph did not take the event | B1 |
 | `step=device_box ... back=<4` | (e): the root did not take its place or scale | B2 |
 
