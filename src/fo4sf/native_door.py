@@ -37,7 +37,7 @@ def prepare(plan, unit_scale, fps=30):
     for i,bone in enumerate(bones):
         if bone['parent'] < -1 or bone['parent'] >= i or abs(bone['bind']['scale']-1)>1e-5:
             raise NifError('native prototype requires ordered bones with unit bind scale')
-    index={bone['node']:i for i,bone in enumerate(bones) if bone.get('node') is not None}
+    index={door_rig.bone_key(bone):i for i,bone in enumerate(bones)}
     clips=[]
     for clip in plan['clips']:
         last=round(clip['duration']*fps)

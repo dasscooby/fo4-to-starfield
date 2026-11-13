@@ -278,6 +278,7 @@ def fill_static_tracks(plan):
     for every bone, root included. This writes the same: block i is rig bone i, name and position agree. Only objects built through
     anim_object get it; the door path is unchanged. The static sample carries the bone's own bind (so predictions agree) and
     native_door.prepare writes identity for it."""
+    from . import door_rig
     bones = plan["bones"]
     clips = []
     for clip in plan["clips"]:
@@ -286,14 +287,14 @@ def fill_static_tracks(plan):
         times = sorted({every[0], every[-1]})            # a key at the first and the last frame is enough for a bone that stays
         tracks = []
         for bone in bones:
-            if bone["node"] in by_node:
-                tracks.append(by_node[bone["node"]])
+            if bone.get("node") is None and not bone.get("bind_for"):       # only a '<name>_Bind' parent bone may lack a node
+                raise ValueError(f"rig bone {bone['name']!r} has no source node: a block for it cannot be written")
+            key = door_rig.bone_key(bone)                  # a '<name>_Bind' parent bone (animated_identity_binds, bind_for) is keyed 'bind:<name>'
+            if key in by_node:
+                tracks.append(by_node[key])
                 continue
-            if bone.get("node") is None:                   # a '<name>_Bind' parent bone made by animated_identity_binds
-                raise ValueError(f"rig bone {bone['name']!r} has no source node: a block for it cannot be written (rotated-bind animated bone)")
-            node = bone["node"]
             b = bone["bind"]
-            tracks.append({"node": node, "name": bone["name"], "static": True, "target": bone["name"],
+            tracks.append({"node": key, "name": bone["name"], "static": True, "target": bone["name"],
                            "samples": [{"elapsed": t, "translation_source_units": list(b["translation_source_units"]),
                                         "quaternion_wxyz": list(b["quaternion_wxyz"]), "scale": 1.0} for t in times]})
         clips.append({**clip, "tracks": tracks})
@@ -353,7 +354,7 @@ def clip_table(plan, unit_scale):
     and per track what it does from the first to the last sample (door_rig.open_motion: travel in metres, rotation in degrees).
     "bones" lists every track; "motion" says which of them actually move: a track can exist and stand still. unit_scale (source units to metres, convert_static.UNIT_SCALE) is required: travel is in metres."""
     from . import door_rig
-    index = {b["node"]: i for i, b in enumerate(plan["bones"])}        # the rig bone index CALUMI files a track under
+    index = {door_rig.bone_key(b): i for i, b in enumerate(plan["bones"])}        # the rig bone index CALUMI files a track under
     rows = []
     for clip in plan["clips"]:
         rows.append({"name": clip["name"], "seconds": round(clip["duration"], 4), "frames": round(clip["duration"] * FPS),
