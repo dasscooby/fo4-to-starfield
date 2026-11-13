@@ -212,6 +212,15 @@ namespace
 	constexpr std::size_t   kQuestDumpAt = 0x38;            // F11 at stage e (FAL-446): libxse RE::TESQuest's pad038 ...
 	constexpr std::size_t   kQuestDumpEnd = 0x338;           // ... to the end of its startEventData (+0x330), 64 to a line
 	constexpr std::size_t   kQuestStageLast = kQuestDumpEnd - 2;   // [Kit] MissionStageAt=: a u16 inside the F11 dump
+	constexpr std::size_t   kQuestPointerLast = kQuestDumpEnd - 8;   // FAL-571: the dump's last 8-byte word
+	constexpr std::size_t   kObjectiveBlock = 0x40;          // FAL-571: the bytes read behind each pointer followed
+	constexpr std::size_t   kKitObjectives = 8;              // [Kit] MissionObjective= lines, at most
+	constexpr std::size_t   kQuestObjectivesAt = 0x148;      // FAL-571, PC at 73271aa3: objectives' BSTArray, data at +0x150
+	constexpr std::size_t   kObjectiveOwnerAt = 0x18;        // ... in each objective: its quest's address,
+	constexpr std::size_t   kObjectiveNumberAt = 0x24;       // its number (u16, 10, 85, 86 as the console takes it)
+	constexpr std::size_t   kObjectiveStateAt = 0x28;        // and its state (a byte: 0 not shown, 1 shown, 3 shown and completed)
+	constexpr std::uint32_t kQuestObjectivesMax = 64;        // a larger size is not read (reason=head)
+	constexpr std::size_t   kKitObjectiveRows = 12;          // value rows for objectives: 16 less FORM, FILE, FLAGS, STAGE
 	constexpr std::string_view kKitChars = " !#%&'()*+,-./0123456789:;<=>?ABCDEFGHIJKLMNOPQRSTUVWXYZ[]_";   // KIT_FONT
 	constexpr auto          kKitTitle = "fo4sfTitle";        // NAMES
 	constexpr auto          kKitHeader = "fo4sfHeaderInfo";
@@ -486,6 +495,26 @@ namespace
 	bool Peek(std::uintptr_t a_addr, T& a_out)
 	{
 		return Peek(a_addr, &a_out, sizeof(T));
+	}
+
+	// FAL-571: a word of the quest's dump worth following: 8-byte aligned, in user space and outside the game's image (a
+	// heap object), its 0x40 bytes committed, readable and not a guard page (VirtualQuery; a read of a guard page would
+	// fault once and take its guard away)
+	bool Followable(std::uintptr_t a_addr)
+	{
+		if (a_addr < 0x10000 || a_addr > 0x7FFF'FFFF'0000 || a_addr % 8 != 0 || InImage(a_addr, 1)) {
+			return false;
+		}
+		REX::W32::MEMORY_BASIC_INFORMATION info{};
+		if (!REX::W32::VirtualQuery(reinterpret_cast<const void*>(a_addr), &info, sizeof(info)) ||
+			info.state != REX::W32::MEM_COMMIT) {
+			return false;
+		}
+		constexpr std::uint32_t readable = REX::W32::PAGE_READONLY | REX::W32::PAGE_READWRITE | REX::W32::PAGE_WRITECOPY |
+		                                   REX::W32::PAGE_EXECUTE_READ | REX::W32::PAGE_EXECUTE_READWRITE;
+		constexpr std::uint32_t guard = 0x100;   // PAGE_GUARD, which REX::W32 does not name
+		const auto              end = reinterpret_cast<std::uintptr_t>(info.baseAddress) + info.regionSize;
+		return (info.protect & readable) != 0 && (info.protect & guard) == 0 && a_addr + kObjectiveBlock <= end;
 	}
 
 	// the mangled name in an RTTI type descriptor (inside the image), or "" if it leaves the image unterminated
@@ -1619,6 +1648,12 @@ namespace
 		std::size_t              line = 0;
 	};
 
+	struct KitObjective   // [Kit] MissionObjective=<index>|<path> (FAL-571)
+	{
+		std::uint16_t            index = 0;   // the objective's number, as the console takes it (10, 85, 86)
+		std::vector<std::size_t> path;        // from the quest: a pointer read at each offset but the last, then its state's byte
+	};
+
 	struct KitConfig
 	{
 		std::string                                    title = "FO4SF PIP-BOY";
@@ -1627,6 +1662,7 @@ namespace
 		std::string                                    missionFile;   // Mission=: our mission's plugin file, or ""
 		std::uint32_t                                  missionId = 0;   // and its form's local id in that file
 		std::size_t                                    missionStageAt = 0;   // MissionStageAt=: its stage's u16, or 0 (STAGE ?)
+		std::vector<KitObjective>                      objectives;   // MissionObjective=: each objective's state, or none
 		std::vector<KitPage>                           pages;
 		std::vector<std::string>                       tabs;     // in the order of their first page
 		std::array<std::vector<std::size_t>, kKitTabs> subs;     // each tab's pages, in order
@@ -1794,6 +1830,56 @@ namespace
 		return true;
 	}
 
+	// parse_kit's check_objective (FAL-571): <index>|<path>, the objective's number (1 to 5 decimal digits, at most 65535,
+	// once) and where its state is, as scripts/ui/pipboy_quest_bytes.py --objective prints it from the F11 dumps: 2 or 3
+	// offsets of 1 to 3 hex digits joined by '/', the first a pointer in the quest's dump (a multiple of 8, 38 to 330),
+	// a middle one a pointer in the 0x40 bytes behind it (a multiple of 8, 0 to 38), the last the state's byte (0 to 3F);
+	// at most 8 lines
+	bool KitObjectiveLine(std::string_view a_text)
+	{
+		const auto all = [](std::string_view a_s, auto a_is) {
+			return !a_s.empty() && std::ranges::all_of(a_s, [&](char a_c) { return a_is(static_cast<unsigned char>(a_c)) != 0; });
+		};
+		const auto bar = a_text.find('|');
+		if (bar == std::string_view::npos || g_kit.objectives.size() == kKitObjectives) {
+			return false;
+		}
+		const auto number = a_text.substr(0, bar);
+		if (number.size() > 5 || !all(number, [](int a_c) { return std::isdigit(a_c); })) {
+			return false;
+		}
+		const auto value = std::strtoul(std::string(number).c_str(), nullptr, 10);
+		if (value > 0xFFFF) {
+			return false;
+		}
+		const auto index = static_cast<std::uint16_t>(value);
+		if (std::ranges::any_of(g_kit.objectives, [&](const KitObjective& a_o) { return a_o.index == index; })) {
+			return false;
+		}
+		KitObjective objective;
+		objective.index = index;
+		auto rest = a_text.substr(bar + 1);
+		while (true) {
+			const auto slash = rest.find('/');
+			const auto part = rest.substr(0, slash);
+			if (part.size() > 3 || !all(part, [](int a_c) { return std::isxdigit(a_c); }) || objective.path.size() == 3) {
+				return false;
+			}
+			objective.path.push_back(static_cast<std::size_t>(std::strtoul(std::string(part).c_str(), nullptr, 16)));
+			if (slash == std::string_view::npos) {
+				break;
+			}
+			rest.remove_prefix(slash + 1);
+		}
+		const auto& path = objective.path;
+		if (path.size() < 2 || path.front() < kQuestDumpAt || path.front() > kQuestPointerLast || path.front() % 8 != 0 ||
+			(path.size() == 3 && (path[1] > kObjectiveBlock - 8 || path[1] % 8 != 0)) || path.back() >= kObjectiveBlock) {
+			return false;
+		}
+		g_kit.objectives.push_back(std::move(objective));
+		return true;
+	}
+
 	std::string KitSignature()   // make_pipboy_kit.py signature(): the movie's fo4sfKitId
 	{
 		std::string tabs;
@@ -1877,6 +1963,8 @@ namespace
 					// KitMission kept it
 				} else if (key == "MissionStageAt" && !g_kit.missionStageAt && KitStageAt(value)) {
 					// KitStageAt kept it
+				} else if (key == "MissionObjective" && KitObjectiveLine(value)) {
+					// KitObjectiveLine kept it
 				} else {
 					return KitRefuse(n, std::format("kit_key key={}", key));
 				}
@@ -2269,6 +2357,8 @@ namespace
 	// log does). The first read logs the quest's bytes from +0x100 once (step=kit_quest), where the flags and the
 	// current stage are; the stage shows ? until [Kit] MissionStageAt= names its offset (FAL-527). Starfield's own
 	// quests are not listed yet
+	void KitObjectiveRows(std::uintptr_t a_quest, std::uint32_t a_formId, std::vector<std::pair<std::string, std::string>>& a_info);
+
 	std::vector<KitRow> KitQuestRows()
 	{
 		static std::uint32_t formId = 0;
@@ -2329,14 +2419,171 @@ namespace
 		}
 		std::string file = g_kit.missionFile;
 		std::ranges::transform(file, file.begin(), [](unsigned char a_c) { return static_cast<char>(std::toupper(a_c)); });
-		return { { name, "", { { "FORM", std::format("{:08X}", formId) }, { "FILE", file },
-			{ "FLAGS", flagged ? std::format("{:04X}", flags) : "?" }, { "STAGE", stageText } } } };
+		std::vector<std::pair<std::string, std::string>> info{ { "FORM", std::format("{:08X}", formId) }, { "FILE", file },
+			{ "FLAGS", flagged ? std::format("{:04X}", flags) : "?" }, { "STAGE", stageText } };
+		KitObjectiveRows(quest, formId, info);
+		return { { name, "", std::move(info) } };
+	}
+
+	// FAL-571: an objective's state as the PC's run at 73271aa3 read it (0, 1, 3); any other value raw
+	std::string ObjectiveState(std::uint8_t a_state)
+	{
+		switch (a_state) {
+		case 0:
+			return "NOT SHOWN";
+		case 1:
+			return "SHOWN";
+		case 3:
+			return "DONE";
+		default:
+			return std::format("STATE {}", static_cast<unsigned>(a_state));
+		}
+	}
+
+	// FAL-571: the quest's objectives as value rows OBJECTIVE <n>, each its state named (ObjectiveState). Peek only.
+	// [Kit] MissionObjective= lines, when there are any, are used as they are (an override, each read along its path).
+	// Else the objectives' BSTArray at +0x148 is walked: its size at most 64 and at most its capacity, and every entry an
+	// objective whose +0x18 is this quest, else one row OBJECTIVES ? and what=quest_objectives reason=head or
+	// reason=objective index=<i> (nothing shown from a half-read array). Logged when it changes:
+	// step=kit_quest_objectives form= at=+148 size= capacity= objectives=<n>,... (or the reason), and each state at the
+	// first read and at each change: step=kit_quest_objective form= objective=<n> from=<array or path=...> state=<n>.
+	// At most 12 rows: past 11, the 12th is MORE OBJECTIVES <count>
+	void KitObjectiveRows(std::uintptr_t a_quest, std::uint32_t a_formId, std::vector<std::pair<std::string, std::string>>& a_info)
+	{
+		static std::unordered_map<std::uint32_t, int> loggedStates;
+		const auto shown = [&](std::uint16_t a_number, std::uint8_t a_state, const std::string& a_from) {
+			a_info.emplace_back(std::format("OBJECTIVE {}", a_number), ObjectiveState(a_state));
+			auto& logged = loggedStates.try_emplace(a_number, -1).first->second;
+			if (logged != a_state) {
+				logged = a_state;
+				REX::INFO("step=kit_quest_objective form={:08X} objective={} from={} state={}", a_formId, a_number, a_from,
+					static_cast<unsigned>(a_state));
+			}
+		};
+		if (g_kit.objectives.empty()) {
+			static std::string loggedWalk;
+			ArrayHead          head{};
+			std::string        why;
+			std::vector<std::pair<std::uint16_t, std::uint8_t>> found;
+			if (!Peek(a_quest + kQuestObjectivesAt, head) || head.size > head.capacity || head.size > kQuestObjectivesMax ||
+				(head.size && !head.data)) {
+				why = std::format("reason=head size={} capacity={} data={}", head.size, head.capacity, Hex(head.data));
+			}
+			for (std::uint32_t i = 0; why.empty() && i < head.size; ++i) {
+				std::uintptr_t objective = 0;
+				std::uintptr_t owner = 0;
+				std::uint16_t  number = 0;
+				std::uint8_t   state = 0;
+				if (!Peek(head.data + 8ull * i, objective) || !objective || !Peek(objective + kObjectiveOwnerAt, owner) ||
+					owner != a_quest || !Peek(objective + kObjectiveNumberAt, number) || !Peek(objective + kObjectiveStateAt, state)) {
+					why = std::format("reason=objective index={} objective={} owner={}", i, Hex(objective), Hex(owner));
+				} else {
+					found.emplace_back(number, state);
+				}
+			}
+			std::string numbers;
+			for (const auto& entry : found) {
+				numbers += std::format("{}{}", numbers.empty() ? "" : ",", entry.first);
+			}
+			if (numbers.empty()) {
+				numbers = "none";
+			}
+			const auto walk = why.empty() ? std::format("size={} capacity={} objectives={}", head.size, head.capacity, numbers) : why;
+			if (walk != loggedWalk) {
+				loggedWalk = walk;
+				REX::INFO("step=kit_quest_objectives form={:08X} at=+{:03X} {}", a_formId, kQuestObjectivesAt, walk);
+			}
+			if (!why.empty()) {
+				a_info.emplace_back("OBJECTIVES", Unknown("quest_objectives", why));
+				return;
+			}
+			if (found.empty()) {
+				a_info.emplace_back("OBJECTIVES", "NONE");
+				return;
+			}
+			const auto rows = found.size() > kKitObjectiveRows ? kKitObjectiveRows - 1 : found.size();
+			for (std::size_t i = 0; i < rows; ++i) {
+				shown(found[i].first, found[i].second, "array");
+			}
+			if (rows < found.size()) {
+				a_info.emplace_back("MORE OBJECTIVES", std::to_string(found.size() - rows));
+			}
+			return;
+		}
+		for (std::size_t i = 0; i < g_kit.objectives.size(); ++i) {
+			const auto&    objective = g_kit.objectives[i];
+			std::string    path;
+			std::uintptr_t at = a_quest;
+			bool           read = true;
+			for (std::size_t p = 0; p < objective.path.size(); ++p) {
+				path += std::format("{}+{:02X}", p ? "/" : "", objective.path[p]);
+				if (read && p + 1 < objective.path.size()) {
+					read = Peek(at + objective.path[p], at) && at;
+				}
+			}
+			std::uint8_t state = 0;
+			if (!read || !Peek(at + objective.path.back(), state)) {
+				a_info.emplace_back(std::format("OBJECTIVE {}", objective.index), Unknown(std::format("objective:{}", objective.index),
+					std::format("reason=unreadable objective={} path={}", objective.index, path)));
+				continue;
+			}
+			shown(objective.index, state, "path=" + path);
+		}
+	}
+
+	// FAL-571, after the quest's bytes on F11 at stage (e): where the objectives' states are. They are not among the
+	// quest's own bytes as far as the sources say (FO4's and Skyrim's BGSQuestObjective is an object of its own that
+	// points back to its quest, reached through a list or an array), so each 8-byte word of the dump that is Followable
+	// is followed one hop (its 0x40 bytes), and each such word in those bytes one hop further. A block that holds the
+	// quest's own address (its owner) is logged once, by the first path that reached it,
+	// step=kit_quest_obj n=<snapshot> form= path=+<offset>[/+<offset>] at=<address> bytes=<64 bytes>, then
+	// step=kit_quest_objs n= form= followed=<blocks read> owned=<blocks logged>. Peek and VirtualQuery only, no call into
+	// the game; a third hop (a list's third entry) is not followed
+	void LogKitQuestObjectives(std::uint32_t a_n, std::uint32_t a_formId)
+	{
+		struct Block
+		{
+			std::uintptr_t at;
+			std::string    path;
+		};
+		const auto               quest = g_kitQuest;
+		std::set<std::uintptr_t> seen{ quest };
+		std::vector<Block>       hop1;
+		std::size_t              followed = 0;
+		std::size_t              owned = 0;
+		const auto visit = [&](std::uintptr_t a_from, std::size_t a_offset, std::string a_path, std::vector<Block>* a_keep) {
+			std::uintptr_t                                  to = 0;
+			std::array<std::uintptr_t, kObjectiveBlock / 8> words{};
+			if (!Peek(a_from + a_offset, to) || !Followable(to) || !seen.insert(to).second ||
+				!Peek(to, words.data(), kObjectiveBlock)) {
+				return;
+			}
+			++followed;
+			if (std::ranges::find(words, quest) != words.end()) {
+				++owned;
+				REX::INFO("step=kit_quest_obj n={} form={:08X} path={} at={} bytes={}", a_n, a_formId, a_path, Hex(to),
+					KitBytes(to, kObjectiveBlock));
+			}
+			if (a_keep) {
+				a_keep->push_back({ to, std::move(a_path) });
+			}
+		};
+		for (auto at = kQuestDumpAt; at <= kQuestPointerLast; at += 8) {
+			visit(quest, at, std::format("+{:02X}", at), &hop1);
+		}
+		for (const auto& block : hop1) {
+			for (std::size_t at = 0; at < kObjectiveBlock; at += 8) {
+				visit(block.at, at, std::format("{}/+{:02X}", block.path, at), nullptr);
+			}
+		}
+		REX::INFO("step=kit_quest_objs n={} form={:08X} followed={} owned={}", a_n, a_formId, followed, owned);
 	}
 
 	// FAL-446, main thread, on the snapshot key at stage (e): the mission's bytes from +0x38 to +0x338, 64 to a line
 	// (step=kit_quest_bytes n=<snapshot> form= at=+<offset> bytes=), so two presses with the mission at two stages (the
 	// console's setstage between them) show where the current stage is. The quest is the one the quests page last
-	// accepted, checked again by its RTTI; no call into the game. STAGE shows ? until [Kit] MissionStageAt= names it
+	// accepted, checked again by its RTTI; no call into the game. STAGE shows ? until [Kit] MissionStageAt= names it.
+	// FAL-571: then the blocks behind its pointers that point back to it (LogKitQuestObjectives)
 	void LogKitQuestBytes()
 	{
 		const auto n = g_snapshots.load();
@@ -2350,6 +2597,7 @@ namespace
 		for (auto at = kQuestDumpAt; at < kQuestDumpEnd; at += 0x40) {
 			REX::INFO("step=kit_quest_bytes n={} form={:08X} at=+{:03X} bytes={}", n, formId, at, KitBytes(g_kitQuest + at, 0x40));
 		}
+		LogKitQuestObjectives(n, formId);
 	}
 
 	// a_text in lines of at most a_columns, each broken after its last space, '_', '-', '/' or '|' when the rest does

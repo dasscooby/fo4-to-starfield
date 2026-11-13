@@ -101,6 +101,103 @@ class GraphParseTests(unittest.TestCase):
         self.assertIn("not XML", "\n".join(graphs.graph_lines("b.agx", "x", b"\0\1binary")[0]))
 
 
+# A synthetic state machine. The REAL transition layout is unread: this fixture invents three places a transition could live (a sheet with
+# transition-word headers, extra children of an output, an element the reader does not know) to show that the dump prints all of them and
+# the report mode's sheet filter does not.
+MACHINE = (b"<root><Name>Machine</Name><Category>Activators</Category>"
+           b"<node><node_type>NT_STATE_MACHINE</node_type><name>SM</name>"
+           b"<input><name>in</name><id>1</id><idx>0</idx></input>"
+           b"<output><name>out</name><id>2</id><idx>0</idx><target>StateB</target><event>Trans01</event></output>"
+           b"<transition_hint from='StateA' to='StateB'>on Trans01</transition_hint>"
+           + ("<property_sheet><num_columns>3</num_columns>"
+              "<column><header>From</header></column><column><header>To</header></column><column><header>Fires On</header></column>"
+              "<row><prop><value>StateA</value></prop><prop><value>StateB</value></prop><prop><value>Trans01</value></prop></row>"
+              "<row><prop><value>StateB</value></prop><prop><value></value></prop><prop><value>Done</value><listindex>2</listindex></prop></row>"
+              "</property_sheet>").encode()
+           + b"<graph><node><node_type>NT_GAMEBRYO_SEQUENCE</node_type><name>StateA</name></node></graph></node></root>")
+
+
+class DumpTests(unittest.TestCase):
+    def test_every_sheet_row_and_element_is_printed_whatever_its_columns(self):
+        text = "\n".join(graphs.dump_lines("m.agx", "x", MACHINE))
+        self.assertIn("COMPLETE DUMP", text)
+        self.assertIn("property_sheet /root/node/property_sheet {num_columns='3'}: 3 column(s) ['From', 'To', 'Fires On']; 2 row(s)", text)   # its interior is printed now
+        self.assertIn("a header names a transition word (by name only)", text)
+        self.assertIn("row 0: From='StateA' | To='StateB' | Fires On='Trans01'", text)
+        self.assertIn("row 1: From='StateB' | Fires On[2]='Done'  [3 cell(s), 1 empty]", text)      # an empty cell is counted, a listindex kept
+        self.assertIn("transition_hint from='StateA' to='StateB' = 'on Trans01'", text)             # an element the reader does not know
+        self.assertIn("target = 'StateB'", text)
+        self.assertIn("event = 'Trans01'", text)
+        self.assertIn("/root/node/transition_hint", text)                                          # the census lists its path
+        self.assertIn("/root/node/graph/node/name", text)
+        self.assertNotIn("transition", "\n".join(graphs.graph_lines("m.agx", "x", MACHINE)[0]).replace("NT_STATE_MACHINE", ""))   # the report mode prints none of it
+
+    def test_the_caps_are_said_and_the_census_still_counts(self):
+        rows = [[f"S{i}", "B"] for i in range(7)]
+        data = agx("Big", rows, headers=("From", "To"))
+        lines, census = graphs.dump_agx(data, max_rows=3, per_path=1)
+        text = "\n".join(lines)
+        self.assertIn("... 4 more row(s) not printed", text)
+        self.assertEqual(census["/root/node/graph/node"], 1)
+        many = b"<root>" + b"".join(b"<node><name>n%d</name></node>" % i for i in range(5)) + b"</root>"
+        lines, census = graphs.dump_agx(many, per_path=2)
+        self.assertEqual(census["/root/node"], 5)
+        self.assertEqual(sum(1 for ln in lines if ln.strip() == "node"), 2)
+        self.assertIn("(path /root/node: 3 element(s) not printed", "\n".join(lines))
+
+    def test_a_file_that_is_not_xml_says_so(self):
+        self.assertIn("not XML", "\n".join(graphs.dump_lines("b.agx", "x", b"\0\1binary")))
+
+
+SHEET_XML = ("<root><node><node_type>NT_SM</node_type><name>Top</name><id>1</id><input><name>in</name><link node='2' output='0' hidden='false'>"
+             "<property_sheet id='9'>sheet-text<num_columns>2</num_columns>"
+             "<column kind='k'><header>Property</header><types>1</types></column><column kind='k'><header>Value</header><types>1</types></column><extra>E</extra>"
+             "<row r='1'><prop><type>1</type><value>Event</value></prop><prop><type>1</type><value>Play01</value><flag>F</flag></prop></row>"
+             "<row r='1'><prop><type>1</type><value>Transition Type</value></prop><prop><type>1</type><value></value></prop><transition_inside>q</transition_inside></row>"
+             "</property_sheet></link></input></node>"
+             "<node><node_type>NT_ANIM</node_type><name>StateA</name><id>2</id></node></root>").encode()
+
+
+class SheetInteriorTests(unittest.TestCase):
+    """The Courier's FAL-578 hold: everything inside a property_sheet is printed or counted, and a link sheet says what it is."""
+    def setUp(self):
+        lines, self.census = graphs.dump_agx(SHEET_XML)
+        self.text = "\n".join(lines)
+
+    def test_the_sheets_own_attributes_text_and_other_children_are_printed(self):
+        for want in ("@id='9'", "#text='sheet-text'", "num_columns='2'", "extra='E'"):
+            self.assertIn(want, self.text)
+
+    def test_column_attributes_and_children_are_printed_once_as_common(self):
+        self.assertIn("every column also has {@kind='k', types='1'}", self.text)
+
+    def test_row_attributes_and_children_and_cell_children_are_printed(self):
+        self.assertIn("row 1 {transition_inside='q'}: Property='Transition Type'", self.text)      # the one row that has the child says so
+        self.assertNotIn("every row also has {@r='1', transition_inside", self.text)   # one of two is not "every"
+        self.assertIn("every row also has {@r='1'}", self.text)
+        self.assertIn("every cell also has {type='1'}", self.text)
+        self.assertIn("Value='Play01' {flag='F'}", self.text)                   # a cell's own difference sits by the cell
+        self.assertIn("1 empty", self.text)
+
+    def test_the_census_counts_every_element_inside_a_sheet(self):
+        base = "/root/node/input/link/property_sheet"
+        for tail, n in (("", 1), ("/num_columns", 1), ("/column", 2), ("/column/types", 2), ("/extra", 1), ("/row", 2), ("/row/prop", 4),
+                        ("/row/prop/type", 4), ("/row/prop/flag", 1), ("/row/transition_inside", 1)):
+            self.assertEqual(self.census.get(base + tail), n, tail)
+
+    def test_a_sheet_with_event_and_transition_type_rows_is_marked_and_a_link_says_where_it_sits(self):
+        self.assertIn("TRANSITION LINK SHEET (rows Event and Transition Type)", self.text)
+        self.assertIn("link on node 'Top' (type 'NT_SM', id '1'); attributes node='2' output='0' hidden='false'", self.text)
+        self.assertIn("child/attribute id: 'StateA'", self.text)
+        self.assertIn("position from 1: 'StateA'", self.text)
+        self.assertIn("user_id: none", self.text)
+        self.assertIn("none chosen", self.text)                                 # every plausible reading, none picked
+
+    def test_an_ordinary_sheet_is_not_marked_a_link_sheet(self):
+        lines, _ = graphs.dump_agx(agx("Machine.agx", [("StateA", "Seq", "", "", "Trans01")]))
+        self.assertNotIn("TRANSITION LINK SHEET", "\n".join(lines))
+
+
 class NifFactsTests(unittest.TestCase):
     def test_manager_sequences_and_text_keys(self):
         f = graphs.nif_facts(model_nif())
@@ -277,6 +374,37 @@ class GraphsModeTests(unittest.TestCase):
 
     def test_the_old_probe_modes_still_parse(self):
         self.assertEqual(sys.modules["vault111_anim_probe"].DEFAULT_REFS, ("00126D", "00138B", "001616"))
+
+
+class DumpModeTests(unittest.TestCase):
+    setUp = GraphsModeTests.setUp                       # the same synthetic Data folder, without re-running its tests
+    write_archive = GraphsModeTests.write_archive
+    run_graphs = GraphsModeTests.run_graphs
+
+    def run_dump(self, *names, extra=()):
+        argv = ["--out", self.out, "--data", self.data, "--game-archive", "Starfield - Animations.ba2"]
+        for n in names:
+            argv += ["--dump-graph", n]
+        self.assertEqual(probe.main(["--graphs"] + argv + list(extra)), 0)
+        with open(self.out, encoding="utf-8") as f:
+            return f.read()
+
+    def test_the_dump_mode_reads_only_the_archives_and_says_what_is_missing(self):
+        self.write_archive("Starfield - Animations.ba2", {GRAPHS + "Machine.agx": MACHINE, GRAPHS + "Stages.agx": STAGES})
+        before = sorted(os.listdir(self.data))
+        text = self.run_dump("machine", "Stages.agx", "nothere")
+        self.assertIn("vault111_anim_graphs --dump-graph (read-only; FAL-489): machine, stages, nothere", text)
+        self.assertIn("=== graph machine.agx", text)
+        self.assertIn("row 0: From='StateA' | To='StateB' | Fires On='Trans01'", text)
+        self.assertIn("=== graph stages.agx", text)
+        self.assertIn("=== graph nothere.agx: unread (no entry of that name in the archives read)", text)
+        self.assertNotIn("##### 2. ACTI", text)                       # no Starfield.esm read
+        self.assertNotIn("##### 3. models", text)                     # no models read
+        self.assertEqual(sorted(os.listdir(self.data)), before)
+        self.assertEqual(sorted(os.listdir(self.tmp.name)), sorted(["Data", "r.txt"]))
+
+    def test_without_dump_graph_the_report_mode_is_unchanged(self):
+        self.assertIn("##### 1. the .agx graphs", self.run_graphs())
 
 
 if __name__ == "__main__":
