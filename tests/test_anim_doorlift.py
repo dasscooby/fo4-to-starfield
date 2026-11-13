@@ -145,7 +145,7 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(pre.count("Say("), 2)
         self.assertEqual(pre.count("Utility.Wait(1.2)"), 2)
         play = PSC[PSC.index("Function PlayOne("):PSC.index("Function Cleanup()")]
-        self.assertEqual(re.findall(r'(PreNotice|SayHold|Say)\("((?:C s|PLAY )[^"]*)', play), [("PreNotice", "C s"), ("PreNotice", "C s"), ("SayHold", "PLAY ")])
+        self.assertEqual(re.findall(r'(PreNotice|SayHold|Say)\("((?:C s|PLAY )[^"]*)', play), [("Say", "C s"), ("PreNotice", "C s"), ("PreNotice", "C s"), ("SayHold", "PLAY ")])        # the first is the early return for a missing reference
         self.assertLess(play.index('" reading")'), play.index('Reading("before"'))                          # a notice BEFORE the reading ...
         self.assertLess(play.index('" calling")'), play.index("r.PlayAnimation(n)"))                         # ... and BEFORE the call
         self.assertLess(play.index("StartTimer(LISTEN_S"), play.index("r.PlayAnimation(n)"))
