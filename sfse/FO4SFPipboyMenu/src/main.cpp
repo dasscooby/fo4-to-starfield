@@ -443,6 +443,7 @@ namespace
 	bool                                     g_codeObj = false;         // FAL-614 proof 1b: CodeObj=1, the stand-in BGSCodeObj
 	bool                                     g_codeObjHide = false;     // FAL-614 proof 1c: CodeObjHide=1, HideMenu closes our menu
 	bool                                     g_codeObjSound = false;    // FAL-614 proof 1d: CodeObjSound=1, PlaySound plays a file
+	std::string                              g_codeObjInit;             // FAL-614 proof 2a: CodeObjInit=<root function>, handed the stand-in
 	std::filesystem::path                    g_soundDir;                // <dll folder>/FO4SFPipboyMenuSounds
 	std::atomic<std::uint32_t>               g_soundsPlaying{ 0 };
 	std::atomic<std::uint32_t>               g_soundLines{ 0 };
@@ -3570,6 +3571,18 @@ namespace
 		if (done) {
 			g_codeObjMovie = movie;
 		}
+		// FAL-614 proof 2a (CodeObjInit=<name>): a page loaded alone has no shell to hand it its engine object (D2's
+		// STAT page names InitCodeObj and codeObj), so once the stand-in is set the plugin calls root.<name>(stand-in)
+		// itself, once per movie, and logs what it found
+		if (done && !g_codeObjInit.empty()) {
+			RE::Scaleform::GFx::Value init;
+			RE::Scaleform::GFx::Value result;
+			const bool got = top.GetMember(g_codeObjInit.c_str(), &init);
+			const bool found = got && (init.GetType() == RE::Scaleform::GFx::Value::ValueType::kClosure || init.IsObject());
+			const bool called = found && top.Invoke(g_codeObjInit.c_str(), &result, &holder, 1);
+			REX::INFO("step=code_obj_init name={} got={} found={} type={} called={} result_type={}", g_codeObjInit, got ? 1 : 0,
+				found ? 1 : 0, TypeCode(init), called ? 1 : 0, TypeCode(result));
+		}
 		if (done || attempt <= kLoggedCodeObjTries || attempt == kMaxCodeObjTries) {
 			std::string names;
 			for (std::size_t i = 0; i < g_codeObjCount; ++i) {
@@ -4236,9 +4249,11 @@ namespace
 	}
 
 	// a value as ASCII; any other character as '?'
+	// FAL-614 proof 2a: long enough for CodeObjNames at its most, 16 names of 64 and their commas (a longer value would
+	// be cut without a word)
 	std::string ReadText(const std::filesystem::path& a_ini, const wchar_t* a_key)
 	{
-		std::array<wchar_t, 160> text{};
+		std::array<wchar_t, kMaxCodeNames * (kMaxName + 1) + 1> text{};
 		REX::W32::GetPrivateProfileStringW(L"FO4SFPipboyMenu", a_key, L"", text.data(), static_cast<std::uint32_t>(text.size()),
 			a_ini.c_str());
 		std::string out;
@@ -4342,6 +4357,7 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	g_codeObj = ReadNumber(ini, L"CodeObj", 0) != 0;   // FAL-614 proof 1b: with Movie= only
 	g_codeObjHide = ReadNumber(ini, L"CodeObjHide", 0) != 0;   // FAL-614 proof 1c: with CodeObj=1 only
 	g_codeObjSound = ReadNumber(ini, L"CodeObjSound", 0) != 0;   // FAL-614 proof 1d: with CodeObj=1 only
+	g_codeObjInit = ReadText(ini, L"CodeObjInit");   // FAL-614 proof 2a: with CodeObj=1 only
 	// FAL-414: up to four keyboard ids that close the menu while it is open (0 = unused)
 	g_cancelCodes = { ReadNumber(ini, L"CancelCode1", 0x1B), ReadNumber(ini, L"CancelCode2", 0x09), ReadNumber(ini, L"CancelCode3", 0),
 		ReadNumber(ini, L"CancelCode4", 0) };
@@ -4384,6 +4400,13 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	if (g_codeObjSound && (!g_codeObj || std::ranges::find(g_codeObjNames.begin(), g_codeObjNames.begin() + g_codeObjCount,
 	                                         std::string("PlaySound")) == g_codeObjNames.begin() + g_codeObjCount)) {
 		Refuse("ini", "code_obj_sound=1 (with CodeObj=1 and PlaySound in CodeObjNames only)");
+		return true;
+	}
+	// FAL-614 proof 2a: CodeObjInit=<name>, 1 to 64 letters, digits and '_', with CodeObj=1 only
+	if (!g_codeObjInit.empty() && (!g_codeObj || g_codeObjInit.size() > kMaxName || !std::ranges::all_of(g_codeObjInit, [](char a_c) {
+			return (a_c >= 'A' && a_c <= 'Z') || (a_c >= 'a' && a_c <= 'z') || (a_c >= '0' && a_c <= '9') || a_c == '_';
+		}))) {
+		Refuse("ini", std::format("code_obj_init={} (with CodeObj=1 only; 1 to 64 letters, digits and _)", g_codeObjInit));
 		return true;
 	}
 	if (g_codeObjSound) {

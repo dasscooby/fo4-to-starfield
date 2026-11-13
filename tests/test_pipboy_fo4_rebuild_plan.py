@@ -162,7 +162,7 @@ class RebuildPlanTests(unittest.TestCase):
                      "**The boot sequence's sounds, step 1: read D4 (owner PC; names and header fields only).**",
                      "`UIPipBoyBootSequenceA`, `B` and `C`", "No samples.", "D4 reads in memory and writes nothing.",
                      "**S2, the plugin plays the player's converted file itself**",
-                     "no audio enters Git", "4. Done: read D4 (13 Nov)."):
+                     "no audio enters Git", "4. Done: read D4 and proof 1d (13 Nov"):
             self.assertIn(text, self.plan, text)
 
     def test_code_obj_sound(self):
@@ -196,6 +196,34 @@ class RebuildPlanTests(unittest.TestCase):
                          r"\nCodeObjSound=0\r?\n")
         readme = (ROOT / "sfse" / "FO4SFPipboyMenu" / "README.md").read_text(encoding="utf-8")
         for text in ("refuse step=ini code_obj_sound=1", "`CodeObjSound` (0)", "nothing of it enters Git"):
+            self.assertIn(text, readme, text)
+
+    def test_code_obj_init(self):
+        # FAL-614: proof 1d recorded; proof 2a hands the STAT page our stand-in by calling its root InitCodeObj once
+        for text in ("**Proof 1d, the result (owner PC, 13 Nov, 05:26 to 05:31 UTC, at `e86d2059`): PASS by the log",
+                     "**Proof 2a, the card: the STAT page alone.**", "`CodeObjInit=InitCodeObj`",
+                     "--extra-movie FO4SF_Fo4Stats", "set=17 of=17 read_back=1", "5. Proof 2a, the STAT page alone"):
+            self.assertIn(text, self.plan, text)
+        names = self.plan[self.plan.index("`CodeObjNames=PlaySound,") + len("`CodeObjNames="):]
+        names = names[:names.index("`")].split(",")
+        self.assertEqual(len(names), 16)
+        self.assertEqual(len(set(names)), 16)
+        self.assertNotIn("HideMenu", names)
+        # ReadText's buffer holds the longest CodeObjNames (it was 160 characters; this list is longer)
+        self.assertIn("std::array<wchar_t, kMaxCodeNames * (kMaxName + 1) + 1> text{};", self.main)
+        self.assertGreater(len(",".join(names)), 160)
+        install = self.main[self.main.index("bool CodeObjInstall("):]
+        install = install[:install.index("\n\t}\n")]
+        self.assertIn("if (done && !g_codeObjInit.empty()) {", install)   # once, on the try that set the stand-in
+        self.assertIn("top.Invoke(g_codeObjInit.c_str(), &result, &holder, 1)", install)
+        self.assertLess(install.index("g_codeObjMovie = movie;"), install.index("top.Invoke(g_codeObjInit.c_str()"))
+        self.assertIn('g_codeObjInit = ReadText(ini, L"CodeObjInit");', self.main)
+        self.assertIn('Refuse("ini", std::format("code_obj_init={} (with CodeObj=1 only; 1 to 64 letters, digits and _)"',
+                      self.main)
+        self.assertRegex((ROOT / "sfse" / "FO4SFPipboyMenu" / "FO4SFPipboyMenu.ini").read_text(encoding="utf-8"),
+                         r"\nCodeObjInit=\r?\n")
+        readme = (ROOT / "sfse" / "FO4SFPipboyMenu" / "README.md").read_text(encoding="utf-8")
+        for text in ("refuse step=ini code_obj_init=", "`CodeObjInit` (empty)", "step=code_obj_init name= got="):
             self.assertIn(text, readme, text)
 
     def test_reads_recorded(self):

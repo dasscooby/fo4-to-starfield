@@ -500,6 +500,36 @@ cut; no crash. Other outcomes: `missing` (the file's name or folder), `not_pcm16
 `open_failed` (no audio device for that format), no `step=sound` at all (`CodeObjSound` not read: check the
 `refuse` lines).
 
+**Proof 1d, the result (owner PC, 13 Nov, 05:26 to 05:31 UTC, at `e86d2059`): PASS by the log, verified; not yet
+heard.** No download was needed: the player's Fallout 4 install carries its own `xwmaencode.exe`, which converted the
+three files privately (PCM 16 bit, mono, 44100 Hz; real lengths 5.15, 5.39 and 6.08 seconds, shorter than D4's
+estimate). `step=code_obj_sound folder=FO4SFPipboyMenuSounds max_playing=4`; A started 86 ms after its call
+(`playing=1`), B and C 8 ms after theirs (`playing=2` each: they overlap); every sound reached `result=end`
+(`took_ms` 5276, 5421, 6111); `step=close by=hide_menu` at +15.36 seconds and C's end 1.15 seconds after it, so the
+close did not cut C. No crash; the sounds folder was moved out again. Nobody listened: whether it sounds right is for
+the owner's ear.
+
+**Proof 2a, the card: the STAT page alone.** Plugin code (one new setting), so the PC rebuilds. D2's STAT page names
+`InitCodeObj`, `codeObj` and `bAcquiredByNativeCode`, but not `HideMenu`: a page is handed its engine object by the
+shell (`PipboyMenu.swf`) rather than reading `root.BGSCodeObj` itself (a reading, not verified). Loaded alone it has no
+shell, so `CodeObjInit=<name>` (with `CodeObj=1` only; it ships empty) makes the plugin call `root.<name>(stand-in)`
+once per movie, right after the stand-in is set, and log
+`step=code_obj_init name= got= found= type= called= result_type=`. The stand-in's names below are D2's verbs on the
+page, a guess at which are engine calls; 16 is the most the stand-in takes.
+1. On the PC only: copy your own `Interface\Pipboy_StatsPage.swf`, unchanged, into the staged `Data\Interface\` as
+   `FO4SF_Fo4Stats.swf`, and install with `--extra-movie FO4SF_Fo4Stats`.
+2. `Stage=2`, `Movie=FO4SF_Fo4Stats`, `CodeObj=1`, `CodeObjHide=0`, `CodeObjSound=0`, `CodeObjInit=InitCodeObj`,
+   `CodeObjNames=PlaySound,PlayPerkSound,PlaySmallTransition,UseStimpak,UseRadaway,ToggleShowingEffects,GetUpdateMask,UpdateStimpakRadawayEnabled,CanSwitchTabs,CanLowerPipboy,SetIsDirty,AnnounceDataChange,onPerksTabOpen,onPerksTabClose,onNextPerk,onPrevPerk`.
+3. Outdoors: F10, wait 10 seconds, take a screenshot, F10 again.
+4. Send the `step=load_movie`, `step=code_obj`, `step=code_obj_init` and every `step=code_call` line, any `refuse`
+   line, and the screenshot.
+
+What it shows, whatever the result: whether Starfield draws the page's frame from the player's file alone (the
+screenshot), whether the page has `InitCodeObj` at its root and takes our object (`found=1 called=1`), and which of
+the 16 names it calls, with what. PASS: `result=1`, `step=code_obj ... set=17 of=17 read_back=1`, the page's frame on
+screen with empty values, no crash. `found=0`: the page takes its object some other way, and 2b's card starts from
+the call lines and D2's `PipboyMenu` names. Values stay empty until 2b.
+
 **Proof 2, the outline (route A): the STAT page.** Each step has its own card once the one before it has run.
 - **2a, the page alone:** `Movie=FO4SF_Fo4Stats`, the player's `Pipboy_StatsPage.swf` installed with
   `--extra-movie FO4SF_Fo4Stats`, and `CodeObj=1` with the page's own names in `CodeObjNames`. Shows: the page's frame
@@ -604,7 +634,6 @@ delivery.
 1. Done: D1 and D3 (13 Nov).
 2. Done: D2 and proof 1 (13 Nov): route A is alive.
 3. Done: proof 1b (13 Nov, third run) and proof 1c (13 Nov, `CodeObjHide=1`).
-4. Done: read D4 (13 Nov). Proof 1d, the sounds by route S2: its card is written; the PC converts once the owner
-   has said yes to the converter, rebuilds and runs it.
-5. Then proof 2a and 2b, the STAT page by route A, each with its own card, tests, a CARRY line, the Scribe's review,
-   and the PC's run.
+4. Done: read D4 and proof 1d (13 Nov, the sounds by route S2, PASS by the log; the owner's ear still to hear it).
+5. Proof 2a, the STAT page alone: its card is written (`CodeObjInit=`). Then 2b, HP by name, from 2a's log, with its
+   own card, tests, a CARRY line, the Scribe's review, and the PC's run.
