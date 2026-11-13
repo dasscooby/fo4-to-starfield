@@ -1430,3 +1430,19 @@ failure; refuse healthy riders rather than removing them implicitly. This avoids
 ownership store or a repair routine that guesses which game files belong to us. Rebuilding
 or reinstalling missing output automatically was rejected: source inputs may have changed,
 and only the owning installers can safely remove their unchanged publications.
+
+## 2026-11-13: A skinned door shape across hinged bones rides the bone with the smaller error (Minuteman, FAL-489)
+
+Decision: `convert_multipart_door(seam_limit_m=...)` (set only for models with their own clip alias, i.e. the Vault 111 cog door) lets a
+skinned shape whose triangles run across several rig bones ride one of them: per set of spanning bones, the one whose `skin_seams.rigid_error_m`
+(the farthest any vertex of the set lands from FO4's skinning over every clip sample) is smaller, lowest slot on a tie, and only when that error
+is within `SEAM_LIMIT_M` (2.5 cm). Any other case is refused or dropped exactly as before; every other door is unchanged.
+Why: the cog door's catwalk (the owner's exit sequence) is WalkWay01:7, 2,803 vertices of about 2,900, all rigid but with 288 triangles across
+hinged bone pairs; the old rule refused the shape, so the converted door kept three small catwalk parts and lost the walkway that slides out in
+Stage2. PC read 13 Nov (door_skin_report rigid_error_m, #777): no pair translates, every pair is a hinge (7.5 degrees at the four root-to-sub
+joints, under 1 degree at the chain links); riding the smaller side costs at most 2.25 cm, every other set under 1 cm. The paper effect
+Paper:0 costs 3.0 to 12.7 cm and stays out. A 2.25 cm gap at four fold lines during a 43 s extend is the price of keeping the walkway; whether it
+is acceptable is the owner's eye in a session (unseen).
+Alternatives: leave the shape out (no walkway); split triangles per bone and drop the stretch strip (loses surface, more code); native skinned
+conversion (unread whether the activator rig path takes skin weights); enable it for every door (a behaviour change for models nobody measured).
+The limit is tuned between two measured numbers (2.25 and 3.0 cm), so a new model that lands near it needs its own read.

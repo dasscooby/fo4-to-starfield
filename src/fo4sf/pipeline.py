@@ -731,7 +731,8 @@ class Converter:
                     files, res["door"] = convert_static.convert_multipart_door(
                         raw, out_name, mats, lambda plan, scale: native_door.export_files(plan, self.door_anim_dll, scale),
                         collision_template=self.collision_template, leaf_physics_donor=self.door_physics_donor,
-                        rest_pose_check=True, aliases=aliases, drop_skinned=bool(aliases))
+                        rest_pose_check=True, aliases=aliases, drop_skinned=bool(aliases),
+                        seam_limit_m=convert_static.SEAM_LIMIT_M if aliases else None)
                 except Exception as e:                   # noqa: BLE001  (falls back to the passable static door)
                     files = None
                     res.pop("door", None)

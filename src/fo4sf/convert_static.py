@@ -476,11 +476,31 @@ def _same_bind(a, b):
             and all(abs(x - y) <= BIND_TOLERANCE for x, y in zip(ra, rb)) and abs(sa - sb) <= BIND_TOLERANCE)
 
 
+SEAM_LIMIT_M = 0.025   # the farthest a spanning triangle's vertices may land from FO4's skinning when it rides one bone (rigid_skinned_parts)
+# FAL-489, the Vault 111 cog door's catwalk (PC read 13 Nov, door_skin_report rigid_error_m): its main mesh WalkWay01:7 has 288 triangles across
+# hinged bone pairs; riding the side with the smaller error costs at most 2.25 cm, every other set under 1 cm, while the paper effect Paper:0
+# costs 3.0 to 12.7 cm and stays out. Used only where a caller opts in (convert_multipart_door seam_limit_m).
 RIGID_SKIN_TOLERANCE = 1e-3   # weight a rigid vertex may put on other bones: half-float rounding, not a blend
 # (Codex on #354: 0.995 / 0.005 across two bones was accepted and drifted 5 cm from real skinning at 10 m of travel)
 
 
-def rigid_skinned_parts(src, shape, bones):
+def _seam_slot(skin, shape, slots, slot_of, poses, limit):
+    """The slot a set of triangles across several bones rides: the one whose bone leaves the vertices that follow the others closest to
+    FO4's skinning over every clip sample (skin_seams.rigid_error_m), lowest slot on a tie; None when no candidate is in the poses or the
+    best error is over limit metres."""
+    from . import skin_seams
+    tris = [t for t in shape.triangles if {slot_of[i] for i in t} == set(slots)]
+    verts = sorted({i for t in tris for i in t})
+    best = None
+    for x in sorted(slots):
+        moved = [(skin.bones[slot_of[v]], skin.skin_to_bone[slot_of[v]], shape.positions[v]) for v in verts if slot_of[v] != x]
+        got = skin_seams.rigid_error_m(poses, moved, skin.bones[x], skin.skin_to_bone[x])
+        if got is not None and (best is None or got["max_m"] < best[0]):
+            best = (got["max_m"], x)
+    return best[1] if best is not None and best[0] <= limit else None
+
+
+def rigid_skinned_parts(src, shape, bones, poses=None, seam_limit_m=SEAM_LIMIT_M):
     """A skinned door shape whose every drawn vertex follows one bone fully, cut into one piece per bone and re-expressed
     in that bone's space so the rig carries each piece as an ordinary attachment: [(bone index, shape), ...] or None.
     Weight 1 on one bone makes skinning bone_world * skin_to_bone, so bone-local positions are skin_to_bone(stored) and a
@@ -488,7 +508,11 @@ def rigid_skinned_parts(src, shape, bones):
     Door:7 has 363 vertices on b_Door and 118 on b_Handle, none blended). A vertex putting more than
     RIGID_SKIN_TOLERANCE of its weight on other bones (a blend), two slots of one bone with different skin_to_bone (the
     weighted result is then not either bind; Codex on #354), a triangle across two bones or a bone outside the rig
-    give None."""
+    give None.
+    poses (skin_seams.bone_poses of the plan): a triangle across several bones then rides one of them instead of giving None: per set of
+    bones the one with the smaller skin_seams.rigid_error_m, if that is within seam_limit_m (the hinged catwalk's seams, SEAM_LIMIT_M); the
+    triangle's vertices that follow another bone sit where that bone's skin_to_bone puts them, so a piece never stretches. Without poses
+    a spanning triangle still gives None."""
     from . import fo4skin
     try:
         skin = fo4skin.read_skin(src, shape.block)
@@ -515,10 +539,18 @@ def rigid_skinned_parts(src, shape, bones):
             return None
         slot_of[v] = per_bone[bone][1]
     by_slot = {}
+    seam = {}                                      # set of slots a triangle spans -> the slot that set rides
     for t in shape.triangles:
         slots = {slot_of[i] for i in t}
         if len(slots) != 1:
-            return None
+            if poses is None:
+                return None
+            key = frozenset(slots)
+            if key not in seam:
+                if (chosen := _seam_slot(skin, shape, key, slot_of, poses, seam_limit_m)) is None:
+                    return None
+                seam[key] = chosen
+            slots = {seam[key]}
         by_slot.setdefault(slots.pop(), []).append(t)
     index = {b.get("node"): i for i, b in enumerate(bones) if b.get("node") is not None}
     if any(skin.bones[k] not in index for k in by_slot):
@@ -602,7 +634,7 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
                            collision_template: bytes = None, leaf_physics_donor: bytes = None,
                            rest_pose_check: bool = False, aliases: dict = None,
                            drop_skinned: bool = False, allowed=None, expect_clips=None, plan_hook=None,
-                           anim_graph: str = None, motion_clip: str = "Open") -> Tuple[Dict[str, bytes], dict]:
+                           anim_graph: str = None, motion_clip: str = "Open", seam_limit_m: float = None) -> Tuple[Dict[str, bytes], dict]:
     """FO4 door whose "Open" sequence moves geometry under more than one node (frozen_door_parts: double doors,
     shutters, sliding panel sets) -> Starfield door with its OWN rig and clips, as vanilla double doors have
     (IndIntRmSmWallMid_DoorA01: one rig bone and one clip track per leaf, one keyframed body per leaf).
@@ -619,6 +651,8 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
     rest_pose_check: refuse a door whose Open does not start, or whose Close does not end, at the bind pose
     (door_rig.rest_pose_issue; the sliding / lifting route, which takes every NOT_HINGED_RE door).
     aliases: door_rig.plan's sequence aliases (an animated activator converted as a door, pipeline.OWN_RIG_ALIASES).
+    seam_limit_m: a skinned shape whose triangles run across hinged bones may ride the bone with the smaller error when it is within this
+    many metres of FO4's skinning (rigid_skinned_parts poses; None: such a shape is refused or dropped as before).
     drop_skinned: leave skinned shapes out instead of refusing the door (a rig cannot carry them); the door entry lists
     them under "dropped_skinned_shapes".
     allowed / expect_clips / plan_hook / anim_graph / motion_clip: an animated object that is no door (anim_object, the
@@ -648,8 +682,12 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
     kept = {s.block: (s, m) for s, m in zip(shapes, material_paths) if m is not None}
     shape_name = lambda b, s: (s.name or f"Shape{b}".encode()).decode("latin-1")    # noqa: E731
     rebound = {}                         # piece key -> rig bone it rides rigidly (rigid_skinned_parts); one piece per bone
+    seam_poses = None
+    if seam_limit_m is not None and any(s.skinned for s, _ in kept.values()):
+        from . import skin_seams
+        seam_poses = skin_seams.bone_poses(plan)
     for b, (s, m) in list(kept.items()):
-        if s.skinned and (parts := rigid_skinned_parts(src, s, plan["bones"])) is not None:
+        if s.skinned and (parts := rigid_skinned_parts(src, s, plan["bones"], seam_poses, seam_limit_m)) is not None:
             del kept[b]
             for k, (bone, piece) in enumerate(parts):
                 key = b if len(parts) == 1 else f"{b}.{k}"
