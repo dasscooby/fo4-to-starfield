@@ -426,6 +426,23 @@ What each other outcome means:
   log.
 - A crash: send the crash log; `CodeObj=0` is proof 1 as it passed.
 
+**Third run (owner PC, 13 Nov, 04:05 to 04:09 UTC, at `5db70734`): PASS, verified.**
+- `step=movie_root ... root_type=.?AVMovieRoot@AS3@GFx@Scaleform@@`, then `step=code_obj when=load try=1 root_of=1
+  get_variable=1 root=1 root_type=10 holder_type=8 set=3 of=3 read_back=1`. The diagnosis above holds.
+- Calls: `PlaySound` `UIPipBoyBootSequenceA` 30 ms after the set, `...B` at +5.1 seconds, `...C` at +10.4 seconds, then
+  `HideMenu` with no arguments at +15.4 seconds. With the menu left open, the movie repeats B, C and `HideMenu` every
+  10.3 seconds.
+- **Settled:** a function object takes members; the movie calls by name on `root.BGSCodeObj`; a set at load is early
+  enough; the timeline ends in `HideMenu`.
+
+**Proof 1c, the card: a real `HideMenu` (owner PC; the plugin's `CodeObjHide=` setting, FAL-614).** As proof 1b, with
+`CodeObjHide=1` added: the stand-in's `HideMenu` still logs, and also closes our menu on the main thread, as the CLOSE
+button and F10 do. Outdoors: F10, then wait 20 seconds without pressing anything.
+PASS: `step=code_call ... name=HideMenu` at about +15 seconds, then `step=close n=<k> by=hide_menu was_open=1
+sent=hide`, the menu gone from the screen, and no further `code_call` lines. The game stays playable; F10 opens it
+again from the start. The sounds (`UIPipBoyBootSequenceA`, `B`, `C`) are the next card after this one, converted on the
+PC with nothing in Git.
+
 **Proof 2, the outline (route A): the STAT page.** Each step has its own card once the one before it has run.
 - **2a, the page alone:** `Movie=FO4SF_Fo4Stats`, the player's `Pipboy_StatsPage.swf` installed with
   `--extra-movie FO4SF_Fo4Stats`, and `CodeObj=1` with the page's own names in `CodeObjNames`. Shows: the page's frame
@@ -529,6 +546,7 @@ delivery.
 
 1. Done: D1 and D3 (13 Nov).
 2. Done: D2 and proof 1 (13 Nov): route A is alive.
-3. The owner PC runs proof 1b a third time (the card above, `CodeObj=1` on this branch, with stage c's ids read).
-4. Then proof 2a and 2b, the STAT page by route A, each with its own card, tests, a CARRY line, the Scribe's review,
+3. Done: proof 1b (13 Nov, third run). The owner PC runs proof 1c (`CodeObjHide=1`).
+4. Then the boot sequence's three sounds, converted on the PC.
+5. Then proof 2a and 2b, the STAT page by route A, each with its own card, tests, a CARRY line, the Scribe's review,
    and the PC's run.

@@ -426,6 +426,7 @@ namespace
 	std::atomic<bool>                        g_loadingMovie{ false };   // FAL-614: inside our call of the engine's LoadMovie
 	std::atomic<std::uint32_t>               g_movieNameAsks{ 0 };      // GetName calls answered with Movie= in that call
 	bool                                     g_codeObj = false;         // FAL-614 proof 1b: CodeObj=1, the stand-in BGSCodeObj
+	bool                                     g_codeObjHide = false;     // FAL-614 proof 1c: CodeObjHide=1, HideMenu closes our menu
 	std::atomic<std::uint32_t>               g_codeCalls{ 0 };          // calls of the stand-in's functions, logged up to kMaxCodeCalls
 	std::atomic<const void*>                 g_codeObjMovie{ nullptr }; // the movie the stand-in is set on (done for it)
 	std::atomic<const void*>                 g_codeObjTriedMovie{ nullptr };
@@ -3288,6 +3289,8 @@ namespace
 	// root.BGSCodeObj (D2's names: BGSCodeObj, BGSExternalInterface, PlaySound, HideMenu). The stand-in answers each
 	// function named in CodeObjNames with a log line and does nothing else: no sound plays and the menu stays open (F10
 	// closes it). A name not listed is not there, as for a movie with no engine object.
+	void Close(std::uint32_t a_n, const char* a_by);
+
 	class CodeObjFunction final : public RE::Scaleform::GFx::FunctionHandler
 	{
 	public:
@@ -3305,6 +3308,11 @@ namespace
 				                                     std::format("type{}", static_cast<int>(a_params.args[0].GetType()));
 			}
 			REX::INFO("step=code_call n={} name={} args={} arg0={}", n, _name, a_params.argCount, arg0);
+			// FAL-614 proof 1c (CodeObjHide=1): the movie's HideMenu closes our menu, on the main thread as the CLOSE
+			// button and F10 do; every other name only logs
+			if (g_codeObjHide && _name == "HideMenu" && g_task) {
+				g_task->AddTask([n]() { Close(n, "hide_menu"); });
+			}
 		}
 
 	private:
@@ -3841,6 +3849,7 @@ namespace
 	}
 
 	// stage d: the CLOSE button, heard on the menu's thread, closes the menu here, on the main thread, as F10 does
+	// (and, FAL-614 proof 1c, the movie's HideMenu through the stand-in BGSCodeObj)
 	void Close(std::uint32_t a_n, const char* a_by = "button")
 	{
 		auto* ui = RE::UI::GetSingleton();
@@ -4123,6 +4132,7 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	g_keepAlive = ReadNumber(ini, L"KeepAlive", 1) != 0;
 	g_movie = ReadText(ini, L"Movie");   // FAL-614: checked below, after the stage
 	g_codeObj = ReadNumber(ini, L"CodeObj", 0) != 0;   // FAL-614 proof 1b: with Movie= only
+	g_codeObjHide = ReadNumber(ini, L"CodeObjHide", 0) != 0;   // FAL-614 proof 1c: with CodeObj=1 only
 	// FAL-414: up to four keyboard ids that close the menu while it is open (0 = unused)
 	g_cancelCodes = { ReadNumber(ini, L"CancelCode1", 0x1B), ReadNumber(ini, L"CancelCode2", 0x09), ReadNumber(ini, L"CancelCode3", 0),
 		ReadNumber(ini, L"CancelCode4", 0) };
@@ -4155,6 +4165,10 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 		return true;
 	}
 	if (g_codeObj && !ParseCodeObjNames(ReadText(ini, L"CodeObjNames"))) {
+		return true;
+	}
+	if (g_codeObjHide && !g_codeObj) {
+		Refuse("ini", "code_obj_hide=1 (with CodeObj=1 only)");
 		return true;
 	}
 	std::string clickCall;

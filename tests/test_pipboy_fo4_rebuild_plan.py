@@ -109,7 +109,8 @@ class RebuildPlanTests(unittest.TestCase):
         for text in ("**Proof 1, the result (owner PC, 13 Nov, 02:46 to 02:50 UTC, at `2db64a83`): PASS, verified.**",
                      "**Route A is alive:**", "**Proof 1b, the card: the stand-in engine object",
                      "`Stage=2`, `Movie=FO4SF_Fo4Boot`, `CodeObj=1`", "set=3 of=3 read_back=1 names=PlaySound,HideMenu",
-                     "**Proof 2, the outline (route A): the STAT page.**", "3. The owner PC runs proof 1b"):
+                     "**Proof 2, the outline (route A): the STAT page.**", "3. Done: proof 1b (13 Nov, third run).",
+                     "**Proof 1c, the card: a real `HideMenu`"):
             self.assertIn(text, self.plan, text)
         load = self.main[self.main.index("bool MenuLoadMovie("):]
         load = load[:load.index("\n\t}\n")]
@@ -138,8 +139,15 @@ class RebuildPlanTests(unittest.TestCase):
         self.assertIn('top.SetMember("BGSCodeObj", holder)', install)
         handler = self.main[self.main.index("class CodeObjFunction final"):]
         handler = handler[:handler.index("\n\t};\n")]
-        for absent in ("AddMessage", "PlaySound(", "g_task", "Invoke("):   # it logs and does nothing else
+        for absent in ("AddMessage", "PlaySound(", "Invoke("):   # it logs; only HideMenu may act, and only by Close
             self.assertNotIn(absent, handler, absent)
+        # proof 1c: with CodeObjHide=1 the movie's HideMenu closes our menu on the main thread, as the CLOSE button does
+        self.assertIn('if (g_codeObjHide && _name == "HideMenu" && g_task) {', handler)
+        self.assertIn('g_task->AddTask([n]() { Close(n, "hide_menu"); });', handler)
+        self.assertEqual(handler.count("g_task"), 2)
+        self.assertIn('if (g_codeObjHide && !g_codeObj) {', self.main)
+        self.assertRegex((ROOT / "sfse" / "FO4SFPipboyMenu" / "FO4SFPipboyMenu.ini").read_text(encoding="utf-8"),
+                         r"\nCodeObjHide=0\r?\n")
         self.assertIn("if (n > kMaxCodeCalls) {", handler)
         ini = (ROOT / "sfse" / "FO4SFPipboyMenu" / "FO4SFPipboyMenu.ini").read_text(encoding="utf-8")
         self.assertRegex(ini, r"\nCodeObj=0\r?\n")

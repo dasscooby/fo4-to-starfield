@@ -335,7 +335,7 @@ class PagePluginTests(unittest.TestCase):
         listen = function(self.main, "void PageListen(")
         self.assertLess(listen.index("RootOf(a_menu)"), listen.index("GetVariable("))
         self.assertIn('args[0] = "click";', listen)
-        close = function(self.main, "void Close(")
+        close = function(self.main, "void Close(std::uint32_t a_n, const char* a_by = ")
         self.assertIn("if (open) {\n\t\t\tqueue->AddMessage(MenuName(), RE::UI_MESSAGE_TYPE::kHide);", close)
         key = function(self.main, "std::uint32_t KeyThread(")
         self.assertIn("if (g_closeNow.exchange(false)) {", key)

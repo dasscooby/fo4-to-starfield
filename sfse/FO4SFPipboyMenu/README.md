@@ -598,7 +598,8 @@ first five tries and the one that sets it log
 `step=code_obj when= try= root_of= get_variable= root= root_type= holder_type= set= of= read_back= names=`. Each
 call logs `step=code_call n= name= args= arg0=`
 (the first 64 characters of a string argument, else its type), up to 64 calls, and does nothing else: no sound, and
-`HideMenu` leaves the menu open.
+`HideMenu` leaves the menu open. With `CodeObjHide=1` (with `CodeObj=1` only, else `refuse step=ini code_obj_hide=1`)
+`HideMenu` also closes our menu on the main thread, as the CLOSE button and F10 do: `step=close n= by=hide_menu`.
 
 ### PASS at (c), `Stage=3` (steps: `docs/spikes/pipboy-channel-bridge-session.md`)
 
