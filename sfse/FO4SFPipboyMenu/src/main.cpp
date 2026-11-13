@@ -140,6 +140,8 @@ namespace
 	constexpr std::uint32_t kMaxCodeCalls = 64;              // FAL-614 proof 1b: stand-in BGSCodeObj calls logged
 	constexpr std::size_t   kMaxCodeArg = 64;                // and the first characters of a string argument
 	constexpr std::size_t   kMaxCodeNames = 16;              // CodeObjNames: the stand-in's functions
+	constexpr std::uint32_t kMaxCodeObjTries = 40;           // tries per movie (load, show, then one per kUpdate)
+	constexpr std::uint32_t kLoggedCodeObjTries = 5;         // the first tries logged; the one that sets it always
 
 	// stage d (the STAT page)
 	constexpr std::uint32_t kDataHandlerRva = 0x5FD9B28;     // SFSE 0.2.21 sfse/GameData.h: TESDataHandler::GetSingleton
@@ -425,6 +427,9 @@ namespace
 	std::atomic<std::uint32_t>               g_movieNameAsks{ 0 };      // GetName calls answered with Movie= in that call
 	bool                                     g_codeObj = false;         // FAL-614 proof 1b: CodeObj=1, the stand-in BGSCodeObj
 	std::atomic<std::uint32_t>               g_codeCalls{ 0 };          // calls of the stand-in's functions, logged up to kMaxCodeCalls
+	std::atomic<const void*>                 g_codeObjMovie{ nullptr }; // the movie the stand-in is set on (done for it)
+	std::atomic<const void*>                 g_codeObjTriedMovie{ nullptr };
+	std::atomic<std::uint32_t>               g_codeObjTries{ 0 };       // tries on g_codeObjTriedMovie
 	ProcessMessage_t                         g_engineProcessMessage = nullptr;
 	const SFSE::TaskInterface*               g_task = nullptr;
 	std::atomic<bool>                        g_registered{ false };
@@ -3243,6 +3248,12 @@ namespace
 			if (g_checkedMovie == movie) {
 				g_checkedMovie = nullptr;
 			}
+			if (g_codeObjMovie == movie) {   // FAL-614 proof 1b: a later movie at the same address gets its own stand-in
+				g_codeObjMovie = nullptr;
+			}
+			if (g_codeObjTriedMovie == movie) {
+				g_codeObjTriedMovie = nullptr;
+			}
 		}
 		g_engineDtor(a_self, a_flags & ~1u);   // the engine's IMenu destructor, without its delete: the memory is ours
 		if (a_flags & 1) {
@@ -3300,16 +3311,30 @@ namespace
 	std::array<std::string, kMaxCodeNames>           g_codeObjNames;
 	std::size_t                                      g_codeObjCount = 0;
 
-	// right after the engine's LoadMovie returned the movie, on the same thread, before the movie's next frame: a function
-	// object as the holder (an ActionScript 3 Function is dynamic, so it takes members) with one function per name on it,
-	// set as root.BGSCodeObj, then read back
-	void CodeObjInstall(const void* a_menu)
+	// a function object as the holder (an ActionScript 3 Function is dynamic, so it takes members) with one function per
+	// name on it, set as root.BGSCodeObj, then read back. Proof 1b found no root right after the engine's LoadMovie
+	// returned (root=0 in the same millisecond), so it is tried there ("load"), after the engine's own kShow ("show") and
+	// after each kUpdate ("update", sent while it is not set), on the menu's thread, up to kMaxCodeObjTries per movie;
+	// the first tries and the one that sets it are logged with what was found
+	bool CodeObjInstall(const void* a_menu, const char* a_when)
 	{
+		const void* const movie = MovieOf(a_menu);
+		if (!movie || g_codeObjMovie.load() == movie) {
+			return true;
+		}
+		if (g_codeObjTriedMovie.exchange(movie) != movie) {
+			g_codeObjTries.store(0);
+		}
+		const auto attempt = ++g_codeObjTries;
+		if (attempt > kMaxCodeObjTries) {
+			return false;
+		}
 		auto* const root = RootOf(a_menu);
 		RE::Scaleform::GFx::Value top;
 		RE::Scaleform::GFx::Value holder;
 		RE::Scaleform::GFx::Value back;
-		const bool  gotRoot = root && root->GetVariable(&top, "root") && top.IsObject();
+		const bool  gotVariable = root && root->GetVariable(&top, "root");
+		const bool  gotRoot = gotVariable && top.IsObject();
 		std::size_t set = 0;
 		if (gotRoot) {
 			root->CreateFunction(&holder, &g_codeObjSelf);
@@ -3321,12 +3346,28 @@ namespace
 			set += !holder.IsUndefined() && top.SetMember("BGSCodeObj", holder) ? 1 : 0;
 		}
 		const bool readBack = gotRoot && top.GetMember("BGSCodeObj", &back) && back.IsObject();
-		std::string names;
-		for (std::size_t i = 0; i < g_codeObjCount; ++i) {
-			names += std::format("{}{}", i ? "," : "", g_codeObjNames[i]);
+		const bool done = readBack && set == g_codeObjCount + 1;
+		if (done) {
+			g_codeObjMovie = movie;
 		}
-		REX::INFO("step=code_obj root={} holder_type={} set={} of={} read_back={} names={}", gotRoot ? 1 : 0,
-			TypeCode(holder), set, g_codeObjCount + 1, readBack ? 1 : 0, names);
+		if (done || attempt <= kLoggedCodeObjTries || attempt == kMaxCodeObjTries) {
+			std::string names;
+			for (std::size_t i = 0; i < g_codeObjCount; ++i) {
+				names += std::format("{}{}", i ? "," : "", g_codeObjNames[i]);
+			}
+			REX::INFO("step=code_obj when={} try={} root_of={} get_variable={} root={} root_type={} holder_type={} set={} of={} "
+					  "read_back={} names={}",
+				a_when, attempt, root ? 1 : 0, gotVariable ? 1 : 0, gotRoot ? 1 : 0, TypeCode(top), TypeCode(holder), set,
+				g_codeObjCount + 1, readBack ? 1 : 0, names);
+		}
+		return done;
+	}
+
+	// stage b with CodeObj=1: true while the menu's movie has no stand-in yet and tries are left (the key thread then
+	// sends kUpdate, which stage b does not otherwise get)
+	bool CodeObjPending()
+	{
+		return g_codeObj && g_codeObjMovie.load() == nullptr && g_codeObjTries.load() < kMaxCodeObjTries;
 	}
 
 	bool MenuLoadMovie(void* a_self, bool a_dispatcher, bool a_arg2)
@@ -3350,7 +3391,7 @@ namespace
 			Hex(reinterpret_cast<std::uintptr_t>(MovieOf(a_self))), g_movie.empty() ? kMenuName : g_movie.c_str(),
 			g_movieNameAsks.load());
 		if (loaded && g_codeObj && MovieOf(a_self)) {
-			CodeObjInstall(a_self);
+			CodeObjInstall(a_self, "load");
 		}
 		return loaded;
 	}
@@ -3376,6 +3417,10 @@ namespace
 			                                                         "other"sv;
 			REX::INFO("step=message menu={} type={} raw={} result={}", Hex(reinterpret_cast<std::uintptr_t>(a_self)), name,
 				static_cast<std::uint32_t>(type), static_cast<std::int64_t>(result));
+		}
+		if (g_stage == 2 && g_codeObj &&
+			(type == RE::UI_MESSAGE_TYPE::kShow || type == RE::UI_MESSAGE_TYPE::kUpdate)) {   // FAL-614 proof 1b
+			CodeObjInstall(a_self, type == RE::UI_MESSAGE_TYPE::kShow ? "show" : "update");
 		}
 		if (g_stage >= 3) {   // stages c, d and e: after the engine's own handling, on its thread for this menu
 			if (type == RE::UI_MESSAGE_TYPE::kShow) {
@@ -3867,6 +3912,9 @@ namespace
 				g_task->AddTask([n]() { CheckState(n); });
 			}
 			down = now;
+			if (g_stage == 2 && CodeObjPending() && ++ticks % 17 == 0) {   // FAL-614 proof 1b: retry the stand-in
+				g_task->AddTask([]() { SendUpdate(); });   // nothing while the menu is closed
+			}
 			if (g_stage < 3) {
 				continue;
 			}

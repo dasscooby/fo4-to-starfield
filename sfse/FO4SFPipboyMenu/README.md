@@ -588,10 +588,14 @@ It exists for proof 1 of `docs/spikes/pipboy-fo4-rebuild-plan.md`: the player's 
 on their PC only, never in Git.
 
 `CodeObj=1` (with `Movie=` only; without it: `refuse step=ini code_obj=1`) is proof 1b's stand-in for the movie's
-engine object. Right after the engine's `LoadMovie` returns the movie, on the same thread, the plugin sets
-`root.BGSCodeObj` to a function object carrying one function per name in `CodeObjNames` (empty: `PlaySound,HideMenu`;
-1 to 16 names of letters, digits and `_`, none twice, else `refuse step=ini code_obj_names=`). It logs
-`step=code_obj root= holder_type= set= of= read_back= names=`. Each call logs `step=code_call n= name= args= arg0=`
+engine object. The plugin sets `root.BGSCodeObj` to a function object carrying one function per name in
+`CodeObjNames` (empty: `PlaySound,HideMenu`; 1 to 16 names of letters, digits and `_`, none twice, else
+`refuse step=ini code_obj_names=`). It tries right after the engine's `LoadMovie` returns (`when=load`; proof 1b's
+first run found no root there), after the engine's own `kShow` (`when=show`) and after each `kUpdate` (`when=update`),
+which the key thread sends about every half second while the stand-in is not set, up to 40 tries per movie. The
+first five tries and the one that sets it log
+`step=code_obj when= try= root_of= get_variable= root= root_type= holder_type= set= of= read_back= names=`. Each
+call logs `step=code_call n= name= args= arg0=`
 (the first 64 characters of a string argument, else its type), up to 64 calls, and does nothing else: no sound, and
 `HideMenu` leaves the menu open.
 

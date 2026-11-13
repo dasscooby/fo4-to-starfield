@@ -115,10 +115,21 @@ class RebuildPlanTests(unittest.TestCase):
         load = load[:load.index("\n\t}\n")]
         self.assertLess(load.index("g_loadingMovie.store(false);"),
                         load.index("if (loaded && g_codeObj && MovieOf(a_self)) {"))
+        self.assertIn('CodeObjInstall(a_self, "load");', load)
+        # proof 1b found no root right after LoadMovie: tried again after the engine's kShow and at each kUpdate
+        message = self.main[self.main.index("RE::UI_MESSAGE_RESULT MenuProcessMessage("):]
+        message = message[:message.index("\n\t}\n")]
+        self.assertLess(message.index("g_engineProcessMessage(a_self, a_message)"),
+                        message.index('CodeObjInstall(a_self, type == RE::UI_MESSAGE_TYPE::kShow ? "show" : "update");'))
+        self.assertIn("if (g_stage == 2 && CodeObjPending() && ++ticks % 17 == 0) {", self.main)
+        self.assertIn("if (attempt > kMaxCodeObjTries) {", self.main)
+        self.assertIn("step=code_obj when={} try={} root_of={} get_variable={} root={}", self.main)
+        destroy = self.main[self.main.index("void* MenuDestroy("):]
+        self.assertIn("g_codeObjMovie = nullptr;", destroy[:destroy.index("g_engineDtor(")])
         self.assertIn('if (g_codeObj && g_movie.empty()) {', self.main)
         self.assertIn('ParseCodeObjNames(ReadText(ini, L"CodeObjNames"))', self.main)
         self.assertIn('std::string("PlaySound,HideMenu")', self.main)
-        install = self.main[self.main.index("void CodeObjInstall("):]
+        install = self.main[self.main.index("bool CodeObjInstall("):]
         install = install[:install.index("\n\t}\n")]
         self.assertIn('top.SetMember("BGSCodeObj", holder)', install)
         handler = self.main[self.main.index("class CodeObjFunction final"):]

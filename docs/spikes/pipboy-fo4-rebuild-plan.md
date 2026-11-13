@@ -388,15 +388,28 @@ Environment as for proof 1, with the plugin built from this branch's head.
    `PlaySound,HideMenu`).
 3. Outdoors: F10, wait 20 seconds, take a screenshot, F10 again.
 
-PASS: `step=code_obj root=1 holder_type=<n> set=3 of=3 read_back=1 names=PlaySound,HideMenu`, then
-`step=code_call` lines: `name=PlaySound` (three are expected from D2) with their `arg0`, and one `name=HideMenu`.
-That settles the object contract (functions called by name on `root.BGSCodeObj`) and whether the timeline reaches its
-end. The stand-in only logs: no sound plays, and `HideMenu` leaves the menu open.
+**First run (owner PC, 13 Nov, 03:29 to 03:34 UTC, at `f5114524`): verified.** The movie loaded and played as in
+proof 1, but `step=code_obj root=0 holder_type=0 set=0 of=3 read_back=0`, logged in the same millisecond as
+`load_movie result=1`; the menu's `step=state n=1 open=1` came 0.74 seconds later. No root existed on that thread right
+after `LoadMovie` returned, so nothing about the holder was tested. No crash.
+
+**The fix (this card's head):** the plugin tries again after the engine's own `kShow` (`when=show`) and after each
+`kUpdate` (`when=update`). The key thread sends a `kUpdate` about every half second while the stand-in is not set, up to
+40 tries per movie. The first five tries and the one that sets it are logged:
+`step=code_obj when= try= root_of= get_variable= root= root_type= holder_type= set= of= read_back= names=`.
+
+PASS: one `step=code_obj ... root=1 ... set=3 of=3 read_back=1 names=PlaySound,HideMenu`, with the `when=` and
+`try=` that found the root. Then `step=code_call` lines, `name=PlaySound` with their `arg0`, and one `name=HideMenu`.
+D2 names three `PlaySound` calls; any made before the set (the timeline starts at the load) are not seen, so fewer
+than three is not a failure. That settles the object contract (functions called by name on `root.BGSCodeObj`) and
+whether the timeline reaches its end. The stand-in only logs: no sound plays, and `HideMenu` leaves the menu open.
 What each other outcome means:
-- `set` below 3 or `read_back=0`: a function object does not take members here. The next card makes the holder a
-  plain object (the root's object-creating slot, not read yet).
-- `step=code_obj` passes but no `step=code_call`: the movie reads the object another way, or before our set (at its
-  first frame). Send the log.
+- No try finds `root=1` (`root_of=0`: our root check refused; `get_variable=0` or `root=0`: the movie has no root
+  object yet even after 40 tries): send the log; the next card reads the root another way.
+- `set` below 3 or `read_back=0` with `root=1`: a function object does not take members here. The next card makes the
+  holder a plain object (the root's object-creating slot, not read yet).
+- `step=code_obj` passes but no `step=code_call`: the movie reads the object another way, or before our set. Send the
+  log.
 - A crash: send the crash log; `CodeObj=0` is proof 1 as it passed.
 
 **Proof 2, the outline (route A): the STAT page.** Each step has its own card once the one before it has run.
@@ -502,6 +515,6 @@ delivery.
 
 1. Done: D1 and D3 (13 Nov).
 2. Done: D2 and proof 1 (13 Nov): route A is alive.
-3. The owner PC runs proof 1b (the card above, `CodeObj=1` on this branch).
+3. The owner PC runs proof 1b again (the card above, `CodeObj=1` on this branch, with the later tries).
 4. Then proof 2a and 2b, the STAT page by route A, each with its own card, tests, a CARRY line, the Scribe's review,
    and the PC's run.
