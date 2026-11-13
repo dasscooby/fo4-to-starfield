@@ -114,6 +114,12 @@ def is_identity_rotation(q,tolerance=1e-6):
     return abs(abs(q[0])-1)<=tolerance and math.hypot(*q[1:])<=tolerance
 
 
+def bone_key(bone):
+    """The key a clip track names its rig bone by: the source node, or for a static '<name>_Bind' parent bone (no source node,
+    animated_identity_binds) the synthetic 'bind:<name>' that anim_object.fill_static_tracks gives its filler track."""
+    return bone['node'] if bone.get('node') is not None else 'bind:'+bone['name']
+
+
 def animated_identity_binds(plan):
     """Copy of plan in which every animated bone has an identity bind rotation.
 

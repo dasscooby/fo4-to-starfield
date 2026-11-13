@@ -734,5 +734,52 @@ class ConverterTests(unittest.TestCase):
             self.assertEqual(os.listdir(tmp), [])
 
 
+class RotatedBindBoneTests(unittest.TestCase):
+    """Real VltElevator.nif (PC, 13 Nov): the stage refused with "rig bone 'c_ExteriorLightR_Bind' has no source node". A '<name>_Bind'
+    parent bone made by door_rig.animated_identity_binds has no FO4 node; it still needs its block (block i is rig bone i)."""
+
+    def plan(self):
+        turned = (0.7071067811865476, 0.7071067811865476, 0.0, 0.0)
+        ident = (1.0, 0.0, 0.0, 0.0)
+        bone = lambda node, name, parent, q: {"node": node, "name": name, "parent": parent, "bind": {"translation_source_units": [0.0, 0.0, 0.0], "quaternion_wxyz": list(q), "scale": 1.0}}  # noqa: E731
+        track = lambda node, name, z: {"node": node, "name": name, "target": name, "samples": [_sample((0, 0, 0), turned), _sample((0, 0, z), turned, 1.0)]}  # noqa: E731
+        clip = lambda name: {"name": name, "duration": 1.0, "events": [], "tracks": [track(2, "Light", 5.0), track(3, "Light2", 7.0)]}  # noqa: E731
+        raw = {"space": "source_local", "bones": [bone(1, "Root", -1, ident), bone(2, "Light", 0, turned), bone(3, "Light2", 0, turned)],
+               "attachments": [], "clips": [clip("StateA_Play"), clip("StateB_Play")]}
+        return anim_object.add_toggle_idles(anim_object.fill_static_tracks(door_rig.animated_identity_binds(raw)))
+
+    def test_every_rig_bone_gets_a_block_in_rig_order_the_bind_parents_included(self):
+        plan = self.plan()
+        names = [b["name"] for b in plan["bones"]]
+        self.assertEqual(names, ["Root", "Light_Bind", "Light", "Light2_Bind", "Light2"])
+        self.assertIsNone(plan["bones"][1]["node"])
+        for clip in plan["clips"]:
+            self.assertEqual([t["name"] for t in clip["tracks"]], names)
+            by = {t["name"]: t for t in clip["tracks"]}
+            self.assertTrue(by["Light_Bind"].get("static") and by["Root"].get("static"))
+            self.assertFalse(by["Light"].get("static"))
+            self.assertEqual(by["Light_Bind"]["samples"][0]["quaternion_wxyz"], [0.7071067811865476, 0.7071067811865476, 0.0, 0.0])   # its own bind
+
+    def test_the_native_writer_files_each_track_under_its_own_rig_index_and_writes_the_bind_parent_as_identity(self):
+        prepared = native_door.prepare(self.plan(), 0.01428)
+        for clip in prepared["clips"]:
+            self.assertEqual([(t["name"], t["bone"]) for t in clip["tracks"]],
+                             [("Root", 0), ("Light_Bind", 1), ("Light", 2), ("Light2_Bind", 3), ("Light2", 4)])
+            bind_parent = clip["tracks"][1]
+            self.assertEqual([k["quaternion_wxyz"] for k in bind_parent["keys"]], [[1.0, 0.0, 0.0, 0.0]] * len(bind_parent["keys"]))
+            self.assertEqual(bind_parent["channels"], ["rotation"])
+
+    def test_the_clip_table_indexes_the_bind_parent_and_moves_only_the_animated_bones(self):
+        rows = {r["name"]: r for r in anim_object.clip_table(self.plan(), convert_static.UNIT_SCALE)}
+        a = rows["StateA_Play"]
+        self.assertEqual([(t["bone"], t["bone_index"], t["static"]) for t in a["tracks"]],
+                         [("Root", 0, True), ("Light_Bind", 1, True), ("Light", 2, False), ("Light2_Bind", 3, True), ("Light2", 4, False)])
+        self.assertEqual(a["bones"], ["Light", "Light2"])
+
+    def test_a_plan_without_rotated_binds_is_unchanged(self):
+        plan = anim_object.fill_static_tracks(door_rig.animated_identity_binds(door_rig.plan(console_nif(), placed=True, aliases=STATES, allowed=tuple(STATES.values()))))
+        self.assertTrue(all(b["node"] is not None for b in plan["bones"]))
+
+
 if __name__ == "__main__":
     unittest.main()
