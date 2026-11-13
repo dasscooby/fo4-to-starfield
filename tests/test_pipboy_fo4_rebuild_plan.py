@@ -124,6 +124,10 @@ class RebuildPlanTests(unittest.TestCase):
         self.assertIn("if (g_stage == 2 && CodeObjPending() && ++ticks % 17 == 0) {", self.main)
         self.assertIn("if (attempt > kMaxCodeObjTries) {", self.main)
         self.assertIn("step=code_obj when={} try={} root_of={} get_variable={} root={}", self.main)
+        # proof 1b's second run: root_of=0 on every try, because stage b had not read stage c's ids (RootOf's RTTI)
+        self.assertIn("bool ChannelIdsNeeded() { return g_stage >= 3 || (g_stage == 2 && g_codeObj); }", self.main)
+        self.assertLess(self.main.index("g_codeObj = ReadNumber(ini, L\"CodeObj\", 0) != 0;"),
+                        self.main.index("if (!CheckEverything(dir)) {"))
         destroy = self.main[self.main.index("void* MenuDestroy("):]
         self.assertIn("g_codeObjMovie = nullptr;", destroy[:destroy.index("g_engineDtor(")])
         self.assertIn('if (g_codeObj && g_movie.empty()) {', self.main)

@@ -398,6 +398,20 @@ after `LoadMovie` returned, so nothing about the holder was tested. No crash.
 40 tries per movie. The first five tries and the one that sets it are logged:
 `step=code_obj when= try= root_of= get_variable= root= root_type= holder_type= set= of= read_back= names=`.
 
+**Second run (owner PC, 13 Nov, 03:45 to 03:49 UTC, at `aadf1372`): verified.** Every try, from `when=load try=1`
+to `when=update try=40` (+20.1 seconds), logged `root_of=0 get_variable=0 root=0 root_type=0`. The movie played; no
+`code_call`; no crash. So it was not timing.
+
+**The cause, read from the source (not yet confirmed by a run):** at stage 2 the plugin reads only stage a and b's
+Address Library ids (`IdCount()` gave `kIdCountB`). `RootOf` compares the movie root's type with
+`Address(kMovieRootRtti)`, one of stage c's ids, which stage 2 had never read. So the first try refused, once, with
+`refuse step=channel what=movie_root ...`, and that turns the channel off: every later try returns at once with no
+root. Stage 3, where our own movie's channel works on this PC, reads and checks those ids
+(`step=channel_ids value_functions=sfse_equal rtti_names=ok`).
+
+**The fix (this card's head):** with `CodeObj=1`, stage 2 reads and checks stage c's ids as stage 3 does. At load, the
+log then shows `step=channel_ids value_functions=sfse_equal rtti_names=ok` before `step=ready stage=b`.
+
 PASS: one `step=code_obj ... root=1 ... set=3 of=3 read_back=1 names=PlaySound,HideMenu`, with the `when=` and
 `try=` that found the root. Then `step=code_call` lines, `name=PlaySound` with their `arg0`, and one `name=HideMenu`.
 D2 names three `PlaySound` calls; any made before the set (the timeline starts at the load) are not seen, so fewer
@@ -515,6 +529,6 @@ delivery.
 
 1. Done: D1 and D3 (13 Nov).
 2. Done: D2 and proof 1 (13 Nov): route A is alive.
-3. The owner PC runs proof 1b again (the card above, `CodeObj=1` on this branch, with the later tries).
+3. The owner PC runs proof 1b a third time (the card above, `CodeObj=1` on this branch, with stage c's ids read).
 4. Then proof 2a and 2b, the STAT page by route A, each with its own card, tests, a CARRY line, the Scribe's review,
    and the PC's run.

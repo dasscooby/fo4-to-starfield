@@ -473,7 +473,11 @@ namespace
 
 	std::uintptr_t Address(std::size_t a_id) { return g_base + g_rva[a_id]; }
 
-	std::size_t IdCount() { return g_stage >= 4 ? kIdCount : g_stage == 3 ? kIdCountC : kIdCountB; }   // (e): (d)'s ids
+	// FAL-614 proof 1b: stage b with CodeObj=1 reaches the movie's root as stage c does (RootOf's RTTI, the Value
+	// functions), so it reads and checks stage c's ids too; without them RootOf compared against an unread RTTI address
+	bool ChannelIdsNeeded() { return g_stage >= 3 || (g_stage == 2 && g_codeObj); }
+
+	std::size_t IdCount() { return g_stage >= 4 ? kIdCount : ChannelIdsNeeded() ? kIdCountC : kIdCountB; }   // (e): (d)'s ids
 
 	bool InImage(std::uintptr_t a_addr, std::size_t a_len)
 	{
@@ -3775,7 +3779,7 @@ namespace
 		if (!CheckImage() || !ReadAddressLibrary(a_dir / "versionlib-1-16-244-0.bin") ||
 			!CheckVtable(kVtblPrimary, 0x00, "primary") || !CheckVtable(kVtblInput, 0x10, "BSInputEventUser") ||
 			!CheckVtable(kVtblSink, 0x50, "BSTEventSink") || !CheckSlots() || !CheckCtor() ||
-			(g_stage >= 3 && !CheckChannelIds()) || (g_stage >= 4 && !CheckPageIds())) {
+			(ChannelIdsNeeded() && !CheckChannelIds()) || (g_stage >= 4 && !CheckPageIds())) {
 			return false;
 		}
 		const auto* engine = reinterpret_cast<const std::uintptr_t*>(Address(kVtblPrimary));

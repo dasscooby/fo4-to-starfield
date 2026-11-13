@@ -588,7 +588,8 @@ It exists for proof 1 of `docs/spikes/pipboy-fo4-rebuild-plan.md`: the player's 
 on their PC only, never in Git.
 
 `CodeObj=1` (with `Movie=` only; without it: `refuse step=ini code_obj=1`) is proof 1b's stand-in for the movie's
-engine object. The plugin sets `root.BGSCodeObj` to a function object carrying one function per name in
+engine object. With it, stage (b) reads and checks stage (c)'s ids too (`step=channel_ids ...` at load), as the root
+check needs them. The plugin sets `root.BGSCodeObj` to a function object carrying one function per name in
 `CodeObjNames` (empty: `PlaySound,HideMenu`; 1 to 16 names of letters, digits and `_`, none twice, else
 `refuse step=ini code_obj_names=`). It tries right after the engine's `LoadMovie` returns (`when=load`; proof 1b's
 first run found no root there), after the engine's own `kShow` (`when=show`) and after each `kUpdate` (`when=update`),
