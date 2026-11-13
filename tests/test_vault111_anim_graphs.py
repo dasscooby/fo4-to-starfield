@@ -511,5 +511,92 @@ class FormModeTests(unittest.TestCase):
             self.run_form("--dump-form", "notahex")
 
 
+def candidates_esm():
+    """Three ACTIs on twostages.agx: A (model in the archive, placed twice), B (model NOT in the archive, placed once), C (no model, never placed); one on another graph."""
+    w = esm.PluginWriter([])
+    tg = "AnimTextData\\Tables\\Graphs\\TwoStages.agx"
+    w.add(esm.Record("ACTI", 0x1A, [(b"EDID", esm.zbytes("LiftA"))] + comp(tg, "G\\skeleton.rig") + [(b"MODL", esm.zbytes(LIFT_MODEL))]))
+    w.add(esm.Record("ACTI", 0x1B, [(b"EDID", esm.zbytes("LiftB"))] + comp(tg, "G\\skeleton.rig") + [(b"MODL", esm.zbytes("Ships\\Gone.nif"))]))
+    w.add(esm.Record("ACTI", 0x1C, [(b"EDID", esm.zbytes("LiftC"))] + comp(tg)))
+    w.add(esm.Record("ACTI", 0x1D, [(b"EDID", esm.zbytes("Other"))] + comp("AnimTextData\\Tables\\Graphs\\Stages.agx") + [(b"MODL", esm.zbytes(LIFT_MODEL))]))
+    body = w.to_bytes()
+    cell = esm.Record("CELL", 0x3001, [(b"EDID", esm.zbytes("CellA"))])
+    def ref(fid, base, pos):
+        return esm.Record("REFR", fid, [(b"NAME", struct.pack("<I", base)), (b"DATA", struct.pack("<6f", *pos, 0, 0, 0))]).to_bytes()
+    kids = esm.group_bytes(struct.pack("<I", 0x3001), ref(0x4001, 0x1A, (1, 2, 3)) + ref(0x4002, 0x1A, (4, 5, 6)) + ref(0x4003, 0x1B, (7, 8, 9)) + ref(0x4004, 0x1D, (0, 0, 0)), 9)
+    return body + esm.group_bytes("CELL", cell.to_bytes() + kids)
+
+
+class CandidatesTests(unittest.TestCase):
+    setUp_form = FormModeTests.setUp
+    run_form = FormModeTests.run_form
+
+    def setUp(self):
+        self.setUp_form()
+        with open(os.path.join(self.data, "Starfield.esm"), "wb") as f:
+            f.write(candidates_esm())
+
+    def test_the_candidates_list_every_user_with_its_model_check_and_placement_count_best_first(self):
+        text = self.run_form("--candidates", "twostages", "--game-archive", "Starfield - Meshes*.ba2")
+        self.assertIn("=== candidates for graph twostages: 3 ACTI/FURN record(s) name it", text)
+        self.assertIn("4 placed record(s) in the CELL and WRLD groups", text)
+        a, b, c = (text.index(f"ACTI {x}") for x in ("0000001A LiftA", "0000001B LiftB", "0000001C LiftC"))
+        self.assertTrue(a < b < c)                                                          # most placed first
+        self.assertIn("LiftA  placed 2  model in the archives  model=" + LIFT_MODEL, text)
+        self.assertIn("LiftB  placed 1  model NOT in the archives read", text)
+        self.assertIn("LiftC  placed 0  no model", text)
+        self.assertIn("REFR 00004002  cell 00003001 CellA  position 4.0, 5.0, 6.0", text)
+        self.assertNotIn("Other", text)                                                       # another graph's user is not a candidate
+        self.assertIn("usable (model in the archives AND placed at least once): 1 of 3", text)
+
+    def test_without_an_archive_the_model_is_unread_not_missing_and_nothing_is_usable(self):
+        text = self.run_form("--candidates", "twostages.agx")
+        self.assertIn("model check: unread (no --game-archive given)", text)
+        self.assertIn("LiftA  placed 2  model unread", text)
+        self.assertNotIn("NOT in the archives", text)
+        self.assertIn("usable (model in the archives AND placed at least once): 0 of 3", text)
+
+    def test_a_graph_nobody_names_says_so(self):
+        self.assertIn("none found: unread or no record names this graph", self.run_form("--candidates", "nosuchgraph"))
+
+    def test_the_banner_names_only_the_modes_used(self):
+        self.assertIn("vault111_anim_graphs --candidates (read-only; FAL-489)", self.run_form("--candidates", "twostages"))
+        self.assertIn("vault111_anim_graphs --dump-form / --refs-to (read-only; FAL-489)", self.run_form("--dump-form", "24", "--refs-to", "24"))
+
+    def test_a_glob_that_matches_nothing_says_so_and_no_argument_says_that(self):
+        none_given = self.run_form("--candidates", "twostages")
+        self.assertIn("model check: unread (no --game-archive given)", none_given)
+        nothing = self.run_form("--candidates", "twostages", "--game-archive", "Nothing*.ba2")
+        self.assertIn("archive argument 'Nothing*.ba2': nothing matched under", nothing)
+        self.assertIn("model check: unread (the --game-archive argument matched no file)", nothing)
+        self.assertNotIn("no --game-archive given", nothing)
+        self.assertNotIn("NOT in the archives", nothing)
+        self.assertIn("usable (model in the archives AND placed at least once): 0 of 3", nothing)
+        form = self.run_form("--dump-form", "1A", "--game-archive", "Nothing*.ba2")
+        self.assertIn("model check unread: the --game-archive argument matched no file", form)
+
+    def test_the_candidate_samples_are_a_fixed_three_whatever_refs_limit_says(self):
+        for limit in ("1", "12"):
+            text = self.run_form("--candidates", "twostages", "--refs-limit", limit)
+            self.assertIn("LiftA  placed 2", text)
+            self.assertEqual(text.count("REFR 00004001"), 1)
+            self.assertEqual(text.count("REFR 00004002"), 1)                 # LiftA's second placement is listed even with --refs-limit 1
+
+    def test_a_placed_record_outside_a_cell_child_group_keeps_the_previous_cell_label(self):
+        w = esm.PluginWriter([])
+        w.add(esm.Record("ACTI", 0x41, [(b"EDID", esm.zbytes("Stray"))] + comp("AnimTextData\\Tables\\Graphs\\TwoStages.agx")))
+        cell = esm.Record("CELL", 0x3001, [(b"EDID", esm.zbytes("CellA"))])
+        ref = esm.Record("REFR", 0x4009, [(b"NAME", struct.pack("<I", 0x41)), (b"DATA", struct.pack("<6f", 5, 5, 5, 0, 0, 0))]).to_bytes()
+        stray = esm.group_bytes("CELL", cell.to_bytes() + esm.group_bytes(struct.pack("<I", 0x3001), b"", 9) + ref)
+        with open(os.path.join(self.data, "Starfield.esm"), "wb") as f:
+            f.write(w.to_bytes() + stray)
+        text = self.run_form("--candidates", "twostages")
+        self.assertIn("REFR 00004009  cell 00003001 CellA", text)             # the usage text says it: the label is the last one seen
+
+
+    def test_the_one_form_refs_still_work_through_the_shared_scan(self):
+        self.assertIn("2 found; first 2:", self.run_form("--refs-to", "1A"))
+
+
 if __name__ == "__main__":
     unittest.main()
