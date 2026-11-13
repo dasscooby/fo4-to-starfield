@@ -30,7 +30,7 @@ Claude runs it for one session on the PC after the Courier's CLEAR. **Nothing he
 | 10 | the DOOR only: place it 4 m ahead, register; a notice after each step (`S10 start`, `door placed`, `door moved=`, then the `REG` line, `S10 done`) |
 | 20 | register every event again on the door, and on the lift when it exists |
 | 21..24 | DOOR: `Open`, `Close`, then the direct `Opened`, `Closed` |
-| 30 | the LIFT's own placement, after the door's stages: placed **disabled**, moved 5 m ahead and 3 m to the right (a guess; the test room is about 12 m deep), enabled only if the move happened (no `MoveTo` = it stays disabled: never a moving platform on the player), with `EnableNoWait` when the game declares it (it never blocks), else `Enable`; registered; a notice after each step (`S30 start`, `lift placed`, `lift moved=`, `lift enabled nowait=`, `REG`, `S30 done`) |
+| 30 | the LIFT's own placement, after the door's stages: placed **disabled**, moved 2.5 m ahead, between the player and the door (4 m), no side offset (5 m ahead and 3 m right was not seen in the 13 Nov session; the lift's size is unread, so a large platform may overlap the player: the one reading says), enabled only if the move happened (no `MoveTo` = it stays disabled: never a moving platform on the player), with `EnableNoWait` when the game declares it (it never blocks), else `Enable`; registered; a notice after each step (`S30 start`, `lift placed`, `lift moved=`, `lift enabled nowait=`, `REG`, `S30 done`) |
 | 31..36 | LIFT: `Stage1`, `Stage2`, `Stage1NoTransition`, `Stage2NoTransition`, then `Stage1Transition`, `Stage2Transition` (clip names, not events: expected false, tried once so the log says so) |
 | 40 | a reading of both |
 | 60 | disable and delete both |
@@ -69,3 +69,15 @@ ahead (outside the closed room, about 12 m deep) and called a blocking `Enable` 
 That is a hypothesis, not a result. The change makes the session tell where it stops, whichever it is: (1) a notice at the start of stage 10 and after each step; (2) the door is placed and
 registered before the lift is touched, and the lift has its own stage 30 after the door's stages (21..24); (3) the lift lands 5 m ahead and 3 m to the right; (4) `EnableNoWait` when the base scripts
 declare it (the stager keeps the optional line only if it compiles), else the blocking `Enable` as before. If the notices still stop at one step, that step is the finding.
+
+## Session 2 result (supported: Claude's PC game session at ccc2dfb8, 13 Nov 2026, 01:20 to 01:33 UTC, on the pull request, comment 6841159941; not replayed here)
+**Door half: seen on screen, a pass for these calls.** `Open` opens (swings left) and holds, `Close` closes, `Opened` and `Closed` set the pose at once, all four `ok=TRUE`; the plays send `Trans01` and `Done`,
+the direct poses only `IsOn` / `IsOff`; every stage 10 step notice came. **Lift half: not a result.** Stage 30 ran to `S30 done` (placed disabled, `moved=TRUE`, `enabled nowait=TRUE`, so `EnableNoWait` compiled in,
+`REG lift 5/5`), but the lift was in no shot, and stages 31 to 36 printed nothing in 49 shots. Missing for the door too: the `W s21..24` closing lines and a stage 20 `REG` line.
+**What is read from it (inference, no log; not a result):** (a) the first lift `PlayAnimation`, or the reading once enabled, may never return and hold the poll: that is Claude's reading. (b) The missing `W` and stage 20
+`REG` notices are also consistent with a single short notice that had already gone by the time of the shot (taken up to 20 s after a 15 s window closed); the console kit repeats its notices and its `W` line was seen.
+(c) Stage 40 (and the settled readings) only wrote to the log in this kit: their silence on screen is by construction, not a finding.
+**Changed in the next head (script and card only; the clips, the plugin and the stage list are untouched):** each play stage has its own one-shot timer (`TIMER_CALL + stage`), the poll only starts it, so no call is made inside the poll;
+a notice before the reading and one before the call (`C sN name reading`, `C sN name calling`), so the last notice on screen names the step that did not return; the return and closing notices are repeated like the console kit's;
+the readings after a stage's call and stage 40 are shown on screen (`READ ...`), the lift's after it was enabled included; the lift is placed 2.5 m ahead, between the player and the door.
+Whether the lift's call really hangs, and why, is still **unread**: the next session shows the step.

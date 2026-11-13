@@ -13,8 +13,12 @@ Scriptname FO4SF_AnimDoorLiftQuest extends Quest
 ;             after the move (NOT blocking when EnableNoWait exists), registered; a notice after each step. A lift that cannot be moved is left disabled and says so
 ;   31..36    the LIFT: Stage1, Stage2, Stage1NoTransition, Stage2NoTransition, then Stage1Transition and Stage2Transition (clip names, not events: expected
 ;             false, tried once so the log says so), then 15 s of listening each
-;   40        a reading of both references now
+;   40        a reading of both references now (shown on screen as READ lines since the 13 Nov session: before, only the log had it)
 ;   60        Disable and Delete both
+; Calls (stages 21..24 and 31..36) are NOT made inside the poll: the poll only starts a one-shot timer per stage (TIMER_CALL + stage), so a call that never returns
+; cannot hold the poll or the other stages (PC session 13 Nov 01:20 UTC: the lift stages were silent). Each call says "C sN <name> reading" before the reading and
+; "C sN <name> calling" before PlayAnimation, so the last notice on screen names the step that did not return. Return and closing notices are shown at once and
+; repeated (the window notice too): the 13 Nov shots were taken up to 20 s after a 15 s window closed and a single notice had gone.
 ; One name per stage: set the next stage only after the 15 s window of the last one has closed (its "quiet" or "listened" line). An event is
 ; logged with label=door or label=lift and stage=<the open window's stage>, or stage=0 when no window is open. NEVER the wait form (it never
 ; returns when the graph sends no end event). Every log line that matters also shows as a notification beginning "AP " (Say).
@@ -34,15 +38,22 @@ string GamePlugin = "Starfield.esm"
 int DoorControlId = 0x801   ; ACTI FO4SF_AnimDoorControl of FO4SFAnimDoorLift.esm (local id)
 int LiftId = 0x10C35        ; the vanilla ShipQuickLift1, a form of Starfield.esm
 float DoorAheadM = 4.0
-float LiftAheadM = 5.0      ; the lift 5 m in front of the player ...
-float LiftSideM = 3.0       ; ... and 3 m to the right: a guess (the test room is about 12 m deep); the lift's size is unread
+float LiftAheadM = 2.5      ; the lift 2.5 m in front of the player, between the player and the door (4 m) ...
+float LiftSideM = 0.0       ; ... and not to the side (the PC session of 13 Nov saw nothing at 5 m ahead, 3 m right); the lift's size is unread
 
 ; ---------------------------------------------------------------- state
 
 int TIMER_POLL = 1
 int TIMER_QUIET = 100       ; + the stage
+int TIMER_RESAY = 200       ; the last on-screen notice shown again
+int TIMER_CALL = 400        ; + the stage: the play call of that stage (its own timer, so a call that hangs cannot hold the poll)
 float POLL_S = 1.0
 float LISTEN_S = 15.0
+float CALL_DELAY_S = 0.3    ; from the poll to the call of a stage
+float RESAY_S = 2.0         ; the last notice is shown again every RESAY_S seconds, RESAY_TIMES times
+int RESAY_TIMES = 3
+string LastLine = ""
+int ResayLeft = 0
 int[] StageList
 bool[] DoneList
 string[] DoorEvents
@@ -184,6 +195,14 @@ EndFunction
 
 ; ---------------------------------------------------------------- readings and spawning
 
+Function SayHold(string msg)
+    {Say it now and again every RESAY_S seconds RESAY_TIMES times (a shot taken seconds later still holds it). The last notice is the one repeated.}
+    LastLine = msg
+    Say(msg)
+    ResayLeft = RESAY_TIMES
+    StartTimer(RESAY_S, TIMER_RESAY)
+EndFunction
+
 Function Reading(string when, int stage, string what, ObjectReference r)
     {One line: the reference, its base, 3D, disabled state, cell, position and distance to the player.}
     if r == None
@@ -192,6 +211,9 @@ Function Reading(string when, int stage, string what, ObjectReference r)
     endif
     Actor p = Game.GetPlayer()
     Trace("read stage=" + stage + " label=" + what + " when=" + when + " ref=" + Id(r) + " base=" + Id(r.GetBaseObject()) + " loaded=" + r.Is3DLoaded() + " disabled=" + r.IsDisabled() + " cell=" + Id(r.GetParentCell()) + " pos=" + r.GetPositionX() + "," + r.GetPositionY() + "," + r.GetPositionZ() + " dist=" + p.GetDistance(r))
+    if when != "before"
+        Say("READ s" + stage + " " + what + " " + when + " 3d=" + r.Is3DLoaded() + " off=" + r.IsDisabled() + " dist=" + p.GetDistance(r) + " dz=" + (r.GetPositionZ() - p.GetPositionZ()) + " az=" + r.GetAngleZ() + " pa=" + p.GetAngleZ())
+    endif
 EndFunction
 
 Function Spawn(int stage)
@@ -262,14 +284,24 @@ Event OnTimer(int aiTimerID)
     if aiTimerID == TIMER_POLL
         Poll()
         StartTimer(POLL_S, TIMER_POLL)
+    elseif aiTimerID == TIMER_RESAY
+        if ResayLeft > 0
+            ResayLeft -= 1
+            Say(LastLine + " (again)")
+            if ResayLeft > 0
+                StartTimer(RESAY_S, TIMER_RESAY)
+            endif
+        endif
+    elseif aiTimerID >= TIMER_CALL
+        CallStage(aiTimerID - TIMER_CALL)
     elseif aiTimerID >= TIMER_QUIET
         int stage = aiTimerID - TIMER_QUIET
         if WindowEvents == 0
             Trace("quiet stage=" + stage + " seconds=" + LISTEN_S)
-            Say("W s" + stage + " quiet")
+            SayHold("W s" + stage + " quiet")
         else
             Trace("listened stage=" + stage + " events=" + WindowEvents + " seconds=" + LISTEN_S)
-            Say("W s" + stage + " heard " + WindowEvents)
+            SayHold("W s" + stage + " heard " + WindowEvents)
         endif
         if ListenStage == stage
             ListenStage = 0
@@ -302,9 +334,9 @@ Function Step(int stage)
     elseif stage == 30
         SpawnLift(stage)
     elseif stage >= 21 && stage <= 24
-        PlayOne(stage, "door", DoorRef, DoorCalls[stage - 21])
+        StartTimer(CALL_DELAY_S, TIMER_CALL + stage)
     elseif stage >= 31 && stage <= 36
-        PlayOne(stage, "lift", LiftRef, LiftCalls[stage - 31])
+        StartTimer(CALL_DELAY_S, TIMER_CALL + stage)
     elseif stage == 40
         Reading("stage40", stage, "door", DoorRef)
         Reading("stage40", stage, "lift", LiftRef)
@@ -313,19 +345,31 @@ Function Step(int stage)
     endif
 EndFunction
 
+Function CallStage(int stage)
+    {The timer of a play stage: the door's stages 21..24 and the lift's 31..36, each in its own timer event.}
+    if stage >= 21 && stage <= 24
+        PlayOne(stage, "door", DoorRef, DoorCalls[stage - 21])
+    elseif stage >= 31 && stage <= 36
+        PlayOne(stage, "lift", LiftRef, LiftCalls[stage - 31])
+    endif
+EndFunction
+
 Function PlayOne(int stage, string what, ObjectReference r, string n)
-    {One PlayAnimation name: the reading before, the call and its return, then LISTEN_S of listening (events arrive in OnAnimationEvent). Never the wait form.}
+    {One PlayAnimation name: a notice, the reading before, a notice, the call and its return, then LISTEN_S of listening (events arrive in OnAnimationEvent). Never the wait form.}
     if r == None
         Trace("play stage=" + stage + " label=" + what + " name=" + n + " ref=none (place it first)")
+        Say("C s" + stage + " " + n + " no " + what)
         return
     endif
+    Say("C s" + stage + " " + n + " reading")
     Reading("before", stage, what, r)
     ListenStage = stage
     WindowEvents = 0
+    Say("C s" + stage + " " + n + " calling")
+    StartTimer(LISTEN_S, TIMER_QUIET + stage)
     bool ok = r.PlayAnimation(n)
     Trace("play stage=" + stage + " label=" + what + " name=" + n + " ref=" + Id(r) + " ok=" + ok)
-    Say("PLAY " + what + " s" + stage + " " + n + " ok=" + ok)
-    StartTimer(LISTEN_S, TIMER_QUIET + stage)
+    SayHold("PLAY " + what + " s" + stage + " " + n + " ok=" + ok)
 EndFunction
 
 Function Cleanup()

@@ -79,7 +79,7 @@ class ScriptTests(unittest.TestCase):
         and, once, the clip names Stage1Transition / Stage2Transition (not events: expected false); one call per stage."""
         self.assertEqual(strings("DoorCalls", PSC), ["Open", "Close", "Opened", "Closed"])
         self.assertEqual(strings("LiftCalls", PSC), ["Stage1", "Stage2", "Stage1NoTransition", "Stage2NoTransition", "Stage1Transition", "Stage2Transition"])
-        self.assertIn("PlayOne(stage, \"door\", DoorRef, DoorCalls[stage - 21])", PSC)
+        self.assertIn("PlayOne(stage, \"door\", DoorRef, DoorCalls[stage - 21])", PSC)             # now inside CallStage, run by the stage's own timer
         self.assertIn("PlayOne(stage, \"lift\", LiftRef, LiftCalls[stage - 31])", PSC)
         self.assertIn("elseif stage >= 21 && stage <= 24", PSC)
         self.assertIn("elseif stage >= 31 && stage <= 36", PSC)
@@ -108,8 +108,8 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("LiftRef = p.PlaceAtMe(liftBase, 1, true, true, false)", PSC)    # abInitiallyDisabled = true
         self.assertIn("LiftRef.Enable(false)", PSC)
         self.assertIn("if LiftRef && liftMoved", PSC)                                  # not moved, not enabled: never a platform on the player
-        self.assertIn("float LiftAheadM = 5.0", PSC)
-        self.assertIn("float LiftSideM = 3.0", PSC)
+        self.assertIn("float LiftAheadM = 2.5", PSC)
+        self.assertIn("float LiftSideM = 0.0", PSC)
         self.assertNotIn("LiftM", PSC.replace("LiftMoved", ""))                      # the old 40 m constant is gone
         self.assertIn("p.PlaceAtMe(doorBase, 1, true, false, false)", PSC)
         # the move is an optional native: with no MoveTo the optional lines stay comments and the lift stays disabled
@@ -125,6 +125,30 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("nowait = true", on)
         self.assertIn("        if !nowait\n            LiftRef.Enable(false)", PSC)             # Enable only when the no-wait call was not kept
         self.assertNotIn("LiftRef.EnableNoWait(false)", PSC.replace(";OPT ObjectReference.EnableNoWait         LiftRef.EnableNoWait(false)", ""))   # only as an optional line
+
+    def test_a_call_that_never_returns_cannot_hold_the_poll_and_says_which_step_it_was(self):
+        """PC session 13 Nov 01:20 UTC: the lift stages and stage 40 were silent. Each play stage has its own one-shot timer, and the notices name the step."""
+        step = PSC[PSC.index("Function Step(int stage)"):PSC.index("Function PlayOne(")]
+        self.assertEqual(step.count("StartTimer(CALL_DELAY_S, TIMER_CALL + stage)"), 2)                    # the door's stages and the lift's: only a timer start
+        self.assertLess(PSC.index("aiTimerID == TIMER_RESAY"), PSC.index("aiTimerID >= TIMER_CALL"))       # the id orders: 1, 200, then >= 400, then >= 100
+        self.assertLess(PSC.index("aiTimerID >= TIMER_CALL"), PSC.index("aiTimerID >= TIMER_QUIET"))
+        self.assertIn("int TIMER_CALL = 400", PSC)
+        play = PSC[PSC.index("Function PlayOne("):PSC.index("Function Cleanup()")]
+        self.assertEqual(re.findall(r'Say(?:Hold)?\("((?:C s|PLAY )[^"]*)', play), ["C s", "C s", "C s", "PLAY "])
+        self.assertLess(play.index('" reading")'), play.index('Reading("before"'))                          # a notice BEFORE the reading ...
+        self.assertLess(play.index('" calling")'), play.index("r.PlayAnimation(n)"))                         # ... and BEFORE the call
+        self.assertLess(play.index("StartTimer(LISTEN_S"), play.index("r.PlayAnimation(n)"))                 # the window timer starts before the call too
+        self.assertEqual(PSC.count("r.PlayAnimation(n)"), 1)
+
+    def test_the_closing_and_return_notices_are_repeated_and_the_readings_are_on_screen(self):
+        """The door's four windows printed no W line in the 13 Nov shots (taken up to 20 s after a 15 s window; one notice had gone), and stage 40 only logged."""
+        self.assertIn('SayHold("W s" + stage + " quiet")', PSC)
+        self.assertIn('SayHold("W s" + stage + " heard " + WindowEvents)', PSC)
+        self.assertIn('SayHold("PLAY " + what', PSC)
+        self.assertIn('Say(LastLine + " (again)")', PSC)
+        reading = PSC[PSC.index("Function Reading("):PSC.index("Function Spawn(int stage)")]
+        self.assertIn('Say("READ s" + stage', reading)
+        self.assertIn('if when != "before"', reading)                                                        # the reading before every call stays log-only
 
     def test_the_door_is_placed_and_registered_before_the_lift_is_touched_and_every_step_says_so(self):
         """The 13 Nov session was silent after stage 10: a notice at the start and after each step, the door first, the lift in its own stage 30."""
