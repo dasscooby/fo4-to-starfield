@@ -49,5 +49,22 @@ class AliasTests(unittest.TestCase):
         self.assertIn("rig_bones", out)
 
 
+class SpanTests(unittest.TestCase):
+    def test_triangles_across_bones_are_counted_by_bone_set_and_single_bone_ones_are_not(self):
+        node_of = {0: 7, 1: 7, 2: 7, 3: 9, 4: 9}
+        tris = [(0, 1, 2), (0, 1, 3), (1, 2, 4), (3, 4, 3), (0, 3, 4)]
+        self.assertEqual(dsr.spanning(tris, node_of), {(7, 9): 3})
+        self.assertEqual(dsr.spanning([(0, 1, 2)], node_of), {})
+
+    def test_local_travel_is_the_extent_of_a_bones_own_translation_in_metres(self):
+        def tr(node, pts):
+            return {"node": node, "samples": [{"translation_source_units": p} for p in pts]}
+        plan = {"clips": [{"tracks": [tr(5, [(0, 0, 0), (35, 0, 0), (70, 0, 0)]), tr(6, [(1, 2, 3)] * 3)]},
+                          {"tracks": [tr(5, [(0, 0, 0), (0, 140, 0)])]}]}
+        got = dsr.local_travel_m(plan)
+        self.assertAlmostEqual(got[5], 2.0)                      # the larger of 1 m and 2 m over the clips
+        self.assertAlmostEqual(got[6], 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,6 @@
 """Why a door's skinned shapes do not ride its rig: per skinned shape, the bones it uses (name, in the rig plan or not,
-parent node), how many drawn vertices follow each bone, and how many blend bones (top weight under 0.99, by bone pair).
+parent node), how many drawn vertices follow each bone, how many blend bones (top weight under 0.99, by bone pair), and the triangles that span
+two or more bones (by bone set, with each bone's own local travel in metres): the ones that keep a shape off the rig.
 Read-only; prints JSON.
 
   python scripts/door_skin_report.py --fo4-data <Fallout 4 Data> <mesh name, e.g. Meshes\\Interiors\\RedRocket\\Doors\\RedRPedDoor.nif>
@@ -32,11 +33,37 @@ def aliases_for(mesh, hand=None):
     return pipeline.OWN_RIG_ALIASES.get(re.split(r"[\\/]", mesh)[-1].lower())
 
 
+def spanning(triangles, node_of):
+    """Triangles whose drawn vertices follow more than one bone: {sorted tuple of bone nodes: triangle count}. These are what
+    convert_static.rigid_skinned_parts refuses ('a triangle across two bones'): one rigid piece per bone cannot hold them together."""
+    out = Counter()
+    for t in triangles:
+        nodes = {node_of[i] for i in t}
+        if len(nodes) > 1:
+            out[tuple(sorted(nodes))] += 1
+    return dict(out)
+
+
+def local_travel_m(plan, unit=70.0):
+    """{bone node: largest distance in metres between two samples of its own translation track, over all clips}. LOCAL: the bone's
+    motion in its parent's space; a parent's own travel is not added, so a child of a moving bone reads as still (source units / 70)."""
+    out = {}
+    for clip in plan["clips"]:
+        for tr in clip["tracks"]:
+            pts = [s["translation_source_units"] for s in tr["samples"]]
+            lo = [min(p[a] for p in pts) for a in range(3)]
+            hi = [max(p[a] for p in pts) for a in range(3)]
+            d = sum((h - l) ** 2 for h, l in zip(hi, lo)) ** 0.5 / unit
+            out[tr["node"]] = max(out.get(tr["node"], 0.0), d)
+    return out
+
+
 def report(src, aliases=None):
     plan = door_rig.animated_identity_binds(door_rig.plan(src, placed=True, aliases=aliases))
     rig = {b["node"] for b in plan["bones"] if b.get("node") is not None}
     parents = {c: n for n in range(len(src.blocks)) if src.type_of(n).endswith("Node") for c in nif.node_children(src, n)}
     animated = {t["node"] for c in plan["clips"] for t in c["tracks"]}
+    travel = local_travel_m(plan)
 
     def name(b):
         return fo4skin._block_name(src, b).decode("latin-1") if 0 <= b < len(src.blocks) else str(b)
@@ -46,19 +73,23 @@ def report(src, aliases=None):
             continue
         skin = fo4skin.read_skin(src, s.block)
         used = {i for t in s.triangles for i in t}
-        follow, blends = Counter(), Counter()
+        follow, blends, node_of = Counter(), Counter(), {}
         for v in used:
             ws, ks = skin.weights[v], skin.indices[v]
             total = sum(ws) or 1.0
             top = max(range(len(ws)), key=lambda j: ws[j])
             follow[name(skin.bones[ks[top]])] += 1
+            node_of[v] = skin.bones[ks[top]]
             if ws[top] / total < 0.99:
                 pair = sorted({name(skin.bones[k]) for w, k in zip(ws, ks) if w > 0})
                 blends[" + ".join(pair)] += 1
         out.append({"shape": (s.name or b"").decode("latin-1"), "block": s.block, "drawn_vertices": len(used),
                     "bones": [{"name": name(b), "in_rig": b in rig, "animated": b in animated,
                                "parent": name(parents[b]) if b in parents else None} for b in skin.bones],
-                    "dominant_bone": dict(follow), "blended_vertices": dict(blends)})
+                    "dominant_bone": dict(follow), "blended_vertices": dict(blends),
+                    "spanning_triangles": [{"bones": [name(b) for b in nodes], "triangles": n,
+                                            "own_travel_m": [round(travel.get(b, 0.0), 3) for b in nodes]}
+                                           for nodes, n in sorted(spanning(s.triangles, node_of).items(), key=lambda kv: -kv[1])]})
     return {"rig_bones": [b["name"] for b in plan["bones"]], "shapes": out}
 
 
