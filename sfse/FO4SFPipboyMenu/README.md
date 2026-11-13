@@ -384,6 +384,52 @@ a slight glow and a better font come next. The colour is already one setting. Th
   player's own Fallout 4 interface files on their PC, as the port does for everything else, after the PC survey names
   those files.
 
+## The device raise (FAL-714, step 3b)
+
+Off by default (`Device=0`): nothing below runs, and the log has none of its lines. `Device=1` is read at `Stage=5`
+only (at another stage: `refuse step=ini reason=device_stage`). Step 3a found that the first-person raise plays only by
+editor id (`Human_1stPersonRoot_DataSlateOpen`; `..._DataSlateClose` lowers it), that the pose holds on its own and
+survives our menu's open and close, and that the raise itself narrows the view. So the plugin names the idles by editor
+id, never by form id, and touches neither the camera nor the FOV.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `Device` | `0` | `1` = the device sequence on `DeviceKey` |
+| `DeviceKey` | `0x78` (F9) | 1 to 0xFE, not `Key`, `SnapshotKey`, `WorldKey` or any `Kit*` key (`refuse step=ini reason=device_key`) |
+| `DeviceRaiseIdle` | `Human_1stPersonRoot_DataSlateOpen` | the raise idle's editor id |
+| `DeviceLowerIdle` | `Human_1stPersonRoot_DataSlateClose` | the lower idle's editor id |
+| `DeviceRaiseMs` | `900` | hold before the kit opens (Fallout 4's 0.867 s up, rounded to the 30 ms poll); 0 to 5000 |
+| `DeviceLowerMs` | `700` | `DeviceKey` ignored this long after a lower (Fallout 4's 0.667 s down); 0 to 5000 |
+| `DeviceBox` | `0.078,0.271,0.309` | left and top as fractions of the 1920x1080 stage, and the scale; the box stays inside the stage |
+
+**Checked first (at load, `Device=1`):** the keys as above, then `TESForm::LookupByEditorID` (libxse 9d090c4 id 47403)
+in the same Address Library file, with the checks every other id gets (below the count, non-zero, inside the image,
+libxse's own lookup the same offset): `step=device_id ...`, or `refuse step=device_id`. It is kept out of the shared id
+list so that `Device=0` reads and logs exactly the ids it did before. No SFSE address is compared for it.
+
+**The sequence** (every line carries `t_ms`, the milliseconds since the last `DeviceKey` press, steady clock):
+
+1. `DeviceKey` while the menu is closed: `step=device_key n= open=0 t_ms=0`.
+2. Main thread, once, on the first press with a player: the player's `IAnimationGraphManagerHolder` (libxse:
+   TESObjectREFR's base at +0x60) from PlayerCharacter's RTTI hierarchy, its vtable naming PlayerCharacter there, slot
+   0x00 the adjustor thunk to the player's destructor and slot 0x01 (`NotifyAnimationGraphImpl`) inside the image:
+   `step=device_holder ...`. Then both idles by editor id: a `TESIdleForm` by RTTI, form type IDLE (0x5C at +0x2E),
+   with its `behaviorGraphName` (+0x60) and `animEventName` (+0x68): `step=device_idle which=raise|lower editor_id=
+   form= type= graph= event=`. This line also says which form id the console's numeric `playidle` should have reached.
+3. The raise: the idle's own animation event to the player, `step=device_raise n= result=1|0 t_ms=`.
+4. `DeviceRaiseMs` later: `step=device_show n= sent=show t_ms=` (the usual `step=toggle` with it), and in our kShow
+   handling, after the kit's own: `step=device_box by=device root=1 set=4 back=4 x=149.76 y=292.68 scale=0.309`.
+   When `Key` (F10) opens the kit instead, the root is reset: `by=key ... x=0.00 y=0.00 scale=1.000`.
+5. A close by any route (`DeviceKey` again, `Key`, Tab or Esc, CLOSE) of a menu opened as the device: from our kHide
+   handling, `step=device_lower n= result= lock_ms= t_ms=`; `DeviceKey` is then ignored for `DeviceLowerMs`
+   (`step=device_key ignored=lowering`).
+
+Not in this step: no camera or FOV write, no second menu name, no power-armor check, no Tab binding, no model on the
+arm. The lower's own duration is not measured (no menu is open to pause it).
+
+**Fallbacks, only if the session needs them:** `result=0`, or no raise on screen: B1 (the idle through Papyrus, a PEX
+built on the PC). `back` below 4: B2 (the kit generator writes a second movie laid out in the box).
+
 ## Build (PC)
 
 From a checkout at the PR head, in the PC's x64 environment:
@@ -709,5 +755,11 @@ menu and the pause menu open.
 | `step=listen name=root ... added=0` | (e): no listener on the root, so clicks do nothing; the keys still work | report the line |
 | `step=kit_click ... target=0` or `name=-` | (e): the click's event had no target or no name | report: one listener per object is the fallback |
 | `step=kit_av av:<id>:...:refused` | (e): that form id gave no `ActorValueInfo`; its row prints `?` | report the line |
+| `refuse step=ini reason=device_key` / `device_idle` / `device_ms` / `device_box` / `device_stage` | (e), `Device=1`: that device key is wrong; the plugin stays idle | fix the ini |
+| `refuse step=device_id ...` | (e), `Device=1`: libxse's `TESForm::LookupByEditorID` id is beyond the file, zero, outside the image or another offset through libxse; the plugin stays idle | `NEEDS-PC lookup 47403` |
+| `refuse step=device_holder reason=...` | (e), `Device=1`: the player's animation-graph holder is not at +0x60 or its slots are not as declared; no raise or lower is sent, and the kit does not open on `DeviceKey` | report the line (its slots and targets) |
+| `refuse step=device_idle which=<w> reason=not_found` / `not_idle` / `no_event` | (e), `Device=1`: that editor id gave no form, another type, or no animation event | report the line |
+| `step=device_raise ... result=0` | (e): the player's graph did not take the event | B1 |
+| `step=device_box ... back=<4` | (e): the root did not take its place or scale | B2 |
 
 The probe changes no Starfield interface file, and nothing it makes goes into Git: no dll, no movie, no archive.
