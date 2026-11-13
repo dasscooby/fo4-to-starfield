@@ -25,6 +25,19 @@ know) is UNREAD by the author of this tool: the dump shows whatever is there, an
     python vault111_anim_probe.py --graphs --dump-graph genericstategraph01 --dump-graph activatorstategraph01 --out <dump.txt>
            --data <Starfield Data> --game-archive "Starfield - Animations.ba2"
 
+Third mode, `--dump-form HEX` (repeatable) and `--refs-to HEX` (repeatable), for ONE base object whose 3D did not load (the lift
+ShipQuickLift1, 00010C35: FAL-489, the lift half of the door and lift kit): no graph is read.
+  --dump-form 00010C35   every subrecord of the record (signature, size, text or hex, any text strings found inside, and for a 4-byte
+                         subrecord the form id it could be), the record flags, and the model path, rig (BNAM), clip folder (CNAM) and
+                         the component names read from it; then the model checked against the archives given, exactly as in the report
+                         above (is the file there, the NIF header, NiControllerManager / sequences / text keys, the rig's clips).
+  --refs-to 00010C35     every REFR and ACHR of the CELL and WRLD top groups whose NAME is that form id: count, and the first --refs-limit
+                         (default 12) with the cell (form id and editor id) and the position. A count of 0 says only that no such
+                         placed reference was found in those groups, not why the game never places one.
+Both write only --out.  Examples:
+    python vault111_anim_probe.py --graphs --dump-form 00010C35 --out <lift.txt> --data <Starfield Data> --game-archive "Starfield - Meshes*.ba2"
+    python vault111_anim_probe.py --graphs --refs-to 00010C35 --out <lift-refs.txt> --data <Starfield Data>
+
 usage: python vault111_anim_probe.py --graphs --out <report.txt> --data <Starfield Data>
            --game-archive "Starfield - Animations.ba2" --game-archive "Starfield - Meshes*.ba2"
            [--esm <Starfield.esm>] [--graph <name> ...] [--model <meshes path> ...] [--per-graph 12] [--default-models 2]
@@ -813,6 +826,127 @@ def run_dump(a):
     return "\n".join(out) + "\n"
 
 
+# ----------------------------------------------------------------------------------------------- one form (--dump-form, --refs-to)
+FORM_GROUPS = (b"ACTI", b"FURN", b"DOOR", b"MSTT", b"STAT", b"TERM", b"FLOR", b"CONT")
+PLACED = (b"REFR", b"ACHR")
+CHILD_GROUPS = (6, 8, 9, 10)          # cell children, persistent, temporary, visible distant: the label is the parent cell's form id
+
+
+def parse_form_id(text):
+    try:
+        return int(str(text).strip().lower().replace("0x", ""), 16) & 0xFFFFFFFF
+    except ValueError:
+        raise SystemExit(f"not a hex form id: {text!r}")
+
+
+def strings_in(data, minimum=4):
+    return [m.group().decode("ascii") for m in re.finditer(rb"[\x20-\x7e]{%d,}" % minimum, data)]
+
+
+def sub_line(sig, d, cap=64):
+    """One subrecord, as stored: its text when it is all text, else hex (capped), the text strings inside it, and what 4 bytes could be."""
+    s = sig.decode("latin1")
+    if d and d[-1:] == b"\0" and len(d) > 1 and all(0x20 <= c < 0x7F for c in d[:-1]):
+        return f"    {s} [{len(d)}] text {d[:-1].decode('ascii')!r}"
+    line = f"    {s} [{len(d)}] hex {d[:cap].hex(' ')}" + (" ..." if len(d) > cap else "")
+    if len(d) == 4:
+        line += f"   (u32 {struct.unpack('<I', d)[0]:#010x}, float {struct.unpack('<f', d)[0]:.6g})"
+    found = strings_in(d)
+    if found:
+        line += "   strings: " + " | ".join(found[:12]) + (" ..." if len(found) > 12 else "")
+    return line
+
+
+def find_form(plugin, fid):
+    """The record with this form id in the flat groups of FORM_GROUPS, (record, None); (None, notes) when it is not there."""
+    for label in FORM_GROUPS:
+        if label.decode() not in plugin.groups:
+            continue
+        for start, end in plugin.groups[label.decode()]:
+            for item in plugin.walk(start, end):
+                if item[0] == "REC" and struct.unpack_from("<I", plugin.buf, item[1] + 12)[0] == fid:
+                    return plugin.record_at(item[1]), None
+    return None, "searched " + ", ".join(b.decode() for b in FORM_GROUPS if b.decode() in plugin.groups)
+
+
+def form_lines(plugin, fid, archives):
+    rec, note = find_form(plugin, fid)
+    out = [f"=== form {fid:08X}"]
+    if rec is None:
+        return out + [f"  no record with that form id ({note}); unread"]
+    out.append(f"  {rec.sig.decode()}  edid {rec.edid or '-'}  flags {rec.flags:#010x}  version {rec.version}  {len(rec.subs)} subrecord(s):")
+    out += [sub_line(s, d) for s, d in rec.subs]
+    comp, cname = graph_component(rec.subs)
+    names = [esm.zstring(d) for s, d in rec.subs if s == b"BFCB"]
+    model = model_path(rec.subs)
+    out.append(f"  components (BFCB): " + (", ".join(names) or "none"))
+    out.append(f"  animation graph component {cname or 'none'}: " + (", ".join(f"{k}={v}" for k, v in sorted(comp.items())) or "no ANAM/BNAM/CNAM"))
+    out.append(f"  model: {model or 'no .nif text in the record'}")
+    if not model:
+        return out
+    if not archives:
+        return out + ["  model check unread: no --game-archive given"]
+    lines, _ = model_report(archives, model, comp.get("CNAM", ""), comp.get("BNAM", ""), ())
+    return out + lines
+
+
+def find_refs(plugin, fid):
+    """([(sig, ref form id, cell form id, (x, y, z) or None)], {cell form id: record offset}, records scanned): REFR / ACHR whose NAME is fid."""
+    hits, cells, scanned, cur = [], {}, 0, 0
+    for label in ("CELL", "WRLD"):
+        for start, end in plugin.groups.get(label, []):
+            for item in plugin.walk(start, end):
+                if item[0] == "GRUP":
+                    if item[2] in CHILD_GROUPS and len(item[1]) == 4:
+                        cur = struct.unpack("<I", item[1])[0]
+                    continue
+                if item[2] == b"CELL":
+                    cells[struct.unpack_from("<I", plugin.buf, item[1] + 12)[0]] = item[1]
+                elif item[2] in PLACED:
+                    scanned += 1
+                    r = plugin.record_at(item[1])
+                    name = r.get(b"NAME")
+                    if name is not None and len(name) == 4 and struct.unpack("<I", name)[0] == fid:
+                        pos = r.get(b"DATA")
+                        hits.append((r.sig.decode(), r.formid, cur, struct.unpack_from("<3f", pos, 0) if pos is not None and len(pos) >= 12 else None))
+    return hits, cells, scanned
+
+
+def refs_lines(plugin, fid, limit):
+    hits, cells, scanned = find_refs(plugin, fid)
+    out = [f"=== references to {fid:08X} (REFR / ACHR with that NAME, in the CELL and WRLD top groups; {scanned} placed record(s) scanned)"]
+    out.append(f"  {len(hits)} found" + (f"; first {min(len(hits), limit)}:" if hits else ""))
+    for sig, rid, cell, pos in hits[:limit]:
+        cedid = plugin.record_at(cells[cell]).edid if cell in cells else "-"
+        out.append(f"    {sig} {rid:08X}  cell {cell:08X} {cedid or '-'}  position " + (", ".join(f"{v:.1f}" for v in pos) if pos else "unread"))
+    if not hits:
+        out.append("  none found: no placed reference of that base in the groups read (the game may place it another way: unread)")
+    return out
+
+
+def run_form(a):
+    """The --dump-form / --refs-to report: Starfield.esm and, for the model check, the archives are read; only --out is written."""
+    out = ["vault111_anim_graphs --dump-form / --refs-to (read-only; FAL-489)"]
+    esm_path = a.esm or os.path.join(a.data, "Starfield.esm")
+    expanded = expand_archives(a.data, a.game_archive)
+    archives = open_archives([p for _, ps in expanded for p in ps])
+    for given, ps in expanded:
+        if not ps:
+            out.append(f"archive argument {given!r}: nothing matched under {a.data}")
+    out.append("archives: " + (", ".join(f"{os.path.basename(p)} ({ar if isinstance(ar, str) else str(len(ar.names)) + ' entries'})" for p, ar in archives) or "none given"))
+    if not os.path.isfile(esm_path):
+        return "\n".join(out + [f"unread: {esm_path} not found"]) + "\n"
+    try:
+        with esm.Plugin(esm_path) as plugin:
+            for h in a.dump_form:
+                out += [""] + form_lines(plugin, parse_form_id(h), archives)
+            for h in a.refs_to:
+                out += [""] + refs_lines(plugin, parse_form_id(h), a.refs_limit)
+    except (esm.EsmError, OSError, struct.error) as e:
+        out.append(f"unread: {esm_path}: {e}")
+    return "\n".join(out) + "\n"
+
+
 def build_parser():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", required=True)
@@ -821,6 +955,9 @@ def build_parser():
     ap.add_argument("--game-archive", action="append", default=[], help='a Starfield archive (name in --data, * allowed), e.g. "Starfield - Animations.ba2"')
     ap.add_argument("--graph", action="append", help="a graph name (replaces the default list)")
     ap.add_argument("--dump-graph", action="append", default=[], help="a graph name: write only the complete dump of it (repeatable; no esm, no models)")
+    ap.add_argument("--dump-form", action="append", default=[], help="a hex form id: write only every subrecord of that record and a check of its model against the archives (repeatable)")
+    ap.add_argument("--refs-to", action="append", default=[], help="a hex form id: write only the REFR / ACHR placements of that base (repeatable; reads the whole CELL and WRLD groups)")
+    ap.add_argument("--refs-limit", type=int, default=12)
     ap.add_argument("--model", action="append", default=[], help="a model path to read (repeatable)")
     ap.add_argument("--per-graph", type=int, default=12)
     ap.add_argument("--default-models", type=int, default=2)
@@ -829,7 +966,7 @@ def build_parser():
 
 def main(argv=None):
     a = build_parser().parse_args(argv)
-    text = run_dump(a) if a.dump_graph else run(a)
+    text = run_dump(a) if a.dump_graph else run_form(a) if (a.dump_form or a.refs_to) else run(a)
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     with open(a.out, "w", encoding="utf-8") as f:
         f.write(text)

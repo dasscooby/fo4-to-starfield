@@ -407,5 +407,109 @@ class DumpModeTests(unittest.TestCase):
         self.assertIn("##### 1. the .agx graphs", self.run_graphs())
 
 
+LIFT = 0x10C35
+LIFT_MODEL = "Ships\\QuickLift\\QuickLift1.nif"
+
+
+def lift_esm():
+    """Starfield.esm with a lift-like ACTI (graph component, a VMAD with a script name, a keyword, an unreadable blob) and a CELL group
+    holding two references to it (one persistent, one temporary), one to another base, and one compressed-sized REFR without NAME."""
+    w = esm.PluginWriter([])
+    vmad = struct.pack("<hhH", 6, 2, 1) + struct.pack("<H", 14) + b"QuickLiftScript" + b"\x00\x00\x00"
+    w.add(esm.Record("ACTI", LIFT, [(b"EDID", esm.zbytes("ShipQuickLift1")), (b"VMAD", vmad), (b"KWDA", struct.pack("<I", 0xABCD)),
+                                    (b"FNAM", b"\x01\x02\x03\x04\x05\x06")] + comp("AnimTextData\\Tables\\Graphs\\TwoStages.agx", "Ships\\QuickLift\\skeleton.rig", "Ships\\QuickLift\\Animations")
+                     + [(b"MODL", esm.zbytes(LIFT_MODEL))]))
+    w.add(esm.Record("ACTI", 0x10C36, [(b"EDID", esm.zbytes("NoModel"))]))
+    body = w.to_bytes()
+    cell = esm.Record("CELL", 0x3001, [(b"EDID", esm.zbytes("ShipCellA"))])
+    def ref(fid, base, pos=None):
+        subs = [(b"NAME", struct.pack("<I", base))] + ([(b"DATA", struct.pack("<6f", *pos, 0, 0, 0))] if pos else [])
+        return esm.Record("REFR", fid, subs).to_bytes()
+    persistent = esm.group_bytes(struct.pack("<I", 0x3001), ref(0x4001, LIFT, (1.0, 2.0, 3.5)), 8)
+    temporary = esm.group_bytes(struct.pack("<I", 0x3001), ref(0x4002, LIFT, (10.0, 20.0, 30.0)) + ref(0x4003, 0x10C36) + ref(0x4004, LIFT), 9)
+    return body + esm.group_bytes("CELL", cell.to_bytes() + persistent + temporary)
+
+
+class FormModeTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.data = os.path.join(self.tmp.name, "Data")
+        os.makedirs(self.data)
+        self.out = os.path.join(self.tmp.name, "r.txt")
+        with open(os.path.join(self.data, "Starfield.esm"), "wb") as f:
+            f.write(lift_esm())
+        with open(os.path.join(self.data, "Starfield - Meshes01.ba2"), "wb") as f:
+            f.write(general_archive({"Meshes\\" + LIFT_MODEL: model_nif()}))
+
+    def run_form(self, *argv):
+        self.assertEqual(probe.main(["--graphs", "--out", self.out, "--data", self.data] + list(argv)), 0)
+        with open(self.out, encoding="utf-8") as f:
+            return f.read()
+
+    def test_dump_form_prints_every_subrecord_the_strings_in_the_blob_and_the_form_id_a_four_byte_subrecord_could_be(self):
+        text = self.run_form("--dump-form", "00010C35", "--game-archive", "Starfield - Meshes*.ba2")
+        self.assertIn("=== form 00010C35", text)
+        self.assertIn("ACTI  edid ShipQuickLift1", text)
+        self.assertIn("EDID [15] text 'ShipQuickLift1'", text)
+        self.assertIn("VMAD [", text)
+        self.assertIn("QuickLiftScript", text)                       # the script name, found inside the blob without parsing it
+        self.assertIn("KWDA [4] hex cd ab 00 00   (u32 0x0000abcd", text)
+        self.assertIn("FNAM [6] hex 01 02 03 04 05 06", text)        # an unknown blob is printed as hex, not guessed
+        self.assertIn("components (BFCB): BGSAnimationGraph_Component", text)
+        self.assertIn("ANAM=AnimTextData\\Tables\\Graphs\\TwoStages.agx", text)
+        self.assertIn("BNAM=Ships\\QuickLift\\skeleton.rig", text)
+        self.assertIn("CNAM=Ships\\QuickLift\\Animations", text)
+        self.assertIn("model: " + LIFT_MODEL, text)
+
+    def test_the_model_is_checked_against_the_archives_given(self):
+        text = self.run_form("--dump-form", "10C35", "--game-archive", "Starfield - Meshes*.ba2")
+        self.assertIn("--- model " + LIFT_MODEL, text)
+        self.assertIn("NiControllerManager: 1", text)
+        self.assertIn("PlayAnim01", text)
+        # the same record, a model that is NOT in the archives read: said, not hidden
+        os.remove(os.path.join(self.data, "Starfield - Meshes01.ba2"))
+        with open(os.path.join(self.data, "Starfield - Meshes01.ba2"), "wb") as f:
+            f.write(general_archive({"Meshes\\Other.nif": model_nif()}))
+        self.assertIn("not in the archives read", self.run_form("--dump-form", "10C35", "--game-archive", "Starfield - Meshes*.ba2"))
+
+    def test_without_an_archive_the_model_check_is_unread(self):
+        self.assertIn("model check unread: no --game-archive given", self.run_form("--dump-form", "10C35"))
+
+    def test_a_record_without_a_model_and_a_form_that_is_not_there_say_so(self):
+        text = self.run_form("--dump-form", "10C36", "--dump-form", "0x99999", "--game-archive", "Starfield - Meshes*.ba2")
+        self.assertIn("model: no .nif text in the record", text)
+        self.assertIn("=== form 00099999\n  no record with that form id (searched ACTI", text)
+        self.assertNotIn("--- model", text)
+
+    def test_refs_to_counts_placements_in_every_child_group_with_cell_and_position(self):
+        text = self.run_form("--refs-to", "00010C35")
+        self.assertIn("=== references to 00010C35", text)
+        self.assertIn("4 placed record(s) scanned", text)
+        self.assertIn("3 found; first 3:", text)
+        self.assertIn("REFR 00004001  cell 00003001 ShipCellA  position 1.0, 2.0, 3.5", text)
+        self.assertIn("REFR 00004002  cell 00003001 ShipCellA  position 10.0, 20.0, 30.0", text)
+        self.assertIn("REFR 00004004  cell 00003001 ShipCellA  position unread", text)         # no DATA: unread, not zero
+        self.assertNotIn("00004003", text)                                                        # the reference to another base
+
+    def test_refs_limit_caps_the_list_and_a_base_never_placed_says_so_without_a_why(self):
+        self.assertIn("3 found; first 1:", self.run_form("--refs-to", "10C35", "--refs-limit", "1"))
+        text = self.run_form("--refs-to", "777")
+        self.assertIn("0 found", text)
+        self.assertIn("none found: no placed reference of that base in the groups read (the game may place it another way: unread)", text)
+
+    def test_only_the_report_is_written_and_a_missing_esm_is_said(self):
+        before = sorted(os.listdir(self.data))
+        self.run_form("--dump-form", "10C35", "--refs-to", "10C35")
+        self.assertEqual(sorted(os.listdir(self.data)), before)
+        self.assertEqual(sorted(os.listdir(self.tmp.name)), sorted(["Data", "r.txt"]))
+        os.remove(os.path.join(self.data, "Starfield.esm"))
+        self.assertIn("unread: ", self.run_form("--dump-form", "10C35"))
+
+    def test_a_bad_form_id_is_refused(self):
+        with self.assertRaises(SystemExit):
+            self.run_form("--dump-form", "notahex")
+
+
 if __name__ == "__main__":
     unittest.main()
