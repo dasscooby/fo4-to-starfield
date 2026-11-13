@@ -3556,32 +3556,44 @@ namespace
 		RE::Scaleform::GFx::Value back;
 		const bool  gotVariable = root && root->GetVariable(&top, "root");
 		const bool  gotRoot = gotVariable && top.IsObject();
-		std::size_t set = 0;
+		std::size_t members = 0;
+		bool        topSet = false;
 		if (gotRoot) {
 			root->CreateFunction(&holder, &g_codeObjSelf);
 			for (std::size_t i = 0; i < g_codeObjCount && !holder.IsUndefined(); ++i) {
 				RE::Scaleform::GFx::Value function;
 				root->CreateFunction(&function, &g_codeObjFunctions[i]);
-				set += !function.IsUndefined() && holder.SetMember(g_codeObjNames[i].c_str(), function) ? 1 : 0;
+				members += !function.IsUndefined() && holder.SetMember(g_codeObjNames[i].c_str(), function) ? 1 : 0;
 			}
-			set += !holder.IsUndefined() && top.SetMember("BGSCodeObj", holder) ? 1 : 0;
+			topSet = !holder.IsUndefined() && top.SetMember("BGSCodeObj", holder);
 		}
-		const bool readBack = gotRoot && top.GetMember("BGSCodeObj", &back) && back.IsObject();
-		const bool done = readBack && set == g_codeObjCount + 1;
-		if (done) {
-			g_codeObjMovie = movie;
-		}
+		const std::size_t set = members + (topSet ? 1 : 0);
+		const bool        readBack = gotRoot && top.GetMember("BGSCodeObj", &back) && back.IsObject();
+		const bool        holderReady = gotRoot && !holder.IsUndefined() && members == g_codeObjCount;
 		// FAL-614 proof 2a (CodeObjInit=<name>): a page loaded alone has no shell to hand it its engine object (D2's
-		// STAT page names InitCodeObj and codeObj), so once the stand-in is set the plugin calls root.<name>(stand-in)
-		// itself, once per movie, and logs what it found
-		if (done && !g_codeObjInit.empty()) {
+		// STAT page names InitCodeObj and codeObj). Proof 2a's run: the page's root is its own sealed class, so
+		// root.BGSCodeObj could not be set (set=16 of=17 read_back=0). So once the stand-in is built the plugin calls
+		// root.<name>(stand-in) itself, whether or not root.BGSCodeObj took it, then reads root.codeObj back; a call
+		// that went through ends the tries for this movie
+		bool called = false;
+		if (holderReady && !g_codeObjInit.empty()) {
 			RE::Scaleform::GFx::Value init;
 			RE::Scaleform::GFx::Value result;
+			RE::Scaleform::GFx::Value codeObj;
 			const bool got = top.GetMember(g_codeObjInit.c_str(), &init);
 			const bool found = got && (init.GetType() == RE::Scaleform::GFx::Value::ValueType::kClosure || init.IsObject());
-			const bool called = found && top.Invoke(g_codeObjInit.c_str(), &result, &holder, 1);
-			REX::INFO("step=code_obj_init name={} got={} found={} type={} called={} result_type={}", g_codeObjInit, got ? 1 : 0,
-				found ? 1 : 0, TypeCode(init), called ? 1 : 0, TypeCode(result));
+			called = found && top.Invoke(g_codeObjInit.c_str(), &result, &holder, 1);
+			const bool gotCodeObj = called && top.GetMember("codeObj", &codeObj);
+			if (called || attempt <= kLoggedCodeObjTries || attempt == kMaxCodeObjTries) {
+				REX::INFO("step=code_obj_init when={} try={} name={} got={} found={} type={} called={} result_type={} "
+						  "code_obj={} code_obj_type={}",
+					a_when, attempt, g_codeObjInit, got ? 1 : 0, found ? 1 : 0, TypeCode(init), called ? 1 : 0, TypeCode(result),
+					gotCodeObj ? 1 : 0, TypeCode(codeObj));
+			}
+		}
+		const bool done = holderReady && ((readBack && topSet) || called);
+		if (done) {
+			g_codeObjMovie = movie;
 		}
 		if (done || attempt <= kLoggedCodeObjTries || attempt == kMaxCodeObjTries) {
 			std::string names;

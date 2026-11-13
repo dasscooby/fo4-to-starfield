@@ -609,9 +609,11 @@ and closing the menu does not cut one; at most 4 at once. It logs `step=sound n=
 ms= playing=` and `result=end took_ms=`, or one of `missing`, `bad_size`, `unreadable`, `not_riff_wave`, `no_fmt`,
 `not_pcm16`, `bad_format`, `no_data`, `open_failed`, `write_failed`, `bad_name`, `busy`, `no_thread` (up to 64 lines).
 With `CodeObjInit=<name>` (with `CodeObj=1` only, 1 to 64 letters, digits and `_`, else
-`refuse step=ini code_obj_init=`; proof 2a) the plugin, once per movie and right after the stand-in is set, calls the
-movie's own `root.<name>` with the stand-in as its one argument, as a page's shell would, and logs
-`step=code_obj_init name= got= found= type= called= result_type=`.
+`refuse step=ini code_obj_init=`; proof 2a) the plugin, once the stand-in is built with all its functions and whether
+or not `root.BGSCodeObj` took it (a page's root is a sealed class that takes no new member), calls the movie's own
+`root.<name>` with the stand-in as its one argument, as a page's shell would, reads `root.codeObj` back, and logs
+`step=code_obj_init when= try= name= got= found= type= called= result_type= code_obj= code_obj_type=`. A call that went
+through ends the tries for that movie.
 It does not follow the game's volume sliders. The folder is the player's, made by hand on the PC; no installer here
 writes or removes it, and nothing of it enters Git.
 

@@ -214,16 +214,24 @@ class RebuildPlanTests(unittest.TestCase):
         self.assertGreater(len(",".join(names)), 160)
         install = self.main[self.main.index("bool CodeObjInstall("):]
         install = install[:install.index("\n\t}\n")]
-        self.assertIn("if (done && !g_codeObjInit.empty()) {", install)   # once, on the try that set the stand-in
-        self.assertIn("top.Invoke(g_codeObjInit.c_str(), &result, &holder, 1)", install)
-        self.assertLess(install.index("g_codeObjMovie = movie;"), install.index("top.Invoke(g_codeObjInit.c_str()"))
+        # proof 2a's first run: the page's sealed root took no BGSCodeObj (set=16 of=17), so InitCodeObj waits only for
+        # the stand-in's functions, not for root.BGSCodeObj, and a call that went through ends the tries
+        self.assertIn("const bool        holderReady = gotRoot && !holder.IsUndefined() && members == g_codeObjCount;", install)
+        self.assertIn("if (holderReady && !g_codeObjInit.empty()) {", install)
+        self.assertIn("called = found && top.Invoke(g_codeObjInit.c_str(), &result, &holder, 1);", install)
+        self.assertIn('top.GetMember("codeObj", &codeObj)', install)
+        self.assertIn("const bool done = holderReady && ((readBack && topSet) || called);", install)
+        self.assertLess(install.index("top.Invoke(g_codeObjInit.c_str()"), install.index("g_codeObjMovie = movie;"))
+        for text in ("**Proof 2a, the first run (owner PC, 13 Nov, 05:48 to 05:52 UTC, at `95e79c5a`)",
+                     "set=16 of=17 read_back=0", "**Proof 2a, the second run: the card.**", "code_obj=1 code_obj_type=8"):
+            self.assertIn(text, self.plan, text)
         self.assertIn('g_codeObjInit = ReadText(ini, L"CodeObjInit");', self.main)
         self.assertIn('Refuse("ini", std::format("code_obj_init={} (with CodeObj=1 only; 1 to 64 letters, digits and _)"',
                       self.main)
         self.assertRegex((ROOT / "sfse" / "FO4SFPipboyMenu" / "FO4SFPipboyMenu.ini").read_text(encoding="utf-8"),
                          r"\nCodeObjInit=\r?\n")
         readme = (ROOT / "sfse" / "FO4SFPipboyMenu" / "README.md").read_text(encoding="utf-8")
-        for text in ("refuse step=ini code_obj_init=", "`CodeObjInit` (empty)", "step=code_obj_init name= got="):
+        for text in ("refuse step=ini code_obj_init=", "`CodeObjInit` (empty)", "step=code_obj_init when= try= name= got="):
             self.assertIn(text, readme, text)
 
     def test_reads_recorded(self):

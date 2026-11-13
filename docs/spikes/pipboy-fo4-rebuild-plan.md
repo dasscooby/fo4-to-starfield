@@ -530,6 +530,28 @@ the 16 names it calls, with what. PASS: `result=1`, `step=code_obj ... set=17 of
 screen with empty values, no crash. `found=0`: the page takes its object some other way, and 2b's card starts from
 the call lines and D2's `PipboyMenu` names. Values stay empty until 2b.
 
+**Proof 2a, the first run (owner PC, 13 Nov, 05:48 to 05:52 UTC, at `95e79c5a`): the page draws; the hand-over did not
+happen. Verified.** Starfield draws the player's STAT page from the file alone: a highlighted `INTELLIGENCE` row with
+`( + )`, the six condition bars, two weapon tiles and the placeholder name `ALBERT`, mid-screen at the stage's own size,
+with no frame or tabs (those are the shell's). But `step=code_obj ... set=16 of=17 read_back=0` on all five logged
+tries: the stand-in was built with its 16 functions, and `root.BGSCodeObj = stand-in` failed. No `code_obj_init`, no
+`code_call`, no `refuse`, no crash. The reading (the PC's, and mine): the page's root is its own sealed class, which
+takes no new member, where the boot sequence's timeline root did; and since the set never counted as done,
+`InitCodeObj` was never called. The page shows its design-time placeholders, so 2b can be judged by a placeholder
+(`ALBERT`, a bar) being replaced.
+
+**Proof 2a, the second run: the card.** Plugin code, so the PC rebuilds. The stand-in is now handed over by
+`CodeObjInit=` whether or not `root.BGSCodeObj` takes it: once the stand-in is built with all its functions, the
+plugin calls `root.<name>(stand-in)`, then reads `root.codeObj` back, and logs
+`step=code_obj_init when= try= name= got= found= type= called= result_type= code_obj= code_obj_type=`. A call that
+went through ends the tries for this movie; for a movie whose root takes `BGSCodeObj` (the boot sequence) nothing
+changes. Same steps and settings as the first run.
+PASS: `step=code_obj_init ... found=1 called=1 ... code_obj=1 code_obj_type=8` (the page kept our object as its
+`codeObj`), then `code_call` lines for whatever the page calls on it, with the page drawn as before and no crash.
+`found=0`: `InitCodeObj` is not a public member of the page's root, and the hand-over is the shell's
+(`PipboyMenu.swf`); 2b then starts from D2's `PipboyMenu` names. `called=1 code_obj=0`: the page took the call but
+keeps the object elsewhere; the `code_call` lines show whether it uses it.
+
 **Proof 2, the outline (route A): the STAT page.** Each step has its own card once the one before it has run.
 - **2a, the page alone:** `Movie=FO4SF_Fo4Stats`, the player's `Pipboy_StatsPage.swf` installed with
   `--extra-movie FO4SF_Fo4Stats`, and `CodeObj=1` with the page's own names in `CodeObjNames`. Shows: the page's frame
@@ -635,5 +657,6 @@ delivery.
 2. Done: D2 and proof 1 (13 Nov): route A is alive.
 3. Done: proof 1b (13 Nov, third run) and proof 1c (13 Nov, `CodeObjHide=1`).
 4. Done: read D4 and proof 1d (13 Nov, the sounds by route S2, PASS by the log; the owner's ear still to hear it).
-5. Proof 2a, the STAT page alone: its card is written (`CodeObjInit=`). Then 2b, HP by name, from 2a's log, with its
+5. Proof 2a, the STAT page alone: first run done (the page draws; the hand-over did not happen); the second run's
+   card is written (`CodeObjInit=` called whether or not `root.BGSCodeObj` takes the stand-in). Then 2b, HP by name, from 2a's log, with its
    own card, tests, a CARRY line, the Scribe's review, and the PC's run.
