@@ -37,8 +37,12 @@ def inspect(starfield):
             rec = json.loads(raw.decode("utf-8-sig"))
             if not isinstance(rec, dict) or not rec:
                 raise ValueError("receipt is not an object")
-            if "files" in rec and not isinstance(rec["files"], dict):
-                raise ValueError("receipt files are not an object")
+            # Core deploy records a list of paths, with identities in artifacts;
+            # the ride-along installers record a path-to-digest object instead.
+            # Leave missing legacy fields alone; each installer validates ownership.
+            files_type = list if comp == "port" else dict
+            if "files" in rec and not isinstance(rec["files"], files_type):
+                raise ValueError("receipt files do not match the component's format")
         except (UnicodeError, ValueError):
             errors.append(f"cannot read {name}; preserve it for a failure report")
             continue

@@ -2871,3 +2871,21 @@ controls plus real Tk fixture assertions. Recorded editor/file-lock and detector
 limits instead of claiming every tool lock is detected or changing broad process APIs.
 Existing locked-plugin cleanup/retry regression was replayed. Ubuntu source worker;
 no new Windows/game run, no real owner files or operational PC evidence accessed.
+
+## 2026-11-13 — Codex / Lone: FAL-274 core receipt regression (FAL-726)
+
+Claude's actual-PC report at 56d249a1 passed five-stage inventory/cards and the wrong
+folder refusal, but every Install rejected FO4Port.deploy.json because recovery
+required an object for every files field. The same reason would block Play; Play was
+not pressed. Core deploy's publish function writes a list and separate artifacts.
+Fixed the launcher check by component (core list, kit object), preserving legacy
+missing fields, pending flags and the installers' ownership checks. No receipt edits.
+
+Three synthetic regression controls failed before the fix. Added a receipt produced
+by the real core publisher on synthetic bytes, Play eligibility, healthy no-rollback
+and interrupted core rollback, kit install/remove beside a core receipt, malformed
+shape refusals and pending flags across every known component. Ubuntu 26.04.1 LTS,
+Python 3.14.4, numpy 2.5.4/Pillow 12.3.0; commands and final results are in the FAL-274
+core-receipt-fix task receipt. Native Windows/game checks remain NOT_RUN at the fix.
+Missing archives/installers/cards and the bridge hold stay separate gates. Added a
+bounded read-only PC recheck; no merge until PC Play eligibility is observed.

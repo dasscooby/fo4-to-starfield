@@ -79,6 +79,26 @@ class KitActions(unittest.TestCase):
         self.assertEqual(self.run.call_args.kwargs['env']['LOCALAPPDATA'],str(self.local))
         self.assertNotIn('build',argv)
 
+    def test_core_deploy_list_receipt_allows_kit_round_trip_without_changing_core(self):
+        core = self.data / 'FO4Port.esm'
+        core.write_bytes(b'synthetic core')
+        manifest = self.data / 'FO4Port.deploy.json'
+        # Core deploy stores path names separately from artifact identities; kit
+        # installers instead store a path-to-digest object in their files field.
+        manifest.write_text(json.dumps({'files': [core.name], 'published_files': [core.name],
+            'artifacts': {core.name: {'sha256': '0' * 64, 'size': len(core.read_bytes())}},
+            'plugins_txt': str(self.plugins), 'plugins_added': [], 'plugins_replaced': [],
+            'complete': True}), encoding='utf-8')
+        before = {p: p.read_bytes() for p in (core, manifest, self.plugins)}
+        model = gui.SettingsModel(str(ROOT/'scripts/launcher.py'), str(self.path))
+        self.assertEqual(model.play_reason(model.saved, str(self.game), [], windows=True), '')
+        for action in ('install', 'remove'):
+            argv = model.kit_command(action, model.saved, 'pipboy_probe', [], windows=True)
+            self.assertEqual(argv[4:6], ['tests', action])
+            self.execute(action, run=subprocess.run)
+        self.assertEqual({p: p.read_bytes() for p in before}, before)
+        self.assertEqual(set(self.data.iterdir()), {core, manifest})
+
     def test_running_unknown_exception_and_late_game_start_refuse(self):
         for callback in [lambda:True,lambda:None,lambda:'unknown',mock.Mock(side_effect=OSError('tasklist failed')),
                          mock.Mock(side_effect=[False,True])]:

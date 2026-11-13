@@ -88,6 +88,21 @@ An older kit wrapper that does not accept --prepacked refuses; it cannot silentl
 Radiation/power armor wrappers belong to their writer's unmerged branches; forwarding
 this flag is coordinated on FAL-273. Missing scripts remain visible and disabled.
 
+Unavailable prerequisites stay refused with a reason; the page never prepares them.
+A missing prebuilt archive reports the missing-archive reason on attempted Install;
+the PC helper must prepare it separately. A missing installer disables Install/Remove
+and leaves the row and its explanation visible. A bridge hold (`FO4SF.toggle.json`)
+remains authoritative in the kit installer for both install and uninstall; the page
+must not remove or bypass it. Keep a pre-existing kit installed when this page cannot
+restore it. Missing owner cards refuse independently; a card note cannot replace an
+archive, installer or hold release.
+
+Recovery reads each writer's receipt shape: core `FO4Port.deploy.json` has a `files`
+list with identities in `artifacts`, whereas kit receipts have a `files` object.
+Missing legacy fields keep their existing treatment. The launcher does not rewrite
+or upgrade either shape; complete/cleanup/rollback flags still gate every component,
+and the component's installer still owns validation and rollback.
+
 For scripts/helpers, `launcher.py tests list|register|install|remove --settings <file>`
 uses the same model. Register takes `--kit <key> --stage <folder>`. Install/remove take
 `--kit <key> --starfield <expected saved game folder>`; a stale target refuses. These

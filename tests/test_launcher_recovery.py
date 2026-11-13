@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 from fo4sf.launcher import crashwatch, gui, recovery, settings  # noqa: E402
 from test_launcher_crashwatch import FakeSystem  # noqa: E402
 from test_launcher_restore import tes4  # noqa: E402
+from test_deployment import deploy  # noqa: E402
 
 
 class RecoveryTests(unittest.TestCase):
@@ -200,12 +201,59 @@ class RecoveryTests(unittest.TestCase):
                 self.recover(apply=True, run=run)
                 run.assert_not_called()
 
+    def test_core_deploy_producer_receipt_does_not_block_play_or_trigger_recovery(self):
+        source = self.root / "synthetic-core.esm"
+        source.write_bytes(tes4())
+        manifest = self.data / deploy.MANIFEST
+        with mock.patch.object(deploy, "plugins_txt_path", return_value=str(self.plugins)):
+            deploy.publish(str(self.data), str(manifest), [str(source)],
+                           [str(self.data / deploy.PLUGIN)],
+                           {deploy.PLUGIN: deploy.artifact_identity(source)})
+        self.assertEqual(json.loads(manifest.read_bytes())["files"], [deploy.PLUGIN])
+        before = {p: p.read_bytes() for p in (manifest, self.data / deploy.PLUGIN, self.plugins)}
+        self.assertEqual(recovery.inspect(str(self.game)), ({"port": before[manifest]}, [], []))
+        self.assertEqual(recovery.play_reason(str(self.game)), "")
+        model = gui.SettingsModel(str(self.launcher), str(self.settings_path))
+        self.assertEqual(model.play_reason(model.saved, str(self.game), [], windows=True), "")
+        self.assertIn("play", model.command("play", model.saved, pids=[], windows=True))
+        run = mock.Mock()
+        self.recover(apply=True, run=run)
+        run.assert_not_called()
+        self.assertEqual({p: p.read_bytes() for p in before}, before)
+        # A list-shaped interrupted core receipt must still reach its own rollback.
+        rec = json.loads(manifest.read_bytes())
+        rec["complete"] = False
+        manifest.write_text(json.dumps(rec), encoding="utf-8")
+        self.assertIn("incomplete", recovery.play_reason(str(self.game)))
+        self.recover(apply=True)
+        self.assertEqual(self.plugins.read_bytes(), self.original)
+        self.assertFalse(manifest.exists())
+        self.assertFalse((self.data / deploy.PLUGIN).exists())
+
+    def test_files_shape_is_specific_to_each_receipt_writer(self):
+        for comp, (name, _script) in recovery.COMPONENTS.items():
+            path = self.data / name
+            wrong_shape = {} if comp == "port" else []
+            for malformed in (wrong_shape, None, "files", 7, True):
+                with self.subTest(component=comp, files=malformed):
+                    raw = json.dumps({"files": malformed, "complete": True}).encode()
+                    path.write_bytes(raw)
+                    self.assertIn("unreadable", recovery.play_reason(str(self.game)))
+                    run = mock.Mock()
+                    with self.assertRaisesRegex(ValueError, "preserve"):
+                        self.recover(apply=True, run=run)
+                    run.assert_not_called()
+                    self.assertEqual(path.read_bytes(), raw)
+            path.unlink()
+
     def test_all_known_journals_cleanup_and_completed_rollback_gate_play(self):
-        for name, _script in recovery.restore.COMPONENTS.values():
+        for comp, (name, _script) in recovery.COMPONENTS.items():
             path = self.data / name
             for rec in ({"complete": False}, {"complete": True, "cleanup_pending": True},
                         {"complete": False, "rollback_completed": {}}):
+                rec["files"] = [] if comp == "port" else {}
                 path.write_text(json.dumps(rec))
+                self.assertEqual(recovery.inspect(str(self.game))[1:], ([comp], []))
                 self.assertIn("incomplete", recovery.play_reason(str(self.game)))
             path.unlink()
 
