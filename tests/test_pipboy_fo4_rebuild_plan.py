@@ -247,16 +247,42 @@ class RebuildPlanTests(unittest.TestCase):
         install = install[:install.index("\n\t}\n")]
         probe = install[install.index("for (std::size_t i = 0; done && i < g_probeCount; ++i) {"):]
         probe = probe[:probe.index("step=code_obj_probe")]
-        self.assertIn(".GetMember(", probe)
+        self.assertIn("ReadPath(top, g_probeNames[i], at)", probe)
+        read = self.main[self.main.index("bool ReadPath("):]
+        read = read[:read.index("\n\t}\n")]
+        self.assertIn(".GetMember(", read)
         for absent in ("SetMember(", "Invoke(", "CreateFunction("):   # read-only
             self.assertNotIn(absent, probe, absent)
+            self.assertNotIn(absent, read, absent)
         self.assertIn('const auto probe = ReadText(ini, L"CodeObjProbe");', self.main)
         self.assertIn("if (!probe.empty() && !g_codeObj) {", self.main)
-        self.assertIn("bool ParseProbeNames(std::string_view a_list)", self.main)
+        self.assertIn('ParsePaths(probe, g_probeNames, g_probeCount, "code_obj_probe")', self.main)
         self.assertRegex((ROOT / "sfse" / "FO4SFPipboyMenu" / "FO4SFPipboyMenu.ini").read_text(encoding="utf-8"),
                          r"\nCodeObjProbe=\r?\n")
         readme = (ROOT / "sfse" / "FO4SFPipboyMenu" / "README.md").read_text(encoding="utf-8")
         for text in ("refuse step=ini code_obj_probe=", "`CodeObjProbe` (empty)", "step=code_obj_probe n= name= found="):
+            self.assertIn(text, readme, text)
+
+    def test_code_obj_calls(self):
+        # FAL-614: proof 2b step i recorded (no data entry on the root); step ii calls onAcquiredByNativeCode, then probes
+        for text in ("**Proof 2b step i, the result (owner PC, 13 Nov, 06:25 to 06:29 UTC, at `3dff85fb`): verified.**",
+                     "**Proof 2b step ii, the card: the acquire step, then the same probe.**",
+                     "`CodeObjCalls=onAcquiredByNativeCode`", "-1 means nothing was read"):
+            self.assertIn(text, self.plan, text)
+        install = self.main[self.main.index("bool CodeObjInstall("):]
+        install = install[:install.index("\n\t}\n")]
+        calls = install[install.index("for (std::size_t i = 0; done && i < g_rootCallCount; ++i) {"):]
+        calls = calls[:calls.index("step=code_obj_root_call")]
+        self.assertIn("function.GetType() == RE::Scaleform::GFx::Value::ValueType::kClosure", calls)   # functions only
+        self.assertIn("owner.Invoke(name.c_str(), &result, nullptr, 0)", calls)                          # no arguments
+        self.assertNotIn("SetMember(", calls)
+        self.assertLess(install.index("g_rootCallCount; ++i"), install.index("g_probeCount; ++i"))       # calls, then probe
+        self.assertIn('ParsePaths(calls, g_rootCallNames, g_rootCallCount, "code_obj_calls")', self.main)
+        self.assertIn("if (!calls.empty() && !g_codeObj) {", self.main)
+        self.assertRegex((ROOT / "sfse" / "FO4SFPipboyMenu" / "FO4SFPipboyMenu.ini").read_text(encoding="utf-8"),
+                         r"\nCodeObjCalls=\r?\n")
+        readme = (ROOT / "sfse" / "FO4SFPipboyMenu" / "README.md").read_text(encoding="utf-8")
+        for text in ("refuse step=ini code_obj_calls=", "`CodeObjCalls` (empty)", "step=code_obj_root_call n= name="):
             self.assertIn(text, readme, text)
 
     def test_reads_recorded(self):

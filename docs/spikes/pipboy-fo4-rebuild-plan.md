@@ -579,6 +579,30 @@ calls it with an event the plugin builds; if only `DataObj` or `_DataObj` is pub
 into it and calls `InvalidateData`; if neither, the hand-over of data belongs to the shell, and step ii loads
 `PipboyMenu.swf` around the page.
 
+**Proof 2b step i, the result (owner PC, 13 Nov, 06:25 to 06:29 UTC, at `3dff85fb`): verified.** Sixteen
+`code_obj_probe` lines, no crash. Public on the page's root: `ProcessUserEvent` (11, a function), `codeObj` (8, our
+object), `bAcquiredByNativeCode` (2, a boolean, value 0), `onAcquiredByNativeCode` (11), `ReleaseCodeObj` (11) and
+`stage` (10). Not found (`found=0 type=-1`; -1 means nothing was read): `onPipboyChangeEvent`,
+`onPipboyChangeEventInternal`, `InvalidateData`, `onAnnounceDataChange`, `DataObj`, `_DataObj`, `UpdateMask`,
+`CurrHP`, `MaxHP` and `PlayerInfo`. So by the decision table there is no data entry point on the root. Two leads from
+the PC before loading the whole shell: `bAcquiredByNativeCode` is false while `onAcquiredByNativeCode` is public, an
+acquire step Fallout 4's engine makes and nobody has made here; and the change event may be dispatched on `stage`
+rather than called as a method.
+
+**Proof 2b step ii, the card: the acquire step, then the same probe.** Plugin code, so the PC rebuilds.
+`CodeObjCalls=<path>,...` (with `CodeObj=1` only; it ships empty): once per movie, on the try that finished the
+hand-over and before the probe, each path is called with no arguments and logged as `step=code_obj_root_call n= name=
+found= type= called= result_type=`. A path that is not a function is not called.
+1. Install and settings as for step i (the same `CodeObjProbe=` line), plus `CodeObjCalls=onAcquiredByNativeCode`.
+2. Outdoors: F10, wait 10 seconds, take a screenshot, F10 again.
+3. Send the `step=code_obj_init`, `step=code_obj_root_call`, every `step=code_obj_probe` and every `step=code_call`
+   line, and the screenshot.
+
+PASS: `code_obj_root_call ... name=onAcquiredByNativeCode found=1 type=11 called=1`, then `bAcquiredByNativeCode`
+probed as 1, no crash. What it decides: if new data names appear on the root, or calls come in on our object
+(`code_call`), step iii uses them; if nothing changes, step iii takes the second lead and dispatches the change event
+on `stage`, which needs an event the plugin builds, or loads `PipboyMenu.swf` around the page.
+
 **Proof 2, the outline (route A): the STAT page.** Each step has its own card once the one before it has run.
 - **2a, the page alone:** `Movie=FO4SF_Fo4Stats`, the player's `Pipboy_StatsPage.swf` installed with
   `--extra-movie FO4SF_Fo4Stats`, and `CodeObj=1` with the page's own names in `CodeObjNames`. Shows: the page's frame
@@ -685,5 +709,6 @@ delivery.
 3. Done: proof 1b (13 Nov, third run) and proof 1c (13 Nov, `CodeObjHide=1`).
 4. Done: read D4 and proof 1d (13 Nov, the sounds by route S2, PASS by the log; the owner's ear still to hear it).
 5. Done: proof 2a, the STAT page alone (13 Nov, second run: the page draws and takes our object through
-   `InitCodeObj`). Proof 2b step i, what the page exposes (`CodeObjProbe=`, read-only): its card is written. Then 2b, HP by name, from 2a's log, with its
+   `InitCodeObj`). Done: proof 2b step i (no data entry on the root). Step ii, the acquire step (`CodeObjCalls=`):
+   its card is written. Then 2b, HP by name, from 2a's log, with its
    own card, tests, a CARRY line, the Scribe's review, and the PC's run.

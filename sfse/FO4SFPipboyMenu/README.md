@@ -27,7 +27,7 @@ and logs every step. The stage is picked by `Stage` in `FO4SFPipboyMenu.ini`:
 | --- | --- |
 | `src/main.cpp` | the plugin: version guard, checks before use, the menu object, the key thread |
 | `src/pch.h` | precompiled header (libxse's game headers and SFSE layer) |
-| `FO4SFPipboyMenu.ini` | `Stage`, `Key` (default `0x79`, F10), `Flags` (0), `KeepAlive` (1); stage (b): `Movie` (empty: ours, FAL-614), `CodeObj` (0), `CodeObjNames` (empty: `PlaySound,HideMenu`), `CodeObjHide` (0), `CodeObjSound` (0), `CodeObjInit` (empty) and `CodeObjProbe` (empty); stage (c): `FlagSets` (`0x0,0x8,0x9`), `SnapshotKey` (`0x7A`, F11), `ClickCall` (empty: off); stages (d) and (e): `PageFlagSets` (`0x19`); stages (d), (e): `CancelCode1` to `CancelCode4` (`0x1B`, `0x09`: Esc and Tab as Windows virtual-key codes, as the PC's game run logged them); stage (e): `KitUp` to `KitNextTab`, and the pages (`[Kit]`, `[Page <TAB>/<SUB>]`) |
+| `FO4SFPipboyMenu.ini` | `Stage`, `Key` (default `0x79`, F10), `Flags` (0), `KeepAlive` (1); stage (b): `Movie` (empty: ours, FAL-614), `CodeObj` (0), `CodeObjNames` (empty: `PlaySound,HideMenu`), `CodeObjHide` (0), `CodeObjSound` (0), `CodeObjInit` (empty), `CodeObjProbe` (empty) and `CodeObjCalls` (empty); stage (c): `FlagSets` (`0x0,0x8,0x9`), `SnapshotKey` (`0x7A`, F11), `ClickCall` (empty: off); stages (d) and (e): `PageFlagSets` (`0x19`); stages (d), (e): `CancelCode1` to `CancelCode4` (`0x1B`, `0x09`: Esc and Tab as Windows virtual-key codes, as the PC's game run logged them); stage (e): `KitUp` to `KitNextTab`, and the pages (`[Kit]`, `[Page <TAB>/<SUB>]`) |
 | `xmake.lua`, `build.ps1` | the PC build: FOCCPing's build path (`docs/spikes/combined-core-probes.md`, B0-2) |
 | `scripts/ui/make_probe_swf.py` | writes the stage (b) movie, with `--channel` the stage (c) one and with `--page` the stage (d) one (pure Python; tests `tests/test_make_probe_swf.py`, `tests/test_pipboy_stat_page.py`) |
 | `scripts/ui/make_pipboy_kit.py` | the page kit (stage (e)): reads and checks the pages of the ini (`--check`) and writes the kit's movie for them (pure Python, on `make_probe_swf.py`; tests `tests/test_pipboy_kit.py`) |
@@ -616,8 +616,11 @@ or not `root.BGSCodeObj` took it (a page's root is a sealed class that takes no 
 through ends the tries for that movie. With `CodeObjProbe=<path>,...` (with `CodeObj=1` only, 1 to 16 paths of
 letters, digits, `_` and `.`, else `refuse step=ini code_obj_probe=`; proof 2b step i) the plugin, once per movie on the
 try that finished the hand-over, reads each path from the movie's root with `GetMember` and logs
-`step=code_obj_probe n= name= found= type= value=` (the value only for a boolean or a number). It sets and calls
-nothing.
+`step=code_obj_probe n= name= found= type= value=` (the value only for a boolean or a number; `type=-1` when the path
+was not found). It sets and calls nothing. With `CodeObjCalls=<path>,...` (same rules, else
+`refuse step=ini code_obj_calls=`; proof 2b step ii) each path that is a function is called once with no arguments,
+on the same try and before the probe, and logged as `step=code_obj_root_call n= name= found= type= called=
+result_type=`.
 It does not follow the game's volume sliders. The folder is the player's, made by hand on the PC; no installer here
 writes or removes it, and nothing of it enters Git.
 
