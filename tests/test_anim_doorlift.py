@@ -143,6 +143,10 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("that was wrong", DOC[i:i + 120])
         pre = PSC[PSC.index("Function PreNotice("):PSC.index("Function CallStage(")]
         self.assertEqual(pre.count("Say("), 2)
+        self.assertLess(pre.index('Trace("notice text=" + msg)'), pre.index("Say(msg)"))                       # in the user log BEFORE the first show (FAL-634)
+        self.assertIn("the rule", DOC)
+        self.assertIn("does not enforce it", DOC)
+        self.assertIn("the script does not enforce it", PSC)
         self.assertEqual(pre.count("Utility.Wait(1.2)"), 2)
         play = PSC[PSC.index("Function PlayOne("):PSC.index("Function Cleanup()")]
         self.assertEqual(re.findall(r'(PreNotice|SayHold|Say)\("((?:C s|PLAY )[^"]*)', play), [("Say", "C s"), ("PreNotice", "C s"), ("PreNotice", "C s"), ("SayHold", "PLAY ")])        # the first is the early return for a missing reference
