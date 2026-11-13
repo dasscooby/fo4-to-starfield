@@ -14,7 +14,7 @@ usage:
   python make_anim_console.py stage --out <new dir> --starfield-data <Starfield Data> --fo4-data <Fallout 4 Data>
          --door-anim-dll <CALUMI.Animation dll> --collision-template <nif> --texconv <texconv.exe> --content-resources <zip>
          --states "Stage1=StateA_Play,Stage2=StateB_Play" [--port-data <dir with FO4Port.esm and its archives>] [--foley <name>]
-         [--model <FO4 mesh path>] [--edid <EditorID>] [--compiler <exe>] [--ahead-m <m>] [--up-m <m>] [--side-m <m>]
+         [--model <FO4 mesh path>] [--edid <EditorID>] [--compiler <exe>] [--ahead-m <m>] [--up-m <m>] [--side-m <m>] [--placed-ref <hex>]
       1. the plugin tool's `info` on FO4Port.esm (the console base's id and model);
       2. the conversion of the Fallout 4 console (pipeline.Converter.convert_anim_object: model, rig, four clips, materials);
       3. only meshes, geometries and materials go in the kit (textures are not shipped: every texture the conversion wrote must
@@ -81,6 +81,23 @@ def set_base_id(text, base_id):
     new = BASE_LINE.sub("int BaseId = 0x" + base_id.lower().removeprefix("0x") + "  ;BASE", text, count=1)
     if new == text:
         sys.exit("the script has no 'int BaseId = 0 ;BASE' line to put the id into")
+    return new
+
+
+PLACED_LINE = re.compile(r"^int PlacedId = 0 +;PLACED", re.M)
+
+
+def set_placed(text, placed_id):
+    """The script's text with the local id (in FO4Port.esm) of a PLACED reference in (0x<hex>): the quest then plays the clips on that
+    reference instead of spawning a copy (FAL-489 lift session 2: the placed Vault 111 lift, REFR 001618). The line must be there once."""
+    if not re.fullmatch(r"(0x)?[0-9A-Fa-f]{1,6}", placed_id):
+        sys.exit(f"placed reference id {placed_id!r} is not a local form id (at most six hex digits)")
+    value = int(placed_id, 16)
+    if value == 0:
+        sys.exit("placed reference id 0 means 'spawn a copy': leave --placed-ref out instead")
+    new = PLACED_LINE.sub("int PlacedId = 0x" + placed_id.lower().removeprefix("0x") + "  ;PLACED", text, count=1)
+    if new == text:
+        sys.exit("the script has no 'int PlacedId = 0 ;PLACED' line to put the id into")
     return new
 
 
@@ -306,7 +323,12 @@ def stage(a, converter=None):
     with open(PSC, encoding="utf-8") as f:
         text = set_base_id(f.read(), info["base_id"])
     spawn = {k: getattr(a, k + "_m", None) for k in ("ahead", "up", "side")}
+    placed = getattr(a, "placed_ref", None)
+    if placed and any(v is not None for v in spawn.values()):
+        sys.exit("--placed-ref plays the clips on a placed reference: --ahead-m / --up-m / --side-m place a spawned copy and would do nothing")
     text = set_spawn(text, **spawn)
+    if placed:
+        text = set_placed(text, placed)
     sources = read_sources(a.content_resources)
     src_dir = extract_sources(a.content_resources, work)
     pre = probe_a.precheck_sources(sources, text)
@@ -330,7 +352,7 @@ def stage(a, converter=None):
     with open(os.path.join(out, SCRIPT + ".psc"), "w", encoding="utf-8", newline="\n") as f:
         f.write(final_text)
     manifest = {"original": original, "port_model": info["model"], "base_edid": a.edid, "base_id": info["base_id"],
-                "model": model_path, "states": states, "spawn_m": {k: v for k, v in spawn.items() if v is not None}, "foley": a.foley or "", "anim": anim, "kit_files": copied,
+                "model": model_path, "states": states, "spawn_m": {k: v for k, v in spawn.items() if v is not None}, "placed_ref": placed or "", "foley": a.foley or "", "anim": anim, "kit_files": copied,
                 "textures_not_shipped": textures}
     with open(os.path.join(out, "anim_manifest.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=1)
@@ -606,6 +628,7 @@ def main(argv=None):
     s.add_argument("--ahead-m", type=float, default=None, help="metres in front of the player the copy is spawned (default: the script's 1.5)")
     s.add_argument("--up-m", type=float, default=None, help="metres above the player's reference (the feet; the session read DZ=1.2 for 1.2) (default: the script's 1.2)")
     s.add_argument("--side-m", type=float, default=None, help="metres to the player's right for the second copy, stage 11 (default: the script's 0.9)")
+    s.add_argument("--placed-ref", default=None, help="local id in FO4Port.esm of a PLACED reference (e.g. 001618, the Vault 111 lift): the quest plays the clips on it instead of spawning a copy; stage 11 is refused and stage 60 leaves it alone")
     s.add_argument("--model", default="")
     s.add_argument("--edid", default=EDID)
     i = sub.add_parser("inspect")

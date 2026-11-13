@@ -116,6 +116,37 @@ class ScriptTests(unittest.TestCase):
         on = mac.enable(PSC, ["ObjectReference.MoveTo", "ObjectReference.SetAngle", "ObjectReference.Delete"])
         self.assertIsNone(re.search(r"^;OPT ", on, re.M))                           # every optional line of the new function switches on with its name
 
+    def test_a_placed_reference_is_taken_not_spawned_and_is_never_disabled_or_deleted(self):
+        """FAL-489 lift session 2: the clips play on the PLACED lift (REFR 001618). Stage 10 must not PlaceAtMe or move it; stage 11 makes no copy;
+        stage 60 must leave it alone (Disable / Delete of the real lift would be destructive)."""
+        self.assertEqual(len(re.findall(r"(?m)^int PlacedId = 0 +;PLACED", PSC)), 1)
+        spawn = PSC.split("Function Spawn(int stage)")[1].split("EndFunction")[0]
+        self.assertLess(spawn.index("if PlacedId != 0"), spawn.index("TestRef = p.PlaceAtMe"))                    # the placed branch returns before any spawn
+        self.assertIn("UsePlaced(stage, base)", spawn)
+        used = PSC.split("Function UsePlaced")[1].split("EndFunction")[0].split("}", 1)[1]                # the code, not its doc comment
+        for forbidden in ("PlaceAtMe", "MoveTo", "SetAngle", "Disable", "Delete"):
+            self.assertNotIn(forbidden, used)
+        self.assertIn("Game.GetFormFromFile(PlacedId, BasePlugin)", used)
+        self.assertIn("f as ObjectReference", used)
+        self.assertIn("RegisterAll(stage)", used)
+        side = PSC.split("Function SpawnSide")[1].split("EndFunction")[0]
+        self.assertLess(side.index("if UsingPlaced"), side.index("PlaceAtMe"))
+        cleanup = PSC.split("Function Cleanup")[1].split("EndFunction")[0]
+        first = cleanup.split("if TestRef2")[0]
+        self.assertIn("if TestRef && !UsingPlaced", first)                                           # the first reference is disabled / deleted only when it was spawned
+        self.assertIn("UsingPlaced = false", cleanup)
+
+    def test_the_placed_id_is_written_once_and_a_bad_one_is_refused(self):
+        on = mac.set_placed(PSC, "0x001618")
+        self.assertRegex(on, r"(?m)^int PlacedId = 0x001618  ;PLACED")
+        self.assertEqual(on.count("\n"), PSC.count("\n"))
+        self.assertRegex(mac.set_placed(PSC, "1618"), r"(?m)^int PlacedId = 0x1618  ;PLACED")
+        for bad in ("zz", "", "12345678", "0", "0x000000"):
+            with self.assertRaises(SystemExit):
+                mac.set_placed(PSC, bad)
+        with self.assertRaises(SystemExit):
+            mac.set_placed("no line here\n", "12")
+
     def test_the_base_id_is_written_once_and_a_bad_one_is_refused(self):
         on = mac.set_base_id(PSC, "0x001234")
         self.assertRegex(on, r"(?m)^int BaseId = 0x001234  ;BASE")
@@ -400,6 +431,21 @@ class StageTests(unittest.TestCase):
         self.assertEqual(mac.stage(self.args(self.root / "staged-nospawn"), converter=make), 0)
         self.assertEqual(json.loads((self.root / "staged-nospawn" / "anim_manifest.json").read_text())["spawn_m"], {})   # the default stage names none
         self.assertRegex((self.root / "staged-nospawn" / "FO4SF_AnimConsoleQuest.psc").read_text(), r"(?m)^float AheadM = 1.5 +;")
+
+    def test_the_stage_writes_the_placed_id_and_refuses_it_together_with_spawn_distances(self):
+        make, holder = self.converter()
+        out = self.root / "staged-placed"
+        self.assertEqual(mac.stage(self.args(out, placed_ref="001618"), converter=make), 0)
+        self.assertRegex((out / "FO4SF_AnimConsoleQuest.psc").read_text(), r"(?m)^int PlacedId = 0x001618  ;PLACED")
+        self.assertEqual(json.loads((out / "anim_manifest.json").read_text())["placed_ref"], "001618")
+        make, holder = self.converter()
+        self.assertEqual(mac.stage(self.args(self.root / "staged-noplaced"), converter=make), 0)
+        self.assertRegex((self.root / "staged-noplaced" / "FO4SF_AnimConsoleQuest.psc").read_text(), r"(?m)^int PlacedId = 0 +;PLACED")
+        self.assertEqual(json.loads((self.root / "staged-noplaced" / "anim_manifest.json").read_text())["placed_ref"], "")
+        make, holder = self.converter()
+        with self.assertRaises(SystemExit):
+            mac.stage(self.args(self.root / "staged-both", placed_ref="001618", up_m=1.7), converter=make)
+        self.assertFalse((self.root / "staged-both").exists())                                       # nothing published
 
     def test_swap_siblings_is_off_by_default_and_reaches_the_converter_when_asked(self):
         self.assertFalse(self.shared_holder["conv"].swapped)                                # the default stage is the one staged in setUpClass
