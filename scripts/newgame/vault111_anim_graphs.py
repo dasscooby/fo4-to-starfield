@@ -35,9 +35,13 @@ ShipQuickLift1, 00010C35: FAL-489, the lift half of the door and lift kit): no g
                          (default 12) with the cell (form id and editor id) and the position. A count of 0 says only that no such
                          placed reference was found in those groups, not why the game never places one.
 Fourth option, `--candidates GRAPH` (repeatable): for each ACTI / FURN that names that graph (all of them, not the first dozen), one line:
-form id, editor id, model, whether the model file is in the archives given (present / NOT in the archives read / no model), the rig (BNAM)
-and clip folder (CNAM), and how many REFR / ACHR place it (one scan of the CELL and WRLD groups for all of them together). It exists to
-pick a user of a graph that can be tested: a model in the archives and a placement count above 0.
+form id, editor id, the placement count (REFR / ACHR, one scan of the CELL and WRLD groups for all of them together), the model state
+(`model in the archives`, `model NOT in the archives read`, `no model`, or `model unread` when no archive could be opened: none given, or
+the --game-archive argument matched no file; `model unread` is never counted as missing and never as usable), the model, the rig (BNAM)
+and clip folder (CNAM), then up to 3 placements of that record (a fixed 3, not --refs-limit) with cell and position. Best placed first
+(then form id). It ends with `usable (model in the archives AND placed at least once): N of M`. It exists to pick a user of a graph
+that can be tested. The cell shown for a placement is the label of the nearest enclosing cell child group (type 6, 8, 9 or 10) seen
+before it in the file; a placed record outside such a group keeps the previous label.
 Both write only --out.  Examples:
     python vault111_anim_probe.py --graphs --dump-form 00010C35 --out <lift.txt> --data <Starfield Data> --game-archive "Starfield - Meshes*.ba2"
     python vault111_anim_probe.py --graphs --refs-to 00010C35 --out <lift-refs.txt> --data <Starfield Data>
@@ -874,7 +878,7 @@ def find_form(plugin, fid):
     return None, "searched " + ", ".join(b.decode() for b in FORM_GROUPS if b.decode() in plugin.groups)
 
 
-def form_lines(plugin, fid, archives):
+def form_lines(plugin, fid, archives, why="no --game-archive given"):
     rec, note = find_form(plugin, fid)
     out = [f"=== form {fid:08X}"]
     if rec is None:
@@ -890,7 +894,7 @@ def form_lines(plugin, fid, archives):
     if not model:
         return out
     if not archives:
-        return out + ["  model check unread: no --game-archive given"]
+        return out + [f"  model check unread: {why}"]
     lines, _ = model_report(archives, model, comp.get("CNAM", ""), comp.get("BNAM", ""), ())
     return out + lines
 
@@ -938,7 +942,17 @@ def refs_lines(plugin, fid, limit):
     return out
 
 
-def candidate_lines(plugin, graph, archives, limit):
+CANDIDATE_SAMPLES = 3
+
+
+def archive_note(a, archives):
+    """Why the model check is unread, or '' when archives were opened."""
+    if archives:
+        return ""
+    return "the --game-archive argument matched no file" if a.game_archive else "no --game-archive given"
+
+
+def candidate_lines(plugin, graph, archives, why=""):
     """Every ACTI / FURN naming `graph`: model present in the archives, rig, clip folder, placement count (one placement scan for all)."""
     base = graph.lower().rsplit(".", 1)[0] if graph.lower().endswith(".agx") else graph.lower()
     recs, _, _, _, notes = read_records(plugin, {base})
@@ -947,7 +961,7 @@ def candidate_lines(plugin, graph, archives, limit):
     if not recs:
         return out + ["  none found: unread or no record names this graph"]
     found, cells, scanned = find_refs_many(plugin, [h["formid"] for h in recs])
-    out.append(f"  placement scan: {scanned} placed record(s) in the CELL and WRLD groups; model check: " + ("against the archives given" if archives else "unread (no --game-archive given)"))
+    out.append(f"  placement scan: {scanned} placed record(s) in the CELL and WRLD groups; model check: " + ("against the archives given" if archives else f"unread ({why or 'no --game-archive given'})"))
     usable = 0
     for h in sorted(recs, key=lambda h: (-len(found[h["formid"]]), h["formid"])):
         n = len(found[h["formid"]])
@@ -960,7 +974,7 @@ def candidate_lines(plugin, graph, archives, limit):
             state = "model NOT in the archives read" if got is None else "model unreadable" if isinstance(got[1], Exception) else "model in the archives"
         usable += state == "model in the archives" and n > 0
         out.append(f"  {h['sig']} {h['formid']:08X} {h['edid'] or '-'}  placed {n}  {state}  model={h['model'] or '-'}  BNAM={h['BNAM'] or '-'}  CNAM={h['CNAM'] or '-'}")
-        for sig, rid, cell, pos in found[h["formid"]][:limit]:
+        for sig, rid, cell, pos in found[h["formid"]][:CANDIDATE_SAMPLES]:
             cedid = plugin.record_at(cells[cell]).edid if cell in cells else "-"
             out.append(f"      {sig} {rid:08X}  cell {cell:08X} {cedid or '-'}  position " + (", ".join(f"{v:.1f}" for v in pos) if pos else "unread"))
     out.append(f"  usable (model in the archives AND placed at least once): {usable} of {len(recs)}")
@@ -969,10 +983,12 @@ def candidate_lines(plugin, graph, archives, limit):
 
 def run_form(a):
     """The --dump-form / --refs-to report: Starfield.esm and, for the model check, the archives are read; only --out is written."""
-    out = ["vault111_anim_graphs --dump-form / --refs-to (read-only; FAL-489)"]
+    modes = [n for n, on in (("--dump-form", a.dump_form), ("--refs-to", a.refs_to), ("--candidates", a.candidates)) if on]
+    out = [f"vault111_anim_graphs {' / '.join(modes)} (read-only; FAL-489)"]
     esm_path = a.esm or os.path.join(a.data, "Starfield.esm")
     expanded = expand_archives(a.data, a.game_archive)
     archives = open_archives([p for _, ps in expanded for p in ps])
+    why = archive_note(a, archives)
     for given, ps in expanded:
         if not ps:
             out.append(f"archive argument {given!r}: nothing matched under {a.data}")
@@ -982,11 +998,11 @@ def run_form(a):
     try:
         with esm.Plugin(esm_path) as plugin:
             for h in a.dump_form:
-                out += [""] + form_lines(plugin, parse_form_id(h), archives)
+                out += [""] + form_lines(plugin, parse_form_id(h), archives, why)
             for h in a.refs_to:
                 out += [""] + refs_lines(plugin, parse_form_id(h), a.refs_limit)
             for g in a.candidates:
-                out += [""] + candidate_lines(plugin, g, archives, min(a.refs_limit, 3))
+                out += [""] + candidate_lines(plugin, g, archives, why)
     except (esm.EsmError, OSError, struct.error) as e:
         out.append(f"unread: {esm_path}: {e}")
     return "\n".join(out) + "\n"

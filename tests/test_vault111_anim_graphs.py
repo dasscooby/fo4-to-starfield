@@ -559,6 +559,41 @@ class CandidatesTests(unittest.TestCase):
     def test_a_graph_nobody_names_says_so(self):
         self.assertIn("none found: unread or no record names this graph", self.run_form("--candidates", "nosuchgraph"))
 
+    def test_the_banner_names_only_the_modes_used(self):
+        self.assertIn("vault111_anim_graphs --candidates (read-only; FAL-489)", self.run_form("--candidates", "twostages"))
+        self.assertIn("vault111_anim_graphs --dump-form / --refs-to (read-only; FAL-489)", self.run_form("--dump-form", "24", "--refs-to", "24"))
+
+    def test_a_glob_that_matches_nothing_says_so_and_no_argument_says_that(self):
+        none_given = self.run_form("--candidates", "twostages")
+        self.assertIn("model check: unread (no --game-archive given)", none_given)
+        nothing = self.run_form("--candidates", "twostages", "--game-archive", "Nothing*.ba2")
+        self.assertIn("archive argument 'Nothing*.ba2': nothing matched under", nothing)
+        self.assertIn("model check: unread (the --game-archive argument matched no file)", nothing)
+        self.assertNotIn("no --game-archive given", nothing)
+        self.assertNotIn("NOT in the archives", nothing)
+        self.assertIn("usable (model in the archives AND placed at least once): 0 of 3", nothing)
+        form = self.run_form("--dump-form", "1A", "--game-archive", "Nothing*.ba2")
+        self.assertIn("model check unread: the --game-archive argument matched no file", form)
+
+    def test_the_candidate_samples_are_a_fixed_three_whatever_refs_limit_says(self):
+        for limit in ("1", "12"):
+            text = self.run_form("--candidates", "twostages", "--refs-limit", limit)
+            self.assertIn("LiftA  placed 2", text)
+            self.assertEqual(text.count("REFR 00004001"), 1)
+            self.assertEqual(text.count("REFR 00004002"), 1)                 # LiftA's second placement is listed even with --refs-limit 1
+
+    def test_a_placed_record_outside_a_cell_child_group_keeps_the_previous_cell_label(self):
+        w = esm.PluginWriter([])
+        w.add(esm.Record("ACTI", 0x41, [(b"EDID", esm.zbytes("Stray"))] + comp("AnimTextData\\Tables\\Graphs\\TwoStages.agx")))
+        cell = esm.Record("CELL", 0x3001, [(b"EDID", esm.zbytes("CellA"))])
+        ref = esm.Record("REFR", 0x4009, [(b"NAME", struct.pack("<I", 0x41)), (b"DATA", struct.pack("<6f", 5, 5, 5, 0, 0, 0))]).to_bytes()
+        stray = esm.group_bytes("CELL", cell.to_bytes() + esm.group_bytes(struct.pack("<I", 0x3001), b"", 9) + ref)
+        with open(os.path.join(self.data, "Starfield.esm"), "wb") as f:
+            f.write(w.to_bytes() + stray)
+        text = self.run_form("--candidates", "twostages")
+        self.assertIn("REFR 00004009  cell 00003001 CellA", text)             # the usage text says it: the label is the last one seen
+
+
     def test_the_one_form_refs_still_work_through_the_shared_scan(self):
         self.assertIn("2 found; first 2:", self.run_form("--refs-to", "1A"))
 
