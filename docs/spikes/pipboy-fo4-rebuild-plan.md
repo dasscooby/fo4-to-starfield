@@ -443,6 +443,30 @@ sent=hide`, the menu gone from the screen, and no further `code_call` lines. The
 again from the start. The sounds (`UIPipBoyBootSequenceA`, `B`, `C`) are the next card after this one, converted on the
 PC with nothing in Git.
 
+**Proof 1c, the result (owner PC, 13 Nov, 04:38 to 04:42 UTC, at `9550c00a`): PASS twice in one session, verified.**
+`HideMenu` at +15.4 seconds, then `step=close n=4 by=hide_menu was_open=1 sent=hide` in the same millisecond; the menu
+was gone from the screen at 18 seconds, with no further `code_call`. The second F10 loaded the movie again (`result=1`,
+stand-in set on try 1), with the same three `PlaySound` calls and the same close at +15.4 seconds. MSVC accepts the
+forward declaration of `Close`. No crash, nothing left installed.
+
+**The boot sequence's sounds, step 1: read D4 (owner PC; names and header fields only).** The movie asks for three
+sounds by name: `UIPipBoyBootSequenceA`, `B` and `C`. That these are the editor ids of sound descriptors (`SNDR`) in
+the player's `Fallout4.esm` is a **hypothesis**; D4 settles it and names the files behind them.
+- In the player's `Fallout4.esm`: the records whose editor id is one of the three names. For each, print the record
+  type, the names of its subrecords, and the file names it lists (`ANAM` in a sound descriptor). Nothing else.
+- For each file name: whether `Fallout4 - Sounds.ba2` (or another of the player's archives) holds it, and its audio
+  header only: the container (`RIFF`/`WAVE` or `XWMA`), the format tag, channels, sample rate, bits per sample and
+  the length in seconds. No samples.
+- D4 reads in memory and writes nothing. The audio stays on the PC.
+
+**The sounds, step 2 (written from D4's lines; a proposal, nothing built).** Two ways a converted sound can play:
+- **S1, Starfield's own audio engine** (Wwise). New sounds need authored sound banks. Not proposed now.
+- **S2, the plugin plays the player's converted file itself** through Windows audio, from a private folder next to
+  the plugin, when the stand-in's `PlaySound` names it. It does not follow the game's volume sliders. It is the
+  cheapest proof that the sounds play at the right moments, and it is the proposal for proof 1d.
+- If D4 shows `XWMA`, the PC converts it to plain `WAVE` with its own tool first; no audio enters Git, a task or a
+  receipt.
+
 **Proof 2, the outline (route A): the STAT page.** Each step has its own card once the one before it has run.
 - **2a, the page alone:** `Movie=FO4SF_Fo4Stats`, the player's `Pipboy_StatsPage.swf` installed with
   `--extra-movie FO4SF_Fo4Stats`, and `CodeObj=1` with the page's own names in `CodeObjNames`. Shows: the page's frame
@@ -546,7 +570,7 @@ delivery.
 
 1. Done: D1 and D3 (13 Nov).
 2. Done: D2 and proof 1 (13 Nov): route A is alive.
-3. Done: proof 1b (13 Nov, third run). The owner PC runs proof 1c (`CodeObjHide=1`).
-4. Then the boot sequence's three sounds, converted on the PC.
+3. Done: proof 1b (13 Nov, third run) and proof 1c (13 Nov, `CodeObjHide=1`).
+4. The owner PC runs read D4 (the three sounds' records and file headers). Then proof 1d, the sounds by route S2.
 5. Then proof 2a and 2b, the STAT page by route A, each with its own card, tests, a CARRY line, the Scribe's review,
    and the PC's run.

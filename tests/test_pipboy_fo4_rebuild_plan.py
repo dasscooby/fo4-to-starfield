@@ -109,7 +109,7 @@ class RebuildPlanTests(unittest.TestCase):
         for text in ("**Proof 1, the result (owner PC, 13 Nov, 02:46 to 02:50 UTC, at `2db64a83`): PASS, verified.**",
                      "**Route A is alive:**", "**Proof 1b, the card: the stand-in engine object",
                      "`Stage=2`, `Movie=FO4SF_Fo4Boot`, `CodeObj=1`", "set=3 of=3 read_back=1 names=PlaySound,HideMenu",
-                     "**Proof 2, the outline (route A): the STAT page.**", "3. Done: proof 1b (13 Nov, third run).",
+                     "**Proof 2, the outline (route A): the STAT page.**", "3. Done: proof 1b (13 Nov, third run)",
                      "**Proof 1c, the card: a real `HideMenu`"):
             self.assertIn(text, self.plan, text)
         load = self.main[self.main.index("bool MenuLoadMovie("):]
@@ -155,6 +155,15 @@ class RebuildPlanTests(unittest.TestCase):
         readme = (ROOT / "sfse" / "FO4SFPipboyMenu" / "README.md").read_text(encoding="utf-8")
         for text in ("refuse step=ini code_obj=1", "step=code_call n= name= args= arg0=", "`CodeObj` (0)"):
             self.assertIn(text, readme, text)
+
+    def test_sound_read(self):
+        # FAL-614: proof 1c recorded; the boot sequence's sounds start with read D4, names and header fields only
+        for text in ("**Proof 1c, the result (owner PC, 13 Nov, 04:38 to 04:42 UTC, at `9550c00a`): PASS twice",
+                     "**The boot sequence's sounds, step 1: read D4 (owner PC; names and header fields only).**",
+                     "`UIPipBoyBootSequenceA`, `B` and `C`", "No samples.", "D4 reads in memory and writes nothing.",
+                     "**S2, the plugin plays the player's converted file itself**",
+                     "no audio enters Git", "4. The owner PC runs read D4"):
+            self.assertIn(text, self.plan, text)
 
     def test_reads_recorded(self):
         for text in ("**Read on the PC (D1, 13 Nov,", "**Read on the PC (D3, 13 Nov): verified.**",
