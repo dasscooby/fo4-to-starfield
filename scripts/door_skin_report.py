@@ -5,9 +5,10 @@ Read-only; prints JSON.
 
   python scripts/door_skin_report.py --fo4-data <Fallout 4 Data> <mesh name, e.g. Meshes\\Interiors\\RedRocket\\Doors\\RedRPedDoor.nif>
 
-A model whose sequences are not named Open / Close needs the clip alias the converter gives it (pipeline.OWN_RIG_ALIASES, looked up by the file
-name: the Vault 111 cog door VltGearDoor01.nif plays Stage2 as Open); without it door_rig.plan refuses ("absent or ambiguous animation bindings")
-and the report cannot run. --alias "Stage2=Open" names one by hand for any other model.
+A model whose sequences are not named Open / Close (the Vault 111 cog door VltGearDoor01.nif plays Stage2 as Open) has those sequences skipped
+by the plan unless it is given the clip alias the converter uses (pipeline.OWN_RIG_ALIASES, looked up by the file name): the report still runs
+without it, but its plan has no Open clip. The alias, from that table or by hand (--alias "Stage2=Open"), is what makes the plan select that
+sequence as Open, as the converter's own plan does.
 """
 import argparse
 import json
