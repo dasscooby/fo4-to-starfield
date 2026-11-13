@@ -729,5 +729,75 @@ class DumpFormEdidTests(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(self.data)), before)
 
 
+def cell_esm():
+    """Two cells. 3001 holds: an anchor reference (base MovingPlatform_AnchorMarker; XLKR 8 bytes and XLRT 4 bytes, signatures the tool does not interpret),
+    a node reference (base MovingPlatform_FloorNodeMarker) and an unrelated reference (base Other); a persistent-group reference too. 3002 holds one anchor."""
+    w = esm.PluginWriter([])
+    w.add(esm.Record("ACTI", 0x61, [(b"EDID", esm.zbytes("MovingPlatform_AnchorMarker"))]))
+    w.add(esm.Record("ACTI", 0x62, [(b"EDID", esm.zbytes("MovingPlatform_FloorNodeMarker"))]))
+    w.add(esm.Record("ACTI", 0x63, [(b"EDID", esm.zbytes("OtherThing"))]))
+    body = w.to_bytes()
+
+    def ref(fid, base, pos, extra=()):
+        return esm.Record("REFR", fid, [(b"NAME", struct.pack("<I", base)), (b"DATA", struct.pack("<6f", *pos, 0, 0, 0))] + list(extra)).to_bytes()
+    c1 = esm.Record("CELL", 0x3001, [(b"EDID", esm.zbytes("WarehouseTest"))]).to_bytes()
+    c2 = esm.Record("CELL", 0x3002, [(b"EDID", esm.zbytes("OtherCell"))]).to_bytes()
+    anchor = ref(0x4101, 0x61, (1, 2, 3), [(b"XLKR", struct.pack("<II", 0x70, 0x4102)), (b"XLRT", struct.pack("<I", 0x71))])
+    kids1 = esm.group_bytes(struct.pack("<I", 0x3001), anchor + ref(0x4102, 0x62, (4, 5, 6)) + ref(0x4103, 0x63, (7, 8, 9)), 9)
+    pers1 = esm.group_bytes(struct.pack("<I", 0x3001), ref(0x4104, 0x62, (0, 0, -4)), 8)
+    kids2 = esm.group_bytes(struct.pack("<I", 0x3002), ref(0x4201, 0x61, (9, 9, 9)), 9)
+    return body + esm.group_bytes("CELL", c1 + pers1 + kids1 + c2 + kids2)
+
+
+class CellRefsTests(unittest.TestCase):
+    setUp_form = FormModeTests.setUp
+    run_form = FormModeTests.run_form
+
+    def setUp(self):
+        self.setUp_form()
+        with open(os.path.join(self.data, "Starfield.esm"), "wb") as f:
+            f.write(cell_esm())
+
+    def test_every_reference_of_the_cell_is_listed_with_base_and_position_and_no_other_cell(self):
+        text = self.run_form("--cell-refs", "00003001")
+        self.assertIn("vault111_anim_graphs --cell-refs (read-only; FAL-489)", text)
+        self.assertIn("=== cell 00003001 WarehouseTest: 4 REFR/ACHR in it", text)
+        self.assertIn("REFR 00004101  base 00000061 MovingPlatform_AnchorMarker  at 1.0, 2.0, 3.0", text)
+        self.assertIn("REFR 00004102  base 00000062 MovingPlatform_FloorNodeMarker  at 4.0, 5.0, 6.0", text)
+        self.assertIn("REFR 00004103  base 00000063 OtherThing  at 7.0, 8.0, 9.0", text)
+        self.assertIn("REFR 00004104  base 00000062 MovingPlatform_FloorNodeMarker  at 0.0, 0.0, -4.0", text)       # the persistent child group counts
+        self.assertNotIn("00004201", text)                                                                           # another cell's reference
+
+    def test_the_marker_references_are_dumped_in_full_with_unknown_subrecords_as_stored(self):
+        text = self.run_form("--cell-refs", "3001")
+        self.assertIn("full dump of 3 reference(s) whose base editor id contains 'movingplatform'", text)
+        self.assertIn("--- REFR 00004101  base 00000061 MovingPlatform_AnchorMarker", text)
+        self.assertIn("XLKR [8] hex 70 00 00 00 02 41 00 00   words: 00000070 00004102", text)       # not interpreted, words shown
+        self.assertIn("XLRT [4] hex 71 00 00 00   (u32 0x00000071", text)
+        self.assertNotIn("--- REFR 00004103", text)                                                  # the unrelated base is listed, not dumped
+
+    def test_dump_word_limit_and_an_empty_word(self):
+        self.assertIn("full dump of 1 reference(s) whose base editor id contains 'anchor'", self.run_form("--cell-refs", "3001", "--cell-dump-word", "anchor"))
+        none = self.run_form("--cell-refs", "3001", "--cell-dump-word", "")
+        self.assertIn("full dump of 0 reference(s) whose base editor id contains nothing (no word given)", none)
+        self.assertNotIn("--- REFR", none)
+        capped = self.run_form("--cell-refs", "3001", "--cell-limit", "2")
+        self.assertIn("... 2 more not listed (--cell-limit 2)", capped)
+        self.assertIn("full dump of 3 reference(s)", capped)                                           # the dump is not capped by the line limit
+
+    def test_a_cell_that_is_not_there_says_so_and_only_the_report_is_written(self):
+        before = sorted(os.listdir(self.data))
+        text = self.run_form("--cell-refs", "00009999")
+        self.assertIn("=== cell 00009999 (no CELL record with that form id found): 0 REFR/ACHR in it", text)
+        self.assertEqual(sorted(os.listdir(self.data)), before)
+        self.assertEqual(sorted(os.listdir(self.tmp.name)), sorted(["Data", "r.txt"]))
+
+    def test_other_modes_are_unchanged_beside_it(self):
+        self.assertIn("2 found; first 2:", self.run_form("--refs-to", "62"))                           # 4102 and 4104
+        both = self.run_form("--refs-to", "62", "--cell-refs", "3002")
+        self.assertIn("vault111_anim_graphs --refs-to / --cell-refs (read-only; FAL-489)", both)
+        self.assertIn("REFR 00004201", both)
+
+
 if __name__ == "__main__":
     unittest.main()

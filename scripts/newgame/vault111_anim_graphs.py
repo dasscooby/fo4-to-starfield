@@ -38,6 +38,14 @@ ShipQuickLift1, 00010C35: FAL-489, the lift half of the door and lift kit): no g
 form id it resolved (or says no ACTI/FURN has that editor id, or that several do and dumps each), then the same dump. Use it where only the
 editor id is known (the MovingPlatform_* markers); a marker that is another record type needs its hex id and --dump-form.
 
+Sixth option, `--cell-refs HEX` (repeatable; the cell's form id, e.g. 00293430 for WarehouseMovingPlatforms): every REFR / ACHR of that cell, one
+line each (reference form id, base form id, base editor id when the base is an ACTI / FURN, position), capped by `--cell-limit` (default 400),
+then the FULL subrecord dump (as --dump-form prints a record, plus every 8, 12, 16, ... byte subrecord shown as 32-bit words that could be
+form ids) of each reference whose base editor id contains a `--cell-dump-word` (repeatable; default `movingplatform`; `--cell-dump-word ""`
+dumps none). It exists to read how a placed set is linked (a linked-ref or location-ref-type subrecord is printed as stored, never
+interpreted: this tool does not know what a subrecord signature means). A reference belongs to the cell whose label is on the nearest
+enclosing child group (the same rule as --refs-to).
+
 Fourth option, `--candidates GRAPH` (repeatable): for each ACTI / FURN that names that graph (all of them, not the first dozen), one line:
 form id, editor id, the placement count (REFR / ACHR, one scan of the CELL and WRLD groups for all of them together), the model state
 (`model in the archives`, `model NOT in the archives read`, `no model`, or `model unread` when no archive could be opened: none given, or
@@ -1067,6 +1075,54 @@ def placed_lines(plugin, archives, top, words, why=""):
     return out
 
 
+def word_note(d):
+    """For a subrecord of 8..32 bytes with a length divisible by 4: its 32-bit words (they may be form ids), else ''."""
+    if 8 <= len(d) <= 32 and len(d) % 4 == 0:
+        return "   words: " + " ".join(f"{w:08X}" for w in struct.unpack(f"<{len(d) // 4}I", d))
+    return ""
+
+
+def find_cell_refs(plugin, cell_fid):
+    """([placed Record of REFR / ACHR in that cell], the cell's editor id or None)."""
+    out, cur, cedid = [], 0, None
+    for label in ("CELL", "WRLD"):
+        for start, end in plugin.groups.get(label, []):
+            for item in plugin.walk(start, end):
+                if item[0] == "GRUP":
+                    if item[2] in CHILD_GROUPS and len(item[1]) == 4:
+                        cur = struct.unpack("<I", item[1])[0]
+                    continue
+                if item[2] == b"CELL" and struct.unpack_from("<I", plugin.buf, item[1] + 12)[0] == cell_fid:
+                    cedid = plugin.record_at(item[1]).edid
+                elif item[2] in PLACED and cur == cell_fid:
+                    out.append(plugin.record_at(item[1]))
+    return out, cedid
+
+
+def cell_lines(plugin, cell_fid, words, limit):
+    refs, cedid = find_cell_refs(plugin, cell_fid)
+    recs, _ = read_actifurn(plugin)
+    edid = {r["formid"]: r["edid"] for r in recs}
+    out = [f"=== cell {cell_fid:08X} {cedid or '(no CELL record with that form id found)'}: {len(refs)} REFR/ACHR in it"]
+    rows = []
+    for r in refs:
+        name, pos = r.get(b"NAME"), r.get(b"DATA")
+        base = struct.unpack("<I", name)[0] if name is not None and len(name) == 4 else None
+        rows.append((r, base, struct.unpack_from("<3f", pos, 0) if pos is not None and len(pos) >= 12 else None))
+    for r, base, p in rows[:limit]:
+        out.append(f"  {r.sig.decode()} {r.formid:08X}  base {('%08X' % base) if base is not None else 'unread'} {edid.get(base, '-') if base is not None else '-'}  at {', '.join(f'{v:.1f}' for v in p) if p else 'unread'}")
+    if len(rows) > limit:
+        out.append(f"  ... {len(rows) - limit} more not listed (--cell-limit {limit})")
+    wl = [w.lower() for w in words if w]
+    dumped = [(r, base) for r, base, _ in rows if wl and base is not None and any(w in (edid.get(base) or "").lower() for w in wl)]
+    out.append(f"  full dump of {len(dumped)} reference(s) whose base editor id contains " + (", ".join(repr(w) for w in words if w) or "nothing (no word given)"))
+    for r, base in dumped:
+        out += ["", f"--- {r.sig.decode()} {r.formid:08X}  base {base:08X} {edid.get(base) or '-'}  flags {r.flags:#010x}  {len(r.subs)} subrecord(s):"]
+        for s, d in r.subs:
+            out.append(sub_line(s, d) + word_note(d))
+    return out
+
+
 def resolve_edids(plugin, names):
     """([(name, [form ids])]): the ACTI / FURN records whose editor id equals each name (case-insensitive)."""
     recs, _ = read_actifurn(plugin)
@@ -1076,7 +1132,7 @@ def resolve_edids(plugin, names):
 def run_form(a):
     """The --dump-form / --refs-to report: Starfield.esm and, for the model check, the archives are read; only --out is written."""
     modes = [n for n, on in (("--dump-form", a.dump_form), ("--dump-form-edid", a.dump_form_edid), ("--refs-to", a.refs_to), ("--candidates", a.candidates),
-                             ("--placed", a.placed), ("--edid-word", a.edid_word)) if on]
+                             ("--placed", a.placed), ("--edid-word", a.edid_word), ("--cell-refs", a.cell_refs)) if on]
     out = [f"vault111_anim_graphs {' / '.join(modes)} (read-only; FAL-489)"]
     esm_path = a.esm or os.path.join(a.data, "Starfield.esm")
     expanded = expand_archives(a.data, a.game_archive)
@@ -1101,6 +1157,8 @@ def run_form(a):
                 out += [""] + refs_lines(plugin, parse_form_id(h), a.refs_limit)
             if a.placed or a.edid_word:
                 out += [""] + placed_lines(plugin, archives, a.placed_top if a.placed else None, a.edid_word, why)
+            for h in a.cell_refs:
+                out += [""] + cell_lines(plugin, parse_form_id(h), a.cell_dump_word if a.cell_dump_word else ["movingplatform"], a.cell_limit)
             for g in a.candidates:
                 out += [""] + candidate_lines(plugin, g, archives, why)
     except (esm.EsmError, OSError, struct.error) as e:
@@ -1122,6 +1180,9 @@ def build_parser():
     ap.add_argument("--candidates", action="append", default=[], help="a graph name: write only every ACTI/FURN naming it, with its model checked against the archives and its placement count (repeatable)")
     ap.add_argument("--placed", action="store_true", help="write only the census of every ACTI/FURN whose animation graph component has an ANAM graph path, grouped by graph, with the placement counts and the model check")
     ap.add_argument("--placed-top", type=int, default=5, help="with --placed: the best N placed bases per graph (default 5)")
+    ap.add_argument("--cell-refs", action="append", default=[], help="a hex cell form id: write only the REFR/ACHR of that cell, one line each, and the full subrecord dump of those whose base editor id contains a --cell-dump-word (repeatable)")
+    ap.add_argument("--cell-dump-word", action="append", default=[], help='with --cell-refs: a word of a base editor id whose references are dumped in full (repeatable; default "movingplatform"; "" dumps none)')
+    ap.add_argument("--cell-limit", type=int, default=400, help="with --cell-refs: the most reference lines listed (default 400)")
     ap.add_argument("--edid-word", action="append", default=[], help="a word of an editor id (case-insensitive, repeatable): write the ACTI/FURN whose editor id contains it, with graph, placements and model check")
     ap.add_argument("--refs-limit", type=int, default=12)
     ap.add_argument("--model", action="append", default=[], help="a model path to read (repeatable)")
@@ -1132,7 +1193,7 @@ def build_parser():
 
 def main(argv=None):
     a = build_parser().parse_args(argv)
-    text = run_dump(a) if a.dump_graph else run_form(a) if (a.dump_form or a.dump_form_edid or a.refs_to or a.candidates or a.placed or a.edid_word) else run(a)
+    text = run_dump(a) if a.dump_graph else run_form(a) if (a.dump_form or a.dump_form_edid or a.refs_to or a.candidates or a.placed or a.edid_word or a.cell_refs) else run(a)
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     with open(a.out, "w", encoding="utf-8") as f:
         f.write(text)
