@@ -420,8 +420,8 @@ Install:
    experiment's `FO4SFExp.install.json` is not read or changed. A `plugin_toggle.py` hold makes it refuse, so run it
    between `plugin_toggle.py on` and `off`. `status`, `order` and `active` take `--starfield <game>` alone.
    With `Movie=<name>` (stage (b)), add `--extra-movie <name>` to install: the stage's `Data\Interface\<name>.swf`,
-   the player's private movie, is packed too (`<name>` is `FO4SF_` and letters, digits, `_`; the file must read
-   back as a SWF). Anything else in `Data` that is not a byte-for-byte twin is still refused.
+   the player's private movie, is packed too (`<name>` is `FO4SF_` and letters, digits, `_`; the file must be a
+   whole SWF: signature, FileLength and every tag's length, no tag's contents read). Anything else in `Data` that is not a byte-for-byte twin is still refused.
 
 Uninstall:
 

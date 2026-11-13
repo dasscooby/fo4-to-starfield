@@ -242,6 +242,30 @@ class PipboyProbeInstallTests(unittest.TestCase):
         self.assertIn("does not read back as a SWF", str(code))
         self.assert_untouched()
 
+    def test_an_extra_movie_with_tags_our_writer_never_makes_installs(self):
+        # Scribe FAL-632: the player's movie holds tags of its own (D1: DefineEditText with other flags, DoABC);
+        # only the container is checked. Code 82 (DoABC) and 37 with a layout byte, short and long lengths.
+        body = (bytes([0x00]) + b"\x00\x1e\x01\x00"
+                + make_probe_swf.tag(37, b"\x01\x00" + bytes(20) + b"\x20\x00")
+                + make_probe_swf.tag(82, b"\x01\x00\x00\x00boot\x00" + bytes(80)) + make_probe_swf.tag(0))
+        raw = b"CWS\x0f" + (8 + len(body)).to_bytes(4, "little") + zlib.compress(body)
+        with self.assertRaises(make_probe_swf.SwfError):    # the writer's reader refuses it (the finding)
+            make_probe_swf.read_movie(raw)
+        self.assertIsNone(pbi.swf_problem(self.stage_extra(raw=raw)))
+        code, out = self.run_main("install", "--dir", self.staged, "--extra-movie", "FO4SF_Fo4Boot")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.run_main("uninstall")[0], 0)
+        self.assertEqual(self.exp_record(), EXP_RECORD)
+
+    def test_a_cut_or_padded_extra_movie_is_refused(self):
+        body = bytes([0x00]) + b"\x00\x1e\x01\x00" + make_probe_swf.tag(82, bytes(80)) + make_probe_swf.tag(0)
+        for cut, why in ((body[:-8], "runs past the body"), (body + b"\0\0", "after the End tag"),
+                         (body[:-2], "no End tag")):
+            raw = b"FWS\x0f" + (8 + len(cut)).to_bytes(4, "little") + cut
+            self.assertIn(why, pbi.swf_problem(self.stage_extra(raw=raw)))
+        raw = b"FWS\x0f" + (9 + len(body)).to_bytes(4, "little") + body
+        self.assertIn("FileLength", pbi.swf_problem(self.stage_extra(raw=raw)))
+
     def test_extra_movie_names(self):
         for bad in ("", "Fo4Boot", "pipboybootsequence", "FO4SF_", "FO4SF_a.b", "FO4SF_../x", "FO4SF_é",
                     "FO4SF_" + "x" * 59, "FO4SF_PipboyMenu", "fo4sf_pipboymenu", "FO4SF_PIPBOYMENU"):

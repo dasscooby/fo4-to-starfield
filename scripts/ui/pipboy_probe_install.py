@@ -58,6 +58,43 @@ def extra_movie_problem(name):
     return None
 
 
+def swf_problem(path):
+    """Why the file at `path` is not a whole SWF, or None. Only the container is read: the signature (CWS or FWS), the
+    FileLength against the body, the frame header, and each tag's code and length up to the End tag at the body's end.
+    No tag's contents are read (the extra movie is the player's own, not one our writer made)."""
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+    except OSError as e:
+        return str(e)
+    if len(raw) < 8 or raw[:3] not in (b"CWS", b"FWS"):
+        return "the signature is not CWS or FWS"
+    length = int.from_bytes(raw[4:8], "little")
+    try:
+        body = zlib.decompress(raw[8:]) if raw[:3] == b"CWS" else raw[8:]
+    except zlib.error as e:
+        return f"the body does not decompress: {e}"
+    if 8 + len(body) != length:
+        return f"FileLength {length} but the body is {len(body)} bytes + 8"
+    if not body:
+        return "no frame header"
+    nbits = body[0] >> 3
+    pos = (5 + 4 * nbits + 7) // 8 + 4                     # the frame RECT, then frame rate and frame count
+    while pos + 2 <= len(body):
+        head = int.from_bytes(body[pos:pos + 2], "little")
+        code, size, pos = head >> 6, head & 0x3F, pos + 2
+        if size == 0x3F:
+            if pos + 4 > len(body):
+                return "a tag's long length runs past the body"
+            size, pos = int.from_bytes(body[pos:pos + 4], "little"), pos + 4
+        if pos + size > len(body):
+            return f"tag {code} runs past the body"
+        pos += size
+        if code == 0:
+            return None if pos == len(body) else f"{len(body) - pos} bytes after the End tag"
+    return "no End tag"
+
+
 def stage_problems(d, extra_movie=""):
     """What is wrong with the staged folder, as a list (empty: it is the probe as make_pipboy_probe.py stages it, plus
     the one extra movie when named)."""
@@ -92,10 +129,9 @@ def stage_problems(d, extra_movie=""):
         else:
             problems += twin_problems(data, twins)
     if extra:
-        try:
-            make_probe_swf.read_movie(os.path.join(data, *extra.split("/")))
-        except (make_probe_swf.SwfError, OSError, zlib.error) as e:
-            problems.append(f"the extra movie {extra} does not read back as a SWF: {e}")
+        why = swf_problem(os.path.join(data, *extra.split("/")))
+        if why:
+            problems.append(f"the extra movie {extra} does not read back as a SWF: {why}")
     return problems
 
 
