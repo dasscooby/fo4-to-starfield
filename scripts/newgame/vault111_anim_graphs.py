@@ -38,9 +38,18 @@ Fourth option, `--candidates GRAPH` (repeatable): for each ACTI / FURN that name
 form id, editor id, model, whether the model file is in the archives given (present / NOT in the archives read / no model), the rig (BNAM)
 and clip folder (CNAM), and how many REFR / ACHR place it (one scan of the CELL and WRLD groups for all of them together). It exists to
 pick a user of a graph that can be tested: a model in the archives and a placement count above 0.
+Fifth option, `--placed` (the census of what the game DOES place): every ACTI / FURN with an animation graph component, one scan of the
+CELL and WRLD groups for the placement counts of all of them, then per graph: how many base records name it, how many are placed at least
+once, how many of those have their model in the archives given, the total placements, and the best `--placed-top` (default 5) placed
+bases (form id, editor id, placements, model state, model, BNAM, CNAM, the first placement's cell and position). Graphs are ordered by
+the number of placed bases whose model is in the archives (then by placed bases). `--edid-word WORD` (repeatable, with or without
+--placed) adds a table of every ACTI / FURN whose editor id contains WORD (case-insensitive), with or without a graph component:
+form id, editor id, graph, placements, model state. A placement is a REFR / ACHR in the CELL and WRLD top groups; the count says nothing
+about placements made another way (scripts, leveled lists, ship builder), and a record placed only that way reads 0.
 Both write only --out.  Examples:
     python vault111_anim_probe.py --graphs --dump-form 00010C35 --out <lift.txt> --data <Starfield Data> --game-archive "Starfield - Meshes*.ba2"
     python vault111_anim_probe.py --graphs --refs-to 00010C35 --out <lift-refs.txt> --data <Starfield Data>
+    python vault111_anim_probe.py --graphs --placed --edid-word lift --edid-word elevator --edid-word platform --out <placed.txt> --data <Starfield Data> --game-archive "Starfield - Meshes*.ba2"
     python vault111_anim_probe.py --graphs --candidates twostages --out <cand.txt> --data <Starfield Data> --game-archive "Starfield - Meshes*.ba2"
 
 usage: python vault111_anim_probe.py --graphs --out <report.txt> --data <Starfield Data>
@@ -967,9 +976,80 @@ def candidate_lines(plugin, graph, archives, limit):
     return out
 
 
+def model_state(archives, model):
+    if not model:
+        return "no model"
+    if not archives:
+        return "model unread"
+    _, got = model_entry(archives, model)
+    return "model NOT in the archives read" if got is None else "model unreadable" if isinstance(got[1], Exception) else "model in the archives"
+
+
+def read_actifurn(plugin):
+    """Every ACTI / FURN record as a dict (sig, formid, edid, model, ANAM, BNAM, CNAM, graph base or ''), and notes."""
+    out, notes = [], []
+    for label in RECORD_GROUPS:
+        if label.decode() not in plugin.groups:
+            notes.append(f"no {label.decode()} top group in {os.path.basename(plugin.path)}")
+            continue
+        for rec in plugin.records(label.decode()):
+            comp, _ = graph_component(rec.subs)
+            anam = comp.get("ANAM", "")
+            out.append({"sig": rec.sig.decode(), "formid": rec.formid, "edid": rec.edid, "model": model_path(rec.subs), "ANAM": anam,
+                        "BNAM": comp.get("BNAM", ""), "CNAM": comp.get("CNAM", ""), "graph": graph_base(anam) if anam else ""})
+    return out, notes
+
+
+def pos_text(p):
+    return ", ".join(f"{v:.1f}" for v in p) if p else "unread"
+
+
+def placed_lines(plugin, archives, top, words):
+    recs, notes = read_actifurn(plugin)
+    wanted = [r for r in recs if r["graph"]] if top is not None else []
+    wordset = [w.lower() for w in words]
+    by_word = [r for r in recs if wordset and any(w in (r["edid"] or "").lower() for w in wordset)]
+    ids = {r["formid"] for r in wanted} | {r["formid"] for r in by_word}
+    found, cells, scanned = find_refs_many(plugin, ids)
+    out = [f"=== placed census: {len(recs)} ACTI/FURN record(s) read, {sum(1 for r in recs if r['graph'])} with an animation graph component; "
+           f"placement scan: {scanned} placed record(s) in the CELL and WRLD groups; model check: " + ("against the archives given" if archives else "unread (no --game-archive given)")] + notes
+    cache = {}
+
+    def state(r):
+        if r["model"] not in cache:
+            cache[r["model"]] = model_state(archives, r["model"])
+        return cache[r["model"]]
+
+    if top is not None:
+        graphs = {}
+        for r in wanted:
+            graphs.setdefault(r["graph"], []).append(r)
+
+        def key(item):
+            rs = item[1]
+            placed = [r for r in rs if found[r["formid"]]]
+            return (-sum(1 for r in placed if state(r) == "model in the archives"), -len(placed), item[0])
+        out.append(f"  per graph ({len(graphs)} graph(s)); 'usable' = model in the archives AND placed at least once:")
+        for g, rs in sorted(graphs.items(), key=key):
+            placed = sorted([r for r in rs if found[r["formid"]]], key=lambda r: (-len(found[r["formid"]]), r["formid"]))
+            usable = [r for r in placed if state(r) == "model in the archives"]
+            out.append(f"  {g}: {len(rs)} base(s), {len(placed)} placed, {len(usable)} usable, {sum(len(found[r['formid']]) for r in rs)} placement(s) in all")
+            for r in placed[:top]:
+                f = found[r["formid"]]
+                sig, rid, cell, pos = f[0]
+                cedid = plugin.record_at(cells[cell]).edid if cell in cells else "-"
+                out.append(f"      {r['sig']} {r['formid']:08X} {r['edid'] or '-'}  placed {len(f)}  {state(r)}  model={r['model'] or '-'}  BNAM={r['BNAM'] or '-'}  CNAM={r['CNAM'] or '-'}  first {sig} {rid:08X} cell {cell:08X} {cedid or '-'} at {pos_text(pos)}")
+    for w in words:
+        hits = sorted([r for r in by_word if w.lower() in (r["edid"] or "").lower()], key=lambda r: (-len(found[r["formid"]]), r["formid"]))
+        out.append(f"  editor id contains {w!r}: {len(hits)} record(s), {sum(1 for r in hits if found[r['formid']])} placed")
+        for r in hits:
+            out.append(f"      {r['sig']} {r['formid']:08X} {r['edid']}  graph={r['graph'] or 'none'}  placed {len(found[r['formid']])}  {state(r)}  model={r['model'] or '-'}")
+    return out
+
+
 def run_form(a):
     """The --dump-form / --refs-to report: Starfield.esm and, for the model check, the archives are read; only --out is written."""
-    out = ["vault111_anim_graphs --dump-form / --refs-to (read-only; FAL-489)"]
+    out = ["vault111_anim_graphs --dump-form / --refs-to / --candidates / --placed / --edid-word (read-only; FAL-489)"]
     esm_path = a.esm or os.path.join(a.data, "Starfield.esm")
     expanded = expand_archives(a.data, a.game_archive)
     archives = open_archives([p for _, ps in expanded for p in ps])
@@ -985,6 +1065,8 @@ def run_form(a):
                 out += [""] + form_lines(plugin, parse_form_id(h), archives)
             for h in a.refs_to:
                 out += [""] + refs_lines(plugin, parse_form_id(h), a.refs_limit)
+            if a.placed or a.edid_word:
+                out += [""] + placed_lines(plugin, archives, a.placed_top if a.placed else None, a.edid_word)
             for g in a.candidates:
                 out += [""] + candidate_lines(plugin, g, archives, min(a.refs_limit, 3))
     except (esm.EsmError, OSError, struct.error) as e:
@@ -1003,6 +1085,9 @@ def build_parser():
     ap.add_argument("--dump-form", action="append", default=[], help="a hex form id: write only every subrecord of that record and a check of its model against the archives (repeatable)")
     ap.add_argument("--refs-to", action="append", default=[], help="a hex form id: write only the REFR / ACHR placements of that base (repeatable; reads the whole CELL and WRLD groups)")
     ap.add_argument("--candidates", action="append", default=[], help="a graph name: write only every ACTI/FURN naming it, with its model checked against the archives and its placement count (repeatable)")
+    ap.add_argument("--placed", action="store_true", help="write only the census of every ACTI/FURN with an animation graph component that the game places (per graph, with model check)")
+    ap.add_argument("--placed-top", type=int, default=5, help="with --placed: the best N placed bases per graph (default 5)")
+    ap.add_argument("--edid-word", action="append", default=[], help="a word of an editor id (case-insensitive, repeatable): write the ACTI/FURN whose editor id contains it, with graph, placements and model check")
     ap.add_argument("--refs-limit", type=int, default=12)
     ap.add_argument("--model", action="append", default=[], help="a model path to read (repeatable)")
     ap.add_argument("--per-graph", type=int, default=12)
@@ -1012,7 +1097,7 @@ def build_parser():
 
 def main(argv=None):
     a = build_parser().parse_args(argv)
-    text = run_dump(a) if a.dump_graph else run_form(a) if (a.dump_form or a.refs_to or a.candidates) else run(a)
+    text = run_dump(a) if a.dump_graph else run_form(a) if (a.dump_form or a.refs_to or a.candidates or a.placed or a.edid_word) else run(a)
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     with open(a.out, "w", encoding="utf-8") as f:
         f.write(text)
