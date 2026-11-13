@@ -386,6 +386,15 @@ class LogTests(unittest.TestCase):
         self.assertEqual(s["verdict"][0], "PLAY, NO EVENTS")
         self.assertIn("1 of 1 register call(s) returned true", s["verdict"][1])
 
+    def test_a_placed_reference_counts_as_the_reference_and_a_placed_none_does_not(self):
+        """FAL-489 lift session 2: the quest takes a PLACED reference (event 'placed') instead of a spawn; the verdict must not call that INCONCLUSIVE."""
+        s = alog.summarize(self.lines("placed stage=10 form=77 ref=99 base=88 placedid=5656 persist=false", "register stage=10 name=Trans01 ref=99 ok=true",
+                                      "play stage=25 name=StateA_Play ref=99 ok=true", "event name=IsOff src=99 stage=25 since=23.85 after=23.85"))
+        self.assertEqual(s["spawned"], 99)
+        self.assertEqual(s["verdict"][0], "EVENTS ARRIVE")
+        s = alog.summarize(self.lines("placed stage=10 form=none ref=none base=88 placedid=5656 persist=false"))
+        self.assertEqual(s["verdict"][0], "INCONCLUSIVE")                                             # the placed reference was not found
+
     def test_no_play_and_inconclusive_and_the_void_register(self):
         s = alog.summarize(self.lines("spawn stage=10 base=77 ref=99 moved=true persist=true", "register stage=10 name=Trans01 ref=99 ok=void",
                                       "play stage=21 name=Play01 ref=99 ok=false"))

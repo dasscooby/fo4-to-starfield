@@ -39,6 +39,7 @@ string LogName = "FO4SFAnimD"
 string ProbePlugin = "FO4SFAnimConsole.esm"
 string BasePlugin = "FO4Port.esm"
 int BaseId = 0  ;BASE the console base's local id in FO4Port.esm (the stager writes it; 0 = not given)
+int PlacedId = 0  ;PLACED the local id in FO4Port.esm of a PLACED reference to play the clips on instead of a spawned copy (the stager writes it with --placed-ref; 0 = spawn a copy)
 float AheadM = 1.5      ; metres in front of the player (variant D session 2 read dist 2.5007 for 2.5: the unit is metres)
 float SideM = 0.9       ; metres to the player's right for the second copy (stage 11), a guess for a clear side view
 float UpM = 1.2         ; metres above the player's own height: a guess at chest height for this model, unread
@@ -55,6 +56,7 @@ string[] EventNames
 string[] PlayNames
 ObjectReference TestRef = None
 ObjectReference TestRef2 = None   ; the side copy (stage 11)
+bool UsingPlaced = false    ; true when TestRef is the placed reference (PlacedId): stage 10 spawns nothing, stage 11 is refused, stage 60 leaves it alone
 bool Quiet = false          ; true in a quiet window (stages 31, 32): Say() shows nothing until the window closes
 string QuietNote = ""        ; the PlayAnimation returns of a quiet stage, shown when its window closes
 float FirstDoneAfter = -1.0  ; seconds from the call to the first Done of the open window, -1 = none yet
@@ -220,6 +222,10 @@ Function Spawn(int stage)
         Trace("spawn stage=" + stage + " base=none ref=none baseid=" + BaseId + " (stage the kit with the plugin tool's info so BaseId is set, and load FO4Port.esm)")
         return
     endif
+    if PlacedId != 0
+        UsePlaced(stage, base)
+        return
+    endif
     TestRef = p.PlaceAtMe(base, 1, true, false, false)
     bool moved = false
     bool turned = false
@@ -238,8 +244,27 @@ Function Spawn(int stage)
     RegisterAll(stage)
 EndFunction
 
+Function UsePlaced(int stage, Form base)
+    {Stage 10 with PlacedId: take the PLACED reference as TestRef. No PlaceAtMe, no MoveTo, no SetAngle, nothing disabled or deleted later. A cell that is not loaded gives a reference with 3d=false.}
+    Form f = Game.GetFormFromFile(PlacedId, BasePlugin)
+    TestRef = f as ObjectReference
+    UsingPlaced = true
+    Trace("placed stage=" + stage + " form=" + Id(f) + " ref=" + Id(TestRef) + " base=" + Id(base) + " placedid=" + PlacedId + " persist=false")
+    Say("PLACED s" + stage + " ref=" + Id(TestRef))
+    if TestRef == None
+        return
+    endif
+    Reading("now", stage, TestRef)
+    RegisterAll(stage)
+EndFunction
+
 Function SpawnSide(int stage)
     {A second copy of the console 0.9 m to the player's right of the first, turned a quarter circle from the first, for a side view.}
+    if UsingPlaced
+        Trace("spawnside stage=" + stage + " refused: the clips play on the placed reference, no copy is made")
+        Say("SIDE s" + stage + " refused (placed)")
+        return
+    endif
     Actor p = Game.GetPlayer()
     Form base = None
     if BaseId != 0
@@ -382,12 +407,13 @@ Function ActivateOnce(int stage)
 EndFunction
 
 Function Cleanup()
-    Trace("cleanup ref=" + Id(TestRef))
-    if TestRef
+    Trace("cleanup ref=" + Id(TestRef) + " placed=" + UsingPlaced)
+    if TestRef && !UsingPlaced
         TestRef.Disable(false)
 ;OPT ObjectReference.Delete         TestRef.Delete()
     endif
     TestRef = None
+    UsingPlaced = false
     if TestRef2
         TestRef2.Disable(false)
 ;OPT ObjectReference.Delete         TestRef2.Delete()

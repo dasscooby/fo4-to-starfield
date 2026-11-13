@@ -5,7 +5,7 @@ Every line the script writes is "FO4SFANIM rt=<real time s> <event> key=value ..
 time stamp in front). A line without end=true was cut and is left out (and counted). Form ids are Papyrus's signed decimal
 ("none" for None); bools "true" / "false"; "void" when the game's register call returns nothing. Case is ignored.
 
-Events: init (the forms it found), spawn (PlaceAtMe: ref), read (a reading of the reference: stage, when, loaded, disabled, cell,
+Events: init (the forms it found), spawn (PlaceAtMe: ref), placed (the PLACED reference taken instead of a spawn, FAL-489 lift session 2: ref; counts as the reference), read (a reading of the reference: stage, when, loaded, disabled, cell,
 pos, dist), register (RegisterForAnimationEvent for one name: ok), play (one PlayAnimation name: ok = its return), event (an
 animation event that arrived: name, stage = the play stage whose 15 s window was open when it came, 0 when none was open, since =
 seconds since the previous event), quiet
@@ -25,6 +25,7 @@ import re
 LINE = re.compile(r"FO4SFANIM rt=(?P<rt>[-+\d.eE]+) (?P<event>\w+)(?P<rest>.*)$", re.IGNORECASE)
 TOKEN = re.compile(r"(\w+)=(\S*)")
 EVENTS = ("init", "spawn", "read", "register", "play", "event", "quiet", "listened", "step", "cleanup")
+EXTRA_EVENTS = ("placed",)     # read too, but not printed by variant A (tests/test_anim_probe.py pins EVENTS to that script): the lift quest of FAL-489 session 2
 NAME_KEYS = ("name", "call", "what", "when")       # words, kept as the game printed them apart from case where a reader compares
 
 
@@ -55,7 +56,7 @@ def value(key, text):
 def parse_line(line):
     """{"rt", "event", key: value ..., "end": bool} of one probe line, None for any other line."""
     m = LINE.search(line)
-    if not m or m.group("event").lower() not in EVENTS:
+    if not m or m.group("event").lower() not in EVENTS + EXTRA_EVENTS:
         return None
     try:
         rt = float(m.group("rt"))
@@ -83,7 +84,7 @@ def summarize(lines):
             cut += 1
             continue
         events.append(d)
-    spawned = next((e.get("ref") for e in events if e["event"] == "spawn" and e.get("ref") is not None), None)
+    spawned = next((e.get("ref") for e in events if e["event"] in ("spawn", "placed") and e.get("ref") is not None), None)
     registers = [e for e in events if e["event"] == "register" and "name" in e]
     arrived = [e for e in events if e["event"] == "event"]
     plays = {}
