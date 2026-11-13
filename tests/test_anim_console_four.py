@@ -109,7 +109,7 @@ class ScriptTests(unittest.TestCase):
         self.assertLess(scene.index("CallOn(SceneStage, ButtonIdle)"), scene.index("ListenOk = SceneOk"))     # restored AFTER the idle call
         self.assertLess(scene.index("SceneIdleOk = ListenOk"), scene.index("ListenOk = SceneOk"))
         self.assertIn('ListenName = "scene (idle call " + SceneIdleOk + ")"', scene)
-        self.assertNotIn("SceneOk + \",\" + ListenOk\n        StartTimer(ButtonS", scene)                           # the idle call is never added to it
+        self.assertNotIn("SceneOk +", scene[scene.index("CallOn(SceneStage, ButtonIdle)"):])                            # the idle call is never added to it
 
     def test_the_registered_events_cover_the_controls_read_and_the_four_states(self):
         events = strings("EventNames")
