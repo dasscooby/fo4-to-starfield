@@ -170,6 +170,15 @@ class ScriptTests(unittest.TestCase):
         self.assertIn('Say("READ s" + stage', reading)
         self.assertIn('if when != "before"', reading)                                                        # the reading before every call stays log-only
 
+    def test_the_card_says_the_lift_half_is_not_a_result_and_the_door_half_is(self):
+        i = DOC.index("## Session 3 result")
+        sec = DOC[i:]
+        self.assertIn("Lift half: NOT a result", sec)
+        self.assertIn("Door half: a pass", sec)
+        self.assertIn("3D=FALSE", sec)
+        self.assertIn("unread", sec)
+        self.assertNotIn("lift half passes", DOC.lower())
+
     def test_the_door_is_placed_and_registered_before_the_lift_is_touched_and_every_step_says_so(self):
         """The 13 Nov session was silent after stage 10: a notice at the start and after each step, the door first, the lift in its own stage 30."""
         spawn = PSC[PSC.index("Function Spawn(int stage)"):PSC.index("Function SpawnLift(int stage)")]
