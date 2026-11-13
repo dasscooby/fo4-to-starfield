@@ -41,6 +41,16 @@ MIN_HALF = 0.005
 MIN_LEAF_HALF = 0.05
 
 
+def clamp_leaf_half(half: Tuple[float, float, float]) -> Tuple[float, float, float]:
+    """Floor each half-extent at MIN_LEAF_HALF.
+
+    Flat door leaves (zero thickness on one axis) previously used 0.02, the exact IEEE value
+    (0x3ca3d70a) that every Red Rocket crash dump reads as an index. Thick leaves never crash.
+    Call sites in convert_static use this so the floor stays consistent and testable.
+    """
+    return tuple(max(MIN_LEAF_HALF, abs(v)) for v in half)
+
+
 class CollisionError(ValueError):
     pass
 

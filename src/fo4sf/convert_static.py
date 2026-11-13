@@ -433,7 +433,7 @@ def convert_door(fo4_nif: bytes, out_name: str, material_paths: list, unit_scale
         lo = [min(p[a] for p in moving_pts) for a in range(3)]
         hi = [max(p[a] for p in moving_pts) for a in range(3)]
         blob = sfcollision.box_blob(collision_template, tuple((lo[a] + hi[a]) / 2 for a in range(3)),
-                                    tuple(max(sfcollision.MIN_LEAF_HALF, (hi[a] - lo[a]) / 2) for a in range(3)))
+                                    sfcollision.clamp_leaf_half(tuple((hi[a] - lo[a]) / 2 for a in range(3))))
         if leaf_physics_donor is not None:      # a static body pins its node: make it keyframed like vanilla door leaves
             blob = sfcollision.keyframed(blob, leaf_physics_donor)
     out = sfnif.build_door_nif(out_name.rsplit("/", 1)[-1].encode(), static_shapes, moving_shapes, template,
@@ -713,7 +713,7 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
         lo = [min(p[k] for p in pts) for k in range(3)]
         hi = [max(p[k] for p in pts) for k in range(3)]
         blob = sfcollision.box_blob(collision_template, tuple((lo[k] + hi[k]) / 2 for k in range(3)),
-                                    tuple(max(sfcollision.MIN_LEAF_HALF, (hi[k] - lo[k]) / 2) for k in range(3)))
+                                    sfcollision.clamp_leaf_half(tuple((hi[k] - lo[k]) / 2 for k in range(3))))
         collision[bones[i]["node"]] = sfcollision.keyframed(blob, leaf_physics_donor)
     if not collision:
         raise nifmod.NifError("door has no moving geometry")
