@@ -162,8 +162,41 @@ class RebuildPlanTests(unittest.TestCase):
                      "**The boot sequence's sounds, step 1: read D4 (owner PC; names and header fields only).**",
                      "`UIPipBoyBootSequenceA`, `B` and `C`", "No samples.", "D4 reads in memory and writes nothing.",
                      "**S2, the plugin plays the player's converted file itself**",
-                     "no audio enters Git", "4. The owner PC runs read D4"):
+                     "no audio enters Git", "4. Done: read D4 (13 Nov)."):
             self.assertIn(text, self.plan, text)
+
+    def test_code_obj_sound(self):
+        # FAL-614 proof 1d: read D4 recorded; PlaySound plays the player's converted file by route S2, mixed, not cut
+        for text in ("**Read D4, the result (owner PC, 13 Nov, at `df7e5c0f`): verified.**", "`RIFF`/`XWMA`, format tag `0x0161`",
+                     "**Proof 1d, the card: the three sounds by route S2.**", "`CodeObjSound=1`", "none of it enters Git",
+                     "`UIPipBoyBootSequenceA.wav`"):
+            self.assertIn(text, self.plan, text)
+        handler = self.main[self.main.index("class CodeObjFunction final"):]
+        handler = handler[:handler.index("\n\t};\n")]
+        self.assertIn('if (g_codeObjSound && _name == "PlaySound") {', handler)
+        start = self.main[self.main.index("void StartSound("):]
+        start = start[:start.index("\n\t}\n")]
+        self.assertIn("if (++g_soundsPlaying > kMaxSoundsPlaying) {", start)   # at most 4 at once
+        self.assertIn("REX::W32::CreateThread(nullptr, 0, &SoundThread", start)   # off the movie's thread
+        self.assertIn("a_c == '_'", start)                                        # the name cannot leave the folder
+        thread = self.main[self.main.index("std::uint32_t SoundThread("):]
+        thread = thread[:thread.index("\n\t}\n")]
+        self.assertIn('g_soundDir / (sound->name + ".wav")', thread)
+        self.assertIn("W32_IMPL_waveOutOpen(&out, kWaveMapper", thread)   # a stream of its own per sound: Windows mixes
+        self.assertNotRegex(thread, r"(?<![A-Za-z_])Close\(")               # nothing ties a sound to the menu
+        wave = self.main[self.main.index("std::string WaveProblem("):]
+        wave = wave[:wave.index("\n\t}\n")]
+        self.assertIn("if (a_wave.tag != 1 || a_wave.bits != 16) {", wave)   # XWMA (0x0161) is converted on the PC first
+        self.assertIn("a_bytes = std::min(size, room);", wave)
+        self.assertIn("constexpr std::size_t   kMaxSoundBytes = 32u << 20;", self.main)
+        self.assertIn('g_codeObjSound = ReadNumber(ini, L"CodeObjSound", 0) != 0;', self.main)
+        self.assertIn('Refuse("ini", "code_obj_sound=1 (with CodeObj=1 and PlaySound in CodeObjNames only)");', self.main)
+        self.assertIn('add_syslinks("winmm")', (ROOT / "sfse" / "FO4SFPipboyMenu" / "xmake.lua").read_text(encoding="utf-8"))
+        self.assertRegex((ROOT / "sfse" / "FO4SFPipboyMenu" / "FO4SFPipboyMenu.ini").read_text(encoding="utf-8"),
+                         r"\nCodeObjSound=0\r?\n")
+        readme = (ROOT / "sfse" / "FO4SFPipboyMenu" / "README.md").read_text(encoding="utf-8")
+        for text in ("refuse step=ini code_obj_sound=1", "`CodeObjSound` (0)", "nothing of it enters Git"):
+            self.assertIn(text, readme, text)
 
     def test_reads_recorded(self):
         for text in ("**Read on the PC (D1, 13 Nov,", "**Read on the PC (D3, 13 Nov): verified.**",

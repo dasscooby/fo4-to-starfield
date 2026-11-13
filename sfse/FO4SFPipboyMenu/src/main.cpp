@@ -88,12 +88,16 @@
 #include "pch.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <numbers>
 #include <optional>
@@ -108,6 +112,13 @@ REX_W32_IMPORT(std::int16_t, GetAsyncKeyState, std::int32_t);
 REX_W32_IMPORT(void*, GetForegroundWindow);
 REX_W32_IMPORT(std::uint32_t, GetWindowThreadProcessId, void*, std::uint32_t*);
 REX_W32_IMPORT(std::uint32_t, GetCurrentProcessId);
+// FAL-614 proof 1d (CodeObjSound=1): Windows audio's waveOut calls (winmm, xmake.lua add_syslinks)
+REX_W32_IMPORT(std::uint32_t, waveOutOpen, void**, std::uint32_t, const void*, std::uintptr_t, std::uintptr_t, std::uint32_t);
+REX_W32_IMPORT(std::uint32_t, waveOutPrepareHeader, void*, void*, std::uint32_t);
+REX_W32_IMPORT(std::uint32_t, waveOutWrite, void*, void*, std::uint32_t);
+REX_W32_IMPORT(std::uint32_t, waveOutReset, void*);
+REX_W32_IMPORT(std::uint32_t, waveOutUnprepareHeader, void*, void*, std::uint32_t);
+REX_W32_IMPORT(std::uint32_t, waveOutClose, void*);
 
 #include "world.h"   // FAL-250: the world-surface census and candidate (World=1; README.md, "World surface")
 
@@ -141,7 +152,11 @@ namespace
 	constexpr std::size_t   kMaxCodeArg = 64;                // and the first characters of a string argument
 	constexpr std::size_t   kMaxCodeNames = 16;              // CodeObjNames: the stand-in's functions
 	constexpr std::uint32_t kMaxCodeObjTries = 40;           // tries per movie (load, show, then one per kUpdate)
-	constexpr std::uint32_t kLoggedCodeObjTries = 5;         // the first tries logged; the one that sets it always
+	constexpr std::uint32_t kLoggedCodeObjTries = 5;
+	constexpr std::size_t   kMaxSoundBytes = 32u << 20;      // FAL-614 proof 1d: one converted sound file, at most
+	constexpr std::uint32_t kMaxSoundsPlaying = 4;           // sounds at once (the boot sequence overlaps two)
+	constexpr std::uint32_t kMaxSoundLines = 64;             // step=sound lines logged
+	constexpr auto          kSoundFolder = "FO4SFPipboyMenuSounds";   // beside the dll: the player's converted files         // the first tries logged; the one that sets it always
 
 	// stage d (the STAT page)
 	constexpr std::uint32_t kDataHandlerRva = 0x5FD9B28;     // SFSE 0.2.21 sfse/GameData.h: TESDataHandler::GetSingleton
@@ -427,6 +442,10 @@ namespace
 	std::atomic<std::uint32_t>               g_movieNameAsks{ 0 };      // GetName calls answered with Movie= in that call
 	bool                                     g_codeObj = false;         // FAL-614 proof 1b: CodeObj=1, the stand-in BGSCodeObj
 	bool                                     g_codeObjHide = false;     // FAL-614 proof 1c: CodeObjHide=1, HideMenu closes our menu
+	bool                                     g_codeObjSound = false;    // FAL-614 proof 1d: CodeObjSound=1, PlaySound plays a file
+	std::filesystem::path                    g_soundDir;                // <dll folder>/FO4SFPipboyMenuSounds
+	std::atomic<std::uint32_t>               g_soundsPlaying{ 0 };
+	std::atomic<std::uint32_t>               g_soundLines{ 0 };
 	std::atomic<std::uint32_t>               g_codeCalls{ 0 };          // calls of the stand-in's functions, logged up to kMaxCodeCalls
 	std::atomic<const void*>                 g_codeObjMovie{ nullptr }; // the movie the stand-in is set on (done for it)
 	std::atomic<const void*>                 g_codeObjTriedMovie{ nullptr };
@@ -3291,6 +3310,191 @@ namespace
 	// closes it). A name not listed is not there, as for a movie with no engine object.
 	void Close(std::uint32_t a_n, const char* a_by);
 
+	// FAL-614 proof 1d (CodeObjSound=1, with CodeObj=1): route S2. The stand-in's PlaySound plays the player's own
+	// converted file <dll folder>/FO4SFPipboyMenuSounds/<name>.wav through Windows audio. Read D4: the boot sequence's
+	// three sounds are SNDR records whose files sit in Fallout4 - Sounds.ba2 as XWMA, mono, 44100 Hz; the PC converts
+	// them to PCM 16 bit WAVE, named by the editor id the movie passes, and they never enter Git. Each call plays on a
+	// waveOut stream and a thread of its own, so the sounds overlap and Windows mixes them (each runs about a second
+	// into the next), and closing the menu does not cut one (C ends about 2 s after HideMenu). It does not follow the
+	// game's volume sliders.
+#pragma pack(push, 1)
+	struct WaveFormat   // WAVEFORMATEX
+	{
+		std::uint16_t tag;
+		std::uint16_t channels;
+		std::uint32_t rate;
+		std::uint32_t bytesPerSecond;
+		std::uint16_t blockAlign;
+		std::uint16_t bits;
+		std::uint16_t extra;
+	};
+#pragma pack(pop)
+	static_assert(sizeof(WaveFormat) == 18);
+
+	struct WaveHeader   // WAVEHDR
+	{
+		char*          data;
+		std::uint32_t  length;
+		std::uint32_t  recorded;
+		std::uintptr_t user;
+		std::uint32_t  flags;
+		std::uint32_t  loops;
+		WaveHeader*    next;
+		std::uintptr_t reserved;
+	};
+	static_assert(sizeof(WaveHeader) == 48);
+	constexpr std::uint32_t kWaveMapper = 0xFFFFFFFF;   // WAVE_MAPPER: the default output
+	constexpr std::uint32_t kWaveHeaderDone = 0x1;      // WHDR_DONE
+
+	// why the file is not PCM 16 bit RIFF/WAVE with 1 or 2 channels (empty: it is), with its format and the data's place;
+	// the chunks are walked by their sizes, "fmt " before "data", the data cut to whole frames and to the file
+	std::string WaveProblem(const std::vector<char>& a_file, WaveFormat& a_wave, std::size_t& a_at, std::size_t& a_bytes)
+	{
+		const auto u32 = [&](std::size_t a_p) {
+			std::uint32_t v;
+			std::memcpy(&v, a_file.data() + a_p, sizeof v);
+			return v;
+		};
+		if (a_file.size() < 12 || std::memcmp(a_file.data(), "RIFF", 4) != 0 || std::memcmp(a_file.data() + 8, "WAVE", 4) != 0) {
+			return "not_riff_wave";
+		}
+		bool fmt = false;
+		a_bytes = 0;
+		for (std::size_t p = 12; p + 8 <= a_file.size();) {
+			const std::size_t size = u32(p + 4);
+			const auto        body = p + 8;
+			const auto        room = a_file.size() - body;
+			if (std::memcmp(a_file.data() + p, "fmt ", 4) == 0 && size >= 16 && size <= room) {
+				std::memcpy(&a_wave, a_file.data() + body, 16);
+				a_wave.extra = 0;
+				fmt = true;
+			} else if (std::memcmp(a_file.data() + p, "data", 4) == 0 && fmt) {
+				a_at = body;
+				a_bytes = std::min(size, room);
+				break;
+			}
+			if (size > room) {
+				break;
+			}
+			p = body + size + (size & 1);
+		}
+		if (!fmt) {
+			return "no_fmt";
+		}
+		if (a_wave.tag != 1 || a_wave.bits != 16) {   // read D4's XWMA is 0x0161: converted on the PC first
+			return std::format("not_pcm16 tag={} bits={}", Hex(a_wave.tag), a_wave.bits);
+		}
+		if (a_wave.channels < 1 || a_wave.channels > 2 || a_wave.rate < 8000 || a_wave.rate > 192000 ||
+			a_wave.blockAlign != a_wave.channels * 2) {
+			return std::format("bad_format channels={} rate={} block_align={}", a_wave.channels, a_wave.rate, a_wave.blockAlign);
+		}
+		a_bytes -= a_bytes % a_wave.blockAlign;
+		if (a_bytes == 0 || a_bytes > 0xFFFFFFFFu) {
+			return "no_data";
+		}
+		a_wave.bytesPerSecond = a_wave.rate * a_wave.blockAlign;
+		return {};
+	}
+
+	struct Sound
+	{
+		std::uint32_t n;
+		std::string   name;
+	};
+
+	// one sound, start to end, on its own thread: read, check, play, wait for the end, close
+	std::uint32_t SoundThread(void* a_sound)
+	{
+		const std::unique_ptr<Sound> sound(static_cast<Sound*>(a_sound));
+		const auto                   start = std::chrono::steady_clock::now();
+		const auto                   ms = [&]() {
+			return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+		};
+		const auto line = [&](std::string_view a_result, const std::string& a_more) {
+			if (++g_soundLines <= kMaxSoundLines) {
+				REX::INFO("step=sound n={} name={} result={}{}", sound->n, sound->name, a_result, a_more);
+			}
+		};
+		const auto end = [&](std::string_view a_result, const std::string& a_more) {
+			line(a_result, a_more);
+			--g_soundsPlaying;
+			return 0u;
+		};
+		std::ifstream in(g_soundDir / (sound->name + ".wav"), std::ios::binary | std::ios::ate);
+		if (!in) {
+			return end("missing", std::format(" file={}/{}.wav", kSoundFolder, sound->name));
+		}
+		const auto size = static_cast<std::streamoff>(in.tellg());
+		if (size <= 0 || static_cast<std::size_t>(size) > kMaxSoundBytes) {
+			return end("bad_size", std::format(" bytes={}", static_cast<long long>(size)));
+		}
+		std::vector<char> file(static_cast<std::size_t>(size));
+		in.seekg(0);
+		if (!in.read(file.data(), size)) {
+			return end("unreadable", "");
+		}
+		WaveFormat  wave{};
+		std::size_t at = 0;
+		std::size_t bytes = 0;
+		if (const auto why = WaveProblem(file, wave, at, bytes); !why.empty()) {
+			return end(why, "");
+		}
+		const auto length = bytes * 1000 / wave.bytesPerSecond;
+		void*      out = nullptr;
+		if (const auto r = W32_IMPL_waveOutOpen(&out, kWaveMapper, &wave, std::uintptr_t{ 0 }, std::uintptr_t{ 0 }, 0u); r != 0) {
+			return end("open_failed", std::format(" mmresult={}", r));
+		}
+		WaveHeader header{};
+		header.data = file.data() + at;
+		header.length = static_cast<std::uint32_t>(bytes);
+		auto r = W32_IMPL_waveOutPrepareHeader(out, &header, static_cast<std::uint32_t>(sizeof header));
+		if (r == 0) {
+			r = W32_IMPL_waveOutWrite(out, &header, static_cast<std::uint32_t>(sizeof header));
+		}
+		if (r == 0) {
+			line("start", std::format(" rate={} channels={} ms={} playing={}", wave.rate, wave.channels, length, g_soundsPlaying.load()));
+			const std::atomic_ref<std::uint32_t> flags(header.flags);   // Windows sets WHDR_DONE from its own thread
+			while (!(flags.load() & kWaveHeaderDone) && ms() < static_cast<long long>(length) + 2000) {
+				REX::W32::Sleep(20);
+			}
+		}
+		W32_IMPL_waveOutReset(out);
+		W32_IMPL_waveOutUnprepareHeader(out, &header, static_cast<std::uint32_t>(sizeof header));
+		W32_IMPL_waveOutClose(out);
+		return r == 0 ? end("end", std::format(" took_ms={}", ms())) : end("write_failed", std::format(" mmresult={}", r));
+	}
+
+	// the stand-in's PlaySound with CodeObjSound=1: its first argument names the file (1 to 64 letters, digits and _)
+	void StartSound(std::uint32_t a_n, const RE::Scaleform::GFx::Value* a_arg)
+	{
+		std::string name = a_arg && a_arg->IsString() ? std::string(a_arg->GetString()) : std::string();
+		const bool  ok = !name.empty() && name.size() <= kMaxName && std::ranges::all_of(name, [](char a_c) {
+			return (a_c >= 'A' && a_c <= 'Z') || (a_c >= 'a' && a_c <= 'z') || (a_c >= '0' && a_c <= '9') || a_c == '_';
+		});
+		if (!ok) {
+			if (++g_soundLines <= kMaxSoundLines) {
+				REX::INFO("step=sound n={} result=bad_name", a_n);
+			}
+			return;
+		}
+		if (++g_soundsPlaying > kMaxSoundsPlaying) {
+			--g_soundsPlaying;
+			if (++g_soundLines <= kMaxSoundLines) {
+				REX::INFO("step=sound n={} name={} result=busy playing={}", a_n, name, kMaxSoundsPlaying);
+			}
+			return;
+		}
+		auto       sound = std::make_unique<Sound>(Sound{ a_n, std::move(name) });
+		const auto thread = REX::W32::CreateThread(nullptr, 0, &SoundThread, sound.get(), 0, nullptr);
+		if (!thread) {
+			--g_soundsPlaying;
+			REX::INFO("step=sound n={} name={} result=no_thread", a_n, sound->name);
+			return;
+		}
+		sound.release();   // the thread owns it now
+		REX::W32::CloseHandle(thread);
+	}
+
 	class CodeObjFunction final : public RE::Scaleform::GFx::FunctionHandler
 	{
 	public:
@@ -3312,6 +3516,10 @@ namespace
 			// button and F10 do; every other name only logs
 			if (g_codeObjHide && _name == "HideMenu" && g_task) {
 				g_task->AddTask([n]() { Close(n, "hide_menu"); });
+			}
+			// FAL-614 proof 1d (CodeObjSound=1): the movie's PlaySound plays the player's converted file, off this thread
+			if (g_codeObjSound && _name == "PlaySound") {
+				StartSound(n, a_params.argCount > 0 ? &a_params.args[0] : nullptr);
 			}
 		}
 
@@ -4133,6 +4341,7 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	g_movie = ReadText(ini, L"Movie");   // FAL-614: checked below, after the stage
 	g_codeObj = ReadNumber(ini, L"CodeObj", 0) != 0;   // FAL-614 proof 1b: with Movie= only
 	g_codeObjHide = ReadNumber(ini, L"CodeObjHide", 0) != 0;   // FAL-614 proof 1c: with CodeObj=1 only
+	g_codeObjSound = ReadNumber(ini, L"CodeObjSound", 0) != 0;   // FAL-614 proof 1d: with CodeObj=1 only
 	// FAL-414: up to four keyboard ids that close the menu while it is open (0 = unused)
 	g_cancelCodes = { ReadNumber(ini, L"CancelCode1", 0x1B), ReadNumber(ini, L"CancelCode2", 0x09), ReadNumber(ini, L"CancelCode3", 0),
 		ReadNumber(ini, L"CancelCode4", 0) };
@@ -4170,6 +4379,16 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	if (g_codeObjHide && !g_codeObj) {
 		Refuse("ini", "code_obj_hide=1 (with CodeObj=1 only)");
 		return true;
+	}
+	// FAL-614 proof 1d: CodeObjSound=1, with CodeObj=1 and PlaySound among its names
+	if (g_codeObjSound && (!g_codeObj || std::ranges::find(g_codeObjNames.begin(), g_codeObjNames.begin() + g_codeObjCount,
+	                                         std::string("PlaySound")) == g_codeObjNames.begin() + g_codeObjCount)) {
+		Refuse("ini", "code_obj_sound=1 (with CodeObj=1 and PlaySound in CodeObjNames only)");
+		return true;
+	}
+	if (g_codeObjSound) {
+		g_soundDir = dir / kSoundFolder;
+		REX::INFO("step=code_obj_sound folder={} max_playing={}", kSoundFolder, kMaxSoundsPlaying);
 	}
 	std::string clickCall;
 	bool        clickCallOk = true;

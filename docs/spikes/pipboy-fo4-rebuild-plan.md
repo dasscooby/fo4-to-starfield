@@ -467,6 +467,39 @@ the player's `Fallout4.esm` is a **hypothesis**; D4 settles it and names the fil
 - If D4 shows `XWMA`, the PC converts it to plain `WAVE` with its own tool first; no audio enters Git, a task or a
   receipt.
 
+**Read D4, the result (owner PC, 13 Nov, at `df7e5c0f`): verified.** The hypothesis holds: three `SNDR` records,
+`0CAC68`, `0CAC69` and `0CAC6A`, each with one `ANAM` naming
+`data\Sound\FX\UI\PipBoy\BootSequence\UI_PipBoy_BootSequence_A.wav` (and `_B`, `_C`). `Fallout4 - Sounds.ba2`
+holds them as `.xwm`: `RIFF`/`XWMA`, format tag `0x0161`, mono, 44100 Hz, 16 bit, about 5.95, 6.32 and 7.06 seconds.
+With the calls at 0, +5.1 and +10.4 seconds, each sound runs about a second into the next, and C ends about 2 seconds
+after the movie's `HideMenu` at +15.4. So the player must mix, not cut, and closing the menu must not stop C. A record
+names `.wav` where the archive holds `.xwm`: the PC's extraction looks for the `.xwm`. No xWMA converter is on the PC
+yet; a download (ffmpeg, kept on the PC) waits for the owner's yes.
+
+**Proof 1d, the card: the three sounds by route S2.** Plugin code, so the PC rebuilds. `CodeObjSound=1` (with
+`CodeObj=1` and `PlaySound` among its names only): the stand-in's `PlaySound` still logs, then plays the player's own
+converted file `FO4SFPipboyMenuSounds\<arg0>.wav` beside the dll, through Windows audio (waveOut), one stream and one
+thread per call, so overlapping sounds mix and closing the menu does not cut one; at most 4 at once. The file must be
+PCM 16 bit `RIFF`/`WAVE` with 1 or 2 channels; anything else (an unconverted `XWMA` too) is logged and not played.
+It does not follow the game's volume sliders. The steps, once the owner has said yes to the converter:
+1. On the PC only: take `UI_PipBoy_BootSequence_A.xwm`, `_B` and `_C` from `Fallout4 - Sounds.ba2` and convert each to
+   PCM 16 bit WAVE, named by the editor id the movie passes, into `Data\SFSE\Plugins\FO4SFPipboyMenuSounds\` beside
+   the dll: `UIPipBoyBootSequenceA.wav`, `UIPipBoyBootSequenceB.wav`, `UIPipBoyBootSequenceC.wav` (for example
+   `ffmpeg -i UI_PipBoy_BootSequence_A.xwm -c:a pcm_s16le UIPipBoyBootSequenceA.wav`). The folder is the player's; no
+   installer here writes or removes it, and none of it enters Git, a task or a receipt.
+2. Install as for proof 1c (`--extra-movie FO4SF_Fo4Boot`).
+3. `Stage=2`, `Movie=FO4SF_Fo4Boot`, `CodeObj=1`, `CodeObjHide=1`, `CodeObjSound=1`, `CodeObjNames=` empty.
+4. Outdoors: F10, then wait 25 seconds without pressing anything, listening.
+5. Send the `step=code_obj_sound`, `step=code_call`, `step=sound` and `step=close` lines, and say what was heard.
+
+PASS: `step=code_obj_sound folder=FO4SFPipboyMenuSounds max_playing=4` at load; for each of A, B and C a
+`step=sound ... result=start rate=44100 channels=1 ms=<about 5950, 6320, 7060>` within a few milliseconds of its
+`code_call`, then `result=end`; B starts while A plays (`playing=2`); `step=close ... by=hide_menu` at about +15.4
+seconds and C's `result=end` about 2 seconds after it; the three sounds heard in time with the text, the last one not
+cut; no crash. Other outcomes: `missing` (the file's name or folder), `not_pcm16` or `not_riff_wave` (not converted),
+`open_failed` (no audio device for that format), no `step=sound` at all (`CodeObjSound` not read: check the
+`refuse` lines).
+
 **Proof 2, the outline (route A): the STAT page.** Each step has its own card once the one before it has run.
 - **2a, the page alone:** `Movie=FO4SF_Fo4Stats`, the player's `Pipboy_StatsPage.swf` installed with
   `--extra-movie FO4SF_Fo4Stats`, and `CodeObj=1` with the page's own names in `CodeObjNames`. Shows: the page's frame
@@ -571,6 +604,7 @@ delivery.
 1. Done: D1 and D3 (13 Nov).
 2. Done: D2 and proof 1 (13 Nov): route A is alive.
 3. Done: proof 1b (13 Nov, third run) and proof 1c (13 Nov, `CodeObjHide=1`).
-4. The owner PC runs read D4 (the three sounds' records and file headers). Then proof 1d, the sounds by route S2.
+4. Done: read D4 (13 Nov). Proof 1d, the sounds by route S2: its card is written; the PC converts once the owner
+   has said yes to the converter, rebuilds and runs it.
 5. Then proof 2a and 2b, the STAT page by route A, each with its own card, tests, a CARRY line, the Scribe's review,
    and the PC's run.
