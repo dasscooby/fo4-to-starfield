@@ -44,7 +44,7 @@ class PipboyDeviceRaiseTest(unittest.TestCase):
         self.assertIn("if (g_device && !CheckDeviceId(dir / \"versionlib-1-16-244-0.bin\")) {", load)
         thread = function(self.src, "std::uint32_t KeyThread(")
         self.assertIn("if (g_device) {   // FAL-714", thread)
-        self.assertEqual(thread.count("DeviceRaise("), 1)
+        self.assertEqual(thread.count("DeviceRaise("), 2)   # the first try and the tick's retry (FAL-725)
         message = function(self.src, "RE::UI_MESSAGE_RESULT MenuProcessMessage(")
         self.assertEqual(message.count("if (g_device) {"), 2)
         for call in ("DevicePlace(", "DeviceLower(", "g_deviceShown = "):
@@ -175,11 +175,12 @@ class PipboyDeviceRaiseTest(unittest.TestCase):
 
     def test_sequence_raise_then_show_after_the_hold(self):
         thread = function(self.src, "std::uint32_t KeyThread(")
-        raise_at = thread.index("g_task->AddTask([n]() { DeviceRaise(n); });")
-        sleep_at = thread.index("REX::W32::Sleep(g_deviceRaiseMs);")
-        show_at = thread.index("g_task->AddTask([n]() { DeviceShow(n); });")
-        self.assertLess(raise_at, sleep_at)
-        self.assertLess(sleep_at, show_at)
+        # FAL-725: the show is due DeviceRaiseMs after the accepted (or given-up) raise, queued on the tick
+        self.assertIn("DeviceRetryStart(g_raiseRetry, n);\n\t\t\t\t\t\t\tg_task->AddTask([n]() { DeviceRaise(n); });", thread)
+        self.assertIn("g_task->AddTask([sn]() { DeviceShow(sn); });", thread)
+        self.assertIn("g_deviceShowAt.compare_exchange_strong(showAt, 0)", thread)
+        raise_ = function(self.src, "void DeviceRaise(")
+        self.assertEqual(raise_.count("g_deviceShowAt = NowMs() + g_deviceRaiseMs;"), 2)   # retry 0, and the outcome
         self.assertIn('g_task->AddTask([n]() { Close(n, "device"); });', thread)
         self.assertIn("if (at < g_deviceLowerUntil.load()) {", thread)
         show = function(self.src, "void DeviceShow(")
@@ -198,6 +199,87 @@ class PipboyDeviceRaiseTest(unittest.TestCase):
         lower = function(self.src, "void DeviceLower(")
         self.assertIn("g_deviceLowerUntil = NowMs() + g_deviceLowerMs;", lower)
         self.assertIn("DeviceNotify(g_lowerIdle)", lower)
+        # FAL-725: pending from kHide, before the first try is queued
+        self.assertLess(hide.index("DeviceRetryStart(g_lowerRetry, n);"), hide.index("DeviceLower(n); });"))
+
+    # ------------------------------------------------------------------ FAL-725 (rev 9): the retries
+    def test_retry_ms_ini_default_and_range(self):
+        self.assertIn("\nDeviceRetryMs=2000\n", self.ini)
+        read = function(self.src, "bool ReadDevice(")
+        self.assertIn('g_deviceRetryMs = ReadNumber(a_ini, L"DeviceRetryMs", 2000);', read)
+        self.assertIn("g_deviceRetryMs > kMaxDeviceMs", read)
+        self.assertIn("constexpr std::uint32_t kMaxDeviceMs = 5000;", self.src)
+        self.assertIn("constexpr std::int64_t  kDeviceRetryEveryMs = 100;", self.src)
+        self.assertIn("`DeviceRetryMs`", self.readme)
+
+    def test_retry_only_on_zero_and_stops_on_one_deadline_or_stop_words(self):
+        outcome = function(self.src, "std::string DeviceRetryOutcome(")
+        self.assertIn('if (a_result == "0" && now + kDeviceRetryEveryMs <= a_retry.deadline.load()) {', outcome)
+        self.assertIn("a_retry.nextAt = now + kDeviceRetryEveryMs;", outcome)
+        self.assertIn("a_retry.state = kRetryWaiting;", outcome)
+        self.assertIn('return a_result == "0" ? std::string("gave_up") : a_result;', outcome)
+        # anything but "0" ends it: "1", holder_changed and no_player (DeviceNotify's words) and refused
+        notify = function(self.src, "std::string DeviceNotify(")
+        for word in ('"no_player"', '"holder_changed"', 'sent ? "1" : "0"'):
+            self.assertIn(word, notify)
+        start = function(self.src, "void DeviceRetryStart(")
+        self.assertIn("a_retry.deadline = now + g_deviceRetryMs;", start)
+        # the tick queues a waiting retry once (waiting -> in flight), from the key thread; no new thread
+        thread = function(self.src, "std::uint32_t KeyThread(")
+        self.assertIn("retry->state.compare_exchange_strong(waiting, kRetryInFlight)", thread)
+        self.assertIn("tick >= retry->nextAt.load()", thread)
+        self.assertIn("g_task->AddTask([rn]() { DeviceRaise(rn); });", thread)
+        self.assertIn("g_task->AddTask([rn]() { DeviceLower(rn); });", thread)
+        self.assertEqual(self.src.count("CreateThread("), 1)
+
+    def test_one_done_line_per_send_and_none_per_retry(self):
+        for name, step in (("void DeviceRaise(", "device_raise"), ("void DeviceLower(", "device_lower")):
+            body = function(self.src, name)
+            done = re.findall(r'"step=' + step + r'_done [^"]*"', body)
+            self.assertEqual(len(done), 1, name)
+            for field in ("tries=", "waited_ms=", "t_ms="):
+                self.assertIn(field, done[0], (name, field))
+            first = re.findall(r'"step=' + step + r' [^"]*"', body)
+            self.assertEqual(len(first), 1, name)
+            self.assertIn("try=1", first[0])
+            self.assertIn("if (tries == 1) {\n\t\t\tREX::INFO(\"step=" + step + " ", body)
+            self.assertIn("if (outcome.empty()) {\n\t\t\treturn;\n\t\t}", body)   # a try still due: no line
+            self.assertIn(step + "_done", self.readme)
+
+    def test_lock_only_on_the_accepted_lower(self):
+        lower = function(self.src, "void DeviceLower(")
+        self.assertEqual(lower.count("g_deviceLowerUntil = "), 2)
+        retry0 = lower.index("if (g_deviceRetryMs == 0) {")
+        accepted = lower.index('if (outcome == "1") {')
+        for at in [m.start() for m in re.finditer("g_deviceLowerUntil = ", lower)]:
+            self.assertTrue(retry0 < at < retry0 + 120 or accepted < at < accepted + 160, at)
+        self.assertNotIn("g_deviceLowerUntil", function(self.src, "RE::UI_MESSAGE_RESULT MenuProcessMessage("))
+        self.assertNotIn("g_deviceLowerUntil = ", function(self.src, "std::uint32_t KeyThread("))
+
+    def test_device_key_ignored_while_a_lower_is_pending(self):
+        thread = function(self.src, "std::uint32_t KeyThread(")
+        pending = thread.index("if (g_lowerRetry.state.load() != kRetryIdle) {")
+        self.assertIn('"step=device_key ignored=lowering pending=1 t_ms={}"', thread)
+        self.assertLess(pending, thread.index("const auto n = ++presses;\n\t\t\t\t\t\tg_devicePressAt = at;"))
+        self.assertIn('"step=device_key ignored=opening pending=1 t_ms={}"', thread)
+
+    def test_no_device_sleep_left(self):
+        thread = function(self.src, "std::uint32_t KeyThread(")
+        device = thread[thread.index("if (g_device) {   // FAL-714"):thread.index("deviceDown = deviceNow;")]
+        self.assertNotIn("Sleep(", device)
+        self.assertNotIn("Sleep(g_deviceRaiseMs)", self.src)
+        self.assertIn("deviceCheckAt = tick + 750;", device)
+        self.assertIn("g_task->AddTask([cn]() { CheckState(cn); });", device)
+
+    def test_retry_zero_keeps_one_send_and_the_lock_from_the_close(self):
+        raise_ = function(self.src, "void DeviceRaise(")
+        zero = raise_[raise_.index("if (g_deviceRetryMs == 0) {"):]
+        self.assertLess(zero.index("g_raiseRetry.state = kRetryIdle;"), zero.index("return;"))
+        self.assertLess(zero.index("return;"), zero.index("DeviceRetryOutcome("))
+        lower = function(self.src, "void DeviceLower(")
+        zero = lower[lower.index("if (g_deviceRetryMs == 0) {"):]
+        self.assertTrue(zero.startswith("if (g_deviceRetryMs == 0) {\n\t\t\tg_deviceLowerUntil = NowMs() + g_deviceLowerMs;"))
+        self.assertLess(lower.index("if (g_deviceRetryMs == 0) {\n\t\t\treturn;"), lower.index("DeviceRetryOutcome("))
 
     def test_key_opens_reset_the_root_to_the_full_screen(self):
         place = function(self.src, "void DevicePlace(")

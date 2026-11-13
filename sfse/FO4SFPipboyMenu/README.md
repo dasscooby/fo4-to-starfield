@@ -399,7 +399,8 @@ id, never by form id, and touches neither the camera nor the FOV.
 | `DeviceRaiseIdle` | `Human_1stPersonRoot_DataSlateOpen` | the raise idle's editor id |
 | `DeviceLowerIdle` | `Human_1stPersonRoot_DataSlateClose` | the lower idle's editor id |
 | `DeviceRaiseMs` | `900` | hold before the kit opens (Fallout 4's 0.867 s up, rounded to the 30 ms poll); 0 to 5000 |
-| `DeviceLowerMs` | `700` | `DeviceKey` ignored this long after a lower (Fallout 4's 0.667 s down); 0 to 5000 |
+| `DeviceLowerMs` | `700` | `DeviceKey` ignored this long after the accepted lower (Fallout 4's 0.667 s down); 0 to 5000 |
+| `DeviceRetryMs` | `2000` | a raise or lower the player's graph refuses (`result=0`) is sent again every 100 ms (`kDeviceRetryEveryMs`) for up to this long; 0 to 5000. `0` = one send and the lock from the close, as at b89ead09 |
 | `DeviceBox` | `0.078,0.271,0.309` | left and top as fractions of the 1920x1080 stage, and the scale; the box stays inside the stage |
 
 **Checked first (at load, `Device=1`):** the keys as above, then `TESForm::LookupByEditorID` (libxse 9d090c4 id 47403)
@@ -421,13 +422,25 @@ list so that `Device=0` reads and logs exactly the ids it did before. No SFSE ad
    path and the raise gave `result=0`; the Sep 2025 header has 0x60/0x68. An event that looks like a path (a `\` or
    `/`, or ending `.agx`, `.hkx` or `.hkt`) is refused: `refuse step=device_idle ... reason=event_is_path slot=0x70
    value=`. This line also says which form id the console's numeric `playidle` should have reached.
-3. The raise: the idle's own animation event to the player, `step=device_raise n= result=1|0 t_ms=`.
-4. `DeviceRaiseMs` later: `step=device_show n= sent=show t_ms=` (the usual `step=toggle` with it), and in our kShow
+3. The raise: the idle's own animation event to the player, `step=device_raise n= result=1|0 try=1 t_ms=`. A `0` is
+   sent again every 100 ms until the graph takes it or `DeviceRetryMs` has passed, with no line per retry and then one
+   closing line: `step=device_raise_done n= result=1|gave_up tries= waited_ms= t_ms=`. `holder_changed`, `no_player`
+   or `refused` end it at once (`result=` that word).
+4. `DeviceRaiseMs` after the accepted (or given-up) raise: `step=device_show n= sent=show raise=1|gave_up t_ms=` (the
+   usual `step=toggle` with it); on `gave_up` the kit still opens (the arm is most likely already up). In our kShow
    handling, after the kit's own: `step=device_box by=device root=1 set=4 back=4 x=149.76 y=292.68 scale=0.309`.
    When `Key` (F10) opens the kit instead, the root is reset: `by=key ... x=0.00 y=0.00 scale=1.000`.
 5. A close by any route (`DeviceKey` again, `Key`, Tab or Esc, CLOSE) of a menu opened as the device: from our kHide
-   handling, `step=device_lower n= result= lock_ms= t_ms=`; `DeviceKey` is then ignored for `DeviceLowerMs`
-   (`step=device_key ignored=lowering`).
+   handling, `step=device_lower n= result= try=1 lock_ms= t_ms=`, retried in the same way, then
+   `step=device_lower_done n= result=1|gave_up tries= waited_ms= lock_ms= t_ms=`. While it is pending, `DeviceKey` is
+   ignored (`step=device_key ignored=lowering pending=1`); after the accepted lower, for `DeviceLowerMs`
+   (`step=device_key ignored=lowering lock_left_ms=`). After `gave_up` there is no lock, so the next key tries again.
+
+**Retry timing (FAL-725):** the key thread's 30 ms tick queues each due retry, the kit's show and the state check 750
+ms after it, with no sleep on the device path. While a raise, its show or that check is due, `DeviceKey` is ignored
+(`step=device_key ignored=opening pending=1`). The `waited_ms` values measure how long the graph takes to accept the
+close after the raise looks finished, and a raise after the close. The other keys' paths (Key, CLOSE, Tab or Esc)
+still wait 750 ms on the key thread after their close, so a retry due in that wait goes out when it ends.
 
 Not in this step: no camera or FOV write, no second menu name, no power-armor check, no Tab binding, no model on the
 arm. The lower's own duration is not measured (no menu is open to pause it).
@@ -765,7 +778,8 @@ menu and the pause menu open.
 | `refuse step=device_holder reason=...` | (e), `Device=1`: the player's animation-graph holder is not at +0x60 or its slots are not as declared; no raise or lower is sent, and the kit does not open on `DeviceKey` | report the line (its slots and targets) |
 | `refuse step=device_idle which=<w> reason=not_found` / `not_idle` / `no_event` | (e), `Device=1`: that editor id gave no form, another type, or no animation event | report the line |
 | `refuse step=device_idle ... reason=event_is_path slot=0x70 value=<v>` | (e), `Device=1`: the slot read as the event holds a file path, so the offset is wrong for this build | read `step=device_idle_slots`: the slot that holds an event-like name is where `kIdleEventAt` goes |
-| `step=device_raise ... result=0` | (e): the player's graph did not take the event | B1 |
+| `step=device_raise_done ... result=gave_up` | (e): the player's graph refused the raise for all of `DeviceRetryMs` | report `tries=` and `waited_ms=`; after an accepted lower, the cap is short or the graph needs its own return event |
+| `step=device_lower_done ... result=gave_up` | (e): the graph refused the close for all of `DeviceRetryMs`; no lock, the arm stays up | another close event, or B1 |
 | `step=device_box ... back=<4` | (e): the root did not take its place or scale | B2 |
 
 The probe changes no Starfield interface file, and nothing it makes goes into Git: no dll, no movie, no archive.

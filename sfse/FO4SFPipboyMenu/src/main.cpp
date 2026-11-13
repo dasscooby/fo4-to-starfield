@@ -271,7 +271,8 @@ namespace
 	constexpr std::size_t   kNotifyGraphSlot = 0x01;         // libxse IAnimationGraphManagerHolder::NotifyAnimationGraphImpl
 	constexpr std::size_t   kMaxIdleName = 96;               // an idle's editor id in the ini: letters, digits, '_'
 	constexpr std::uint32_t kMaxDeviceMs = 5000;             // DeviceRaiseMs and DeviceLowerMs, at most
-	constexpr std::uint32_t kQuickSaveKey = 0x74;            // FAL-719: F5, the game's Quick Save; DeviceKey refuses it
+	constexpr std::int64_t  kDeviceRetryEveryMs = 100;       // FAL-725: a refused raise or lower is resent this often
+	constexpr std::uint32_t kQuickSaveKey = 0x74;           // FAL-719: F5, the game's Quick Save; DeviceKey refuses it
 	constexpr std::uint32_t kQuickLoadKey = 0x78;            //   and F9, its Quick Load (the 3b session at 6040290d)
 	constexpr double        kStageWidth = 1920.0;            // make_pipboy_kit.py STAGE: DeviceBox is in its fractions
 	constexpr double        kStageHeight = 1080.0;
@@ -487,6 +488,30 @@ namespace
 	std::atomic<std::int64_t>                g_devicePressAt{ 0 };     // the last DeviceKey press, steady clock ms
 	std::atomic<std::uint32_t>               g_deviceN{ 0 };           // that press's n
 	std::atomic<std::int64_t>                g_deviceLowerUntil{ 0 };  // DeviceKey ignored until then (DeviceLowerMs)
+	std::uint32_t                            g_deviceRetryMs = 2000;   // FAL-725: a refused raise or lower is resent this long
+
+	// FAL-725: one pending send (the raise or the lower). The main thread sends and writes the outcome; the key thread's
+	// 30 ms tick queues the next try at nextAt. kIdle: nothing pending; kInFlight: a try is queued on the main thread;
+	// kWaiting: the last try gave 0 and the next is due at nextAt
+	enum : int
+	{
+		kRetryIdle,
+		kRetryInFlight,
+		kRetryWaiting
+	};
+	struct DeviceRetry
+	{
+		std::atomic<int>           state{ kRetryIdle };
+		std::atomic<std::uint32_t> n{ 0 };
+		std::atomic<std::int64_t>  firstAt{ 0 };    // the first try, steady ms
+		std::atomic<std::int64_t>  nextAt{ 0 };
+		std::atomic<std::int64_t>  deadline{ 0 };   // firstAt + DeviceRetryMs
+		std::atomic<std::uint32_t> tries{ 0 };
+	};
+	DeviceRetry                              g_raiseRetry;
+	DeviceRetry                              g_lowerRetry;
+	std::atomic<std::int64_t>                g_deviceShowAt{ 0 };      // FAL-725: DeviceShow due (0 = none), set by the raise's outcome
+	std::string                              g_deviceRaiseOutcome;     // main thread only: "1", "gave_up", or a stop word
 	std::atomic<bool>                        g_deviceOpening{ false }; // the next kShow is the device's
 	std::atomic<bool>                        g_asDevice{ false };      // the menu is open as the device
 	std::atomic<bool>                        g_deviceShown{ false };   // our ProcessMessage saw kShow and no kHide since
@@ -1830,23 +1855,89 @@ namespace
 		return sent ? "1" : "0";
 	}
 
-	// main thread: DeviceKey while closed (the key thread opens the kit DeviceRaiseMs later)
-	void DeviceRaise(std::uint32_t a_n)
+	// FAL-725: a pending send begins (the key thread for the raise, our kHide handling for the lower): its first try is
+	// queued on the main thread now, the retries until DeviceRetryMs from now
+	void DeviceRetryStart(DeviceRetry& a_retry, std::uint32_t a_n)
 	{
-		if (!DeviceResolve()) {
-			REX::INFO("step=device_raise n={} result={} t_ms={}", a_n, g_deviceState == 0 ? "refused" : "no_player", SincePress());
-			return;
-		}
-		const auto result = DeviceNotify(g_raiseIdle);
-		REX::INFO("step=device_raise n={} result={} t_ms={}", a_n, result, SincePress());
+		const auto now = NowMs();
+		a_retry.n = a_n;
+		a_retry.firstAt = now;
+		a_retry.nextAt = now;
+		a_retry.deadline = now + g_deviceRetryMs;
+		a_retry.tries = 0;
+		a_retry.state = kRetryInFlight;
 	}
 
-	// main thread: a menu opened as the device was hidden (any route), so the lower; DeviceKey waits DeviceLowerMs
+	// FAL-725, main thread, after a try: "0" (the graph did not take the event; a no-op there) is tried again every
+	// kDeviceRetryEveryMs, on the key thread's tick, while that stays inside DeviceRetryMs. "1", the deadline
+	// ("gave_up") or any other word (holder_changed, no_player, refused) ends it. "" while a try is still due
+	std::string DeviceRetryOutcome(DeviceRetry& a_retry, const std::string& a_result)
+	{
+		const auto now = NowMs();
+		if (a_result == "0" && now + kDeviceRetryEveryMs <= a_retry.deadline.load()) {
+			a_retry.nextAt = now + kDeviceRetryEveryMs;
+			a_retry.state = kRetryWaiting;
+			return {};
+		}
+		a_retry.state = kRetryIdle;
+		return a_result == "0" ? std::string("gave_up") : a_result;
+	}
+
+	// main thread: DeviceKey while closed, and each retry of it. The first try is logged, then one closing line;
+	// DeviceShow is due DeviceRaiseMs after the accepted (or given-up) raise, on the key thread's tick
+	void DeviceRaise(std::uint32_t a_n)
+	{
+		const auto  tries = ++g_raiseRetry.tries;
+		std::string result;
+		if (!DeviceResolve()) {
+			result = g_deviceState == 0 ? "refused" : "no_player";
+		} else {
+			result = DeviceNotify(g_raiseIdle);
+		}
+		if (tries == 1) {
+			REX::INFO("step=device_raise n={} result={} try=1 t_ms={}", a_n, result, SincePress());
+		}
+		if (g_deviceRetryMs == 0) {   // b89ead09's behaviour: one send, the kit DeviceRaiseMs later
+			g_raiseRetry.state = kRetryIdle;
+			g_deviceRaiseOutcome = result;
+			g_deviceShowAt = NowMs() + g_deviceRaiseMs;
+			return;
+		}
+		const auto outcome = DeviceRetryOutcome(g_raiseRetry, result);
+		if (outcome.empty()) {
+			return;
+		}
+		g_deviceRaiseOutcome = outcome;
+		REX::INFO("step=device_raise_done n={} result={} tries={} waited_ms={} t_ms={}", a_n, outcome, tries,
+			NowMs() - g_raiseRetry.firstAt.load(), SincePress());
+		g_deviceShowAt = NowMs() + g_deviceRaiseMs;
+	}
+
+	// main thread: a menu opened as the device was hidden (any route), so the lower, and each retry of it. DeviceKey
+	// waits DeviceLowerMs from the accepted lower (with DeviceRetryMs=0: from this send, as b89ead09)
 	void DeviceLower(std::uint32_t a_n)
 	{
-		g_deviceLowerUntil = NowMs() + g_deviceLowerMs;
+		const auto tries = ++g_lowerRetry.tries;
 		const auto result = g_deviceState == 1 ? DeviceNotify(g_lowerIdle) : std::string("refused");
-		REX::INFO("step=device_lower n={} result={} lock_ms={} t_ms={}", a_n, result, g_deviceLowerMs, SincePress());
+		if (g_deviceRetryMs == 0) {
+			g_deviceLowerUntil = NowMs() + g_deviceLowerMs;
+			g_lowerRetry.state = kRetryIdle;
+		}
+		if (tries == 1) {
+			REX::INFO("step=device_lower n={} result={} try=1 lock_ms={} t_ms={}", a_n, result, g_deviceLowerMs, SincePress());
+		}
+		if (g_deviceRetryMs == 0) {
+			return;
+		}
+		const auto outcome = DeviceRetryOutcome(g_lowerRetry, result);
+		if (outcome.empty()) {
+			return;
+		}
+		if (outcome == "1") {   // the lock counts from the accepted lower; none after gave_up, so the next key tries again
+			g_deviceLowerUntil = NowMs() + g_deviceLowerMs;
+		}
+		REX::INFO("step=device_lower_done n={} result={} tries={} waited_ms={} lock_ms={} t_ms={}", a_n, outcome, tries,
+			NowMs() - g_lowerRetry.firstAt.load(), outcome == "1" ? g_deviceLowerMs : 0, SincePress());
 	}
 
 	// one of the root's numbers set and read back (Scaleform keeps twips: kBoxReadBack)
@@ -3420,6 +3511,7 @@ namespace
 					g_deviceShown = false;
 					if (g_asDevice.exchange(false)) {
 						const auto n = g_deviceN.load();
+						DeviceRetryStart(g_lowerRetry, n);   // FAL-725: pending from here, so DeviceKey waits for it
 						g_task->AddTask([n]() { DeviceLower(n); });
 					}
 				}
@@ -3844,7 +3936,8 @@ namespace
 		}
 		g_deviceOpening = true;
 		Toggle(a_n);
-		REX::INFO("step=device_show n={} sent=show t_ms={}", a_n, SincePress());
+		REX::INFO("step=device_show n={} sent=show raise={} t_ms={}", a_n, g_deviceRaiseOutcome.empty() ? "-" : g_deviceRaiseOutcome,
+			SincePress());
 	}
 
 	void CheckState(std::uint32_t a_n)
@@ -3895,6 +3988,8 @@ namespace
 		bool          down = false;
 		bool          snapDown = false;
 		bool          deviceDown = false;         // FAL-714: DeviceKey
+		std::uint32_t deviceCheckN = 0;           // FAL-725: the device's state check, due on the tick (no sleep)
+		std::int64_t  deviceCheckAt = 0;
 		std::array<std::uint32_t, 6> kitHeld{};   // stage e: how many 30 ms ticks each kit key has been held
 		for (;;) {
 			REX::W32::Sleep(30);
@@ -3917,12 +4012,43 @@ namespace
 				}
 			}
 			if (g_device) {   // FAL-714: DeviceKey raises and opens, or closes (the kHide lowers); ignored while lowering
+				// FAL-725: no sleep on the device path. The tick queues each due retry (DeviceRetry: waiting -> in flight),
+				// the kit's show DeviceRaiseMs after the accepted raise, and the state check 750 ms after a show or close
+				const auto tick = NowMs();
+				for (auto* retry : { &g_raiseRetry, &g_lowerRetry }) {
+					int waiting = kRetryWaiting;
+					if (retry->state.load() == kRetryWaiting && tick >= retry->nextAt.load() &&
+						retry->state.compare_exchange_strong(waiting, kRetryInFlight)) {
+						const auto rn = retry->n.load();
+						if (retry == &g_raiseRetry) {
+							g_task->AddTask([rn]() { DeviceRaise(rn); });
+						} else {
+							g_task->AddTask([rn]() { DeviceLower(rn); });
+						}
+					}
+				}
+				if (auto showAt = g_deviceShowAt.load(); showAt && tick >= showAt && g_deviceShowAt.compare_exchange_strong(showAt, 0)) {
+					const auto sn = g_deviceN.load();
+					g_task->AddTask([sn]() { DeviceShow(sn); });
+					deviceCheckN = sn;
+					deviceCheckAt = tick + 750;   // the engine handles the message on a later frame
+				}
+				if (deviceCheckAt && tick >= deviceCheckAt) {
+					deviceCheckAt = 0;
+					const auto cn = deviceCheckN;
+					g_task->AddTask([cn]() { CheckState(cn); });
+				}
 				const bool deviceNow = (W32_IMPL_GetAsyncKeyState(static_cast<std::int32_t>(g_deviceKey)) & 0x8000) != 0;
 				if (deviceNow && !deviceDown && GameInFront()) {
 					const auto at = NowMs();
-					if (at < g_deviceLowerUntil.load()) {
+					const bool opening = g_raiseRetry.state.load() != kRetryIdle || g_deviceShowAt.load() != 0 || deviceCheckAt != 0;
+					if (g_lowerRetry.state.load() != kRetryIdle) {   // FAL-725: a lower is still being sent
+						REX::INFO("step=device_key ignored=lowering pending=1 t_ms={}", at - g_devicePressAt.load());
+					} else if (at < g_deviceLowerUntil.load()) {
 						REX::INFO("step=device_key ignored=lowering lock_left_ms={} t_ms={}", g_deviceLowerUntil.load() - at,
 							at - g_devicePressAt.load());
+					} else if (opening) {   // FAL-725: a raise, its show or a state check is still due (was the sleep)
+						REX::INFO("step=device_key ignored=opening pending=1 t_ms={}", at - g_devicePressAt.load());
 					} else {
 						const auto n = ++presses;
 						g_devicePressAt = at;
@@ -3931,13 +4057,12 @@ namespace
 						REX::INFO("step=device_key n={} open={} t_ms=0", n, shown ? 1 : 0);
 						if (shown) {
 							g_task->AddTask([n]() { Close(n, "device"); });
+							deviceCheckN = n;
+							deviceCheckAt = at + 750;
 						} else {
+							DeviceRetryStart(g_raiseRetry, n);
 							g_task->AddTask([n]() { DeviceRaise(n); });
-							REX::W32::Sleep(g_deviceRaiseMs);   // the raise plays before the kit opens
-							g_task->AddTask([n]() { DeviceShow(n); });
 						}
-						REX::W32::Sleep(750);   // the engine handles the message on a later frame
-						g_task->AddTask([n]() { CheckState(n); });
 					}
 				}
 				deviceDown = deviceNow;
@@ -4168,18 +4293,19 @@ namespace
 		}
 		g_deviceRaiseMs = ReadNumber(a_ini, L"DeviceRaiseMs", 900);
 		g_deviceLowerMs = ReadNumber(a_ini, L"DeviceLowerMs", 700);
-		if (g_deviceRaiseMs > kMaxDeviceMs || g_deviceLowerMs > kMaxDeviceMs) {
-			return Refuse("ini", std::format("reason=device_ms raise_ms={} lower_ms={} (0 to {})", g_deviceRaiseMs,
-				g_deviceLowerMs, kMaxDeviceMs));
+		g_deviceRetryMs = ReadNumber(a_ini, L"DeviceRetryMs", 2000);   // FAL-725: 0 = one send, as b89ead09
+		if (g_deviceRaiseMs > kMaxDeviceMs || g_deviceLowerMs > kMaxDeviceMs || g_deviceRetryMs > kMaxDeviceMs) {
+			return Refuse("ini", std::format("reason=device_ms raise_ms={} lower_ms={} retry_ms={} (0 to {})", g_deviceRaiseMs,
+				g_deviceLowerMs, g_deviceRetryMs, kMaxDeviceMs));
 		}
 		const auto box = ReadText(a_ini, L"DeviceBox");
 		if (!ParseDeviceBox(box)) {
 			return Refuse("ini", std::format("reason=device_box device_box={} (<left>,<top>,<scale>: inside the stage)", box));
 		}
 		g_device = true;
-		REX::INFO("step=load_device device_key={} raise_idle={} lower_idle={} raise_ms={} lower_ms={} box={:.3f},{:.3f},{:.3f}",
-			Hex(g_deviceKey), g_deviceRaiseIdle, g_deviceLowerIdle, g_deviceRaiseMs, g_deviceLowerMs, g_deviceBox[0],
-			g_deviceBox[1], g_deviceBox[2]);
+		REX::INFO("step=load_device device_key={} raise_idle={} lower_idle={} raise_ms={} lower_ms={} retry_ms={} "
+			"box={:.3f},{:.3f},{:.3f}", Hex(g_deviceKey), g_deviceRaiseIdle, g_deviceLowerIdle, g_deviceRaiseMs, g_deviceLowerMs,
+			g_deviceRetryMs, g_deviceBox[0], g_deviceBox[1], g_deviceBox[2]);
 		return true;
 	}
 
