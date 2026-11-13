@@ -1,6 +1,7 @@
 """Why a door's skinned shapes do not ride its rig: per skinned shape, the bones it uses (name, in the rig plan or not,
 parent node), how many drawn vertices follow each bone, how many blend bones (top weight under 0.99, by bone pair), and the triangles that span
-two or more bones (by bone set, with each bone's own local travel in metres): the ones that keep a shape off the rig.
+two or more bones (by bone set, with how far each pair moves relative to each other over the clips, translation in metres and rotation in
+degrees): the ones that keep a shape off the rig.
 Read-only; prints JSON.
 
   python scripts/door_skin_report.py --fo4-data <Fallout 4 Data> <mesh name, e.g. Meshes\\Interiors\\RedRocket\\Doors\\RedRPedDoor.nif>
@@ -11,7 +12,9 @@ without it, but its plan has no Open clip. The alias, from that table or by hand
 sequence as Open, as the converter's own plan does.
 """
 import argparse
+import itertools
 import json
+import math
 import os
 import re
 import sys
@@ -45,18 +48,59 @@ def spanning(triangles, node_of):
     return dict(out)
 
 
-def local_travel_m(plan, unit=70.0):
-    """{bone node: largest distance in metres between two samples of its own translation track, over all clips}. LOCAL: the bone's
-    motion in its parent's space; a parent's own travel is not added, so a child of a moving bone reads as still (source units / 70)."""
+def bone_poses(plan):
+    """{bone node: [(translation, quaternion_wxyz, scale) in MODEL space, one per sample]} for every bone of the plan, per clip, as
+    {clip name: {...}}. A bone with no track holds its bind; a bone's world pose is its parent's world pose composed with its own local
+    pose (door_rig's frame: translation in source units, parent scale included). Every track of a clip is sampled at the same times."""
+    q_mul, q_rot = door_rig._qmul, door_rig._qrotate
+    bones = plan["bones"]
     out = {}
     for clip in plan["clips"]:
-        for tr in clip["tracks"]:
-            pts = [s["translation_source_units"] for s in tr["samples"]]
-            lo = [min(p[a] for p in pts) for a in range(3)]
-            hi = [max(p[a] for p in pts) for a in range(3)]
-            d = sum((h - l) ** 2 for h, l in zip(hi, lo)) ** 0.5 / unit
-            out[tr["node"]] = max(out.get(tr["node"], 0.0), d)
+        tracks = {tr["node"]: tr["samples"] for tr in clip["tracks"]}
+        count = max((len(s) for s in tracks.values()), default=1)
+        world = {}
+        for i, bone in enumerate(bones):
+            seq = []
+            for n in range(count):
+                if bone.get("node") in tracks:
+                    s = tracks[bone["node"]][min(n, len(tracks[bone["node"]]) - 1)]
+                    lt, lq, ls = s["translation_source_units"], s["quaternion_wxyz"], s["scale"]
+                else:
+                    b = bone["bind"]
+                    lt, lq, ls = b["translation_source_units"], b["quaternion_wxyz"], b["scale"]
+                if bone["parent"] == -1:
+                    seq.append((tuple(lt), tuple(lq), ls))
+                else:
+                    pt, pq, ps = world[bone["parent"]][n]
+                    r = q_rot(pq, [ps * x for x in lt])
+                    seq.append((tuple(p + x for p, x in zip(pt, r)), tuple(q_mul(pq, lq)), ps * ls))
+            world[i] = seq
+        out[clip["name"]] = {bone.get("node"): world[i] for i, bone in enumerate(bones) if bone.get("node") is not None}
     return out
+
+
+def relative_motion(poses, a, b, unit=1.0 / 70.0):
+    """How far bone b moves relative to bone a (a's own frame) over every clip, from its pose at the clip's first sample:
+    {"translation_m": largest change of b's position in a's frame, "rotation_deg": largest turn of b's orientation in a's frame}, or None when
+    either bone is not in the plan. Both 0 means the pair keeps one fixed pose to each other, so a triangle across them is never stretched,
+    whatever each does in the world; a pair that moves apart (two sliding panels) or folds (a hinge) reads above 0, which a per-bone
+    local translation cannot show."""
+    t_max = r_max = 0.0
+    seen = False
+    for clip in poses.values():
+        if a not in clip or b not in clip:
+            return None
+        seen = True
+        rel = []
+        for (ta, qa, sa), (tb, qb, sb) in zip(clip[a], clip[b]):
+            qc = (qa[0], -qa[1], -qa[2], -qa[3])
+            rel.append((tuple(x / (sa or 1.0) for x in door_rig._qrotate(qc, [y - x for x, y in zip(ta, tb)])), tuple(door_rig._qmul(qc, qb))))
+        t0, q0 = rel[0]
+        for tr, q in rel:
+            t_max = max(t_max, sum((x - y) ** 2 for x, y in zip(tr, t0)) ** 0.5 * unit)
+            dot = min(1.0, abs(sum(x * y for x, y in zip(q, q0))))
+            r_max = max(r_max, math.degrees(2 * math.acos(dot)))
+    return {"translation_m": round(t_max, 4), "rotation_deg": round(r_max, 3)} if seen else None
 
 
 def report(src, aliases=None):
@@ -64,7 +108,7 @@ def report(src, aliases=None):
     rig = {b["node"] for b in plan["bones"] if b.get("node") is not None}
     parents = {c: n for n in range(len(src.blocks)) if src.type_of(n).endswith("Node") for c in nif.node_children(src, n)}
     animated = {t["node"] for c in plan["clips"] for t in c["tracks"]}
-    travel = local_travel_m(plan)
+    poses = bone_poses(plan)
 
     def name(b):
         return fo4skin._block_name(src, b).decode("latin-1") if 0 <= b < len(src.blocks) else str(b)
@@ -89,7 +133,8 @@ def report(src, aliases=None):
                                "parent": name(parents[b]) if b in parents else None} for b in skin.bones],
                     "dominant_bone": dict(follow), "blended_vertices": dict(blends),
                     "spanning_triangles": [{"bones": [name(b) for b in nodes], "triangles": n,
-                                            "own_travel_m": [round(travel.get(b, 0.0), 3) for b in nodes]}
+                                            "relative_motion": [{"pair": [name(x), name(y)], **(m if (m := relative_motion(poses, x, y)) else {"not_in_rig": True})}
+                                                                for x, y in itertools.combinations(nodes, 2)]}
                                            for nodes, n in sorted(spanning(s.triangles, node_of).items(), key=lambda kv: -kv[1])]})
     return {"rig_bones": [b["name"] for b in plan["bones"]], "shapes": out}
 
