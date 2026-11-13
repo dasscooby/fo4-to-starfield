@@ -335,7 +335,11 @@ player sees the real boot screen. Proof 2 follows by whichever route proof 1 lea
 built from this branch's head, the probe staged as for `Stage=2`. Nothing of the player's goes into Git.
 1. Stage the probe as usual (`make_pipboy_probe.py stage`). Before packing, copy the player's own
    `Interface\pipboybootsequence.swf`, read from their `Fallout4 - Interface.ba2`, unchanged, into the staged
-   `Data\Interface\` as `FO4SF_Fo4Boot.swf`. Pack as usual. This private archive stays on the PC.
+   `Data\Interface\` as `FO4SF_Fo4Boot.swf`. Install with the one extra movie named:
+   `pipboy_probe_install.py install --dir <stage> --extra-movie FO4SF_Fo4Boot --starfield <game>`. Without
+   `--extra-movie` the installer refuses it as a twin that is not our movie; with it, it checks only the name and that
+   the file reads back as a SWF, packs it into the probe archive and `uninstall` removes it with that archive. This
+   private archive stays on the PC.
 2. In `FO4SFPipboyMenu.ini`: `Stage=2`, `Movie=FO4SF_Fo4Boot`.
 3. Load a save outdoors, press F10, wait 5 seconds, take a screenshot, press F10 again.
 
