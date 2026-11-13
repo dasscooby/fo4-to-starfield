@@ -14,7 +14,7 @@ usage:
   python make_anim_console.py stage --out <new dir> --starfield-data <Starfield Data> --fo4-data <Fallout 4 Data>
          --door-anim-dll <CALUMI.Animation dll> --collision-template <nif> --texconv <texconv.exe> --content-resources <zip>
          --states "Stage1=StateA_Play,Stage2=StateB_Play" [--port-data <dir with FO4Port.esm and its archives>] [--foley <name>]
-         [--model <FO4 mesh path>] [--edid <EditorID>] [--compiler <exe>]
+         [--model <FO4 mesh path>] [--edid <EditorID>] [--compiler <exe>] [--ahead-m <m>] [--up-m <m>] [--side-m <m>]
       1. the plugin tool's `info` on FO4Port.esm (the console base's id and model);
       2. the conversion of the Fallout 4 console (pipeline.Converter.convert_anim_object: model, rig, four clips, materials);
       3. only meshes, geometries and materials go in the kit (textures are not shipped: every texture the conversion wrote must
@@ -82,6 +82,27 @@ def set_base_id(text, base_id):
     if new == text:
         sys.exit("the script has no 'int BaseId = 0 ;BASE' line to put the id into")
     return new
+
+
+SPAWN_LINES = {"ahead": re.compile(r"^float AheadM = [-0-9.]+( +;)", re.M), "up": re.compile(r"^float UpM = [-0-9.]+( +;)", re.M),
+               "side": re.compile(r"^float SideM = [-0-9.]+( +;)", re.M)}
+SPAWN_NAMES = {"ahead": "AheadM", "up": "UpM", "side": "SideM"}
+
+
+def set_spawn(text, ahead=None, up=None, side=None):
+    """The script's text with the spawn distances in metres replaced (FAL-489 lift session 1: a floor 21 m up and 4 to 11 m to a side is out of
+    the camera's view at the console's 1.5 m ahead and 1.2 m up). A distance left None keeps the script's own; a value that is no finite number
+    within 200 m is refused; each line must be there once. Written as a plain literal, the line's comment kept."""
+    for key, value in (("ahead", ahead), ("up", up), ("side", side)):
+        if value is None:
+            continue
+        v = float(value)
+        if not math.isfinite(v) or abs(v) > 200:
+            sys.exit(f"--{key}-m {value!r} is not a finite number of metres within 200")
+        if not SPAWN_LINES[key].search(text):
+            sys.exit(f"the script has no 'float {SPAWN_NAMES[key]} = <number> ;' line to put the distance into")
+        text = SPAWN_LINES[key].sub(lambda m: f"float {SPAWN_NAMES[key]} = {v!r}" + m.group(1), text, count=1)
+    return text
 
 
 def parse_info(text):
@@ -284,6 +305,8 @@ def stage(a, converter=None):
         f.write(wrote + check)
     with open(PSC, encoding="utf-8") as f:
         text = set_base_id(f.read(), info["base_id"])
+    spawn = {k: getattr(a, k + "_m", None) for k in ("ahead", "up", "side")}
+    text = set_spawn(text, **spawn)
     sources = read_sources(a.content_resources)
     src_dir = extract_sources(a.content_resources, work)
     pre = probe_a.precheck_sources(sources, text)
@@ -307,7 +330,7 @@ def stage(a, converter=None):
     with open(os.path.join(out, SCRIPT + ".psc"), "w", encoding="utf-8", newline="\n") as f:
         f.write(final_text)
     manifest = {"original": original, "port_model": info["model"], "base_edid": a.edid, "base_id": info["base_id"],
-                "model": model_path, "states": states, "foley": a.foley or "", "anim": anim, "kit_files": copied,
+                "model": model_path, "states": states, "spawn_m": {k: v for k, v in spawn.items() if v is not None}, "foley": a.foley or "", "anim": anim, "kit_files": copied,
                 "textures_not_shipped": textures}
     with open(os.path.join(out, "anim_manifest.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=1)
@@ -580,6 +603,9 @@ def main(argv=None):
     s.add_argument("--idles", choices=("toggle", "hold"), default="toggle",
                    help="toggle (default, FAL-489 session 7): StateA_Idle = first frame of slot A's clip, StateB_Idle = its last frame, slot B starts from there; "
                         "hold: each Idle holds the last frame of its own Play clip (sessions 1 to 7)")
+    s.add_argument("--ahead-m", type=float, default=None, help="metres in front of the player the copy is spawned (default: the script's 1.5)")
+    s.add_argument("--up-m", type=float, default=None, help="metres above the player's reference (the feet; the session read DZ=1.2 for 1.2) (default: the script's 1.2)")
+    s.add_argument("--side-m", type=float, default=None, help="metres to the player's right for the second copy, stage 11 (default: the script's 0.9)")
     s.add_argument("--model", default="")
     s.add_argument("--edid", default=EDID)
     i = sub.add_parser("inspect")
