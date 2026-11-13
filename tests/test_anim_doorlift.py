@@ -26,6 +26,7 @@ from test_anim_probe import fake_compiler, fake_sources  # noqa: E402
 
 PSC = (ROOT / "scripts" / "newgame" / "FO4SF_AnimDoorLiftQuest.psc").read_text(encoding="utf-8")
 TOOL_SRC = (ROOT / "dotnet" / "AnimDoorLiftControl" / "Program.cs").read_text(encoding="utf-8")
+DOC = (ROOT / "docs" / "research" / "anim-doorlift-control.md").read_text(encoding="utf-8")
 PLUGIN = "FO4SFAnimDoorLift.esm"
 GRAPH_ENTRY = "Meshes\\AnimTextData\\Tables\\Graphs\\GenericOpenClose01.agx"
 ANAM = "AnimTextData\\Tables\\Graphs\\GenericOpenClose01.agx"
@@ -126,19 +127,30 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("        if !nowait\n            LiftRef.Enable(false)", PSC)             # Enable only when the no-wait call was not kept
         self.assertNotIn("LiftRef.EnableNoWait(false)", PSC.replace(";OPT ObjectReference.EnableNoWait         LiftRef.EnableNoWait(false)", ""))   # only as an optional line
 
-    def test_a_call_that_never_returns_cannot_hold_the_poll_and_says_which_step_it_was(self):
-        """PC session 13 Nov 01:20 UTC: the lift stages and stage 40 were silent. Each play stage has its own one-shot timer, and the notices name the step."""
+    def test_the_call_timers_do_not_claim_to_isolate_a_hung_call_and_the_step_notices_come_before_the_step_twice(self):
+        """FAL-629 hold: a native that never returns keeps the script's one stack, so a one-shot timer per stage cannot isolate it. The script must not say it can;
+        the notices before the reading and the call are shown twice (latent wait) BEFORE the step, because nothing repeats them after it starts."""
         step = PSC[PSC.index("Function Step(int stage)"):PSC.index("Function PlayOne(")]
-        self.assertEqual(step.count("StartTimer(CALL_DELAY_S, TIMER_CALL + stage)"), 2)                    # the door's stages and the lift's: only a timer start
+        self.assertEqual(step.count("StartTimer(CALL_DELAY_S, TIMER_CALL + stage)"), 2)
         self.assertLess(PSC.index("aiTimerID == TIMER_RESAY"), PSC.index("aiTimerID >= TIMER_CALL"))       # the id orders: 1, 200, then >= 400, then >= 100
         self.assertLess(PSC.index("aiTimerID >= TIMER_CALL"), PSC.index("aiTimerID >= TIMER_QUIET"))
         self.assertIn("int TIMER_CALL = 400", PSC)
+        self.assertIn("DOES NOT ISOLATE A CALL", PSC)
+        for claim in ("cannot hold the poll", "so a call that hangs cannot", "cannot hold the poll or the other stages"):
+            self.assertNotIn(claim, PSC)
+        i = DOC.index("cannot hold the poll")                                                            # the card quotes the retracted claim once, inside its retraction
+        self.assertEqual(DOC.count("cannot hold the poll"), 1)
+        self.assertIn("that was wrong", DOC[i:i + 120])
+        pre = PSC[PSC.index("Function PreNotice("):PSC.index("Function CallStage(")]
+        self.assertEqual(pre.count("Say("), 2)
+        self.assertEqual(pre.count("Utility.Wait(1.2)"), 2)
         play = PSC[PSC.index("Function PlayOne("):PSC.index("Function Cleanup()")]
-        self.assertEqual(re.findall(r'Say(?:Hold)?\("((?:C s|PLAY )[^"]*)', play), ["C s", "C s", "C s", "PLAY "])
+        self.assertEqual(re.findall(r'(PreNotice|SayHold|Say)\("((?:C s|PLAY )[^"]*)', play), [("PreNotice", "C s"), ("PreNotice", "C s"), ("SayHold", "PLAY ")])
         self.assertLess(play.index('" reading")'), play.index('Reading("before"'))                          # a notice BEFORE the reading ...
         self.assertLess(play.index('" calling")'), play.index("r.PlayAnimation(n)"))                         # ... and BEFORE the call
-        self.assertLess(play.index("StartTimer(LISTEN_S"), play.index("r.PlayAnimation(n)"))                 # the window timer starts before the call too
+        self.assertLess(play.index("StartTimer(LISTEN_S"), play.index("r.PlayAnimation(n)"))
         self.assertEqual(PSC.count("r.PlayAnimation(n)"), 1)
+        self.assertNotIn("PlayAnimationAndWait", PSC)
 
     def test_the_closing_and_return_notices_are_repeated_and_the_readings_are_on_screen(self):
         """The door's four windows printed no W line in the 13 Nov shots (taken up to 20 s after a 15 s window; one notice had gone), and stage 40 only logged."""

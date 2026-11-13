@@ -75,9 +75,13 @@ declare it (the stager keeps the optional line only if it compiles), else the bl
 the direct poses only `IsOn` / `IsOff`; every stage 10 step notice came. **Lift half: not a result.** Stage 30 ran to `S30 done` (placed disabled, `moved=TRUE`, `enabled nowait=TRUE`, so `EnableNoWait` compiled in,
 `REG lift 5/5`), but the lift was in no shot, and stages 31 to 36 printed nothing in 49 shots. Missing for the door too: the `W s21..24` closing lines and a stage 20 `REG` line.
 **What is read from it (inference, no log; not a result):** (a) the first lift `PlayAnimation`, or the reading once enabled, may never return and hold the poll: that is Claude's reading. (b) The missing `W` and stage 20
-`REG` notices are also consistent with a single short notice that had already gone by the time of the shot (taken up to 20 s after a 15 s window closed); the console kit repeats its notices and its `W` line was seen.
+`REG` notices are also consistent with a single short notice that had already gone by the time of the shot (the last shot of each stage was about 20 s after the console line, the window is 15 s); the console kit repeats its notices and its `W` line was seen.
 (c) Stage 40 (and the settled readings) only wrote to the log in this kit: their silence on screen is by construction, not a finding.
-**Changed in the next head (script and card only; the clips, the plugin and the stage list are untouched):** each play stage has its own one-shot timer (`TIMER_CALL + stage`), the poll only starts it, so no call is made inside the poll;
-a notice before the reading and one before the call (`C sN name reading`, `C sN name calling`), so the last notice on screen names the step that did not return; the return and closing notices are repeated like the console kit's;
-the readings after a stage's call and stage 40 are shown on screen (`READ ...`), the lift's after it was enabled included; the lift is placed 2.5 m ahead, between the player and the door.
-Whether the lift's call really hangs, and why, is still **unread**: the next session shows the step.
+**Changed at adabd939 and corrected at the next commit after it (script, tests and card; the clips, the plugin and the stage list are untouched).** At adabd939: each play stage has a one-shot timer (`TIMER_CALL + stage`)
+that makes the call, the poll only starts it; a notice before the reading and one before the call (`C sN name reading`, `C sN name calling`); the return and closing notices are repeated like the console kit's; the readings after a
+stage's call and stage 40 are shown on screen (`READ ...`); the lift is 2.5 m ahead, between the player and the door. **The Courier's FAL-629 hold, accepted:** adabd939 said a call that never returns "cannot hold the poll or the other
+stages"; that was wrong: a native that does not return keeps the script's one stack and every later timer event of this script waits behind it, the poll, the repeats and the window included. The timer does not isolate a call, and the
+claim is removed from the script and this card. What the kit does instead: each `C` notice is shown twice, 1.2 s apart (latent `Utility.Wait`), before the step it names, because nothing can repeat it once the step hangs. A hung step
+leaves its notice on screen for a few seconds only: a shot soon after the console line names it; with script logging on, the log's last line does. Truly isolating a call would need a second script on its own object or quest
+(a plugin change); not built, and not needed until a session shows a step that does hang.
+Whether the lift's call really hangs, and why, is still **unread**: the next session shows the step (not run on Starfield).

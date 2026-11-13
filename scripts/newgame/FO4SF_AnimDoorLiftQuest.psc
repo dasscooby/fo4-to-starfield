@@ -15,10 +15,14 @@ Scriptname FO4SF_AnimDoorLiftQuest extends Quest
 ;             false, tried once so the log says so), then 15 s of listening each
 ;   40        a reading of both references now (shown on screen as READ lines since the 13 Nov session: before, only the log had it)
 ;   60        Disable and Delete both
-; Calls (stages 21..24 and 31..36) are NOT made inside the poll: the poll only starts a one-shot timer per stage (TIMER_CALL + stage), so a call that never returns
-; cannot hold the poll or the other stages (PC session 13 Nov 01:20 UTC: the lift stages were silent). Each call says "C sN <name> reading" before the reading and
-; "C sN <name> calling" before PlayAnimation, so the last notice on screen names the step that did not return. Return and closing notices are shown at once and
-; repeated (the window notice too): the 13 Nov shots were taken up to 20 s after a 15 s window closed and a single notice had gone.
+; Calls (stages 21..24 and 31..36): the poll only starts a one-shot timer per stage (TIMER_CALL + stage) and the timer makes the call. THAT DOES NOT ISOLATE A CALL
+; THAT NEVER RETURNS: a native that does not return keeps this script's one stack, and every later timer event of this script (the poll, the repeats, the window)
+; waits behind it (the Courier's FAL-629 hold; not run on Starfield, so whether a lift call hangs is still unread). What the kit does instead: a notice
+; "C sN <name> reading" before the reading and "C sN <name> calling" before PlayAnimation, each shown twice 1.2 s apart (Utility.Wait, latent: it lets other events run)
+; BEFORE the step, because nothing can repeat a notice once a step hangs. A step that hangs leaves its notice on screen for a few seconds only: a shot soon after the
+; console line names it, a late one does not; with script logging on, the log's last line does. The return notice PLAY and the closing notice W are shown at once and
+; repeated (a timer repeats them after the step has returned). The 13 Nov shots were the last one about 20 s after the console line, the window 15 s, and a
+; single notice had gone.
 ; One name per stage: set the next stage only after the 15 s window of the last one has closed (its "quiet" or "listened" line). An event is
 ; logged with label=door or label=lift and stage=<the open window's stage>, or stage=0 when no window is open. NEVER the wait form (it never
 ; returns when the graph sends no end event). Every log line that matters also shows as a notification beginning "AP " (Say).
@@ -46,7 +50,7 @@ float LiftSideM = 0.0       ; ... and not to the side (the PC session of 13 Nov 
 int TIMER_POLL = 1
 int TIMER_QUIET = 100       ; + the stage
 int TIMER_RESAY = 200       ; the last on-screen notice shown again
-int TIMER_CALL = 400        ; + the stage: the play call of that stage (its own timer, so a call that hangs cannot hold the poll)
+int TIMER_CALL = 400        ; + the stage: the play call of that stage (a one-shot timer: it does NOT isolate a call that never returns)
 float POLL_S = 1.0
 float LISTEN_S = 15.0
 float CALL_DELAY_S = 0.3    ; from the poll to the call of a stage
@@ -345,8 +349,16 @@ Function Step(int stage)
     endif
 EndFunction
 
+Function PreNotice(string msg)
+    {A notice before a step that may not return: shown, 1.2 s, shown again, 1.2 s (Utility.Wait is latent: the script's other events run meanwhile). Nothing can repeat it after the step has started.}
+    Say(msg)
+    Utility.Wait(1.2)
+    Say(msg + " (again)")
+    Utility.Wait(1.2)
+EndFunction
+
 Function CallStage(int stage)
-    {The timer of a play stage: the door's stages 21..24 and the lift's 31..36, each in its own timer event.}
+    {The timer of a play stage: the door's stages 21..24 and the lift's 31..36, each in its own timer event (one stack: a hung call still holds the rest).}
     if stage >= 21 && stage <= 24
         PlayOne(stage, "door", DoorRef, DoorCalls[stage - 21])
     elseif stage >= 31 && stage <= 36
@@ -361,11 +373,11 @@ Function PlayOne(int stage, string what, ObjectReference r, string n)
         Say("C s" + stage + " " + n + " no " + what)
         return
     endif
-    Say("C s" + stage + " " + n + " reading")
+    PreNotice("C s" + stage + " " + n + " reading")
     Reading("before", stage, what, r)
     ListenStage = stage
     WindowEvents = 0
-    Say("C s" + stage + " " + n + " calling")
+    PreNotice("C s" + stage + " " + n + " calling")
     StartTimer(LISTEN_S, TIMER_QUIET + stage)
     bool ok = r.PlayAnimation(n)
     Trace("play stage=" + stage + " label=" + what + " name=" + n + " ref=" + Id(r) + " ok=" + ok)
