@@ -20,8 +20,9 @@ Scriptname FO4SF_AnimDoorLiftQuest extends Quest
 ; waits behind it (the Courier's FAL-629 hold; not run on Starfield, so whether a lift call hangs is still unread). What the kit does instead: a notice
 ; "C sN <name> reading" before the reading and "C sN <name> calling" before PlayAnimation, each shown twice 1.2 s apart (Utility.Wait, latent: it lets other events run)
 ; BEFORE the step, because nothing can repeat a notice once a step hangs. A step that hangs leaves its notice on screen for a few seconds only: a shot soon after the
-; console line names it, a late one does not; with script logging on, the log's last line does, because PreNotice writes the same text to the user log FO4SFAnimDL
-; (Trace, "notice stage=.. text=..") BEFORE it shows it (the Courier's FAL-634 hold: the first version did not). The two latent waits let the poll and other timers run, so a
+; console line names it, a late one does not; with script logging on, the log's last line does PROVIDED no later stage was set and no animation event came in the 2.4 s of
+; the two waits (either writes its own line after it), because PreNotice writes the same text to the user log FO4SFAnimDL
+; (Trace, "notice text=<the notice>", no stage field: FO4SFANIM rt=.. notice text=C sN name reading end=true) BEFORE it shows it (the Courier's FAL-634 hold: the first version did not). The two latent waits let the poll and other timers run, so a
 ; stage set before the step has started may begin during them: the rule "set the next stage only after the window closed" is the person's, the script does not enforce it. The return notice PLAY and the closing notice W are shown at once and
 ; repeated (a timer repeats them after the step has returned). The 13 Nov shots were the last one about 20 s after the console line, the window 15 s, and a
 ; single notice had gone.

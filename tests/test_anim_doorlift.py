@@ -147,6 +147,10 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("the rule", DOC)
         self.assertIn("does not enforce it", DOC)
         self.assertIn("the script does not enforce it", PSC)
+        self.assertNotIn("notice stage=", PSC)                                                              # the header quotes the line the call writes (FAL-636)
+        self.assertIn('Trace, "notice text=', PSC)
+        self.assertIn("PROVIDED no later stage was set", PSC)
+        self.assertIn("provided no later stage was set", DOC)
         self.assertEqual(pre.count("Utility.Wait(1.2)"), 2)
         play = PSC[PSC.index("Function PlayOne("):PSC.index("Function Cleanup()")]
         self.assertEqual(re.findall(r'(PreNotice|SayHold|Say)\("((?:C s|PLAY )[^"]*)', play), [("Say", "C s"), ("PreNotice", "C s"), ("PreNotice", "C s"), ("SayHold", "PLAY ")])        # the first is the early return for a missing reference
