@@ -58,13 +58,14 @@ class CollisionNodesTests(unittest.TestCase):
         bodies = []
         for motion in (0, 1):
             d = bytearray(fake_template())
-            struct.pack_into("<I", d, 240, motion)
+            struct.pack_into("<I", d, 264, motion)
+            struct.pack_into("<I", d, 240, 1 + motion)
             bodies.append(bytes(d))
         rep = tool.read(nif.serialize(sfnif.build_static_nif(b"Lift", [], collision_blob=None, child_collision_blobs=bodies)))
         self.assertEqual(rep["format"], "starfield")
         self.assertEqual(rep["collision_objects"], 2)
         self.assertEqual({o["binding"] for o in rep["objects"]}, {"static-node"})
-        self.assertEqual([o["motion"] for o in rep["objects"]], ["static", "keyframed"])
+        self.assertEqual([o["motion"] for o in rep["objects"]], ["static(layer 1)", "keyframed(layer 2)"])
         self.assertEqual([o["target"] for o in rep["objects"]], ["Collision0", "Collision1"])
         self.assertFalse(rep["has_NiControllerManager"])
         self.assertIn("no NiControllerSequence", rep["reading"])
@@ -97,6 +98,16 @@ class CollisionNodesTests(unittest.TestCase):
             self.assertEqual(tool._bounds(b"x", 0), [[0.0, 0.0, 0.0], [1.0, 2.0, 3.0]])
             self.assertEqual(tool._bounds(b"x", 1), [[10.0, 0.0, 5.0], [11.0, 2.0, 8.0]])
             self.assertIsNone(tool._bounds(b"x", 5))                  # index out of range: unread
+
+    def test_collision_on_an_animated_root_is_animated_not_root(self):
+        f = nif.parse(fo4_lift())
+        f.blocks[-1] = struct.pack("<iIi", f.string_index(b"Up"), 1, 0) + struct.pack("<iiB", -1, -1, 0) \
+            + struct.pack("<5i", f.string_index(b"Root"), -1, -1, -1, -1)
+        for i in range(len(f.blocks)):
+            if f.type_of(i) == "bhkNPCollisionObject":
+                f.blocks[i] = struct.pack("<iHiI", 0, 0x80, 4, 0)
+        rep = tool.read(nif.serialize(f))
+        self.assertEqual(rep["by_binding"], {"animated": 3})
 
 
 if __name__ == "__main__":

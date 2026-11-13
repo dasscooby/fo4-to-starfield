@@ -14,8 +14,8 @@ Evidence labels: node names, targets, hierarchy and animated-node names are read
 parser); the sequence controlled-block layout (29 bytes per block: interpolator, controller, priority byte, five string
 indices; the same layout nif.door_hinge reads for its first block) is checked in range only, so a name list shorter
 than the block count is printed as such; FO4 motion class follows fo4collision.body_mass (static / keyframed /
-dynamic); Starfield motion is the u32 at offset 240 of the body blob (0 static, 1 keyframed, 2 dynamic), as the door
-oracle reads it. Bounds are those of the object's own body index (not the whole shared system); rotated bodies and shape classes other than compressed mesh / convex polytope (e.g. DynamicCompound) print None = unread.
+dynamic); Starfield motion is the u32 at offset 264 of the body blob (0 static, 1 keyframed, 2 dynamic) with the layer at 240
+(research-log 2026-10-10), printed as `motion(layer N)`; verified only for the box layout. Bounds are those of the object's own body index (not the whole shared system); rotated bodies and shape classes other than compressed mesh / convex polytope (e.g. DynamicCompound) print None = unread.
 """
 import argparse
 import json
@@ -93,9 +93,14 @@ def _fo4_motion(blob, body):
 
 
 def _sf_motion(blob):
-    if len(blob) < 244:
+    """motionType u32 at 264 (0 static, 1 keyframed, 2 dynamic) of a Starfield box-layout body blob, with the collision layer
+    at 240 (docs/ai/research-log.md 2026-10-10; sfcollision.KEYFRAMED_FIELDS). Other layouts (dynamic compound) are not verified
+    here, so the word is printed as read plus the layer."""
+    if len(blob) < 268:
         return "blob too short"
-    return MOTION_NAMES.get(struct.unpack_from("<I", blob, 240)[0], "motion unknown")
+    layer, = struct.unpack_from("<I", blob, 240)
+    motion, = struct.unpack_from("<I", blob, 264)
+    return f"{MOTION_NAMES.get(motion, 'motion ' + str(motion))}(layer {layer})"
 
 
 def _bounds(blob, body):
@@ -155,8 +160,8 @@ def read(data):
         o = {"collision_block": i, "target_block": target, "target": _name(f, target), "path": "/".join(reversed(path)),
              "world_position": [round(x, 4) for x in world(target)[0]] if 0 <= target < len(f.blocks) else None,
              "body_index": body, "system_block": system,
-             "binding": "root" if target in roots else ("animated" if target in anim_blocks else
-                                                         "under-animated" if target in under else "static-node")}
+             "binding": "animated" if target in anim_blocks else "under-animated" if target in under else
+                        "root" if target in roots else "static-node"}
         try:
             raw = f.blocks[system]
             blob = raw[4:4 + struct.unpack_from("<I", raw)[0]]
