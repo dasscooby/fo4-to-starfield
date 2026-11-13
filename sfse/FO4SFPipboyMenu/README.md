@@ -27,7 +27,7 @@ and logs every step. The stage is picked by `Stage` in `FO4SFPipboyMenu.ini`:
 | --- | --- |
 | `src/main.cpp` | the plugin: version guard, checks before use, the menu object, the key thread |
 | `src/pch.h` | precompiled header (libxse's game headers and SFSE layer) |
-| `FO4SFPipboyMenu.ini` | `Stage`, `Key` (default `0x79`, F10), `Flags` (0), `KeepAlive` (1); stage (b): `Movie` (empty: ours, FAL-614); stage (c): `FlagSets` (`0x0,0x8,0x9`), `SnapshotKey` (`0x7A`, F11), `ClickCall` (empty: off); stages (d) and (e): `PageFlagSets` (`0x19`); stages (d), (e): `CancelCode1` to `CancelCode4` (`0x1B`, `0x09`: Esc and Tab as Windows virtual-key codes, as the PC's game run logged them); stage (e): `KitUp` to `KitNextTab`, and the pages (`[Kit]`, `[Page <TAB>/<SUB>]`) |
+| `FO4SFPipboyMenu.ini` | `Stage`, `Key` (default `0x79`, F10), `Flags` (0), `KeepAlive` (1); stage (b): `Movie` (empty: ours, FAL-614), `CodeObj` (0) and `CodeObjNames` (empty: `PlaySound,HideMenu`); stage (c): `FlagSets` (`0x0,0x8,0x9`), `SnapshotKey` (`0x7A`, F11), `ClickCall` (empty: off); stages (d) and (e): `PageFlagSets` (`0x19`); stages (d), (e): `CancelCode1` to `CancelCode4` (`0x1B`, `0x09`: Esc and Tab as Windows virtual-key codes, as the PC's game run logged them); stage (e): `KitUp` to `KitNextTab`, and the pages (`[Kit]`, `[Page <TAB>/<SUB>]`) |
 | `xmake.lua`, `build.ps1` | the PC build: FOCCPing's build path (`docs/spikes/combined-core-probes.md`, B0-2) |
 | `scripts/ui/make_probe_swf.py` | writes the stage (b) movie, with `--channel` the stage (c) one and with `--page` the stage (d) one (pure Python; tests `tests/test_make_probe_swf.py`, `tests/test_pipboy_stat_page.py`) |
 | `scripts/ui/make_pipboy_kit.py` | the page kit (stage (e)): reads and checks the pages of the ini (`--check`) and writes the kit's movie for them (pure Python, on `make_probe_swf.py`; tests `tests/test_pipboy_kit.py`) |
@@ -586,6 +586,14 @@ engine did not ask for the name in that call, so the hypothesis is wrong whateve
 
 It exists for proof 1 of `docs/spikes/pipboy-fo4-rebuild-plan.md`: the player's own Fallout 4 boot sequence, staged
 on their PC only, never in Git.
+
+`CodeObj=1` (with `Movie=` only; without it: `refuse step=ini code_obj=1`) is proof 1b's stand-in for the movie's
+engine object. Right after the engine's `LoadMovie` returns the movie, on the same thread, the plugin sets
+`root.BGSCodeObj` to a function object carrying one function per name in `CodeObjNames` (empty: `PlaySound,HideMenu`;
+1 to 16 names of letters, digits and `_`, none twice, else `refuse step=ini code_obj_names=`). It logs
+`step=code_obj root= holder_type= set= of= read_back= names=`. Each call logs `step=code_call n= name= args= arg0=`
+(the first 64 characters of a string argument, else its type), up to 64 calls, and does nothing else: no sound, and
+`HideMenu` leaves the menu open.
 
 ### PASS at (c), `Stage=3` (steps: `docs/spikes/pipboy-channel-bridge-session.md`)
 

@@ -354,6 +354,59 @@ What each other outcome means:
   say what.
 - A crash: send the crash log; the next card is the version conversion.
 
+**Proof 1, the result (owner PC, 13 Nov, 02:46 to 02:50 UTC, at `2db64a83`): PASS, verified.** The player's own
+`pipboybootsequence.swf`, unchanged, installed with `--extra-movie FO4SF_Fo4Boot`; `Stage=2`, `Movie=FO4SF_Fo4Boot`.
+- The log: `step=movie name=FO4SF_Fo4Boot`, then `step=load_movie ... result=1 movie=<non-zero>
+  movie_name=FO4SF_Fo4Boot name_asks=2`. The `GetName` hypothesis holds.
+- On screen: Fallout 4's boot text types itself out in its font over the game view; the header and seven lines stand
+  at 16 seconds. F10 closed it; no crash, nothing left installed.
+- **Route A is alive:** Starfield's player runs this version 15 movie with its ActionScript 3 as it is. No version
+  conversion was needed for this file.
+- Not seen: sound (the movie asks for `PlaySound`); whether the timeline reaches its end and `HideMenu` (frame 371 is
+  about 12.4 seconds at 30 fps; the text still stood at 16 seconds); framing and scale against Fallout 4's own; the
+  movie has no background of its own and draws over the game.
+
+**What Fallout 4's movies ask of the engine (D2's names; a reading, not verified).**
+- Each movie reaches its engine through one object, `BGSCodeObj`, by `Shared:BGSExternalInterface`'s `call`. The
+  boot sequence names two of its functions, `PlaySound` and `HideMenu`. Proof 1 ran with no such object and did not
+  fail, so `call` is expected to skip a missing object (**hypothesis**: the PASS shows no fault, not how it skips).
+- The STAT page and the shell name more: the object's arrival (`InitCodeObj`, `ReleaseCodeObj`, `onCodeObjCreate`,
+  `onCodeObjDestruction`, `bAcquiredByNativeCode`) and the data (`Pipboy_DataObj`, `PipboyChangeEvent`,
+  `onPipboyChangeEvent`, `PipboyUpdateMask`), with the values by name (`CurrHP`, `MaxHP`, `CurrAP`, `MaxAP`,
+  `XPLevel`, `XPProgressPct`, `HeadCondition`, ...). Which names are functions the page calls and which are values
+  the engine pushes is not in D2: names only.
+- The shell `PipboyMenu.swf` loads its pages by file name (`Pipboy_StatsPage.swf` and the others) through
+  `PipboyLoader`. In Starfield those names are not under `Interface/`, so the shell alone would show its frame and no
+  page. Carrying the pages under their own names is a later installer change, not now.
+- Every movie imports `fonts_en.swf`, and in Starfield that name is Starfield's own file. Whether the boot text's
+  font is Fallout 4's or a Starfield font under the same export name is not settled.
+
+**Proof 1b, the card: the stand-in engine object (owner PC; the plugin's `CodeObj=` setting, FAL-614).**
+Environment as for proof 1, with the plugin built from this branch's head.
+1. Install as for proof 1 (`--extra-movie FO4SF_Fo4Boot`).
+2. In `FO4SFPipboyMenu.ini`: `Stage=2`, `Movie=FO4SF_Fo4Boot`, `CodeObj=1`, `CodeObjNames=` empty (that is
+   `PlaySound,HideMenu`).
+3. Outdoors: F10, wait 20 seconds, take a screenshot, F10 again.
+
+PASS: `step=code_obj root=1 holder_type=<n> set=3 of=3 read_back=1 names=PlaySound,HideMenu`, then
+`step=code_call` lines: `name=PlaySound` (three are expected from D2) with their `arg0`, and one `name=HideMenu`.
+That settles the object contract (functions called by name on `root.BGSCodeObj`) and whether the timeline reaches its
+end. The stand-in only logs: no sound plays, and `HideMenu` leaves the menu open.
+What each other outcome means:
+- `set` below 3 or `read_back=0`: a function object does not take members here. The next card makes the holder a
+  plain object (the root's object-creating slot, not read yet).
+- `step=code_obj` passes but no `step=code_call`: the movie reads the object another way, or before our set (at its
+  first frame). Send the log.
+- A crash: send the crash log; `CodeObj=0` is proof 1 as it passed.
+
+**Proof 2, the outline (route A): the STAT page.** Each step has its own card once the one before it has run.
+- **2a, the page alone:** `Movie=FO4SF_Fo4Stats`, the player's `Pipboy_StatsPage.swf` installed with
+  `--extra-movie FO4SF_Fo4Stats`, and `CodeObj=1` with the page's own names in `CodeObjNames`. Shows: the page's frame
+  with no data, and which of its calls arrive. The names to list come from D2 and proof 1b; which of them are calls is
+  a guess until the log shows it.
+- **2b, HP by name:** our plugin pushes `CurrHP` and `MaxHP` into the page by the path 2a's log shows. Not written
+  until 2a has run.
+
 ## Look and function: the seam
 
 - **Function** (one, shared by every look): the pages, what each row or widget is fed, and input. It is the
@@ -448,6 +501,7 @@ delivery.
 ## Next gate
 
 1. Done: D1 and D3 (13 Nov).
-2. The owner PC runs D2 and proof 1 (the card above, with the `Movie=` setting on this branch).
-3. Then proof 2, by the route proof 1 leaves standing. It has its own branch, tests, a CARRY line, the Scribe's
-   review, and the PC's run.
+2. Done: D2 and proof 1 (13 Nov): route A is alive.
+3. The owner PC runs proof 1b (the card above, `CodeObj=1` on this branch).
+4. Then proof 2a and 2b, the STAT page by route A, each with its own card, tests, a CARRY line, the Scribe's review,
+   and the PC's run.

@@ -104,6 +104,35 @@ class RebuildPlanTests(unittest.TestCase):
                      "name_asks=<n>"):
             self.assertIn(text, readme, text)
 
+    def test_code_obj_setting(self):
+        # FAL-614 proof 1b: the stand-in BGSCodeObj, set right after a Movie= load, logging only
+        for text in ("**Proof 1, the result (owner PC, 13 Nov, 02:46 to 02:50 UTC, at `2db64a83`): PASS, verified.**",
+                     "**Route A is alive:**", "**Proof 1b, the card: the stand-in engine object",
+                     "`Stage=2`, `Movie=FO4SF_Fo4Boot`, `CodeObj=1`", "set=3 of=3 read_back=1 names=PlaySound,HideMenu",
+                     "**Proof 2, the outline (route A): the STAT page.**", "3. The owner PC runs proof 1b"):
+            self.assertIn(text, self.plan, text)
+        load = self.main[self.main.index("bool MenuLoadMovie("):]
+        load = load[:load.index("\n\t}\n")]
+        self.assertLess(load.index("g_loadingMovie.store(false);"),
+                        load.index("if (loaded && g_codeObj && MovieOf(a_self)) {"))
+        self.assertIn('if (g_codeObj && g_movie.empty()) {', self.main)
+        self.assertIn('ParseCodeObjNames(ReadText(ini, L"CodeObjNames"))', self.main)
+        self.assertIn('std::string("PlaySound,HideMenu")', self.main)
+        install = self.main[self.main.index("void CodeObjInstall("):]
+        install = install[:install.index("\n\t}\n")]
+        self.assertIn('top.SetMember("BGSCodeObj", holder)', install)
+        handler = self.main[self.main.index("class CodeObjFunction final"):]
+        handler = handler[:handler.index("\n\t};\n")]
+        for absent in ("AddMessage", "PlaySound(", "g_task", "Invoke("):   # it logs and does nothing else
+            self.assertNotIn(absent, handler, absent)
+        self.assertIn("if (n > kMaxCodeCalls) {", handler)
+        ini = (ROOT / "sfse" / "FO4SFPipboyMenu" / "FO4SFPipboyMenu.ini").read_text(encoding="utf-8")
+        self.assertRegex(ini, r"\nCodeObj=0\r?\n")
+        self.assertRegex(ini, r"\nCodeObjNames=\r?\n")
+        readme = (ROOT / "sfse" / "FO4SFPipboyMenu" / "README.md").read_text(encoding="utf-8")
+        for text in ("refuse step=ini code_obj=1", "step=code_call n= name= args= arg0=", "`CodeObj` (0)"):
+            self.assertIn(text, readme, text)
+
     def test_reads_recorded(self):
         for text in ("**Read on the PC (D1, 13 Nov,", "**Read on the PC (D3, 13 Nov): verified.**",
                      "`Interface\\Pip-Boy\\WorldMap_d.dds`, 2048 x 2048", "**D2 (data names; needed"):

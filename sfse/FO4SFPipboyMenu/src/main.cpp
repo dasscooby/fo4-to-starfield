@@ -137,6 +137,9 @@ namespace
 	constexpr std::size_t   kGameVmImplAt = 0xE0;            // libxse RE::GameVM::impl (BSTSmartPointer<IVirtualMachine>)
 	constexpr std::size_t   kDispatchStaticCallSlot = 0x2F;  // libxse IVirtualMachine::DispatchStaticCall
 	constexpr std::size_t   kMaxName = 64;                   // ClickCall: each of the script's and function's names
+	constexpr std::uint32_t kMaxCodeCalls = 64;              // FAL-614 proof 1b: stand-in BGSCodeObj calls logged
+	constexpr std::size_t   kMaxCodeArg = 64;                // and the first characters of a string argument
+	constexpr std::size_t   kMaxCodeNames = 16;              // CodeObjNames: the stand-in's functions
 
 	// stage d (the STAT page)
 	constexpr std::uint32_t kDataHandlerRva = 0x5FD9B28;     // SFSE 0.2.21 sfse/GameData.h: TESDataHandler::GetSingleton
@@ -420,6 +423,8 @@ namespace
 	LoadMovie_t                              g_engineLoadMovie = nullptr;
 	std::atomic<bool>                        g_loadingMovie{ false };   // FAL-614: inside our call of the engine's LoadMovie
 	std::atomic<std::uint32_t>               g_movieNameAsks{ 0 };      // GetName calls answered with Movie= in that call
+	bool                                     g_codeObj = false;         // FAL-614 proof 1b: CodeObj=1, the stand-in BGSCodeObj
+	std::atomic<std::uint32_t>               g_codeCalls{ 0 };          // calls of the stand-in's functions, logged up to kMaxCodeCalls
 	ProcessMessage_t                         g_engineProcessMessage = nullptr;
 	const SFSE::TaskInterface*               g_task = nullptr;
 	std::atomic<bool>                        g_registered{ false };
@@ -3264,6 +3269,66 @@ namespace
 
 	std::int32_t MenuGetViewScaleMode(void*) { return 1; }   // Scaleform ShowAll: the whole stage, aspect kept
 
+	// FAL-614 proof 1b (CodeObj=1, Stage=2 with Movie=): a Fallout 4 movie calls its engine through the object at
+	// root.BGSCodeObj (D2's names: BGSCodeObj, BGSExternalInterface, PlaySound, HideMenu). The stand-in answers each
+	// function named in CodeObjNames with a log line and does nothing else: no sound plays and the menu stays open (F10
+	// closes it). A name not listed is not there, as for a movie with no engine object.
+	class CodeObjFunction final : public RE::Scaleform::GFx::FunctionHandler
+	{
+	public:
+		void Name(const std::string& a_name) { _name = a_name; }
+
+		void Call(const Params& a_params) override
+		{
+			const auto n = ++g_codeCalls;
+			if (n > kMaxCodeCalls) {
+				return;
+			}
+			std::string arg0 = "none";
+			if (a_params.argCount > 0) {
+				arg0 = a_params.args[0].IsString() ? std::string(a_params.args[0].GetString()).substr(0, kMaxCodeArg) :
+				                                     std::format("type{}", static_cast<int>(a_params.args[0].GetType()));
+			}
+			REX::INFO("step=code_call n={} name={} args={} arg0={}", n, _name, a_params.argCount, arg0);
+		}
+
+	private:
+		std::string _name = "BGSCodeObj";   // the holder itself, in case the movie calls it
+	};
+	CodeObjFunction                                  g_codeObjSelf;
+	std::array<CodeObjFunction, kMaxCodeNames>       g_codeObjFunctions;
+	std::array<std::string, kMaxCodeNames>           g_codeObjNames;
+	std::size_t                                      g_codeObjCount = 0;
+
+	// right after the engine's LoadMovie returned the movie, on the same thread, before the movie's next frame: a function
+	// object as the holder (an ActionScript 3 Function is dynamic, so it takes members) with one function per name on it,
+	// set as root.BGSCodeObj, then read back
+	void CodeObjInstall(const void* a_menu)
+	{
+		auto* const root = RootOf(a_menu);
+		RE::Scaleform::GFx::Value top;
+		RE::Scaleform::GFx::Value holder;
+		RE::Scaleform::GFx::Value back;
+		const bool  gotRoot = root && root->GetVariable(&top, "root") && top.IsObject();
+		std::size_t set = 0;
+		if (gotRoot) {
+			root->CreateFunction(&holder, &g_codeObjSelf);
+			for (std::size_t i = 0; i < g_codeObjCount && !holder.IsUndefined(); ++i) {
+				RE::Scaleform::GFx::Value function;
+				root->CreateFunction(&function, &g_codeObjFunctions[i]);
+				set += !function.IsUndefined() && holder.SetMember(g_codeObjNames[i].c_str(), function) ? 1 : 0;
+			}
+			set += !holder.IsUndefined() && top.SetMember("BGSCodeObj", holder) ? 1 : 0;
+		}
+		const bool readBack = gotRoot && top.GetMember("BGSCodeObj", &back) && back.IsObject();
+		std::string names;
+		for (std::size_t i = 0; i < g_codeObjCount; ++i) {
+			names += std::format("{}{}", i ? "," : "", g_codeObjNames[i]);
+		}
+		REX::INFO("step=code_obj root={} holder_type={} set={} of={} read_back={} names={}", gotRoot ? 1 : 0,
+			TypeCode(holder), set, g_codeObjCount + 1, readBack ? 1 : 0, names);
+	}
+
 	bool MenuLoadMovie(void* a_self, bool a_dispatcher, bool a_arg2)
 	{
 		const auto menu = Hex(reinterpret_cast<std::uintptr_t>(a_self));
@@ -3284,6 +3349,9 @@ namespace
 		REX::INFO("step=load_movie menu={} stage=b result={} movie={} movie_name={} name_asks={}", menu, loaded ? 1 : 0,
 			Hex(reinterpret_cast<std::uintptr_t>(MovieOf(a_self))), g_movie.empty() ? kMenuName : g_movie.c_str(),
 			g_movieNameAsks.load());
+		if (loaded && g_codeObj && MovieOf(a_self)) {
+			CodeObjInstall(a_self);
+		}
 		return loaded;
 	}
 
@@ -3911,6 +3979,34 @@ namespace
 		return out;
 	}
 
+	// FAL-614 proof 1b: CodeObjNames=<name>,<name>,... (empty: PlaySound,HideMenu), 1 to 16 names of 1 to 64 letters,
+	// digits and '_', none twice; each becomes one logging function on the stand-in BGSCodeObj
+	bool ParseCodeObjNames(std::string_view a_list)
+	{
+		const std::string list = a_list.empty() ? std::string("PlaySound,HideMenu") : std::string(a_list);
+		g_codeObjCount = 0;
+		std::size_t start = 0;
+		while (start <= list.size()) {
+			const auto end = std::min(list.find(',', start), list.size());
+			const auto name = list.substr(start, end - start);
+			const bool ok = !name.empty() && name.size() <= kMaxName && g_codeObjCount < kMaxCodeNames &&
+			                std::ranges::all_of(name, [](char a_c) {
+				                return (a_c >= 'A' && a_c <= 'Z') || (a_c >= 'a' && a_c <= 'z') || (a_c >= '0' && a_c <= '9') || a_c == '_';
+			                }) &&
+			                std::ranges::find(g_codeObjNames.begin(), g_codeObjNames.begin() + g_codeObjCount, name) ==
+			                    g_codeObjNames.begin() + g_codeObjCount;
+			if (!ok) {
+				Refuse("ini", std::format("code_obj_names={} (1 to {} names of letters, digits and _, none twice)", list, kMaxCodeNames));
+				return false;
+			}
+			g_codeObjNames[g_codeObjCount] = name;
+			g_codeObjFunctions[g_codeObjCount].Name(name);
+			++g_codeObjCount;
+			start = end + 1;
+		}
+		return true;
+	}
+
 	// stage c, FAL-246: ClickCall=<script>.<function>, two Papyrus names of up to 64 letters, digits and '_' (no digit
 	// first); "" = off. False if malformed
 	bool ParseClickCall(std::string_view a_call)
@@ -3974,6 +4070,7 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	g_flags = ReadNumber(ini, L"Flags", 0);
 	g_keepAlive = ReadNumber(ini, L"KeepAlive", 1) != 0;
 	g_movie = ReadText(ini, L"Movie");   // FAL-614: checked below, after the stage
+	g_codeObj = ReadNumber(ini, L"CodeObj", 0) != 0;   // FAL-614 proof 1b: with Movie= only
 	// FAL-414: up to four keyboard ids that close the menu while it is open (0 = unused)
 	g_cancelCodes = { ReadNumber(ini, L"CancelCode1", 0x1B), ReadNumber(ini, L"CancelCode2", 0x09), ReadNumber(ini, L"CancelCode3", 0),
 		ReadNumber(ini, L"CancelCode4", 0) };
@@ -3999,7 +4096,14 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 			Refuse("ini", std::format("movie={} (Stage=2 only; 1 to 64 letters, digits and _)", g_movie));
 			return true;
 		}
-		REX::INFO("step=movie name={} file=Interface/{}.swf", g_movie, g_movie);
+		REX::INFO("step=movie name={} file=Interface/{}.swf code_obj={}", g_movie, g_movie, g_codeObj ? 1 : 0);
+	}
+	if (g_codeObj && g_movie.empty()) {
+		Refuse("ini", "code_obj=1 (with Movie= only: our own movie has no code)");
+		return true;
+	}
+	if (g_codeObj && !ParseCodeObjNames(ReadText(ini, L"CodeObjNames"))) {
+		return true;
 	}
 	std::string clickCall;
 	bool        clickCallOk = true;
