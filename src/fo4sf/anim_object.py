@@ -139,6 +139,45 @@ def add_toggle_idles(plan):
     return {**plan, "clips": clips}
 
 
+def parse_slow(text, states):
+    """'Stage3=4' -> {"StateC_Play": 4} (FO4 sequence = a whole factor, at least 2, at most 8), looked up in states (parse_states). The factor is
+    whole so every key stays on the 30 fps grid the native writer needs. ValueError for a sequence the map does not hold or a factor that is not a whole number in 2..8."""
+    out = {}
+    for part in [p.strip() for p in (text or "").split(",") if p.strip()]:
+        if "=" not in part:
+            raise ValueError(f"slow entry {part!r} is not <FO4 sequence>=<whole factor>")
+        seq, fac = (x.strip() for x in part.split("=", 1))
+        if seq not in states:
+            raise ValueError(f"slow names {seq!r}, which the state map {sorted(states)} does not hold")
+        if not fac.isdigit() or not 2 <= int(fac) <= 8:
+            raise ValueError(f"slow factor {fac!r} for {seq} is not a whole number from 2 to 8")
+        out[states[seq]] = int(fac)
+    return out
+
+
+def stretch_clips(plan, factors):
+    """plan -> plan with the named clips (by slot name: {"StateC_Play": 4}) run slower by a whole factor: every sample time, the duration and every
+    event time are multiplied, nothing else changes (the same poses, the same keys, so the end pose is the end pose; the keys stay on the 30 fps
+    grid). A way to catch a 0.6 s motion with a 1.2 s shot (FAL-489, the PC session of 12 Nov 23:57 UTC). ValueError for a clip the plan lacks or a
+    factor that is not a whole number of at least 1. Run it BEFORE add_chain_idles: the idles are cut from the stretched clips' own end poses."""
+    names = {c["name"] for c in plan["clips"]}
+    for name, f in (factors or {}).items():
+        if name not in names:
+            raise ValueError(f"slow names {name}, which the plan does not hold ({sorted(names)})")
+        if not isinstance(f, int) or f < 1:
+            raise ValueError(f"slow factor {f!r} for {name} is not a whole number of at least 1")
+    clips = []
+    for c in plan["clips"]:
+        f = (factors or {}).get(c["name"], 1)
+        if f == 1:
+            clips.append(c)
+            continue
+        tracks = [{**t, "samples": [{**s, "elapsed": s["elapsed"] * f} for s in t["samples"]]} for t in c["tracks"]]
+        events = [{**e, "elapsed": e["elapsed"] * f} for e in c["events"]]
+        clips.append({**c, "tracks": tracks, "events": events, "duration": c["duration"] * f, "slowed": f})
+    return {**plan, "clips": clips}
+
+
 def add_chain_idles(plan):
     """plan -> plan for genericstategraph01 (FAL-489, the converted console on four states): the mapped Play slots are a chain, each clip starts
     from the pose the one before it ended in, and the four Idle slots hold four successive poses:
@@ -319,7 +358,7 @@ def clip_table(plan, unit_scale):
     for clip in plan["clips"]:
         rows.append({"name": clip["name"], "seconds": round(clip["duration"], 4), "frames": round(clip["duration"] * FPS),
                      "bones": sorted(t["name"] for t in clip["tracks"] if not t.get("static")), "hold_of": clip.get("hold_of"),
-                     "hold_frame": clip.get("hold_frame"), "starts_from": clip.get("starts_from"), "held_at_idle_pose": clip.get("held_at_idle_pose"),
+                     "hold_frame": clip.get("hold_frame"), "slowed": clip.get("slowed"), "starts_from": clip.get("starts_from"), "held_at_idle_pose": clip.get("held_at_idle_pose"),
                      "tracks": [{"bone": t["name"], "bone_index": index[t["node"]], "keys": len(t["samples"]), "static": bool(t.get("static"))}
                             for t in clip["tracks"]],
                      "motion": door_rig.open_motion(plan, unit_scale, clip["name"]),

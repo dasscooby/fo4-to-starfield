@@ -52,7 +52,7 @@ class ScriptTests(unittest.TestCase):
         ran = [int(s) for s in re.findall(r"StageList\[\d+\] = (\d+)", PSC)]
         m = re.search(r"Stages = \{ ([\d, ]+) \}", TOOL_SRC)
         self.assertEqual(ran, [int(x) for x in m.group(1).split(",")])
-        self.assertEqual(ran, [10, 11, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 60])
+        self.assertEqual(ran, [10, 11, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 40, 60])
         self.assertIn(f"StageList = new int[{len(ran)}]", PSC)
         self.assertIn(f"DoneList = new bool[{len(ran)}]", PSC)
         self.assertIn('"FO4SFANIM rt="', PSC)                                  # the variant A reader reads this log too
@@ -75,7 +75,7 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(len(mac.BASE_LINE.findall(PSC)), 1)
         self.assertIn("p.PlaceAtMe(base, 1, true, false, false)", PSC)
         self.assertIn("Game.GetFormFromFile(BaseId, BasePlugin)", PSC)
-        self.assertEqual(PSC.count("TestRef.PlayAnimation(n)"), 1)             # PlayOne (the side copy is TestRef2)
+        self.assertEqual(PSC.count("TestRef.PlayAnimation(n)"), 1)             # CallOn (the side copy is TestRef2)
         self.assertEqual(PSC.count("TestRef2.PlayAnimation(n)"), 1)
 
     def test_the_calls_are_the_requested_order_numbered_then_direct_then_the_spare(self):
@@ -88,6 +88,21 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("elseif stage >= 21 && stage <= 29", PSC)
         self.assertIn("PlayOne(stage, PlayNames[stage - 21])", PSC)
         self.assertEqual(len(names), 29 - 21 + 1)                              # one name per play stage, nothing left over
+
+    def test_the_scene_stage_is_a_timer_chain_that_calls_a_lid_play_the_button_and_its_idle(self):
+        """Claude, FAL-489, 12 Nov 23:58 UTC: Play01, then the button clip, then the idle call that holds it. Stage 30, one window, three timed calls."""
+        self.assertIn("elseif stage == 30\n        SceneStart(stage)", PSC)
+        self.assertIn("int TIMER_SCENE = 300", PSC)
+        self.assertLess(PSC.index("aiTimerID == TIMER_SCENE"), PSC.index("aiTimerID >= TIMER_QUIET"))   # else the quiet branch would take id 300
+        self.assertLess(PSC.index("aiTimerID == TIMER_RESAY"), PSC.index("aiTimerID >= TIMER_QUIET"))
+        scene = PSC[PSC.index("Function SceneNext()"):PSC.index("Function Cleanup()")]
+        self.assertEqual(re.findall(r'CallOn\(SceneStage, ([^)]*)\)', scene), ['"Play01"', "ButtonPlay", "ButtonIdle"])             # the order
+        self.assertIn('CallOn(stage, "StateA_Idle")', PSC)                                                  # it starts from rest
+        self.assertEqual(PSC.count("TestRef.PlayAnimation(n)"), 1)                                           # one place makes the call (CallOn)
+        self.assertIn("StartTimer(ButtonS + 0.7, TIMER_SCENE)", scene)                                      # the idle follows the clip's own length
+        for line in ('string ButtonPlay = "StateC_Play"   ;BUTTONPLAY', 'string ButtonIdle = "StateC_Idle"   ;BUTTONIDLE', "float ButtonS = 0.633               ;BUTTONS"):
+            self.assertEqual(PSC.count(line), 1)
+        self.assertIn('ListenName = "scene"', PSC)
 
     def test_the_registered_events_cover_the_controls_read_and_the_four_states(self):
         events = strings("EventNames")
@@ -198,7 +213,7 @@ class ToolTests(ToolBase):
         self.assertIn("override: ACTI 001234:FO4Port.esm FO4Port_acti_091a48_fallout4 name 'Vault Door Controls'", out)
         self.assertIn(norm("ANAM " + ANAM + " BNAM fo4port\\r\\skeleton.rig CNAM fo4port\\r\\animations"), out)
         self.assertIn("scripts [FO4SF_AnimConsoleFourQuest (0 properties)]", out)
-        self.assertIn("stages [10,11,20,21,22,23,24,25,26,27,28,29,40,60]", out)
+        self.assertIn("stages [10,11,20,21,22,23,24,25,26,27,28,29,30,40,60]", out)
         wrong = self.run_tool("check", out_dir / PLUGIN, port, sf, "--model", "other.nif", "--rig", "fo4port\\r\\skeleton.rig", "--anims", "fo4port\\r\\animations", "--graph", ANAM)
         self.assertEqual(wrong.returncode, 1)
         self.assertIn("the model is not Meshes/other.nif", norm(wrong.stdout))
@@ -292,7 +307,7 @@ class StageTests(ToolBase):
         z = cls.root / (Path(out).name + "-cr.zip")
         fake_sources(z, BASES_D)
         base = dict(out=str(out), starfield_data=str(cls.data), port_data="", game_archive=[], fo4_data="fo4", door_anim_dll="d.dll", collision_template="c.nif",
-                    texconv="t.exe", content_resources=str(z), compiler=str(fake_compiler(cls.root)), states="Stage1=StateA_Play,Stage2=StateB_Play",
+                    texconv="t.exe", content_resources=str(z), compiler=str(fake_compiler(cls.root)), states="Stage1=StateA_Play,Stage2=StateB_Play", slow="",
                     foley="", model="", edid=mac.EDID)
         base.update(kw)
         return type("A", (), base)()
@@ -314,7 +329,7 @@ class StageTests(ToolBase):
         self.assertTrue(conv.calls[0][0].lower().endswith("console01.nif"))
         name, states, foley, kw = conv.calls[0]
         self.assertEqual((states, foley), (STATES, "QST_Flip"))
-        self.assertEqual(kw, {"idles": "chain", "graph": ANAM})                            # chain idles and the path read from the archive, not a constant
+        self.assertEqual(kw, {"idles": "chain", "graph": ANAM, "slow": {}})                            # chain idles and the path read from the archive, not a constant
         plan = json.loads((out / "plan.json").read_text())
         self.assertEqual((plan["kind"], plan["plugins"]), ("anim-console-four", [PLUGIN]))
         self.assertEqual(plan["graph"], {"anam": ANAM, "archive_entry": GRAPH_ENTRY})
@@ -347,11 +362,52 @@ class StageTests(ToolBase):
         self.assertIn(ANAM, readme)
         self.assertIn("StateC_Play: 0.0333 s (1 frames)", readme)                                                                  # the spare play slot
         self.assertIn("starts from StateB_Idle", readme)
-        self.assertIn("stages 10 11 20 21..29 40 60", readme)
+        self.assertIn("stages 10 11 20 21..30 40 60", readme)
         self.assertIn("anim_console_four_install.py install", readme)
         self.assertIn("THROWAWAY STATE ONLY, NO SAVE", readme)
         quest_stages = [int(s) for s in re.findall(r"StageList\[\d+\] = (\d+)", PSC)]
-        self.assertEqual(quest_stages, [10, 11, 20] + list(range(21, 30)) + [40, 60])                                               # the README's "21..29" is the quest's
+        self.assertEqual(quest_stages, [10, 11, 20] + list(range(21, 31)) + [40, 60])                                               # the README's "21..29" is the quest's
+
+    def test_the_scene_is_written_into_the_script_from_the_clip_table_and_the_slow_factor_is_applied(self):
+        """Stage 30 calls Play01, then the SECOND clip of the chain by its slot, then that slot's Idle; the stager writes the slot and the clip's seconds
+        (the stretched ones) into the three ;BUTTON... lines. Slowing a clip by 4 makes it four times as long and changes nothing else."""
+        plain, slow = self.root / "staged-plain", self.root / "staged-slow"
+        amap = "Stage1=StateA_Play,Stage2=StateC_Play"
+        self.assertEqual(maf.stage(self.args(plain, states=amap), converter=self.converter()), 0)
+        self.assertEqual(maf.stage(self.args(slow, states=amap, slow="Stage2=4"), converter=self.converter()), 0)
+        secs = {}
+        for tag, out in (("plain", plain), ("slow", slow)):
+            text = (out / (maf.SCRIPT + ".psc")).read_text()
+            self.assertIn('string ButtonPlay = "StateC_Play"   ;BUTTONPLAY', text)
+            self.assertIn('string ButtonIdle = "StateC_Idle"   ;BUTTONIDLE', text)
+            secs[tag] = float(re.search(r"float ButtonS = ([0-9.]+)   ;BUTTONS", text).group(1))
+            manifest = json.loads((out / "anim_manifest.json").read_text())
+            row = {c["name"]: c for c in manifest["anim"]["clips"]}
+            self.assertEqual(secs[tag], row["StateC_Play"]["seconds"])                                 # the script holds the clip table's seconds
+        self.assertAlmostEqual(secs["slow"], secs["plain"] * 4, places=3)
+        self.assertEqual(json.loads((slow / "plan.json").read_text())["states"], {"Stage1": "StateA_Play", "Stage2": "StateC_Play"})
+        self.assertEqual(json.loads((slow / "anim_manifest.json").read_text())["slow"], {"StateC_Play": 4})
+        self.assertIn("Slowed: {'StateC_Play': 4}", (slow / "README.txt").read_text())
+        rows = {c["name"]: c for c in json.loads((slow / "anim_manifest.json").read_text())["anim"]["clips"]}
+        base = {c["name"]: c for c in json.loads((plain / "anim_manifest.json").read_text())["anim"]["clips"]}
+        self.assertEqual(rows["StateC_Play"]["slowed"], 4)
+        self.assertEqual(rows["StateA_Play"]["seconds"], base["StateA_Play"]["seconds"])                  # another clip is not touched
+        self.assertEqual(rows["StateC_Idle"]["motion"], base["StateC_Idle"]["motion"])                    # the held poses are the same poses
+
+    def test_a_slow_entry_that_names_nothing_or_a_bad_factor_is_refused_before_anything_is_done(self):
+        for bad in ("Stage9=4", "Stage2=1", "Stage2=2.5", "Stage2", "Stage2=9"):
+            with self.subTest(bad=bad):
+                with self.assertRaises(SystemExit) as ctx:
+                    maf.stage(self.args(self.root / "staged-badslow", slow=bad), converter=self.converter())
+                self.assertIn("--slow", str(ctx.exception))
+        self.assertFalse((self.root / "staged-badslow").exists())
+
+    def test_the_default_map_is_the_scene_map_and_the_scene_button_is_its_second_clip(self):
+        self.assertEqual(maf.STATES_DEFAULT, "Stage2=StateA_Play,Stage3=StateC_Play,Stage4=StateD_Play")
+        self.assertEqual(maf.scene_slot(anim_object.parse_states(maf.STATES_DEFAULT, anim_object.PLAY_SLOTS4)), "StateC_Play")
+        self.assertEqual(maf.scene_slot(anim_object.parse_states("Stage2=StateA_Play,Stage3=StateB_Play", anim_object.PLAY_SLOTS4)), "StateB_Play")
+        self.assertEqual(maf.scene_slot({"Stage2": "StateD_Play"}), "StateD_Play")                       # one clip: itself
+        self.assertEqual(anim_object.parse_slow(maf.SLOW_DEFAULT, anim_object.parse_states(maf.STATES_DEFAULT, anim_object.PLAY_SLOTS4)), {"StateC_Play": 4})
 
     def test_the_alternative_map_that_leaves_slot_b_out_stages_and_says_so(self):
         """The graph returns from StateB_Play to the rest pose (control, 12 Nov): the button clip on StateC_Play rests in StateC_Idle instead."""

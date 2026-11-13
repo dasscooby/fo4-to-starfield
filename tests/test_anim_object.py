@@ -403,6 +403,58 @@ class ChainIdlesTests(unittest.TestCase):
         self.assertIsNone(ET.fromstring(d["StateC_Idle"]).find("audios"))
 
 
+class SlowTests(unittest.TestCase):
+    """FAL-489, PC session 12 Nov 23:57 UTC: the button clip (0.6 s) could not be caught by a shot 1.2 s after the call: run a clip slower by a whole factor."""
+    def test_parse_slow_maps_the_fo4_sequence_to_its_slot_and_refuses_the_rest(self):
+        states = anim_object.parse_states("Stage2=StateA_Play,Stage3=StateC_Play", anim_object.PLAY_SLOTS4)
+        self.assertEqual(anim_object.parse_slow("Stage3=4", states), {"StateC_Play": 4})
+        self.assertEqual(anim_object.parse_slow("Stage2=2, Stage3=8", states), {"StateA_Play": 2, "StateC_Play": 8})
+        self.assertEqual(anim_object.parse_slow("", states), {})
+        for bad in ("Stage4=4", "Stage3=1", "Stage3=9", "Stage3=2.5", "Stage3=x", "Stage3", "=4"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                anim_object.parse_slow(bad, states)
+
+    def test_stretch_multiplies_every_time_and_nothing_else(self):
+        plan = console_chain()
+        plan["clips"][1]["events"] = [{"text": "SoundPlay.Click", "elapsed": 0.3, "in_playback_range": True}]
+        out = anim_object.stretch_clips(plan, {"StateB_Play": 4})
+        before, after = plan["clips"][1], out["clips"][1]
+        self.assertAlmostEqual(after["duration"], before["duration"] * 4)
+        self.assertEqual(after["slowed"], 4)
+        self.assertAlmostEqual(after["events"][0]["elapsed"], 1.2)
+        self.assertEqual(after["events"][0]["text"], "SoundPlay.Click")
+        for tb, ta in zip(before["tracks"], after["tracks"]):
+            self.assertEqual(len(tb["samples"]), len(ta["samples"]))
+            for sb, sa in zip(tb["samples"], ta["samples"]):
+                self.assertAlmostEqual(sa["elapsed"], sb["elapsed"] * 4)
+                self.assertEqual({k: v for k, v in sa.items() if k != "elapsed"}, {k: v for k, v in sb.items() if k != "elapsed"})     # the same pose
+        self.assertIs(out["clips"][0], plan["clips"][0])                                                  # another clip is the same object
+        self.assertNotIn("slowed", plan["clips"][1])                                                      # the input is not changed
+        self.assertAlmostEqual(plan["clips"][1]["duration"], 0.6)
+
+    def test_stretch_keeps_frames_on_the_grid_and_the_chain_idles_follow_the_stretched_clip(self):
+        out = anim_object.stretch_clips(console_chain(), {"StateB_Play": 3})
+        for s in out["clips"][1]["tracks"][2]["samples"]:
+            self.assertAlmostEqual(s["elapsed"] * anim_object.FPS, round(s["elapsed"] * anim_object.FPS), places=6)
+        chained = anim_object.add_chain_idles(out)
+        by = {c["name"]: c for c in chained["clips"]}
+        self.assertAlmostEqual(by["StateB_Play"]["duration"], 1.8)
+        self.assertEqual(by["StateC_Idle"]["duration"], 0.0)
+        plain = {c["name"]: c for c in anim_object.add_chain_idles(console_chain())["clips"]}
+        self.assertEqual(_pose(by["StateC_Idle"]), _pose(plain["StateC_Idle"]))                            # the same held pose, slow or not
+
+    def test_stretch_refuses_a_missing_clip_and_a_bad_factor_and_does_nothing_for_none(self):
+        plan = console_chain()
+        self.assertEqual(anim_object.stretch_clips(plan, {})["clips"], plan["clips"])
+        self.assertEqual(anim_object.stretch_clips(plan, None)["clips"], plan["clips"])
+        self.assertEqual(anim_object.stretch_clips(plan, {"StateB_Play": 1})["clips"], plan["clips"])
+        with self.assertRaisesRegex(ValueError, "does not hold"):
+            anim_object.stretch_clips(plan, {"StateD_Play": 2})
+        for bad in (0, 2.5, -1, "2"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                anim_object.stretch_clips(plan, {"StateB_Play": bad})
+
+
 class BuilderTests(unittest.TestCase):
     def build(self, **kw):
         f = console_nif()

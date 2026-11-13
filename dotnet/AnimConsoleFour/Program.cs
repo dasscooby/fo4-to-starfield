@@ -5,7 +5,7 @@
 //   ACTI  an OVERRIDE of the port's console base (default EditorID FO4Port_acti_091a48_fallout4, "Vault Door Controls"): the record as it is,
 //         its model path replaced by the converted model with its own rig, and an AnimationGraphComponent added (ANAM = genericstategraph01,
 //         BNAM = the rig, CNAM = the folder of the eight .af / .afx clips)
-//   QUST  FO4SF_AnimConsoleFourQuest   start game enabled, stages 10 11 20 21..29 40 60, script FO4SF_AnimConsoleFourQuest, NO properties
+//   QUST  FO4SF_AnimConsoleFourQuest   start game enabled, stages 10 11 20 21..30 40 60, script FO4SF_AnimConsoleFourQuest, NO properties
 // The quest's script spawns a copy of that base with PlaceAtMe (any cell: the override is on the base). The base's local id is the script's
 // BaseId line (the stager reads it with `info` and writes it in). The graph's path is read from the game's archives by the stager and passed
 // in with --graph; the tool refuses anything that is not genericstategraph01.
@@ -67,7 +67,7 @@ static class AnimConsoleFour
     // the layout (scripts/newgame/FO4SF_AnimConsoleFourQuest.psc carries the same quest id and stages)
     const uint QuestId = 0x800;
     const string QuestEdid = "FO4SF_AnimConsoleFourQuest", Script = "FO4SF_AnimConsoleFourQuest";
-    static readonly ushort[] Stages = { 10, 11, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 60 };
+    static readonly ushort[] Stages = { 10, 11, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 40, 60 };
 
     static void NeedGraph(string anam)
     {

@@ -41,6 +41,7 @@ import datetime
 import glob
 import json
 import os
+import re
 import shutil
 import sys
 
@@ -62,7 +63,11 @@ SCRIPT = "FO4SF_AnimConsoleFourQuest"
 PSC = os.path.join(HERE, SCRIPT + ".psc")
 KIND = "anim-console-four"
 GRAPH = "genericstategraph01"
-STATES_DEFAULT = "Stage2=StateA_Play,Stage3=StateB_Play,Stage4=StateC_Play"       # the Scribe's rev 4 mapping
+# The map of the SCENE (FAL-489, PC session 12 Nov 23:57 UTC): the graph returns from StateB_Play to the rest pose (Play02 ended at rest), so the button
+# clip goes on StateC_Play, whose Idle (StateC_Idle) is the pose "lid open, button down". The three held poses are the same as with the Scribe's rev 4
+# map (Stage2=StateA_Play,Stage3=StateB_Play,Stage4=StateC_Play); only the slot of the button and of Stage4 change, StateB_Play becomes the spare.
+STATES_DEFAULT = "Stage2=StateA_Play,Stage3=StateC_Play,Stage4=StateD_Play"
+SLOW_DEFAULT = "Stage3=4"             # the button clip four times slower (0.633 s -> 2.533 s), so a shot 1.2 s after the call still catches it; "" = as authored
 DEFAULT_ARCHIVES = ("Starfield - Meshes*.ba2", "Starfield - Animations.ba2")
 LOG = os.path.join(os.path.expanduser("~"), "Documents", "My Games", "Starfield", "Logs", "Script", "User", "FO4SFAnimF.0.log")
 STARFIELD = mac.STARFIELD
@@ -127,6 +132,27 @@ def load_plan(stage_dir):
         return json.load(f)
 
 
+def scene_slot(states):
+    """The slot of the scene's button call: the SECOND clip of the chain (the first is the lid), or the first when the chain has one clip."""
+    chain = anim_object.chain_slots(states)
+    return chain[1] if len(chain) > 1 else chain[0]
+
+
+def set_scene(text, clips, states):
+    """The script's text with the scene's button slot, its Idle and the clip's seconds (from the clip table) in the three ;BUTTON... lines (each once)."""
+    play = scene_slot(states)
+    seconds = [c["seconds"] for c in clips if c["name"] == play]
+    if len(seconds) != 1:
+        sys.exit(f"the clip table has no single clip {play}: {[c['name'] for c in clips]}")
+    for tag, line in (("BUTTONPLAY", f'string ButtonPlay = "{play}"   ;BUTTONPLAY'), ("BUTTONIDLE", f'string ButtonIdle = "{anim_object.IDLE_OF4[play]}"   ;BUTTONIDLE'),
+                      ("BUTTONS", f"float ButtonS = {seconds[0]}   ;BUTTONS")):
+        new, n = re.subn(r"^[^\n;]*;" + tag + r"(?=\s|$)[^\n]*$", line, text, count=1, flags=re.M)
+        if n != 1:
+            sys.exit(f"the script has no ;{tag} line to put the scene's value into")
+        text = new
+    return text
+
+
 def stage(a, converter=None):
     """converter: (a, staging) -> (src, conv) for tests; default mac.build_converter."""
     try:
@@ -134,6 +160,10 @@ def stage(a, converter=None):
         anim_object.chain_slots(states)
     except ValueError as e:
         sys.exit(f"--states: {e}")
+    try:
+        slow = anim_object.parse_slow(a.slow, states)
+    except ValueError as e:
+        sys.exit(f"--slow: {e}")
     final = os.path.abspath(a.out)
     if os.path.exists(final):
         sys.exit(f"{final} exists: stage into a new folder (an earlier stage is never overwritten)")
@@ -156,7 +186,7 @@ def stage(a, converter=None):
     info = mac.parse_info(run(tool + ["info", port_esm, sf_esm, "--edid", a.edid]).stdout)
     src, conv = (converter or mac.build_converter)(a, staging)
     original, _raw = mac.find_original(src, info["model"], a.model)
-    res = conv.convert_anim_object(original, states, a.foley or None, idles="chain", graph=anam)
+    res = conv.convert_anim_object(original, states, a.foley or None, idles="chain", graph=anam, slow=slow)
     if not res.get("ok"):
         sys.exit(f"the console did not convert: {res.get('reason')} (attempt kept in {out})")
     anim = res["anim"]
@@ -172,7 +202,7 @@ def stage(a, converter=None):
     with open(os.path.join(out, "offline_check.txt"), "w", encoding="utf-8") as f:
         f.write(wrote + check)
     with open(PSC, encoding="utf-8") as f:
-        text = mac.set_base_id(f.read(), info["base_id"])
+        text = set_scene(mac.set_base_id(f.read(), info["base_id"]), anim["clips"], states)
     sources = read_sources(a.content_resources)
     src_dir = extract_sources(a.content_resources, work)
     pre = probe_a.precheck_sources(sources, text)
@@ -196,7 +226,7 @@ def stage(a, converter=None):
     with open(os.path.join(out, SCRIPT + ".psc"), "w", encoding="utf-8", newline="\n") as f:
         f.write(final_text)
     manifest = {"original": original, "port_model": info["model"], "base_edid": a.edid, "base_id": info["base_id"], "model": model_path,
-                "states": states, "foley": a.foley or "", "graph": {"anam": anam, "archive_entry": graph_entry}, "anim": anim,
+                "states": states, "slow": slow, "foley": a.foley or "", "graph": {"anam": anam, "archive_entry": graph_entry}, "anim": anim,
                 "kit_files": copied, "textures_not_shipped": textures}
     with open(os.path.join(out, "anim_manifest.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=1)
@@ -218,15 +248,15 @@ def stage(a, converter=None):
     with open(os.path.join(out, "README.txt"), "w", encoding="utf-8") as f:
         f.write(f"""Converted console on four states ({datetime.date.today().isoformat()}). docs/research/anim-console-four.md
 {PLUGIN} (sha256 {plan['outputs'][PLUGIN]}): an override of the port's console base {a.edid} (0x{info['base_id']}) with the converted model
-{model_path}, its own rig and the graph component of {GRAPH} (ANAM {anam}), plus QUST FO4SF_AnimConsoleFourQuest (stages 10 11 20 21..29 40 60).
-Masters Starfield.esm + FO4Port.esm. Original: {original}. State map: {states}. Foley: {a.foley or 'none (no sound frames)'}.
+{model_path}, its own rig and the graph component of {GRAPH} (ANAM {anam}), plus QUST FO4SF_AnimConsoleFourQuest (stages 10 11 20 21..30 40 60).
+Masters Starfield.esm + FO4Port.esm. Original: {original}. State map: {states}. Slowed: {slow or 'none'} (a whole factor on the clip's times). Foley: {a.foley or 'none (no sound frames)'}.
 Clips (eight; the graph's four play slots and four idle slots):
 {table}
 What each Idle slot holds, from the clip table:
 {poses}
 {len(copied)} mesh / geometry / material files in Data (no textures). Checked against Starfield.esm {before['Starfield.esm']}, FO4Port.esm {before['FO4Port.esm']}.
 Optional lines: {', '.join(f'{k}: {v}' for k, v in fate.items()) or 'none'}. RegisterForAnimationEvent returns bool: {pre['register_returns_bool']}.
-Session: stages 10 (spawn) 11 (side copy) 20 (register) 21..24 Play01..Play04, 25..28 StateA_Idle..StateD_Idle, 29 StateD_Play, 40 reading, 60 delete.
+Session: stages 10 (spawn) 11 (side copy) 20 (register) 21..24 Play01..Play04, 25..28 StateA_Idle..StateD_Idle, 29 StateD_Play, 30 the scene (StateA_Idle, Play01, {scene_slot(states)}, then its Idle: lid opens and stays open, button goes down and stays down), 40 reading, 60 delete.
 Install (the owner's word, game closed; loose files are not read, the installer packs them into a ba2):
   python scripts\\newgame\\anim_console_four_install.py install --dir <this folder> --starfield <game dir>
 Remove:  python scripts\\newgame\\anim_console_four_install.py uninstall --starfield <game dir>
@@ -289,7 +319,8 @@ def main(argv=None):
     s.add_argument("--texconv", required=True)
     s.add_argument("--content-resources", default=cr)
     s.add_argument("--compiler", default=os.path.join(STARFIELD, "Tools", "Papyrus Compiler", "PapyrusCompiler.exe"))
-    s.add_argument("--states", default=STATES_DEFAULT, help="FO4 sequence = Play slot in order A, B, C, D with none skipped; default the Scribe's rev 4 map (see `clips`)")
+    s.add_argument("--states", default=STATES_DEFAULT, help="FO4 sequence = Play slot in order A, B, C, D with none skipped; default the scene map (see `clips`)")
+    s.add_argument("--slow", default=SLOW_DEFAULT, help="FO4 sequence = whole factor 2..8: that clip runs slower by the factor (default Stage3=4, the button); empty = as authored")
     s.add_argument("--foley", default="", help="a Starfield foley name for the clips' sound frames (default: none, no sound)")
     s.add_argument("--model", default="")
     s.add_argument("--edid", default=EDID)

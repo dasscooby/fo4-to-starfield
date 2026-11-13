@@ -12,6 +12,9 @@ Scriptname FO4SF_AnimConsoleFourQuest extends Quest
 ;   21..24  PlayAnimation Play01, Play02, Play03, Play04 (the numbered calls), then 15 s of listening each
 ;   25..28  PlayAnimation StateA_Idle, StateB_Idle, StateC_Idle, StateD_Idle (the direct calls: each jumps to that state and holds its pose)
 ;   29      PlayAnimation StateD_Play (the spare play slot: a one-frame hold of the last pose, nothing should move)
+;   30      the SCENE on both copies, one window of SCENE_LISTEN_S: StateA_Idle (back to rest), SCENE_GAP_S later Play01 (the lid opens and stays open),
+;           SCENE_GAP_S later still ButtonPlay (the second clip of the chain, called by its slot name: the button goes down), ButtonS + 0.7 s later
+;           ButtonIdle (that slot's Idle: the pose is held, button down). The stager writes ButtonPlay, ButtonIdle and ButtonS (the clip's seconds).
 ;   40      a reading of the reference now
 ;   60      Disable and Delete the spawned references
 ; Every play stage calls the name on EVERY copy that exists (the side copy too), logs each return, shows the return as a notification AT ONCE
@@ -41,8 +44,14 @@ float UpM = 1.2         ; metres above the player's own height: a guess at chest
 int TIMER_POLL = 1
 int TIMER_QUIET = 100       ; + the stage: the window of that play stage closes
 int TIMER_RESAY = 200       ; the return notice shown again
+int TIMER_SCENE = 300       ; stage 30: the next call of the scene
 float POLL_S = 1.0
 float LISTEN_S = 15.0
+float SCENE_GAP_S = 2.5     ; stage 30: seconds from one call of the scene to the next (the lid clip is 1.633 s)
+float SCENE_LISTEN_S = 20.0
+string ButtonPlay = "StateC_Play"   ;BUTTONPLAY the scene's button call (the stager writes the slot of the chain's second clip)
+string ButtonIdle = "StateC_Idle"   ;BUTTONIDLE the idle that holds the button's end pose
+float ButtonS = 0.633               ;BUTTONS the button clip's seconds (the stager writes it)
 float RESAY_S = 2.0         ; the return notice is shown again every RESAY_S seconds, RESAY_TIMES times
 int RESAY_TIMES = 3
 int[] StageList
@@ -55,6 +64,8 @@ string ListenName = ""      ; the name called in the open window
 string ListenOk = ""         ; what that call returned, "true" / "false" (copies joined with "/")
 string LastPlayLine = ""     ; the return notice, shown again by TIMER_RESAY
 int ResayLeft = 0
+int SceneStep = 0           ; stage 30: the call due next (1 Play01, 2 ButtonPlay, 3 ButtonIdle, 0 = none)
+int SceneStage = 0
 float FirstDoneAfter = -1.0  ; seconds from the call to the first Done of the open window, -1 = none yet
 int ListenStage = 0         ; the play stage whose 15 s window is open; 0 = none (an event then is logged stage=0: outside any window)
 int WindowEvents = 0        ; events that arrived in the open window
@@ -65,8 +76,8 @@ float PlayRt = 0.0            ; real time of the open window's PlayAnimation / A
 
 Event OnInit()
     Debug.OpenUserLog(LogName)
-    StageList = new int[14]
-    DoneList = new bool[14]
+    StageList = new int[15]
+    DoneList = new bool[15]
     StageList[0] = 10
     StageList[1] = 11
     StageList[2] = 20
@@ -79,8 +90,9 @@ Event OnInit()
     StageList[9] = 27
     StageList[10] = 28
     StageList[11] = 29
-    StageList[12] = 40
-    StageList[13] = 60
+    StageList[12] = 30
+    StageList[13] = 40
+    StageList[14] = 60
     PlayNames = new string[9]
     PlayNames[0] = "Play01"
     PlayNames[1] = "Play02"
@@ -281,6 +293,8 @@ Event OnTimer(int aiTimerID)
                 StartTimer(RESAY_S, TIMER_RESAY)
             endif
         endif
+    elseif aiTimerID == TIMER_SCENE
+        SceneNext()
     elseif aiTimerID >= TIMER_QUIET
         int stage = aiTimerID - TIMER_QUIET
         if WindowEvents == 0
@@ -317,6 +331,8 @@ Function Step(int stage)
         RegisterAll(stage)
     elseif stage >= 21 && stage <= 29
         PlayOne(stage, PlayNames[stage - 21])
+    elseif stage == 30
+        SceneStart(stage)
     elseif stage == 40
         Reading("stage40", stage, TestRef)
         Reading("stage40", stage, TestRef2)
@@ -338,6 +354,13 @@ Function PlayOne(int stage, string n)
     ListenName = n
     WindowEvents = 0
     FirstDoneAfter = -1.0
+    CallOn(stage, n)
+    StartTimer(LISTEN_S, TIMER_QUIET + stage)
+EndFunction
+
+Function CallOn(int stage, string n)
+    {The PlayAnimation call itself, on every copy that exists, with its log line and its notice (shown at once and again RESAY_TIMES times).
+     PlayRt is the time of THIS call: an event's after= counts from the last call.}
     PlayRt = Utility.GetCurrentRealTime()
     bool ok = TestRef.PlayAnimation(n)
     ListenOk = "" + ok
@@ -351,7 +374,42 @@ Function PlayOne(int stage, string n)
     Say(LastPlayLine)
     ResayLeft = RESAY_TIMES
     StartTimer(RESAY_S, TIMER_RESAY)
-    StartTimer(LISTEN_S, TIMER_QUIET + stage)
+EndFunction
+
+Function SceneStart(int stage)
+    {Stage 30: the scene. StateA_Idle (rest), then Play01 (the lid opens, rests open), then ButtonPlay (the button goes down), then ButtonIdle (held).
+     One window of SCENE_LISTEN_S for all of it; the closing notice says "scene".}
+    if TestRef == None
+        Trace("scene stage=" + stage + " ref=none (place it first)")
+        return
+    endif
+    Reading("before", stage, TestRef)
+    Reading("before", stage, TestRef2)
+    ListenStage = stage
+    ListenName = "scene"
+    WindowEvents = 0
+    FirstDoneAfter = -1.0
+    SceneStage = stage
+    SceneStep = 1
+    Trace("scene stage=" + stage + " plan=StateA_Idle,Play01," + ButtonPlay + "," + ButtonIdle + " gap=" + SCENE_GAP_S + " buttons=" + ButtonS)
+    CallOn(stage, "StateA_Idle")
+    StartTimer(1.0, TIMER_SCENE)
+    StartTimer(SCENE_LISTEN_S, TIMER_QUIET + stage)
+EndFunction
+
+Function SceneNext()
+    if SceneStep == 1
+        SceneStep = 2
+        CallOn(SceneStage, "Play01")
+        StartTimer(SCENE_GAP_S, TIMER_SCENE)
+    elseif SceneStep == 2
+        SceneStep = 3
+        CallOn(SceneStage, ButtonPlay)
+        StartTimer(ButtonS + 0.7, TIMER_SCENE)
+    elseif SceneStep == 3
+        SceneStep = 0
+        CallOn(SceneStage, ButtonIdle)
+    endif
 EndFunction
 
 Function Cleanup()
