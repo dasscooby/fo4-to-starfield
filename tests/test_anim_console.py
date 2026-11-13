@@ -373,6 +373,34 @@ class StageTests(unittest.TestCase):
         self.assertEqual(mac.stage(self.args(self.root / "staged-t2", port_data=str(port_dir)), converter=make), 0)
         self.assertFalse(any("textures" in k for k in json.loads((self.root / "staged-t2" / "plan.json").read_text())["outputs"]))
 
+    def test_the_spawn_distances_are_written_into_the_script_and_a_bad_one_is_refused(self):
+        self.assertEqual(mac.set_spawn(PSC), PSC)                                           # nothing asked: the script is untouched
+        on = mac.set_spawn(PSC, ahead=45, up=1.7)
+        self.assertRegex(on, r"(?m)^float AheadM = 45.0 +;")
+        self.assertRegex(on, r"(?m)^float UpM = 1.7 +;")
+        self.assertIn("float SideM = 0.9", on)                                              # a distance not named keeps the script's own
+        self.assertEqual(on.count("\n"), PSC.count("\n"))
+        self.assertRegex(mac.set_spawn(PSC, up=-9.5), r"(?m)^float UpM = -9.5 +;")
+        self.assertRegex(mac.set_spawn(mac.set_spawn(PSC, ahead=60), ahead=60), r"(?m)^float AheadM = 60.0 +;")   # the same value twice is not an error
+        for bad in (float("nan"), float("inf"), 201, -201):
+            with self.assertRaises(SystemExit):
+                mac.set_spawn(PSC, ahead=bad)
+        with self.assertRaises(SystemExit):
+            mac.set_spawn("no line here\n", up=1)
+
+    def test_the_stage_writes_the_spawn_distances_into_the_compiled_script_and_the_manifest(self):
+        make, holder = self.converter()
+        out = self.root / "staged-spawn"
+        self.assertEqual(mac.stage(self.args(out, ahead_m=45.0, up_m=1.7), converter=make), 0)
+        text = (out / "FO4SF_AnimConsoleQuest.psc").read_text()
+        self.assertRegex(text, r"(?m)^float AheadM = 45.0 +;")
+        self.assertRegex(text, r"(?m)^float UpM = 1.7 +;")
+        self.assertEqual(json.loads((out / "anim_manifest.json").read_text())["spawn_m"], {"ahead": 45.0, "up": 1.7})
+        make, holder = self.converter()
+        self.assertEqual(mac.stage(self.args(self.root / "staged-nospawn"), converter=make), 0)
+        self.assertEqual(json.loads((self.root / "staged-nospawn" / "anim_manifest.json").read_text())["spawn_m"], {})   # the default stage names none
+        self.assertRegex((self.root / "staged-nospawn" / "FO4SF_AnimConsoleQuest.psc").read_text(), r"(?m)^float AheadM = 1.5 +;")
+
     def test_swap_siblings_is_off_by_default_and_reaches_the_converter_when_asked(self):
         self.assertFalse(self.shared_holder["conv"].swapped)                                # the default stage is the one staged in setUpClass
         make, holder = self.converter()
