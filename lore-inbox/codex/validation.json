@@ -1,0 +1,199 @@
+{
+  "date": "2026-10-28",
+  "progress": {
+    "vt": {
+      "rows": 130,
+      "checked_or_corrected": 130,
+      "newly_reviewed": 1,
+      "verified_source_among_reviewed": 52,
+      "as_reported_among_reviewed": 78,
+      "changed_ids": [
+        "VT-0112"
+      ],
+      "remaining_ids": [],
+      "unchanged_other_rows": 129,
+      "ids_and_order_retained": true
+    },
+    "mil": {
+      "rows": 86,
+      "checked_or_corrected": 86,
+      "newly_reviewed": 23,
+      "verified_source_among_reviewed": 51,
+      "as_reported_among_reviewed": 35,
+      "changed_ids": [
+        "MIL-0001",
+        "MIL-0002",
+        "MIL-0003",
+        "MIL-0006",
+        "MIL-0007",
+        "MIL-0008",
+        "MIL-0009",
+        "MIL-0010",
+        "MIL-0011",
+        "MIL-0012",
+        "MIL-0036",
+        "MIL-0053",
+        "MIL-0055",
+        "MIL-0056",
+        "MIL-0057",
+        "MIL-0059",
+        "MIL-0060",
+        "MIL-0061",
+        "MIL-0062",
+        "MIL-0063",
+        "MIL-0064",
+        "MIL-0065",
+        "MIL-0067"
+      ],
+      "remaining_ids": [],
+      "unchanged_other_rows": 63,
+      "ids_and_order_retained": true
+    },
+    "st3": {
+      "rows": 102,
+      "checked_or_corrected": 102,
+      "newly_reviewed": 9,
+      "verified_source_among_reviewed": 43,
+      "as_reported_among_reviewed": 59,
+      "changed_ids": [
+        "ST-MT-0007",
+        "ST-NV-0031",
+        "ST-NV-0032",
+        "ST-NV-0033",
+        "ST-NV-0034",
+        "ST-NV-0036",
+        "ST-NV-0037",
+        "ST-NV-0038",
+        "ST-NC-0006"
+      ],
+      "remaining_ids": [],
+      "unchanged_other_rows": 93,
+      "ids_and_order_retained": true
+    }
+  },
+  "original_validator": {
+    "vt": {
+      "exit_code": 1,
+      "output": "inbox/codex/vt/verified-1.jsonl:120 VT-0120: source_kind 'cut' does not fit tier 2 (['artbook', 'bible', 'dependent', 'dev', 'guide', 'manual'])\ninbox/codex/vt/verified-1.jsonl:121 VT-0121: source_kind 'cancelled' does not fit tier 2 (['artbook', 'bible', 'dependent', 'dev', 'guide', 'manual'])\ninbox/codex/vt/verified-1.jsonl:122 VT-0122: source_kind 'cancelled' does not fit tier 2 (['artbook', 'bible', 'dependent', 'dev', 'guide', 'manual'])\ninbox/codex/vt/verified-1.jsonl:123 VT-0123: source_kind 'cancelled' does not fit tier 2 (['artbook', 'bible', 'dependent', 'dev', 'guide', 'manual'])\ninbox/codex/vt/verified-1.jsonl:124 VT-0124: source_kind 'cut' does not fit tier 2 (['artbook', 'bible', 'dependent', 'dev', 'guide', 'manual'])\ninbox/codex/vt/verified-1.jsonl:125 VT-0125: source_kind 'cancelled' does not fit tier 2 (['artbook', 'bible', 'dependent', 'dev', 'guide', 'manual'])\ninbox/codex/vt/verified-1.jsonl:126 VT-0126: source_kind 'cut' does not fit tier 2 (['artbook', 'bible', 'dependent', 'dev', 'guide', 'manual'])\ninbox/codex/vt/verified-1.jsonl:127 VT-0127: source_kind 'cut' does not fit tier 2 (['artbook', 'bible', 'dependent', 'dev', 'guide', 'manual'])\ninbox/codex/vt/verified-1.jsonl:128 VT-0128: source_kind 'cut' does not fit tier 2 (['artbook', 'bible', 'dependent', 'dev', 'guide', 'manual'])\n9 problem(s)\n"
+    },
+    "mil": {
+      "exit_code": 1,
+      "output": "inbox/codex/mil/verified-1.jsonl:19 MIL-0019: source_kind 'cancelled' does not fit tier 2 (['artbook', 'bible', 'dependent', 'dev', 'guide', 'manual'])\ninbox/codex/mil/verified-1.jsonl:48 MIL-0048: source_kind 'cut' does not fit tier 2 (['artbook', 'bible', 'dependent', 'dev', 'guide', 'manual'])\ninbox/codex/mil/verified-1.jsonl:64 MIL-0064: source_kind 'cut' does not fit tier 2 (['artbook', 'bible', 'dependent', 'dev', 'guide', 'manual'])\ninbox/codex/mil/verified-1.jsonl:78 MIL-0078: source_kind 'cancelled' does not fit tier 2 (['artbook', 'bible', 'dependent', 'dev', 'guide', 'manual'])\n4 problem(s)\n"
+    },
+    "st3": {
+      "exit_code": 1,
+      "output": "inbox/codex/st3/verified-1.jsonl:8 ST-MT-0008: source_kind 'cut' does not fit tier 2 (['artbook', 'bible', 'dependent', 'dev', 'guide', 'manual'])\ninbox/codex/st3/verified-1.jsonl:9 ST-MT-0009: source_kind 'cut' does not fit tier 2 (['artbook', 'bible', 'dependent', 'dev', 'guide', 'manual'])\ninbox/codex/st3/verified-1.jsonl:59 ST-NM-0004: source_kind 'cancelled' does not fit tier 2 (['artbook', 'bible', 'dependent', 'dev', 'guide', 'manual'])\ninbox/codex/st3/verified-1.jsonl:78 ST-NY-0017: source_kind 'cut' does not fit tier 2 (['artbook', 'bible', 'dependent', 'dev', 'guide', 'manual'])\n4 problem(s)\n"
+    }
+  },
+  "in_memory_owner_policy_errors": {
+    "vt": [],
+    "mil": [],
+    "st3": []
+  },
+  "validator_source_unchanged": true,
+  "canonical_export_unchanged": true,
+  "no_rows_removed": true,
+  "stop_A_complete": false,
+  "method_exception": "Eight FULL-ledger pages were refetched by st3 helper; parent disclosed and preserved the failure. Helper networking disabled for future passes.",
+  "fifth_pass_note": "Historical preceding delivery: eight NY entries brought totals to193/318,91primary102asreported; preserved in prior commits. See sixth_delivery_note for current totals.",
+  "baseline_heads": {
+    "vt": "109f7476bf6ca4a436d92d49890dceee42ccd27a",
+    "mil": "1d29e94fa5133dadb3e9e8d1bacbc5ce0cfeb401",
+    "st3": "109f7476bf6ca4a436d92d49890dceee42ccd27a"
+  },
+  "sixth_delivery_note": "220/318 completed:102primary118asreported;27new checks in vt/mil. Helper cache-only; parent verified proposals and fetched exact missing transcripts. Current-store recovery pending; no canonical edits.",
+  "seventh_delivery_note": "246/318 reviewed:104primary142asreported;26new vt completions,VT0112 remainsunchecked with disputed ratio.17original-validator stale-policy errors; in-memory ownerpolicy passes. Helpers closed, current-store recovery pending.",
+  "eighth_delivery_note": "258/318 reviewed:108primary150as-reported;12new vault completions. VT0112 remains unchecked/HOLD for missing primary panel. Original validator17 stale-policy errors across318; owner-policy in-memory validation passes. No canonical edit; exact Commonwealth queue still awaits recovery.",
+  "ninth_delivery_note": "286/318 priority checks:122primary164asreported. Military86/86, states71/102, vault129/130.28new completions.17stale original-validator policy errors remain; in-memory owner policy0. StopA notcomplete, no canonical writes.",
+  "tenth_delivery_note": "305/318 checks:134primary171asreported. Military86/86, states90/102, vault129/130.19new checks;17stale original-validator policy errors preserved; owner-policy validation0. No canonical writes, StopA incomplete.",
+  "eleventh_delivery_note": "308/318 checks:136primary172reported;states93,military86,vault129. Three sourcegaps closed;original17tier-policy errors retained, in-memory owner-policy0. Canonicaldataunchanged;StopAincomplete.",
+  "twelfth_delivery_note": "Priority second reads complete318/318:146primary172asreported. States102,military86,vault130. Canonical data untouched;17 original validator tier-policy errors remain, in-memory owner-policy0. StopA incomplete: Commonwealth queue work remains. Exact raw snapshot/queue pending recovery, known explicitly assigned TODO sources can proceed.",
+  "new_commonwealth": {
+    "entries": 1199,
+    "ids": "Latest IDs in latest_delivery.ids; nextFA-8214 after fresh full-ID audit",
+    "sources": 82,
+    "coverage": "82unique:2full/80partial",
+    "all_unchecked": true,
+    "original_validator_exit": 1,
+    "known_original_policy_mismatches": 40,
+    "in_memory_owner_policy_errors": 0,
+    "canonical_unchanged": true,
+    "exact_queue_recovered": false,
+    "markers_verified": 32,
+    "game_tier1_count": 1053,
+    "guide_tier2_count": 103,
+    "dependent_tier2_count": 1,
+    "cut_tier2_hold_count": 40,
+    "roadway_images_inspected": 3,
+    "new33_original_validator_errors": 0,
+    "folders": {
+      "c-commonwealth": 127,
+      "c-commonwealth-2": 140,
+      "c-commonwealth-3": 139,
+      "c-commonwealth-4": 150,
+      "c-commonwealth-5": 97,
+      "c-commonwealth-6": 136,
+      "c-commonwealth-7": 150,
+      "c-commonwealth-8": 131,
+      "c-commonwealth-9": 129
+    },
+    "source_rows_across_folders": 100,
+    "new28_original_validator_errors": 0,
+    "eighth_note": "28newrows pass originalCLI; previous127 unchanged/not rerun; existingCU8081policy mismatch remains. Cached26inventoryline coverage; both holotapeIDs staticallyverified. No lore refetch or canonical edits.",
+    "new25_original_validator_errors": 0,
+    "ninth_note": "25new terminal rows; all53 secondfolder rows pass originalCLI, earlier28 bytes preserved and prior127 folder unchanged. All10budgetlines mapped; plans/suspicions/menu text qualified. No lore refetch/canonical writes.",
+    "new17_original_validator_errors": 0,
+    "tenth_note": "31cachedFortStrong/DiamondCity claims in same delivery; all84secondfolder rows originalCLI0. Prior53bytes/127folder/canonical/validator unchanged. Guide tier2, attributed dialogue only, no lore network fetch/native test.",
+    "new31_original_validator_errors": 0,
+    "guide_tier2_hold_count": 0,
+    "new19_original_validator_errors": 0,
+    "eleventh_note": "19newsourcecomparison claims;all103 secondfolder originalCLI0. Grafts guide claimtier2/adopt;playablemechanicunverified, Sun facialtakeover branch contextualized. Helper unsupportedresistance/duplicatedsales corrected. Earlier84bytes/127folder/canonical/validator unchanged;3newpages requestedbeforefetch,allpartial.",
+    "guide_tier2_rejected_count": 1,
+    "new37_original_validator_errors": 0,
+    "twelfth_note": "37new;all140 originalCLI0. Competing CPG accounts attributed; guide construction dates rejected against quoted game plaque. All12 Bunker companion comments represented. New marker0002B880 verified read-only. Prior103/127/canonical preserved.4requested pages fetched once,allpartial.",
+    "new41_original_validator_errors": 0,
+    "thirteenth_note": "41 GeneralAtomics claims;originalCLI0. Corporate/supervisor/programmer accounts retained as attributed. Planned calendar noyear; terminalfeedback notnative effects.2newrawmapmarkers;priorfolders/canonical unchanged.4pagesfetchedonce,allpartial.",
+    "latest_delivery": {
+      "new": 22,
+      "ids": [
+        "FA-8182",
+        "FA-8183",
+        "FA-8184",
+        "FA-8185",
+        "FA-8186",
+        "FA-8187",
+        "FA-8188",
+        "FA-8189",
+        "FA-8190",
+        "FA-8191",
+        "FA-8192",
+        "FA-8193",
+        "FA-8194",
+        "FA-8195",
+        "FA-8196",
+        "FA-8197",
+        "FA-8198",
+        "FA-8199",
+        "FA-8200",
+        "FA-8201",
+        "FA-8202",
+        "FA-8203"
+      ],
+      "next_id": "FA-8214 after fresh full-ID audit",
+      "original_validator_exit": 1,
+      "original_policy_errors": 4,
+      "owner_policy_errors": 0,
+      "qualifications": "22gameclaims,129folder9/1199local vs1152published. Narrow history-source gaps resolved, attribution/plans/uncertainty retained; prior4cutvalidatorerrors unchanged."
+    },
+    "dev_tier2_count": 2
+  },
+  "mil_source_followup": {
+    "id": "MIL-0011",
+    "change": "check_note only; newly inspected ShiftScheduling establishes ReiseReserve/duties, not whole division",
+    "other85rows_identical": true,
+    "all86ids_order_preserved": true,
+    "original_validator_exit": 1,
+    "unchanged_known_policy_mismatches": 4,
+    "owner_policy_errors": 0
+  }
+}
