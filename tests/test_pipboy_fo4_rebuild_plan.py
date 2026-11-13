@@ -1,6 +1,7 @@
 """FAL-614: the Fallout 4 Pip-Boy rebuild plan (docs/spikes/pipboy-fo4-rebuild-plan.md). It keeps its rules, it says
 what our movie is as the source does, and its read D1 (names and header fields only) runs on our own kit movie."""
 import re
+import struct
 import sys
 import unittest
 from pathlib import Path
@@ -70,6 +71,43 @@ class RebuildPlanTests(unittest.TestCase):
         self.assertFalse(any("DoABC" in line for line in lines))                # our movie has no ActionScript
         self.assertTrue(lines[-1].startswith("  tags=") and "69x1" in lines[-1], lines[-1])
         self.assertEqual(space["describe"]("x.dds", b"DDS |" + bytes(16)), ["file=x.dds signature=b'DDS' not_swf=1"])
+
+
+    def test_d2_reads_only_identifier_names(self):
+        code = re.findall(r"```python\n(.*?)```", self.plan, re.S)[1]
+        space = {"__name__": "plan_d2"}
+        exec(compile(code, "pipboy-fo4-rebuild-plan.md D2", "exec"), space)
+        pool = [b"PlayerInfo", b"a sentence, not a name", b"CurrHP", b"x" * 70]
+        abc = struct.pack("<HH", 16, 46) + b"\x00\x00\x00" + bytes([len(pool) + 1])
+        abc += b"".join(bytes([len(s)]) + s for s in pool)
+        tag = struct.pack("<I", 1) + b"boot\0" + abc
+        body = b"\x00" + struct.pack("<HH", 30 << 8, 1)
+        body += struct.pack("<HI", (82 << 6) | 0x3F, len(tag)) + tag + struct.pack("<H", 0)
+        movie = b"FWS" + bytes([15]) + struct.pack("<I", 8 + len(body)) + body
+        self.assertEqual(space["names"](movie), ["  abc=46.16 strings=4 names=2", "  name=CurrHP", "  name=PlayerInfo"])
+        self.assertEqual(space["names"](kit.kit_movie_bytes(kit.read_kit())), [])        # ours has no ActionScript
+
+    def test_movie_setting(self):
+        self.assertIn("**Proof 1, the card (owner PC; the plugin's `Movie=` setting, FAL-614).**", self.plan)
+        self.assertIn("`Stage=2`, `Movie=FO4SF_Fo4Boot`", self.plan)
+        self.assertIn("if (!g_movie.empty() && g_loadingMovie.load()) {", self.main)
+        self.assertIn("if (!name || g_stage != 2) {", self.main)
+        load = self.main[self.main.index("bool MenuLoadMovie("):]
+        load = load[:load.index("\n\t}\n")]
+        order = [load.index(s) for s in ("g_movieNameAsks.store(0);", "g_loadingMovie.store(true);",
+                                         "g_engineLoadMovie(a_self, false, a_arg2);", "g_loadingMovie.store(false);")]
+        self.assertEqual(order, sorted(order))
+        ini = (ROOT / "sfse" / "FO4SFPipboyMenu" / "FO4SFPipboyMenu.ini").read_text(encoding="utf-8")
+        self.assertRegex(ini, r"\nMovie=\r?\n")                                   # shipped empty: our movie
+        readme = (ROOT / "sfse" / "FO4SFPipboyMenu" / "README.md").read_text(encoding="utf-8")
+        for text in ("### (b) with `Movie=`: another movie in our menu (FAL-614)", "refuse step=ini movie=",
+                     "name_asks=<n>"):
+            self.assertIn(text, readme, text)
+
+    def test_reads_recorded(self):
+        for text in ("**Read on the PC (D1, 13 Nov,", "**Read on the PC (D3, 13 Nov): verified.**",
+                     "`Interface\\Pip-Boy\\WorldMap_d.dds`, 2048 x 2048", "**D2 (data names; needed"):
+            self.assertIn(text, self.plan, text)
 
 
 if __name__ == "__main__":

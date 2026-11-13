@@ -27,7 +27,7 @@ and logs every step. The stage is picked by `Stage` in `FO4SFPipboyMenu.ini`:
 | --- | --- |
 | `src/main.cpp` | the plugin: version guard, checks before use, the menu object, the key thread |
 | `src/pch.h` | precompiled header (libxse's game headers and SFSE layer) |
-| `FO4SFPipboyMenu.ini` | `Stage`, `Key` (default `0x79`, F10), `Flags` (0), `KeepAlive` (1); stage (c): `FlagSets` (`0x0,0x8,0x9`), `SnapshotKey` (`0x7A`, F11), `ClickCall` (empty: off); stages (d) and (e): `PageFlagSets` (`0x19`); stages (d), (e): `CancelCode1` to `CancelCode4` (`0x1B`, `0x09`: Esc and Tab as Windows virtual-key codes, as the PC's game run logged them); stage (e): `KitUp` to `KitNextTab`, and the pages (`[Kit]`, `[Page <TAB>/<SUB>]`) |
+| `FO4SFPipboyMenu.ini` | `Stage`, `Key` (default `0x79`, F10), `Flags` (0), `KeepAlive` (1); stage (b): `Movie` (empty: ours, FAL-614); stage (c): `FlagSets` (`0x0,0x8,0x9`), `SnapshotKey` (`0x7A`, F11), `ClickCall` (empty: off); stages (d) and (e): `PageFlagSets` (`0x19`); stages (d), (e): `CancelCode1` to `CancelCode4` (`0x1B`, `0x09`: Esc and Tab as Windows virtual-key codes, as the PC's game run logged them); stage (e): `KitUp` to `KitNextTab`, and the pages (`[Kit]`, `[Page <TAB>/<SUB>]`) |
 | `xmake.lua`, `build.ps1` | the PC build: FOCCPing's build path (`docs/spikes/combined-core-probes.md`, B0-2) |
 | `scripts/ui/make_probe_swf.py` | writes the stage (b) movie, with `--channel` the stage (c) one and with `--page` the stage (d) one (pure Python; tests `tests/test_make_probe_swf.py`, `tests/test_pipboy_stat_page.py`) |
 | `scripts/ui/make_pipboy_kit.py` | the page kit (stage (e)): reads and checks the pages of the ini (`--check`) and writes the kit's movie for them (pure Python, on `make_probe_swf.py`; tests `tests/test_pipboy_kit.py`) |
@@ -567,6 +567,22 @@ Take a screenshot while the menu is open after the fifth press, and one after th
 2. `step=load_movie ... stage=b result=1 movie=<non-zero>`, and `step=sfse_movie_created` for our menu.
 3. The open screenshot shows the green rectangle, centred, about 60 % by 50 % of the screen. It carries the dark label
    `FO4SF PIP-BOY PROBE`. The closed screenshot shows the game without it.
+
+### (b) with `Movie=`: another movie in our menu (FAL-614)
+
+`Movie=<name>` (1 to 64 letters, digits and `_`; empty = ours) makes the menu load `Interface/<name>.swf` instead of
+ours. It works with `Stage=2` only, so no channel, page or kit tries to drive a movie that is not ours. Any other stage
+with `Movie=` set, or a bad name, gives `refuse step=ini movie=...` and the plugin stays idle. At load:
+`step=movie name=<name> file=Interface/<name>.swf`.
+
+How it works (**hypothesis**, the PC's run decides): the engine's `LoadMovie` names the file after the menu's
+`GetName`, as it loads `Interface/FO4SF_PipboyMenu.swf` for ours. While our `LoadMovie` runs the engine's, `GetName`
+answers with `Movie=`; at every other time it answers `FO4SF_PipboyMenu`. The load logs
+`step=load_movie ... result=<0 or 1> movie=<address> movie_name=<name> name_asks=<n>`. `name_asks=0` means the
+engine did not ask for the name in that call, so the hypothesis is wrong whatever loaded.
+
+It exists for proof 1 of `docs/spikes/pipboy-fo4-rebuild-plan.md`: the player's own Fallout 4 boot sequence, staged
+on their PC only, never in Git.
 
 ### PASS at (c), `Stage=3` (steps: `docs/spikes/pipboy-channel-bridge-session.md`)
 

@@ -401,6 +401,7 @@ namespace
 	std::uint32_t g_key = 0x79;     // F10
 	std::uint32_t g_flags = 0;      // OR'ed into the flags the constructor set
 	bool          g_keepAlive = true;
+	std::string   g_movie;          // FAL-614, Stage=2 only: Movie=, the movie Interface/<Movie>.swf instead of ours; "" = ours
 
 	std::uintptr_t                           g_base = 0;
 	std::size_t                              g_imageSize = 0;
@@ -417,6 +418,8 @@ namespace
 	Ctor_t                                   g_ctor = nullptr;
 	Dtor_t                                   g_engineDtor = nullptr;
 	LoadMovie_t                              g_engineLoadMovie = nullptr;
+	std::atomic<bool>                        g_loadingMovie{ false };   // FAL-614: inside our call of the engine's LoadMovie
+	std::atomic<std::uint32_t>               g_movieNameAsks{ 0 };      // GetName calls answered with Movie= in that call
 	ProcessMessage_t                         g_engineProcessMessage = nullptr;
 	const SFSE::TaskInterface*               g_task = nullptr;
 	std::atomic<bool>                        g_registered{ false };
@@ -3244,7 +3247,17 @@ namespace
 		return a_self;
 	}
 
-	const char* MenuGetName(const void*) { return kMenuName; }
+	// the menu's name; while our LoadMovie runs the engine's, Movie= when set (FAL-614: the engine names the movie
+	// file Interface/<name>.swf after it, as it loads Interface/FO4SF_PipboyMenu.swf for ours). Each answer with Movie=
+	// is counted and logged with the load (step=load_movie ... name_asks=)
+	const char* MenuGetName(const void*)
+	{
+		if (!g_movie.empty() && g_loadingMovie.load()) {
+			g_movieNameAsks.fetch_add(1);
+			return g_movie.c_str();
+		}
+		return kMenuName;
+	}
 
 	// "" binds no menu object in the movie: our movie has no code (a file path here is read as a clip path)
 	const char* MenuGetRootPath(const void*) { return ""; }
@@ -3262,10 +3275,15 @@ namespace
 			REX::INFO("step=load_movie menu={} dispatcher={} arg2={} stage=b result=already_loaded", menu, a_dispatcher, a_arg2);
 			return true;
 		}
-		REX::INFO("step=load_movie menu={} dispatcher={} arg2={} stage=b calling", menu, a_dispatcher, a_arg2);
+		REX::INFO("step=load_movie menu={} dispatcher={} arg2={} stage=b calling movie_name={}", menu, a_dispatcher, a_arg2,
+			g_movie.empty() ? kMenuName : g_movie.c_str());
+		g_movieNameAsks.store(0);
+		g_loadingMovie.store(true);
 		const bool loaded = g_engineLoadMovie(a_self, false, a_arg2);
-		REX::INFO("step=load_movie menu={} stage=b result={} movie={}", menu, loaded ? 1 : 0,
-			Hex(reinterpret_cast<std::uintptr_t>(MovieOf(a_self))));
+		g_loadingMovie.store(false);
+		REX::INFO("step=load_movie menu={} stage=b result={} movie={} movie_name={} name_asks={}", menu, loaded ? 1 : 0,
+			Hex(reinterpret_cast<std::uintptr_t>(MovieOf(a_self))), g_movie.empty() ? kMenuName : g_movie.c_str(),
+			g_movieNameAsks.load());
 		return loaded;
 	}
 
@@ -3955,6 +3973,7 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	g_key = ReadNumber(ini, L"Key", 0x79);
 	g_flags = ReadNumber(ini, L"Flags", 0);
 	g_keepAlive = ReadNumber(ini, L"KeepAlive", 1) != 0;
+	g_movie = ReadText(ini, L"Movie");   // FAL-614: checked below, after the stage
 	// FAL-414: up to four keyboard ids that close the menu while it is open (0 = unused)
 	g_cancelCodes = { ReadNumber(ini, L"CancelCode1", 0x1B), ReadNumber(ini, L"CancelCode2", 0x09), ReadNumber(ini, L"CancelCode3", 0),
 		ReadNumber(ini, L"CancelCode4", 0) };
@@ -3970,6 +3989,17 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	if (g_stage < 1 || g_stage > 5) {
 		REX::INFO("step=off (Stage=1, 2, 3, 4 or 5 in FO4SFPipboyMenu.ini to probe)");
 		return true;
+	}
+	// FAL-614: Movie=<name>, 1 to 64 letters, digits and '_', with Stage=2 only (no channel, page or kit drives it)
+	if (!g_movie.empty()) {
+		const bool name = g_movie.size() <= 64 && std::ranges::all_of(g_movie, [](char a_c) {
+			return (a_c >= 'A' && a_c <= 'Z') || (a_c >= 'a' && a_c <= 'z') || (a_c >= '0' && a_c <= '9') || a_c == '_';
+		});
+		if (!name || g_stage != 2) {
+			Refuse("ini", std::format("movie={} (Stage=2 only; 1 to 64 letters, digits and _)", g_movie));
+			return true;
+		}
+		REX::INFO("step=movie name={} file=Interface/{}.swf", g_movie, g_movie);
 	}
 	std::string clickCall;
 	bool        clickCallOk = true;

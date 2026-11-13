@@ -48,6 +48,15 @@ change.
     same tree the Fallout 4 companion app received.
 - What each movie imports from `fonts_en.swf`, and which classes it defines, is what D1 prints.
 
+**Read on the PC (D1, 13 Nov, at `c28a8d5d`, the script unchanged; PR #764 comment 6840521845): verified.**
+- All nine files were found. Each is `CWS` **version 15**, ActionScript 3, with **one `DoABC`** each: the pages hold
+  37 to 119 kB of it, the boot sequence only 2,203 bytes.
+- Stage 876 x 700 (the boot sequence 826 x 700), 30 frames a second.
+- Each imports only `fonts_en.swf`. No Scaleform tag of code 1000 and up, so no image file is named inside the movies.
+- Starfield's two files: version 12, ActionScript 3, 1920 x 1080.
+- So route A is open in principle: the same script generation on both sides, with the version (15 against 12) the
+  first difference to watch. D2 is needed for the pages. The boot sequence, with the least code, stays proof 1.
+
 ## (b) The routes, and what proves or kills each
 
 **Route A: load the converted original movies, feed them what they expect.**
@@ -89,6 +98,16 @@ early, because it costs nothing to try.
 - The marker icons are expected to be symbols inside that movie (one per marker type).
 - The world map image is expected to be a texture under `Textures\Interface\` (a `.dds`). It is named by the worldspace
   record, or found by a name holding `map`. The MAP plan's R5 lists those names.
+
+**Read on the PC (D3, 13 Nov): verified.**
+- The worldspace `Commonwealth`: `ICON` = `Interface\Pip-Boy\WorldMap_d.dds`, 2048 x 2048, BC1, 12 mips.
+- `MNAM`: usable size 0 x 0; north-west cell (-33, 25), south-east cell (28, -36): 62 x 62 Fallout 4 cells.
+  `ONAM`: scale 1, offsets 0. `NAM0` / `NAM9`: -393216 / 393216.
+- So, as a **hypothesis** for the map card: the image spans those 62 cells of 4096 units. A Fallout 4 position (x, y)
+  falls at pixel ((x / 4096 + 33) / 62 x 2048, (25 + 1 - y / 4096) / 62 x 2048), the south-east cell included. The
+  first map card checks it against one marker the player can see on both maps.
+- `Pipboy_MapPage.swf` holds 92 marker symbol classes. A separate `Interface\MapMarkers.swf` also exists; D2 below
+  reads its names with the others.
 
 **What our page must supply.** These come from the Fallout 4 data tree's map branch (hypothesis: the companion app's
 `Map` → `World` values):
@@ -214,9 +233,82 @@ if __name__ == "__main__":
 Run it once per archive, with the file names as arguments, and send the output back. The output stays in the PC's
 private evidence folder; the comment carries the lines.
 
-**D2 (data names, only if D1 shows `DoABC`).** The names of the classes and members the page movies read from the
-engine. The ABC's constant pool of strings is printed, filtered to names: identifiers only, no code, no bytes. Its
-card follows D1, because whether it is needed at all depends on D1.
+**D2 (data names; needed, D1 found `DoABC` in every movie).** The names the movies' ActionScript uses: classes,
+members, and the names of the data the engine sends. It prints the ABC's version and its constant pool of strings,
+filtered to identifiers (letters, digits, `_`, `$`, `.` and `:`, at most 64 characters). No code, no bytes, no
+sentences. Run it on the same nine files as D1 plus `MapMarkers.swf`, in memory as D1:
+
+```python
+import re, struct, zlib
+
+NAME = re.compile(r"[A-Za-z_$][A-Za-z0-9_$.:]{0,63}")
+
+
+def u30(b, at):
+    value = shift = 0
+    while True:
+        byte = b[at]
+        at += 1
+        value |= (byte & 0x7F) << shift
+        shift += 7
+        if not byte & 0x80 or shift >= 35:
+            return value, at
+
+
+def names(data):
+    """The ABC version and the identifier strings of each DoABC tag's constant pool: names only, nothing else."""
+    body = zlib.decompress(data[8:]) if data[:3] in (b"CWS", b"CFX") else data[8:]
+    pos = ((5 + 4 * (body[0] >> 3) + 7) // 8) + 4
+    out = []
+    while pos + 2 <= len(body):
+        head = struct.unpack_from("<H", body, pos)[0]
+        code, size, pos = head >> 6, head & 0x3F, pos + 2
+        if size == 0x3F:
+            size, pos = struct.unpack_from("<I", body, pos)[0], pos + 4
+        tag, pos = body[pos:pos + size], pos + size
+        if code == 0:
+            break
+        if code not in (72, 82):
+            continue
+        at = 0 if code == 72 else tag.index(b"\0", 4) + 1
+        minor, major = struct.unpack_from("<HH", tag, at)
+        at += 4
+        n, at = u30(tag, at)                       # ints: signed varints
+        for _ in range(max(n - 1, 0)):
+            at = u30(tag, at)[1]
+        n, at = u30(tag, at)                       # uints
+        for _ in range(max(n - 1, 0)):
+            at = u30(tag, at)[1]
+        n, at = u30(tag, at)                       # doubles
+        at += 8 * max(n - 1, 0)
+        n, at = u30(tag, at)                       # strings
+        found = set()
+        for _ in range(max(n - 1, 0)):
+            length, at = u30(tag, at)
+            text = tag[at:at + length].decode("utf-8", "replace")
+            at += length
+            if NAME.fullmatch(text):
+                found.add(text)
+        out.append(f"  abc={major}.{minor} strings={max(n - 1, 0)} names={len(found)}")
+        out.extend(f"  name={t}" for t in sorted(found))
+    return out
+
+
+if __name__ == "__main__":
+    import sys
+    sys.path.insert(0, "src")
+    from fo4sf.ba2 import Ba2
+    archive = Ba2(sys.argv[1])
+    for want in sys.argv[2:]:
+        hit = [n for n in archive.names if n.lower().replace("/", "\\").endswith("\\" + want.lower())]
+        print(f"file={want} found={len(hit)}")
+        if hit:
+            print("\n".join(names(archive.read(hit[0]))))
+```
+
+The output stays in the PC's private evidence folder. Send back, per file, the `abc=` line and the count of names, and
+for `PipboyMenu.swf`, `Pipboy_StatsPage.swf` and `pipboybootsequence.swf` the names themselves. The STAT page's names
+are the data proof 2 must feed; the boot sequence's are what proof 1 may ask the engine for.
 
 **D3 (the world map).**
 - The look survey's names-only listing over `Fallout4 - Textures*.ba2` and `Fallout4 - Interface.ba2`, for names
@@ -238,6 +330,25 @@ The owner PC suggested the boot sequence or the STAT page's frame with live HP. 
 player sees the real boot screen. Proof 2 follows by whichever route proof 1 leaves standing.
 - If the boot sequence plays: proof 2 is route A, the shell with the STAT page and the HP value pushed by name.
 - If it does not: proof 2 is route B, the STAT frame's shapes and font copied into our kit movie on the PC.
+
+**Proof 1, the card (owner PC; the plugin's `Movie=` setting, FAL-614).** Environment: the owner's PC, the plugin
+built from this branch's head, the probe staged as for `Stage=2`. Nothing of the player's goes into Git.
+1. Stage the probe as usual (`make_pipboy_probe.py stage`). Before packing, copy the player's own
+   `Interface\pipboybootsequence.swf`, read from their `Fallout4 - Interface.ba2`, unchanged, into the staged
+   `Data\Interface\` as `FO4SF_Fo4Boot.swf`. Pack as usual. This private archive stays on the PC.
+2. In `FO4SFPipboyMenu.ini`: `Stage=2`, `Movie=FO4SF_Fo4Boot`.
+3. Load a save outdoors, press F10, wait 5 seconds, take a screenshot, press F10 again.
+
+PASS: `step=movie name=FO4SF_Fo4Boot`, `step=load_movie ... result=1 movie=<non-zero> movie_name=FO4SF_Fo4Boot
+name_asks=<1 or more>`, and the screenshot shows Fallout 4's boot screen inside our menu, with no crash.
+What each other outcome means:
+- `name_asks=0`: the engine does not name the file after `GetName` in that call. Whatever loaded, the setting's
+  hypothesis is wrong; send the log.
+- `result=0` with `name_asks` of 1 or more: the engine refused the file. The next card converts it, the SWF version
+  15 to 12 first.
+- It loads but shows nothing, or freezes: its ActionScript waits for something of Fallout 4's engine. D2's boot names
+  say what.
+- A crash: send the crash log; the next card is the version conversion.
 
 ## Look and function: the seam
 
@@ -332,5 +443,7 @@ delivery.
 
 ## Next gate
 
-1. The owner PC runs D1 (and D3) and sends back the lines.
-2. Then the card for proof 1. It has its own branch, tests, a CARRY line, the Scribe's review, and the PC's run.
+1. Done: D1 and D3 (13 Nov).
+2. The owner PC runs D2 and proof 1 (the card above, with the `Movie=` setting on this branch).
+3. Then proof 2, by the route proof 1 leaves standing. It has its own branch, tests, a CARRY line, the Scribe's
+   review, and the PC's run.
