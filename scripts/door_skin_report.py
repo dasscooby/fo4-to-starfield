@@ -3,10 +3,16 @@ parent node), how many drawn vertices follow each bone, and how many blend bones
 Read-only; prints JSON.
 
   python scripts/door_skin_report.py --fo4-data <Fallout 4 Data> <mesh name, e.g. Meshes\\Interiors\\RedRocket\\Doors\\RedRPedDoor.nif>
+
+A model whose sequences are not named Open / Close (the Vault 111 cog door VltGearDoor01.nif plays Stage2 as Open) has those sequences skipped
+by the plan unless it is given the clip alias the converter uses (pipeline.OWN_RIG_ALIASES, looked up by the file name): the report still runs
+without it, but its plan has no Open clip. The alias, from that table or by hand (--alias "Stage2=Open"), is what makes the plan select that
+sequence as Open, as the converter's own plan does.
 """
 import argparse
 import json
 import os
+import re
 import sys
 from collections import Counter
 
@@ -14,8 +20,21 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 from fo4sf import door_rig, fo4skin, nif, pipeline  # noqa: E402
 
 
-def report(src):
-    plan = door_rig.animated_identity_binds(door_rig.plan(src, placed=True))
+def aliases_for(mesh, hand=None):
+    """{FO4 sequence: Open/Close} for a model: the one named by hand (--alias), else the converter's own table by file name; None for a plain door."""
+    if hand:
+        out = {}
+        for part in hand.split(","):
+            seq, _, clip = part.partition("=")
+            if clip not in ("Open", "Close") or not seq.strip():
+                raise SystemExit(f"--alias {hand!r}: expected <FO4 sequence>=Open or <FO4 sequence>=Close, comma separated")
+            out[seq.strip()] = clip
+        return out
+    return pipeline.OWN_RIG_ALIASES.get(re.split(r"[\\/]", mesh)[-1].lower())
+
+
+def report(src, aliases=None):
+    plan = door_rig.animated_identity_binds(door_rig.plan(src, placed=True, aliases=aliases))
     rig = {b["node"] for b in plan["bones"] if b.get("node") is not None}
     parents = {c: n for n in range(len(src.blocks)) if src.type_of(n).endswith("Node") for c in nif.node_children(src, n)}
     animated = {t["node"] for c in plan["clips"] for t in c["tracks"]}
@@ -47,12 +66,13 @@ def report(src):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--fo4-data", required=True)
+    ap.add_argument("--alias", default=None, help='sequence aliases by hand, e.g. "Stage2=Open" (default: the converter\'s own table for the model)')
     ap.add_argument("mesh")
     a = ap.parse_args()
     data = pipeline.Fo4Archives(a.fo4_data).mesh(a.mesh)
     if data is None:
         sys.exit(f"{a.mesh} not in the FO4 archives")
-    print(json.dumps(report(nif.parse(data)), indent=1))
+    print(json.dumps(report(nif.parse(data), aliases_for(a.mesh, a.alias)), indent=1))
 
 
 if __name__ == "__main__":
