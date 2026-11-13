@@ -598,5 +598,136 @@ class CandidatesTests(unittest.TestCase):
         self.assertIn("2 found; first 2:", self.run_form("--refs-to", "1A"))
 
 
+def placed_esm():
+    """ACTI/FURN with graphs: Stages x2 (one placed, model present; one placed, model missing), TwoStages x1 (never placed), GenericOpenClose x1 (placed 3 times, model present),
+    an ACTI without a graph component whose editor id has 'Lift', and a FURN with a graph, placed, no model."""
+    w = esm.PluginWriter([])
+    G = "AnimTextData\\Tables\\Graphs\\"
+    w.add(esm.Record("ACTI", 0x21, [(b"EDID", esm.zbytes("ConsoleOne"))] + comp(G + "Stages.agx", "G\\skeleton.rig", "C\\Anim") + [(b"MODL", esm.zbytes(LIFT_MODEL))]))
+    w.add(esm.Record("ACTI", 0x22, [(b"EDID", esm.zbytes("ConsoleGone"))] + comp(G + "Stages.agx") + [(b"MODL", esm.zbytes("Ships\\Gone.nif"))]))
+    w.add(esm.Record("ACTI", 0x23, [(b"EDID", esm.zbytes("LiftNever"))] + comp(G + "TwoStages.agx") + [(b"MODL", esm.zbytes("Ships\\Gone2.nif"))]))
+    w.add(esm.Record("ACTI", 0x24, [(b"EDID", esm.zbytes("DoorishThing"))] + comp(G + "GenericOpenClose01.agx") + [(b"MODL", esm.zbytes(LIFT_MODEL))]))
+    w.add(esm.Record("ACTI", 0x25, [(b"EDID", esm.zbytes("PlainLiftSwitch")), (b"MODL", esm.zbytes(LIFT_MODEL))]))
+    w.add(esm.Record("FURN", 0x26, [(b"EDID", esm.zbytes("ChairNoModel"))] + comp(G + "FurnitureDefault.agx")))
+    body = w.to_bytes()
+    cell = esm.Record("CELL", 0x3001, [(b"EDID", esm.zbytes("CellA"))])
+    def ref(fid, base, pos):
+        return esm.Record("REFR", fid, [(b"NAME", struct.pack("<I", base)), (b"DATA", struct.pack("<6f", *pos, 0, 0, 0))]).to_bytes()
+    refs = ref(0x4001, 0x21, (1, 2, 3)) + ref(0x4002, 0x22, (4, 5, 6)) + ref(0x4003, 0x24, (7, 8, 9)) + ref(0x4004, 0x24, (0, 0, 0)) + ref(0x4005, 0x24, (0, 0, 1)) + ref(0x4006, 0x25, (9, 9, 9)) + ref(0x4007, 0x26, (1, 1, 1))
+    return body + esm.group_bytes("CELL", cell.to_bytes() + esm.group_bytes(struct.pack("<I", 0x3001), refs, 9))
+
+
+class PlacedTests(unittest.TestCase):
+    setUp_form = FormModeTests.setUp
+    run_form = FormModeTests.run_form
+
+    def setUp(self):
+        self.setUp_form()
+        with open(os.path.join(self.data, "Starfield.esm"), "wb") as f:
+            f.write(placed_esm())
+
+    def test_the_census_groups_by_graph_counts_placed_and_usable_and_orders_by_usable(self):
+        text = self.run_form("--placed", "--game-archive", "Starfield - Meshes*.ba2")
+        self.assertIn("=== placed census: 6 ACTI/FURN record(s) read, 5 whose animation graph component has an ANAM graph path", text)
+        self.assertIn("7 placed record(s) in the CELL and WRLD groups", text)
+        self.assertIn("  stages: 2 base(s), 2 placed, 1 usable, 2 placement(s) in all", text)
+        self.assertIn("  genericopenclose01: 1 base(s), 1 placed, 1 usable, 3 placement(s) in all", text)
+        self.assertIn("  twostages: 1 base(s), 0 placed, 0 usable, 0 placement(s) in all", text)
+        self.assertIn("  furnituredefault: 1 base(s), 1 placed, 0 usable, 1 placement(s) in all", text)
+        order = [text.index(f"  {g}: ") for g in ("stages", "genericopenclose01", "furnituredefault", "twostages")]
+        self.assertEqual(order, sorted(order))                                      # usable 1 (stages < genericopenclose01 by name), then placed-not-usable, then unplaced
+        self.assertIn("ACTI 00000024 DoorishThing  placed 3  model in the archives  model=" + LIFT_MODEL, text)
+        self.assertIn("first REFR 00004003 cell 00003001 CellA at 7.0, 8.0, 9.0", text)
+        self.assertIn("ACTI 00000022 ConsoleGone  placed 1  model NOT in the archives read", text)
+        self.assertNotIn("LiftNever  placed", text)                                  # never placed: counted, not listed under the graph's placed bases
+        self.assertNotIn("PlainLiftSwitch", text)                                    # no graph, no --edid-word: not in the census
+
+    def test_placed_top_caps_the_listed_bases_per_graph_but_not_the_counts(self):
+        text = self.run_form("--placed", "--placed-top", "1", "--game-archive", "Starfield - Meshes*.ba2")
+        self.assertIn("  stages: 2 base(s), 2 placed, 1 usable", text)
+        self.assertEqual(text.count("ConsoleOne  placed") + text.count("ConsoleGone  placed"), 1)
+
+    def test_without_an_archive_models_are_unread_and_nothing_is_usable(self):
+        text = self.run_form("--placed")
+        self.assertIn("model check: unread (no --game-archive given)", text)
+        self.assertIn("1 placed, 0 usable", text)
+        self.assertNotIn("NOT in the archives", text)
+
+    def test_edid_word_lists_every_match_with_or_without_a_graph_case_insensitive(self):
+        text = self.run_form("--edid-word", "LIFT", "--edid-word", "nosuch", "--game-archive", "Starfield - Meshes*.ba2")
+        self.assertIn("editor id contains 'LIFT': 2 record(s), 1 placed", text)
+        self.assertIn("ACTI 00000025 PlainLiftSwitch  graph=none  placed 1  model in the archives", text)
+        self.assertIn("ACTI 00000023 LiftNever  graph=twostages  placed 0  model NOT in the archives read", text)
+        self.assertLess(text.index("PlainLiftSwitch"), text.index("LiftNever"))        # placed first
+        self.assertIn("editor id contains 'nosuch': 0 record(s), 0 placed", text)
+        self.assertNotIn("per graph (", text)                                              # --edid-word alone does not print the per-graph census
+
+    def test_the_banner_names_the_placed_modes_and_a_glob_that_matches_nothing_is_said(self):
+        text = self.run_form("--placed", "--edid-word", "lift", "--dump-form-edid", "DoorishThing")
+        self.assertIn("vault111_anim_graphs --dump-form-edid / --placed / --edid-word (read-only; FAL-489)", text)
+        nothing = self.run_form("--placed", "--game-archive", "Nothing*.ba2")
+        self.assertIn("model check: unread (the --game-archive argument matched no file)", nothing)
+        self.assertNotIn("no --game-archive given", nothing)
+        self.assertIn("1 placed, 0 usable", nothing)
+
+    def test_a_component_with_only_a_rig_has_no_graph_row_and_the_header_says_what_it_counts(self):
+        w = esm.PluginWriter([])
+        w.add(esm.Record("ACTI", 0x51, [(b"EDID", esm.zbytes("RigOnly")), (b"BFCB", esm.zbytes("BGSAnimationGraph_Component")), (b"BNAM", esm.zbytes("G\\skeleton.rig")), (b"BFCE", b"")]))
+        w.add(esm.Record("ACTI", 0x52, [(b"EDID", esm.zbytes("WithGraph"))] + comp("AnimTextData\\Tables\\Graphs\\Stages.agx")))
+        with open(os.path.join(self.data, "Starfield.esm"), "wb") as f:
+            f.write(w.to_bytes())
+        text = self.run_form("--placed")
+        self.assertIn("2 ACTI/FURN record(s) read, 1 whose animation graph component has an ANAM graph path", text)
+        self.assertNotIn("RigOnly  placed", text)
+
+    def test_only_the_report_is_written_and_the_other_options_are_unchanged(self):
+        before = sorted(os.listdir(self.data))
+        self.run_form("--placed", "--edid-word", "lift")
+        self.assertEqual(sorted(os.listdir(self.data)), before)
+        self.assertEqual(sorted(os.listdir(self.tmp.name)), sorted(["Data", "r.txt"]))
+        self.assertIn("=== candidates for graph stages: 2 ACTI/FURN record(s) name it", self.run_form("--candidates", "stages"))
+
+
+class DumpFormEdidTests(unittest.TestCase):
+    setUp_form = FormModeTests.setUp
+    run_form = FormModeTests.run_form
+
+    def setUp(self):
+        self.setUp_form()
+        with open(os.path.join(self.data, "Starfield.esm"), "wb") as f:
+            f.write(placed_esm())
+
+    def test_an_editor_id_resolves_to_its_form_id_and_dumps_like_dump_form(self):
+        text = self.run_form("--dump-form-edid", "doorishthing", "--game-archive", "Starfield - Meshes*.ba2")        # case-insensitive
+        self.assertIn("=== editor id 'doorishthing' resolved to form id 00000024", text)
+        self.assertIn("=== form 00000024", text)
+        self.assertIn("ACTI  edid DoorishThing", text)
+        self.assertIn("--- model " + LIFT_MODEL, text)
+        same = self.run_form("--dump-form", "24", "--game-archive", "Starfield - Meshes*.ba2")
+        self.assertEqual(text.split("=== form 00000024", 1)[1], same.split("=== form 00000024", 1)[1])
+
+    def test_an_unknown_editor_id_and_a_record_type_not_searched_say_so(self):
+        text = self.run_form("--dump-form-edid", "NoSuchThing")
+        self.assertIn("=== editor id 'NoSuchThing': no ACTI/FURN record has that editor id (other record types are not searched; use --dump-form with the hex id)", text)
+        self.assertNotIn("=== form ", text)
+
+    def test_two_records_with_one_editor_id_are_both_dumped(self):
+        w = esm.PluginWriter([])
+        for fid in (0x31, 0x32):
+            w.add(esm.Record("ACTI", fid, [(b"EDID", esm.zbytes("TwinMarker"))]))
+        with open(os.path.join(self.data, "Starfield.esm"), "wb") as f:
+            f.write(w.to_bytes())
+        text = self.run_form("--dump-form-edid", "TwinMarker")
+        self.assertIn("resolved to form id 00000031 (1 of 2)", text)
+        self.assertIn("resolved to form id 00000032 (1 of 2)", text)
+
+    def test_it_works_beside_dump_form_and_writes_only_out(self):
+        before = sorted(os.listdir(self.data))
+        text = self.run_form("--dump-form", "21", "--dump-form-edid", "ConsoleGone")
+        self.assertIn("=== form 00000021", text)
+        self.assertIn("=== form 00000022", text)
+        self.assertEqual(sorted(os.listdir(self.data)), before)
+
+
 if __name__ == "__main__":
     unittest.main()
