@@ -635,5 +635,46 @@ class PlacedTests(unittest.TestCase):
         self.assertIn("=== candidates for graph stages: 2 ACTI/FURN record(s) name it", self.run_form("--candidates", "stages"))
 
 
+class DumpFormEdidTests(unittest.TestCase):
+    setUp_form = FormModeTests.setUp
+    run_form = FormModeTests.run_form
+
+    def setUp(self):
+        self.setUp_form()
+        with open(os.path.join(self.data, "Starfield.esm"), "wb") as f:
+            f.write(placed_esm())
+
+    def test_an_editor_id_resolves_to_its_form_id_and_dumps_like_dump_form(self):
+        text = self.run_form("--dump-form-edid", "doorishthing", "--game-archive", "Starfield - Meshes*.ba2")        # case-insensitive
+        self.assertIn("=== editor id 'doorishthing' resolved to form id 00000024", text)
+        self.assertIn("=== form 00000024", text)
+        self.assertIn("ACTI  edid DoorishThing", text)
+        self.assertIn("--- model " + LIFT_MODEL, text)
+        same = self.run_form("--dump-form", "24", "--game-archive", "Starfield - Meshes*.ba2")
+        self.assertEqual(text.split("=== form 00000024", 1)[1], same.split("=== form 00000024", 1)[1])
+
+    def test_an_unknown_editor_id_and_a_record_type_not_searched_say_so(self):
+        text = self.run_form("--dump-form-edid", "NoSuchThing")
+        self.assertIn("=== editor id 'NoSuchThing': no ACTI/FURN record has that editor id (other record types are not searched; use --dump-form with the hex id)", text)
+        self.assertNotIn("=== form ", text)
+
+    def test_two_records_with_one_editor_id_are_both_dumped(self):
+        w = esm.PluginWriter([])
+        for fid in (0x31, 0x32):
+            w.add(esm.Record("ACTI", fid, [(b"EDID", esm.zbytes("TwinMarker"))]))
+        with open(os.path.join(self.data, "Starfield.esm"), "wb") as f:
+            f.write(w.to_bytes())
+        text = self.run_form("--dump-form-edid", "TwinMarker")
+        self.assertIn("resolved to form id 00000031 (1 of 2)", text)
+        self.assertIn("resolved to form id 00000032 (1 of 2)", text)
+
+    def test_it_works_beside_dump_form_and_writes_only_out(self):
+        before = sorted(os.listdir(self.data))
+        text = self.run_form("--dump-form", "21", "--dump-form-edid", "ConsoleGone")
+        self.assertIn("=== form 00000021", text)
+        self.assertIn("=== form 00000022", text)
+        self.assertEqual(sorted(os.listdir(self.data)), before)
+
+
 if __name__ == "__main__":
     unittest.main()

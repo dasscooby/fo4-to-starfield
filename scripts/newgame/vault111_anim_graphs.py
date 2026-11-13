@@ -34,6 +34,10 @@ ShipQuickLift1, 00010C35: FAL-489, the lift half of the door and lift kit): no g
   --refs-to 00010C35     every REFR and ACHR of the CELL and WRLD top groups whose NAME is that form id: count, and the first --refs-limit
                          (default 12) with the cell (form id and editor id) and the position. A count of 0 says only that no such
                          placed reference was found in those groups, not why the game never places one.
+`--dump-form-edid NAME` (repeatable) is `--dump-form` by exact editor id (case-insensitive) among the ACTI and FURN records: it prints the
+form id it resolved (or says no ACTI/FURN has that editor id, or that several do and dumps each), then the same dump. Use it where only the
+editor id is known (the MovingPlatform_* markers); a marker that is another record type needs its hex id and --dump-form.
+
 Fourth option, `--candidates GRAPH` (repeatable): for each ACTI / FURN that names that graph (all of them, not the first dozen), one line:
 form id, editor id, model, whether the model file is in the archives given (present / NOT in the archives read / no model), the rig (BNAM)
 and clip folder (CNAM), and how many REFR / ACHR place it (one scan of the CELL and WRLD groups for all of them together). It exists to
@@ -1047,6 +1051,12 @@ def placed_lines(plugin, archives, top, words):
     return out
 
 
+def resolve_edids(plugin, names):
+    """([(name, [form ids])]): the ACTI / FURN records whose editor id equals each name (case-insensitive)."""
+    recs, _ = read_actifurn(plugin)
+    return [(n, sorted(r["formid"] for r in recs if (r["edid"] or "").lower() == n.lower())) for n in names]
+
+
 def run_form(a):
     """The --dump-form / --refs-to report: Starfield.esm and, for the model check, the archives are read; only --out is written."""
     out = ["vault111_anim_graphs --dump-form / --refs-to / --candidates / --placed / --edid-word (read-only; FAL-489)"]
@@ -1063,6 +1073,11 @@ def run_form(a):
         with esm.Plugin(esm_path) as plugin:
             for h in a.dump_form:
                 out += [""] + form_lines(plugin, parse_form_id(h), archives)
+            for name, fids in resolve_edids(plugin, a.dump_form_edid):
+                if not fids:
+                    out += ["", f"=== editor id {name!r}: no ACTI/FURN record has that editor id (other record types are not searched; use --dump-form with the hex id)"]
+                for fid in fids:
+                    out += ["", f"=== editor id {name!r} resolved to form id {fid:08X}" + (f" (1 of {len(fids)})" if len(fids) > 1 else "")] + form_lines(plugin, fid, archives)
             for h in a.refs_to:
                 out += [""] + refs_lines(plugin, parse_form_id(h), a.refs_limit)
             if a.placed or a.edid_word:
@@ -1083,6 +1098,7 @@ def build_parser():
     ap.add_argument("--graph", action="append", help="a graph name (replaces the default list)")
     ap.add_argument("--dump-graph", action="append", default=[], help="a graph name: write only the complete dump of it (repeatable; no esm, no models)")
     ap.add_argument("--dump-form", action="append", default=[], help="a hex form id: write only every subrecord of that record and a check of its model against the archives (repeatable)")
+    ap.add_argument("--dump-form-edid", action="append", default=[], help="an editor id (exact, case-insensitive; ACTI and FURN only): as --dump-form for the record that has it (repeatable)")
     ap.add_argument("--refs-to", action="append", default=[], help="a hex form id: write only the REFR / ACHR placements of that base (repeatable; reads the whole CELL and WRLD groups)")
     ap.add_argument("--candidates", action="append", default=[], help="a graph name: write only every ACTI/FURN naming it, with its model checked against the archives and its placement count (repeatable)")
     ap.add_argument("--placed", action="store_true", help="write only the census of every ACTI/FURN with an animation graph component that the game places (per graph, with model check)")
@@ -1097,7 +1113,7 @@ def build_parser():
 
 def main(argv=None):
     a = build_parser().parse_args(argv)
-    text = run_dump(a) if a.dump_graph else run_form(a) if (a.dump_form or a.refs_to or a.candidates or a.placed or a.edid_word) else run(a)
+    text = run_dump(a) if a.dump_graph else run_form(a) if (a.dump_form or a.dump_form_edid or a.refs_to or a.candidates or a.placed or a.edid_word) else run(a)
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     with open(a.out, "w", encoding="utf-8") as f:
         f.write(text)
