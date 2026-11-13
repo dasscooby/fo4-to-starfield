@@ -1083,7 +1083,8 @@ def word_note(d):
 
 
 def find_cell_refs(plugin, cell_fid):
-    """([placed Record of REFR / ACHR in that cell], the cell's editor id or None)."""
+    """([placed Record of REFR / ACHR in that cell], the cell's editor id: "" when the CELL record was seen and has no EDID, None when no CELL
+    record with that form id was seen)."""
     out, cur, cedid = [], 0, None
     for label in ("CELL", "WRLD"):
         for start, end in plugin.groups.get(label, []):
@@ -1103,7 +1104,8 @@ def cell_lines(plugin, cell_fid, words, limit):
     refs, cedid = find_cell_refs(plugin, cell_fid)
     recs, _ = read_actifurn(plugin)
     edid = {r["formid"]: r["edid"] for r in recs}
-    out = [f"=== cell {cell_fid:08X} {cedid or '(no CELL record with that form id found)'}: {len(refs)} REFR/ACHR in it"]
+    label = "(no CELL record with that form id found)" if cedid is None else (cedid or "(no editor id)")
+    out = [f"=== cell {cell_fid:08X} {label}: {len(refs)} REFR/ACHR in it"]
     rows = []
     for r in refs:
         name, pos = r.get(b"NAME"), r.get(b"DATA")

@@ -792,6 +792,19 @@ class CellRefsTests(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(self.data)), before)
         self.assertEqual(sorted(os.listdir(self.tmp.name)), sorted(["Data", "r.txt"]))
 
+    def test_a_cell_record_without_an_editor_id_is_not_reported_as_missing(self):
+        w = esm.PluginWriter([])
+        w.add(esm.Record("ACTI", 0x61, [(b"EDID", esm.zbytes("MovingPlatform_AnchorMarker"))]))
+        cell = esm.Record("CELL", 0x3005, []).to_bytes()                                                   # present, no EDID
+        ref = esm.Record("REFR", 0x4301, [(b"NAME", struct.pack("<I", 0x61)), (b"DATA", struct.pack("<6f", 1, 2, 3, 0, 0, 0))]).to_bytes()
+        with open(os.path.join(self.data, "Starfield.esm"), "wb") as f:
+            f.write(w.to_bytes() + esm.group_bytes("CELL", cell + esm.group_bytes(struct.pack("<I", 0x3005), ref, 9)))
+        seen = self.run_form("--cell-refs", "3005")
+        self.assertIn("=== cell 00003005 (no editor id): 1 REFR/ACHR in it", seen)
+        self.assertNotIn("no CELL record with that form id found", seen)
+        self.assertIn("REFR 00004301  base 00000061 MovingPlatform_AnchorMarker", seen)
+        self.assertIn("(no CELL record with that form id found): 0 REFR/ACHR in it", self.run_form("--cell-refs", "3006"))   # a cell that is not there
+
     def test_other_modes_are_unchanged_beside_it(self):
         self.assertIn("2 found; first 2:", self.run_form("--refs-to", "62"))                           # 4102 and 4104
         both = self.run_form("--refs-to", "62", "--cell-refs", "3002")
