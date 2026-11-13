@@ -13,7 +13,7 @@ Claude runs it for one session on the PC after the Courier's CLEAR. **Nothing he
 ## What is built
 - The control's graph component is the vanilla door's WHOLE component (BNAM, CNAM, DNAM, ENAM and anything else it carries) with only the ANAM changed, and `check` compares them: the same flaw the Courier held on the generic control (FAL-579), fixed here the same way.
 - `dotnet/AnimDoorLiftControl` (new): `FO4SFAnimDoorLift.esm`, master `Starfield.esm` only, two records, overrides none. QUST `FO4SF_AnimDoorLiftQuest`
-  (0x800, start game enabled, stages 10 20..24 30..36 40 60, no properties) and ACTI `FO4SF_AnimDoorControl` (0x801): a **new** activator (a DOOR is not an ACTI, so there is
+  (0x800, start game enabled, stages 10 20..24 30..38 40 60, no properties) and ACTI `FO4SF_AnimDoorControl` (0x801): a **new** activator (a DOOR is not an ACTI, so there is
   nothing to duplicate) with the model, BNAM and CNAM of the vanilla DOOR `AK_Ext_Bld_WallA_DoorA_01_Alt02` `000AA24A` (read from the `Starfield.esm` given) and ANAM
   `genericopenclose01.agx` (its path read from the game's archives). One component only, the graph. The vanilla door is neither overridden nor placed.
   `info` / `build` / `check` / `fixture`; `build` refuses a graph that is not `genericopenclose01`, a door that is missing, has no graph component, no model, no rig or
@@ -31,6 +31,8 @@ Claude runs it for one session on the PC after the Courier's CLEAR. **Nothing he
 | 20 | register every event again on the door, and on the lift when it exists |
 | 21..24 | DOOR: `Open`, `Close`, then the direct `Opened`, `Closed` |
 | 30 | the LIFT's own placement, after the door's stages: placed **disabled**, moved 2.5 m ahead, between the player and the door (4 m), no side offset (5 m ahead and 3 m right was not seen in the 13 Nov session; the lift's size is unread, so a large platform may overlap the player: the one reading says), enabled only if the move happened (no `MoveTo` = it stays disabled: never a moving platform on the player), with `EnableNoWait` when the game declares it (it never blocks), else `Enable`; registered; a notice after each step (`S30 start`, `lift placed`, `lift moved=`, `lift enabled nowait=`, `REG`, `S30 done`) |
+| 37 | LIFT retry 1: the BLOCKING `Enable` on the lift of stage 30 (a notice before the call), then the 3D poll |
+| 38 | LIFT retry 2: a SECOND lift placed ENABLED from the start (no initial disable, no `EnableNoWait`), moved to the same place, then the 3D poll; if its 3D loads it becomes the lift that 31..36 drive and the first is disabled |
 | 31..36 | LIFT: `Stage1`, `Stage2`, `Stage1NoTransition`, `Stage2NoTransition`, then `Stage1Transition`, `Stage2Transition` (clip names, not events: expected false, tried once so the log says so) |
 | 40 | a reading of both |
 | 60 | disable and delete both |
@@ -85,3 +87,12 @@ claim is removed from the script and this card. What the kit does instead: each 
 leaves its notice on screen for a few seconds only: a shot soon after the console line names it; with script logging on, the log's last line does provided no later stage was set and no animation event came during the 2.4 s of waits, because `PreNotice` writes the notice to `FO4SFAnimDL` (`notice text=C sN name reading|calling`) before it shows it (the first version at 900f41c8 did not: the Courier's FAL-634 hold). The two latent waits let the poll run, so a stage set before the step starts may begin during them: the rule is to set the next stage only after the window has closed, and the script does not enforce it. Truly isolating a call would need a second script on its own object or quest
 (a plugin change); not built, and not needed until a session shows a step that does hang.
 Whether the lift's call really hangs, and why, is still **unread**: the next session shows the step (not run on Starfield).
+
+## Session 3 result (supported: Claude's PC game session at 5aeca669, 13 Nov 2026, 03:15 to 03:28 UTC, on the pull request, comment 6842949915; not replayed here)
+**Door half: a pass with the full trail** (`C sN name reading`, `calling`, `PLAY door sN name ok=TRUE`; events `Trans01`/`IsOff`/`Done` on `Open`, `Trans01`/`IsOn`/`Done` on `Close`, `IsOff` on `Opened`, `IsOn` on `Closed`;
+the door opens and closes on screen). **Lift: `3D=FALSE` in every reading** (reference where it was put, 2.5 m ahead, not disabled), nothing visible, all six windows quiet; returns `Stage1` FALSE, `Stage2` TRUE, both NoTransition TRUE, both Transition
+FALSE. Those returns are returns on an object without 3D, not the graph's answer; the earlier silence was the notices, not a hung call. **Unread:** why the 3D never loads. Claude's candidates, none tested: the base's model or graph files did not
+resolve for our copy; `EnableNoWait` straight after a `MoveTo` of an initially disabled reference; the vanilla lift needing its own script or linked references.
+**This branch (`minuteman/fal489-lift-3d`, lift half only; the door half is unchanged):** stage 30 now polls `Is3DLoaded` once a second for 8 s (`L3D s30 n s 3d=..` notice and `lift3d` log line per second); stage 37 retries with the blocking
+`Enable`, stage 38 with a second lift placed enabled from the start; each is followed by the same poll. The base's model path is not read in the game (no native for it is known here): the staged `README.txt` now prints `lift_model` from your
+`Starfield.esm` (the tool's `info`), and `info` printed it at the earlier stages too. The stale README sentence that put the lift 5 m ahead and 3 m to the right is fixed (it has been 2.5 m ahead since adabd939). Whether any of the three candidates is the cause stays unread until a session shows a poll that turns true.

@@ -57,7 +57,7 @@ class ScriptTests(unittest.TestCase):
         ran = [int(s) for s in re.findall(r"StageList\[\d+\] = (\d+)", PSC)]
         m = re.search(r"Stages = \{ ([\d, ]+) \}", TOOL_SRC)
         self.assertEqual(ran, [int(x) for x in m.group(1).split(",")])
-        self.assertEqual(ran, [10, 20, 21, 22, 23, 24, 30, 31, 32, 33, 34, 35, 36, 40, 60])
+        self.assertEqual(ran, [10, 20, 21, 22, 23, 24, 30, 31, 32, 33, 34, 35, 36, 37, 38, 40, 60])
         self.assertIn(f"new int[{len(ran)}]", PSC)
         self.assertIn('string LogName = "FO4SFAnimDL"', PSC)
         self.assertTrue(mad.LOG.endswith("FO4SFAnimDL.0.log"))
@@ -169,6 +169,50 @@ class ScriptTests(unittest.TestCase):
         reading = PSC[PSC.index("Function Reading("):PSC.index("Function Spawn(int stage)")]
         self.assertIn('Say("READ s" + stage', reading)
         self.assertIn('if when != "before"', reading)                                                        # the reading before every call stays log-only
+
+    def test_the_lift_3d_is_polled_each_second_with_a_notice_and_a_log_line_and_the_timer_id_cannot_collide(self):
+        """PC session 3 (13 Nov 03:15 UTC): every lift reading said 3D=FALSE. Stage 30 now polls Is3DLoaded for LIFT3D_S seconds, one timer tick a second."""
+        self.assertIn("float LIFT3D_S = 8.0", PSC)
+        self.assertIn("int TIMER_LIFT3D = 500", PSC)
+        self.assertLess(PSC.index("aiTimerID == TIMER_LIFT3D"), PSC.index("aiTimerID >= TIMER_CALL"))     # id 500 would else be taken for the call of stage 100
+        self.assertLess(PSC.index("aiTimerID == TIMER_RESAY"), PSC.index("aiTimerID == TIMER_LIFT3D"))
+        tick = PSC[PSC.index("Function Lift3DTick()"):PSC.index("Function Lift3DLoaded()")]
+        self.assertIn("Lift3DRef.Is3DLoaded()", tick)
+        self.assertIn('Trace("lift3d "', tick)
+        self.assertIn("Say(line)", tick)
+        self.assertIn("StartTimer(1.0, TIMER_LIFT3D)", tick)
+        self.assertEqual(PSC.count("Is3DLoaded()"), PSC.count(".Is3DLoaded()"))                           # always on a reference
+        lift = PSC[PSC.index("Function SpawnLift(int stage)"):PSC.index("; ---------------------------------------------------------------- poll and steps")]
+        self.assertLess(lift.index('RegisterList(stage, "lift"'), lift.index('Lift3DStart("s30", LiftRef)'))    # the poll starts after the registration
+        self.assertLess(lift.index('Lift3DStart("s30", LiftRef)'), lift.index('Say("S30 done")'))
+
+    def test_the_two_retries_are_stages_37_and_38_with_the_blocking_enable_and_a_second_lift_placed_enabled(self):
+        step = PSC[PSC.index("Function Step(int stage)"):PSC.index("Function CallStage(")]
+        self.assertIn("elseif stage == 37\n        LiftRetryEnable(stage)", step)
+        self.assertIn("elseif stage == 38\n        LiftPlaceEnabled(stage)", step)
+        retry = PSC[PSC.index("Function LiftRetryEnable("):PSC.index("Function LiftPlaceEnabled(")]
+        self.assertLess(retry.index('PreNotice("S37 enable (blocking) calling")'), retry.index("LiftRef.Enable(false)"))   # a notice BEFORE the call that may block
+        self.assertNotIn("EnableNoWait", retry.split("}", 1)[1])
+        self.assertLess(retry.index("LiftRef.Enable(false)"), retry.index('Lift3DStart("s37", LiftRef)'))
+        place = PSC[PSC.index("Function LiftPlaceEnabled("):PSC.index("Function Cleanup()")]
+        self.assertIn("LiftRef2 = p.PlaceAtMe(liftBase, 1, true, false, false)", place)                   # abInitiallyDisabled = false
+        code = place.split("}", 1)[1]                                                                        # the code, not the doc comment that names what it does not use
+        self.assertNotIn("EnableNoWait", code)
+        self.assertNotIn(".Enable(", code)
+        self.assertLess(place.index("PlaceAtMe"), place.index('Lift3DStart("s38", LiftRef2)'))
+        loaded = PSC[PSC.index("Function Lift3DLoaded()"):PSC.index("Function LiftRetryEnable(")]
+        self.assertIn('Lift3DWhat == "s38"', loaded)                                                         # only the second lift is adopted
+        self.assertLess(loaded.index("LiftRef.Disable(false)"), loaded.index("LiftRef = Lift3DRef"))         # the first one is disabled before it is replaced
+        cleanup = PSC[PSC.index("Function Cleanup()"):]
+        self.assertIn("LiftRef2.Disable(false)", cleanup)
+        self.assertIn("LiftRef2 = None", cleanup)
+        self.assertIn("if LiftRef2 && LiftRef2 != LiftRef", cleanup)                                          # an adopted lift is not disabled twice
+
+    def test_the_staged_readme_does_not_say_where_an_old_head_put_the_lift(self):
+        src = (ROOT / "scripts" / "newgame" / "make_anim_doorlift.py").read_text(encoding="utf-8")
+        self.assertNotIn("5 m ahead and 3 m to the right", src)                                              # stale since the lift moved to 2.5 m (FAL-489)
+        self.assertIn("2.5 m ahead of the player", src)
+        self.assertIn("lift_model", src)
 
     def test_the_door_is_placed_and_registered_before_the_lift_is_touched_and_every_step_says_so(self):
         """The 13 Nov session was silent after stage 10: a notice at the start and after each step, the door first, the lift in its own stage 30."""
@@ -355,7 +399,7 @@ class StageTests(ToolBase):
         m = re.search(r"stages ([\d. ]+?):", readme)
         self.assertIsNotNone(m, readme[:400])
         self.assertEqual(m.group(1), mad.stage_list(PSC))
-        self.assertEqual(m.group(1), "10 20..24 30..36 40 60")
+        self.assertEqual(m.group(1), "10 20..24 30..38 40 60")
         ran = [int(x) for x in re.findall(r"StageList\[\d+\] = (\d+)", PSC)]
         expanded = []
         for tok in m.group(1).split():

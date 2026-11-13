@@ -11,6 +11,10 @@ Scriptname FO4SF_AnimDoorLiftQuest extends Quest
 ;   21..24    the DOOR: Open, Close, then the direct Opened, Closed, then 15 s of listening each
 ;   30        place the lift: DISABLED, moved LiftAheadM in front of and LiftSideM to the right of the player (the test room is about 12 m deep), enabled only
 ;             after the move (NOT blocking when EnableNoWait exists), registered; a notice after each step. A lift that cannot be moved is left disabled and says so
+;   30..38    30 also polls the lift's 3D (Is3DLoaded) once a second for LIFT3D_S seconds, with a notice and a log line per second ("L3D s30 n s 3d=..").
+;             PC session 13 Nov 03:15 UTC: the lift was placed, not disabled, 2.5 m ahead, and 3D=FALSE in every reading: nothing to drive. Two retries, each a stage of
+;             its own, each followed by the same poll: 37 the BLOCKING Enable on the same reference (no NoWait), 38 a second lift placed ENABLED from the start (no initial
+;             disable, no EnableNoWait), moved to the same spot; if its 3D loads it becomes the lift that 31..36 drive and the first one is disabled.
 ;   31..36    the LIFT: Stage1, Stage2, Stage1NoTransition, Stage2NoTransition, then Stage1Transition and Stage2Transition (clip names, not events: expected
 ;             false, tried once so the log says so), then 15 s of listening each
 ;   40        a reading of both references now (shown on screen as READ lines since the 13 Nov session: before, only the log had it)
@@ -46,6 +50,7 @@ int DoorControlId = 0x801   ; ACTI FO4SF_AnimDoorControl of FO4SFAnimDoorLift.es
 int LiftId = 0x10C35        ; the vanilla ShipQuickLift1, a form of Starfield.esm
 float DoorAheadM = 4.0
 float LiftAheadM = 2.5      ; the lift 2.5 m in front of the player, between the player and the door (4 m) ...
+float LIFT3D_S = 8.0       ; stage 30, 37, 38: seconds the lift's 3D is polled after the placement or the retry
 float LiftSideM = 0.0       ; ... and not to the side (the PC session of 13 Nov saw nothing at 5 m ahead, 3 m right); the lift's size is unread
 
 ; ---------------------------------------------------------------- state
@@ -53,6 +58,7 @@ float LiftSideM = 0.0       ; ... and not to the side (the PC session of 13 Nov 
 int TIMER_POLL = 1
 int TIMER_QUIET = 100       ; + the stage
 int TIMER_RESAY = 200       ; the last on-screen notice shown again
+int TIMER_LIFT3D = 500      ; the lift's 3D poll, one tick a second (its own id; tested before >= TIMER_CALL)
 int TIMER_CALL = 400        ; + the stage: the play call of that stage (a one-shot timer: it does NOT isolate a call that never returns)
 float POLL_S = 1.0
 float LISTEN_S = 15.0
@@ -69,6 +75,11 @@ string[] DoorCalls
 string[] LiftCalls
 ObjectReference DoorRef = None
 ObjectReference LiftRef = None
+ObjectReference LiftRef2 = None       ; stage 38: the second lift, placed enabled from the start
+ObjectReference Lift3DRef = None      ; the reference whose 3D is being polled
+string Lift3DWhat = ""
+int Lift3DLeft = 0
+int Lift3DSecs = 0
 int ListenStage = 0         ; the play stage whose 15 s window is open; 0 = none (an event then is logged stage=0: outside any window)
 int WindowEvents = 0        ; events that arrived in the open window
 float LastEventRt = 0.0
@@ -77,8 +88,8 @@ float LastEventRt = 0.0
 
 Event OnInit()
     Debug.OpenUserLog(LogName)
-    StageList = new int[15]
-    DoneList = new bool[15]
+    StageList = new int[17]
+    DoneList = new bool[17]
     StageList[0] = 10
     StageList[1] = 20
     StageList[2] = 21
@@ -92,8 +103,10 @@ Event OnInit()
     StageList[10] = 34
     StageList[11] = 35
     StageList[12] = 36
-    StageList[13] = 40
-    StageList[14] = 60
+    StageList[13] = 37
+    StageList[14] = 38
+    StageList[15] = 40
+    StageList[16] = 60
     DoorCalls = new string[4]
     DoorCalls[0] = "Open"
     DoorCalls[1] = "Close"
@@ -282,6 +295,7 @@ Function SpawnLift(int stage)
     Trace("spawn stage=" + stage + " label=lift base=" + Id(liftBase) + " ref=" + Id(LiftRef) + " moved=" + liftMoved + " enabled=" + liftMoved + " nowait=" + nowait + " persist=true")
     Reading("now", stage, "lift", LiftRef)
     RegisterList(stage, "lift", LiftRef, LiftEvents)
+    Lift3DStart("s30", LiftRef)
     Say("S30 done")
 EndFunction
 
@@ -299,6 +313,8 @@ Event OnTimer(int aiTimerID)
                 StartTimer(RESAY_S, TIMER_RESAY)
             endif
         endif
+    elseif aiTimerID == TIMER_LIFT3D
+        Lift3DTick()
     elseif aiTimerID >= TIMER_CALL
         CallStage(aiTimerID - TIMER_CALL)
     elseif aiTimerID >= TIMER_QUIET
@@ -340,6 +356,10 @@ Function Step(int stage)
         RegisterList(stage, "lift", LiftRef, LiftEvents)
     elseif stage == 30
         SpawnLift(stage)
+    elseif stage == 37
+        LiftRetryEnable(stage)
+    elseif stage == 38
+        LiftPlaceEnabled(stage)
     elseif stage >= 21 && stage <= 24
         StartTimer(CALL_DELAY_S, TIMER_CALL + stage)
     elseif stage >= 31 && stage <= 36
@@ -388,6 +408,91 @@ Function PlayOne(int stage, string what, ObjectReference r, string n)
     SayHold("PLAY " + what + " s" + stage + " " + n + " ok=" + ok)
 EndFunction
 
+Function Lift3DStart(string what, ObjectReference r)
+    {Poll r.Is3DLoaded() once a second for LIFT3D_S seconds: a notice and a log line per tick, and the first tick now. The tick is a timer event (the poll is not blocked).
+     One poll at a time: starting another replaces the first one's reference.}
+    if r == None
+        Say("L3D " + what + " no lift")
+        return
+    endif
+    Lift3DRef = r
+    Lift3DWhat = what
+    Lift3DSecs = 0
+    Lift3DLeft = LIFT3D_S as int
+    Lift3DTick()
+EndFunction
+
+Function Lift3DTick()
+    if Lift3DRef == None
+        return
+    endif
+    bool loaded = Lift3DRef.Is3DLoaded()
+    string line = "L3D " + Lift3DWhat + " " + Lift3DSecs + "s 3d=" + loaded + " off=" + Lift3DRef.IsDisabled() + " dist=" + Game.GetPlayer().GetDistance(Lift3DRef)
+    Trace("lift3d " + Lift3DWhat + " secs=" + Lift3DSecs + " loaded=" + loaded + " ref=" + Id(Lift3DRef))
+    Say(line)
+    if loaded
+        Lift3DLoaded()
+        return
+    endif
+    Lift3DSecs += 1
+    Lift3DLeft -= 1
+    if Lift3DLeft > 0
+        StartTimer(1.0, TIMER_LIFT3D)
+    else
+        Say("L3D " + Lift3DWhat + " 3d not loaded after " + (LIFT3D_S as int) + " s")
+        Trace("lift3d " + Lift3DWhat + " not loaded after " + (LIFT3D_S as int) + " s ref=" + Id(Lift3DRef))
+    endif
+EndFunction
+
+Function Lift3DLoaded()
+    {The polled lift has its 3D. The second lift (stage 38) then becomes the lift the call stages drive, the first is disabled, and the events are registered on it.}
+    if Lift3DWhat == "s38" && Lift3DRef != LiftRef
+        if LiftRef
+            LiftRef.Disable(false)
+        endif
+        LiftRef = Lift3DRef
+        Say("L3D s38 adopted as the lift")
+        RegisterList(38, "lift", LiftRef, LiftEvents)
+    endif
+EndFunction
+
+Function LiftRetryEnable(int stage)
+    {Stage 37: the BLOCKING Enable on the lift of stage 30, then the 3D poll. The notice comes before the call (PreNotice) because a blocking call may not return.}
+    if LiftRef == None
+        Say("S37 no lift (stage 30 first)")
+        return
+    endif
+    PreNotice("S37 enable (blocking) calling")
+    LiftRef.Enable(false)
+    Say("S37 enable returned")
+    Trace("lift retry stage=" + stage + " blocking enable returned ref=" + Id(LiftRef))
+    Reading("now", stage, "lift", LiftRef)
+    Lift3DStart("s37", LiftRef)
+EndFunction
+
+Function LiftPlaceEnabled(int stage)
+    {Stage 38: a SECOND lift placed enabled from the start (no initial disable, no EnableNoWait), moved to the same place as the first, then the 3D poll. The
+     first lift is left as it is until the second one's 3D loads (Lift3DLoaded).}
+    Actor p = Game.GetPlayer()
+    Form liftBase = Game.GetFormFromFile(LiftId, GamePlugin)
+    float a = p.GetAngleZ()
+    bool moved = false
+    if liftBase == None
+        Say("S38 lift base none")
+        return
+    endif
+    LiftRef2 = p.PlaceAtMe(liftBase, 1, true, false, false)
+    Say("S38 lift 2 placed (enabled)")
+;OPT ObjectReference.MoveTo     if LiftRef2
+;OPT ObjectReference.MoveTo         LiftRef2.MoveTo(p, LiftAheadM * Math.Sin(a) + LiftSideM * Math.Cos(a), LiftAheadM * Math.Cos(a) - LiftSideM * Math.Sin(a), 0.0, false)
+;OPT ObjectReference.MoveTo         moved = true
+;OPT ObjectReference.MoveTo     endif
+    Say("S38 lift 2 moved=" + moved)
+    Trace("lift place stage=" + stage + " second lift ref=" + Id(LiftRef2) + " moved=" + moved + " enabled=true")
+    Reading("now", stage, "lift", LiftRef2)
+    Lift3DStart("s38", LiftRef2)
+EndFunction
+
 Function Cleanup()
     Trace("cleanup door=" + Id(DoorRef) + " lift=" + Id(LiftRef))
     if DoorRef
@@ -398,6 +503,11 @@ Function Cleanup()
         LiftRef.Disable(false)
 ;OPT ObjectReference.Delete         LiftRef.Delete()
     endif
+    if LiftRef2 && LiftRef2 != LiftRef
+        LiftRef2.Disable(false)
+;OPT ObjectReference.Delete         LiftRef2.Delete()
+    endif
     DoorRef = None
     LiftRef = None
+    LiftRef2 = None
 EndFunction
