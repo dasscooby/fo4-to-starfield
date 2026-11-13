@@ -103,6 +103,13 @@ class ScriptTests(unittest.TestCase):
         for line in ('string ButtonPlay = "StateC_Play"   ;BUTTONPLAY', 'string ButtonIdle = "StateC_Idle"   ;BUTTONIDLE', "float ButtonS = 0.633               ;BUTTONS"):
             self.assertEqual(PSC.count(line), 1)
         self.assertIn('ListenName = "scene"', PSC)
+        scene = PSC[PSC.index("Function SceneStart(int stage)"):PSC.index("Function Cleanup()")]
+        # the closing notice's ok= is the three clip calls; the idle call's return (false: already in that state, PC 13 Nov) is in the name instead
+        self.assertEqual(scene.count("SceneOk = "), 3)                                                       # the start and the two later clip calls: three counted, the idle call is not
+        self.assertLess(scene.index("CallOn(SceneStage, ButtonIdle)"), scene.index("ListenOk = SceneOk"))     # restored AFTER the idle call
+        self.assertLess(scene.index("SceneIdleOk = ListenOk"), scene.index("ListenOk = SceneOk"))
+        self.assertIn('ListenName = "scene (idle call " + SceneIdleOk + ")"', scene)
+        self.assertNotIn("SceneOk + \",\" + ListenOk\n        StartTimer(ButtonS", scene)                           # the idle call is never added to it
 
     def test_the_registered_events_cover_the_controls_read_and_the_four_states(self):
         events = strings("EventNames")

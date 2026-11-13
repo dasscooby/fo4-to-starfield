@@ -16,7 +16,7 @@ Claude's reading: a play followed by the direct idle call holds a pose. Three as
    (the old one is still `--states "Stage2=StateA_Play,Stage3=StateB_Play,Stage4=StateC_Play"`). The poses the idles hold are the same four (rest, lid open, lid open + button down, the pose
    after Stage4); `StateB_Play` becomes the one-frame spare, because the graph returns from `StateB_Play` to rest (supported, `Play02`). **New stage 30, the scene** (both copies, one 20 s window,
    closing notice `W s30 scene`): `StateA_Idle` (to rest), 1 s later `Play01` (lid opens; supported: rests in B's pose), 2.5 s later the **button clip by its slot name** `StateC_Play`
-   (the second clip of the chain: the stager writes the slot into the script, so any map works), then `ButtonS + 0.7` s later that slot's Idle `StateC_Idle` (supported: holds the C pose,
+   (the second clip of the chain: the stager writes the slot into the script; it is the button's slot only on the default map: on `Stage3=StateB_Play` the scene would call `StateB_Play` then `StateB_Idle`, the lid pose with the button up. Stage the default map for the scene), then `ButtonS + 0.7` s later that slot's Idle `StateC_Idle` (supported: holds the C pose,
    lid open and button down). The idle's start pose is the clip's last frame, so the hand-over has no jump (the chain builder starts each clip from the pose before it; tested on synthetic clips).
    It is built so; **whether a direct `StateC_Play` plays our clip is inferred from the control** (`StateC_Play` returned true and played its clip there), not seen with this map.
 2. **A slower button.** `--slow Stage3=4` (the default): every sample time, the duration and the event times of that clip times a whole factor 2 to 8, nothing else (same poses, same keys, on
@@ -127,3 +127,10 @@ Fallout 4 data, no CALUMI library here), the real `Starfield.esm` and archives, 
 
 ## Not here
 The glass opacity flag (the Scribe's third step: not asked for this round), the door and the lift controls (PR #757), the cog door, the pick-up object, `StartAltIdle`.
+
+## Session 2 result (supported: Claude's PC game session at cc024f6f, 13 Nov 2026, on the pull request, comment 6840949862; not replayed here)
+**The scene works** (default map, `--slow Stage3=4`): the lid opens (shot 1 equals the lid-open pose), the slowed button is caught mid-motion in shot 2, shots 3 to 7 and stage 40 hold the lid open with the button down.
+One thing seen: the scene's last call `StateC_Idle` answered `FALSE/FALSE` (the graph is already in that state when the call comes; `IsOn` heard at 2.507 s), so the closing line read `scene ok=FALSE/FALSE` with the pose right.
+Change in the next head (script text only, no clip changes: no new session needed for it alone): the closing notice's `ok=` counts the three clip calls; the last call stays (it holds nothing it did not already hold, and its
+own `PLAY` line still shows its return) and its return moves into the notice's name, `scene (idle call false/false)`. Three text notes from the Courier's FAL-618 CLEAR are also fixed in the script header (the first
+scene wait is 1.0 s, not `SCENE_GAP_S`; the close trace says `seconds=15` for every window, stage 30's included) and in the card (the scene follows the default map only).

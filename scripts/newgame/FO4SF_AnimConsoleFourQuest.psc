@@ -12,9 +12,12 @@ Scriptname FO4SF_AnimConsoleFourQuest extends Quest
 ;   21..24  PlayAnimation Play01, Play02, Play03, Play04 (the numbered calls), then 15 s of listening each
 ;   25..28  PlayAnimation StateA_Idle, StateB_Idle, StateC_Idle, StateD_Idle (the direct calls: each jumps to that state and holds its pose)
 ;   29      PlayAnimation StateD_Play (the spare play slot: a one-frame hold of the last pose, nothing should move)
-;   30      the SCENE on both copies, one window of SCENE_LISTEN_S: StateA_Idle (back to rest), SCENE_GAP_S later Play01 (the lid opens and stays open),
-;           SCENE_GAP_S later still ButtonPlay (the second clip of the chain, called by its slot name: the button goes down), ButtonS + 0.7 s later
+;   30      the SCENE on both copies, one window of SCENE_LISTEN_S: StateA_Idle (back to rest), 1.0 s later Play01 (the lid opens and stays open),
+;           SCENE_GAP_S later ButtonPlay (the second clip of the chain, called by its slot name: the button goes down), ButtonS + 0.7 s later
 ;           ButtonIdle (that slot's Idle: the pose is held, button down). The stager writes ButtonPlay, ButtonIdle and ButtonS (the clip's seconds).
+;           The closing notice's ok= is the returns of the first three calls only; the last call's return (the graph is already in that state, so it
+;           answers false, PC session 13 Nov 01:21 UTC) is in the same notice's name: "scene (idle call <return>)". Its own PLAY line is shown as every call's is.
+;           The close TRACE line says seconds=LISTEN_S (15) for every window, stage 30's too (it is SCENE_LISTEN_S, 20): trust the on-screen line.
 ;   40      a reading of the reference now
 ;   60      Disable and Delete the spawned references
 ; Every play stage calls the name on EVERY copy that exists (the side copy too), logs each return, shows the return as a notification AT ONCE
@@ -61,6 +64,8 @@ string[] PlayNames
 ObjectReference TestRef = None
 ObjectReference TestRef2 = None   ; the side copy (stage 11)
 string ListenName = ""      ; the name called in the open window
+string SceneOk = ""          ; stage 30: the returns of the calls so far, each "true/true" (copies joined with "/"), calls joined with ","
+string SceneIdleOk = ""      ; stage 30: what the last call (ButtonIdle) returned
 string ListenOk = ""         ; what that call returned, "true" / "false" (copies joined with "/")
 string LastPlayLine = ""     ; the return notice, shown again by TIMER_RESAY
 int ResayLeft = 0
@@ -393,6 +398,7 @@ Function SceneStart(int stage)
     SceneStep = 1
     Trace("scene stage=" + stage + " plan=StateA_Idle,Play01," + ButtonPlay + "," + ButtonIdle + " gap=" + SCENE_GAP_S + " buttons=" + ButtonS)
     CallOn(stage, "StateA_Idle")
+    SceneOk = ListenOk
     StartTimer(1.0, TIMER_SCENE)
     StartTimer(SCENE_LISTEN_S, TIMER_QUIET + stage)
 EndFunction
@@ -401,14 +407,19 @@ Function SceneNext()
     if SceneStep == 1
         SceneStep = 2
         CallOn(SceneStage, "Play01")
+        SceneOk = SceneOk + "," + ListenOk
         StartTimer(SCENE_GAP_S, TIMER_SCENE)
     elseif SceneStep == 2
         SceneStep = 3
         CallOn(SceneStage, ButtonPlay)
+        SceneOk = SceneOk + "," + ListenOk
         StartTimer(ButtonS + 0.7, TIMER_SCENE)
     elseif SceneStep == 3
         SceneStep = 0
         CallOn(SceneStage, ButtonIdle)
+        SceneIdleOk = ListenOk
+        ListenOk = SceneOk                          ; the closing notice counts the three clip calls, not the idle call that holds a pose already held
+        ListenName = "scene (idle call " + SceneIdleOk + ")"
     endif
 EndFunction
 
