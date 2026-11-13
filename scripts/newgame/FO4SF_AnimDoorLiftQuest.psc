@@ -5,10 +5,12 @@ Scriptname FO4SF_AnimDoorLiftQuest extends Quest
 ; AK_Ext_Bld_WallA_DoorA_01_Alt02 (000AA24A; its Open/Close clips live on SimpleOpenClose01) whose animation graph is genericopenclose01 (no
 ; vanilla record names it). The vanilla door itself is never placed. LIFT: the vanilla ShipQuickLift1 (00010C35, graph twostages), placed UNCHANGED.
 ; The script polls the stages once a second:
-;   10        place the door 4 m in front of the player and the lift LIFT_M in front, DISABLED until it has been moved there (a lift that
-;             cannot be moved away is left disabled and says so: it is never left standing on the player), then register every event name
-;   20        register every event name again on both (the log shows each call's return)
+;   10        place the door 4 m in front of the player, register every event name on it; a notice after EACH step (start, door placed, door moved, registered).
+;             The lift is NOT touched here (the PC session of 13 Nov 00:16 UTC: one stage did both, a lift 40 m away outside the room, and then nothing showed)
+;   20        register every event name again on the door and on the lift when it exists (the log shows each call's return)
 ;   21..24    the DOOR: Open, Close, then the direct Opened, Closed, then 15 s of listening each
+;   30        place the lift: DISABLED, moved LiftAheadM in front of and LiftSideM to the right of the player (the test room is about 12 m deep), enabled only
+;             after the move (NOT blocking when EnableNoWait exists), registered; a notice after each step. A lift that cannot be moved is left disabled and says so
 ;   31..36    the LIFT: Stage1, Stage2, Stage1NoTransition, Stage2NoTransition, then Stage1Transition and Stage2Transition (clip names, not events: expected
 ;             false, tried once so the log says so), then 15 s of listening each
 ;   40        a reading of both references now
@@ -32,7 +34,8 @@ string GamePlugin = "Starfield.esm"
 int DoorControlId = 0x801   ; ACTI FO4SF_AnimDoorControl of FO4SFAnimDoorLift.esm (local id)
 int LiftId = 0x10C35        ; the vanilla ShipQuickLift1, a form of Starfield.esm
 float DoorAheadM = 4.0
-float LiftM = 40.0
+float LiftAheadM = 5.0      ; the lift 5 m in front of the player ...
+float LiftSideM = 3.0       ; ... and 3 m to the right: a guess (the test room is about 12 m deep); the lift's size is unread
 
 ; ---------------------------------------------------------------- state
 
@@ -56,22 +59,23 @@ float LastEventRt = 0.0
 
 Event OnInit()
     Debug.OpenUserLog(LogName)
-    StageList = new int[14]
-    DoneList = new bool[14]
+    StageList = new int[15]
+    DoneList = new bool[15]
     StageList[0] = 10
     StageList[1] = 20
     StageList[2] = 21
     StageList[3] = 22
     StageList[4] = 23
     StageList[5] = 24
-    StageList[6] = 31
-    StageList[7] = 32
-    StageList[8] = 33
-    StageList[9] = 34
-    StageList[10] = 35
-    StageList[11] = 36
-    StageList[12] = 40
-    StageList[13] = 60
+    StageList[6] = 30
+    StageList[7] = 31
+    StageList[8] = 32
+    StageList[9] = 33
+    StageList[10] = 34
+    StageList[11] = 35
+    StageList[12] = 36
+    StageList[13] = 40
+    StageList[14] = 60
     DoorCalls = new string[4]
     DoorCalls[0] = "Open"
     DoorCalls[1] = "Close"
@@ -162,7 +166,7 @@ EndFunction
 
 Function RegisterList(int stage, string what, ObjectReference r, string[] names)
     if r == None
-        Trace("register stage=" + stage + " label=" + what + " ref=none (stage 10 first)")
+        Trace("register stage=" + stage + " label=" + what + " ref=none (stage 10 for the door, stage 30 for the lift, first)")
         return
     endif
     int i = 0
@@ -191,41 +195,65 @@ Function Reading(string when, int stage, string what, ObjectReference r)
 EndFunction
 
 Function Spawn(int stage)
-    {PlaceAtMe the door control (persistent), then 4 m in front of the player when MoveTo exists. The lift is placed DISABLED, moved LIFT_M
-     in front of the player and only then enabled: when MoveTo does not exist it stays disabled (a moving platform is never left on the player).}
+    {Stage 10: the DOOR only. A notice after each step, so a step that never returns is the one after the last notice: start, placed, moved, registered.
+     PlaceAtMe the door control (persistent), then 4 m in front of the player when MoveTo exists, then register.}
     Actor p = Game.GetPlayer()
+    Say("S10 start")
     Form doorBase = Game.GetFormFromFile(DoorControlId, ProbePlugin)
-    Form liftBase = Game.GetFormFromFile(LiftId, GamePlugin)
     float a = p.GetAngleZ()
     bool doorMoved = false
-    bool liftMoved = false
     if doorBase == None
         Trace("spawn stage=" + stage + " label=door base=none ref=none")
-    else
-        DoorRef = p.PlaceAtMe(doorBase, 1, true, false, false)
-;OPT ObjectReference.MoveTo         if DoorRef
-;OPT ObjectReference.MoveTo             DoorRef.MoveTo(p, DoorAheadM * Math.Sin(a), DoorAheadM * Math.Cos(a), 0.0, false)
-;OPT ObjectReference.MoveTo             doorMoved = true
-;OPT ObjectReference.MoveTo         endif
-        Trace("spawn stage=" + stage + " label=door base=" + Id(doorBase) + " ref=" + Id(DoorRef) + " moved=" + doorMoved + " persist=true")
+        Say("S10 door base none")
+        return
     endif
+    DoorRef = p.PlaceAtMe(doorBase, 1, true, false, false)
+    Say("S10 door placed")
+;OPT ObjectReference.MoveTo     if DoorRef
+;OPT ObjectReference.MoveTo         DoorRef.MoveTo(p, DoorAheadM * Math.Sin(a), DoorAheadM * Math.Cos(a), 0.0, false)
+;OPT ObjectReference.MoveTo         doorMoved = true
+;OPT ObjectReference.MoveTo     endif
+    Say("S10 door moved=" + doorMoved)
+    Trace("spawn stage=" + stage + " label=door base=" + Id(doorBase) + " ref=" + Id(DoorRef) + " moved=" + doorMoved + " persist=true")
+    Reading("now", stage, "door", DoorRef)
+    RegisterList(stage, "door", DoorRef, DoorEvents)
+    Say("S10 done")
+EndFunction
+
+Function SpawnLift(int stage)
+    {Stage 30: the LIFT, after the door's stages. PlaceAtMe it DISABLED, move it LiftAheadM in front of and LiftSideM to the right of the player, and only
+     then enable it: with EnableNoWait when the game has it (it never blocks), else Enable. With no MoveTo it stays disabled (a moving platform is never left on
+     the player). A notice after each step.}
+    Actor p = Game.GetPlayer()
+    Say("S30 start")
+    Form liftBase = Game.GetFormFromFile(LiftId, GamePlugin)
+    float a = p.GetAngleZ()
+    bool liftMoved = false
+    bool nowait = false
     if liftBase == None
         Trace("spawn stage=" + stage + " label=lift base=none ref=none")
-    else
-        LiftRef = p.PlaceAtMe(liftBase, 1, true, true, false)
-;OPT ObjectReference.MoveTo         if LiftRef
-;OPT ObjectReference.MoveTo             LiftRef.MoveTo(p, LiftM * Math.Sin(a), LiftM * Math.Cos(a), 0.0, false)
-;OPT ObjectReference.MoveTo             liftMoved = true
-;OPT ObjectReference.MoveTo         endif
-        if LiftRef && liftMoved
+        Say("S30 lift base none")
+        return
+    endif
+    LiftRef = p.PlaceAtMe(liftBase, 1, true, true, false)
+    Say("S30 lift placed (disabled)")
+;OPT ObjectReference.MoveTo     if LiftRef
+;OPT ObjectReference.MoveTo         LiftRef.MoveTo(p, LiftAheadM * Math.Sin(a) + LiftSideM * Math.Cos(a), LiftAheadM * Math.Cos(a) - LiftSideM * Math.Sin(a), 0.0, false)
+;OPT ObjectReference.MoveTo         liftMoved = true
+;OPT ObjectReference.MoveTo     endif
+    Say("S30 lift moved=" + liftMoved)
+    if LiftRef && liftMoved
+;OPT ObjectReference.EnableNoWait         LiftRef.EnableNoWait(false)
+;OPT ObjectReference.EnableNoWait         nowait = true
+        if !nowait
             LiftRef.Enable(false)
         endif
-        Trace("spawn stage=" + stage + " label=lift base=" + Id(liftBase) + " ref=" + Id(LiftRef) + " moved=" + liftMoved + " enabled=" + (liftMoved) + " persist=true")
+        Say("S30 lift enabled nowait=" + nowait)
     endif
-    Reading("now", stage, "door", DoorRef)
+    Trace("spawn stage=" + stage + " label=lift base=" + Id(liftBase) + " ref=" + Id(LiftRef) + " moved=" + liftMoved + " enabled=" + liftMoved + " nowait=" + nowait + " persist=true")
     Reading("now", stage, "lift", LiftRef)
-    RegisterList(stage, "door", DoorRef, DoorEvents)
     RegisterList(stage, "lift", LiftRef, LiftEvents)
+    Say("S30 done")
 EndFunction
 
 ; ---------------------------------------------------------------- poll and steps
@@ -271,6 +299,8 @@ Function Step(int stage)
     elseif stage == 20
         RegisterList(stage, "door", DoorRef, DoorEvents)
         RegisterList(stage, "lift", LiftRef, LiftEvents)
+    elseif stage == 30
+        SpawnLift(stage)
     elseif stage >= 21 && stage <= 24
         PlayOne(stage, "door", DoorRef, DoorCalls[stage - 21])
     elseif stage >= 31 && stage <= 36

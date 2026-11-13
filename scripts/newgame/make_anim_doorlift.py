@@ -5,7 +5,7 @@ Two controls, one session:
   DOOR  ACTI 0x801 of the plugin, a NEW activator with the model, rig (BNAM) and clip folder (CNAM) of the vanilla DOOR
         AK_Ext_Bld_WallA_DoorA_01_Alt02 (000AA24A; its Open/Close clips live on SimpleOpenClose01) whose animation graph is
         genericopenclose01 (0 vanilla users). The vanilla door is not overridden and not placed.
-  LIFT  the vanilla ShipQuickLift1 (00010C35, graph twostages), placed unchanged by the quest, 40 m from the player.
+  LIFT  the vanilla ShipQuickLift1 (00010C35, graph twostages), placed unchanged by the quest (its own stage 30), 5 m ahead and 3 m to the right of the player.
 
 usage:
   python make_anim_doorlift.py precheck [--content-resources <zip>] [--out <precheck.json>]
@@ -68,7 +68,7 @@ def graph_anam(archives):
 
 def stage_list(psc_text):
     """The quest's stages as the README and the card write them: runs of consecutive numbers as a..b, read from the script's StageList lines
-    (so the text cannot drift from the quest: 10 20..24 31..36 40 60)."""
+    (so the text cannot drift from the quest: 10 20..24 30..36 40 60)."""
     nums = [int(n) for n in re.findall(r"StageList\[\d+\] = (\d+)", psc_text)]
     out, i = [], 0
     while i < len(nums):
@@ -203,7 +203,7 @@ def stage(a):
 {PLUGIN} (sha256 {plan['outputs'][PLUGIN]}): QUST FO4SF_AnimDoorLiftQuest (start game enabled, stages {stage_list(text)}: place both,
 register for events, one call per stage with 15 s of listening, cleanup at 60) and ACTI FO4SF_AnimDoorControl: a new activator with the model,
 rig and clip folder of the vanilla door {info.get('door_edid')} (000AA24A) and the graph {anam}. The vanilla door is not placed. The lift is
-the vanilla ShipQuickLift1 (00010C35) placed unchanged, 40 m from the player (this Starfield.esm says it is: {lift}).
+the vanilla ShipQuickLift1 (00010C35) placed unchanged, 5 m ahead and 3 m to the right of the player (this Starfield.esm says it is: {lift}).
 Master Starfield.esm only; nothing is overridden. Checked against Starfield.esm {before}. Re-stage after a game update.
 Optional lines: {', '.join(f'{k}: {v}' for k, v in fate.items()) or 'none'}. RegisterForAnimationEvent returns bool: {pre['register_returns_bool']}.
 No clip file is copied or written: this folder holds no game asset. The lift is a MOVING PLATFORM: stand well away from where it is placed.

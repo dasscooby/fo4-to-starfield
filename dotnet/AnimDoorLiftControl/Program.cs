@@ -2,7 +2,7 @@
 // Scribe's document vault111-gear-door rev 4 section 2c; Claude's request of 12 Nov 21:06 UTC).
 //
 // FO4SFAnimDoorLift.esm (master Starfield.esm only; adds two records, overrides none):
-//   QUST  FO4SF_AnimDoorLiftQuest   start game enabled, stages 10 20 21..24 31..36 40 60, script FO4SF_AnimDoorLiftQuest, NO properties
+//   QUST  FO4SF_AnimDoorLiftQuest   start game enabled, stages 10 20 21..24 30 31..36 40 60, script FO4SF_AnimDoorLiftQuest, NO properties
 //   ACTI  FO4SF_AnimDoorControl     a NEW activator that has the model, rig (BNAM) and clip folder (CNAM) of the vanilla DOOR
 //                                   AK_Ext_Bld_WallA_DoorA_01_Alt02 (000AA24A) and whose animation graph is genericopenclose01 (no vanilla
 //                                   record names it). The vanilla door is NOT overridden and not placed.
@@ -47,7 +47,7 @@ static class Control
     const uint QuestId = 0x800, ControlId = 0x801, DoorId = 0xAA24A, LiftId = 0x10C35;
     const string QuestEdid = "FO4SF_AnimDoorLiftQuest", ControlEdid = "FO4SF_AnimDoorControl", Script = "FO4SF_AnimDoorLiftQuest";
     const string ControlGraphWord = "genericopenclose01", DoorGraphWord = "simpleopenclose01", LiftGraphWord = "twostages";
-    static readonly ushort[] Stages = { 10, 20, 21, 22, 23, 24, 31, 32, 33, 34, 35, 36, 40, 60 };
+    static readonly ushort[] Stages = { 10, 20, 21, 22, 23, 24, 30, 31, 32, 33, 34, 35, 36, 40, 60 };
 
     static FormKey Own(uint id) => new(Plugin, id);
     static FormKey Sf(uint id) => new(SfEsm, id);

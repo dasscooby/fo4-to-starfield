@@ -13,7 +13,7 @@ Claude runs it for one session on the PC after the Courier's CLEAR. **Nothing he
 ## What is built
 - The control's graph component is the vanilla door's WHOLE component (BNAM, CNAM, DNAM, ENAM and anything else it carries) with only the ANAM changed, and `check` compares them: the same flaw the Courier held on the generic control (FAL-579), fixed here the same way.
 - `dotnet/AnimDoorLiftControl` (new): `FO4SFAnimDoorLift.esm`, master `Starfield.esm` only, two records, overrides none. QUST `FO4SF_AnimDoorLiftQuest`
-  (0x800, start game enabled, stages 10 20..24 31..36 40 60, no properties) and ACTI `FO4SF_AnimDoorControl` (0x801): a **new** activator (a DOOR is not an ACTI, so there is
+  (0x800, start game enabled, stages 10 20..24 30..36 40 60, no properties) and ACTI `FO4SF_AnimDoorControl` (0x801): a **new** activator (a DOOR is not an ACTI, so there is
   nothing to duplicate) with the model, BNAM and CNAM of the vanilla DOOR `AK_Ext_Bld_WallA_DoorA_01_Alt02` `000AA24A` (read from the `Starfield.esm` given) and ANAM
   `genericopenclose01.agx` (its path read from the game's archives). One component only, the graph. The vanilla door is neither overridden nor placed.
   `info` / `build` / `check` / `fixture`; `build` refuses a graph that is not `genericopenclose01`, a door that is missing, has no graph component, no model, no rig or
@@ -27,9 +27,10 @@ Claude runs it for one session on the PC after the Courier's CLEAR. **Nothing he
 ## The session
 | stage | what |
 |---|---|
-| 10 | place the door 4 m ahead; place the lift **disabled**, move it 40 m ahead, enable it only if the move happened (no `MoveTo` = it stays disabled: never a moving platform on the player); register |
-| 20 | register every event again on both |
+| 10 | the DOOR only: place it 4 m ahead, register; a notice after each step (`S10 start`, `door placed`, `door moved=`, then the `REG` line, `S10 done`) |
+| 20 | register every event again on the door, and on the lift when it exists |
 | 21..24 | DOOR: `Open`, `Close`, then the direct `Opened`, `Closed` |
+| 30 | the LIFT's own placement, after the door's stages: placed **disabled**, moved 5 m ahead and 3 m to the right (a guess; the test room is about 12 m deep), enabled only if the move happened (no `MoveTo` = it stays disabled: never a moving platform on the player), with `EnableNoWait` when the game declares it (it never blocks), else `Enable`; registered; a notice after each step (`S30 start`, `lift placed`, `lift moved=`, `lift enabled nowait=`, `REG`, `S30 done`) |
 | 31..36 | LIFT: `Stage1`, `Stage2`, `Stage1NoTransition`, `Stage2NoTransition`, then `Stage1Transition`, `Stage2Transition` (clip names, not events: expected false, tried once so the log says so) |
 | 40 | a reading of both |
 | 60 | disable and delete both |
@@ -60,3 +61,11 @@ THROWAWAY STATE ONLY, NO SAVE: the spawned references are persistent.
 ## What was and was not run
 Run here (synthetic fixtures only): the tool's `fixture`/`info`/`build`/`check`, the stage with a fake Papyrus compiler and a synthetic archive, the installer on a temp game folder, the log reader on
 a made-up session. **Not run:** the real `Starfield.esm`, the real archives, the real Papyrus compiler, the game.
+
+## Session 1 result and what changed (supported: Claude's PC game session at f00bcdcb, 13 Nov 00:16 to 00:28 UTC, on the pull request; not replayed here)
+The door control appeared about 4 m ahead after stage 10, and then the kit was silent for the whole session: no `REG`, `PLAY`, `EV` or `W` notice in any of 87 shots, the door never moved.
+No crash, no save. **Seen:** the door's placement; the silence. **Not seen / unread:** why. Claude's reading (inference, no log): stage 10 placed the door, placed the lift disabled, moved it 40 m
+ahead (outside the closed room, about 12 m deep) and called a blocking `Enable` before the first notice; if that step never returns, stage 10 never finishes and every later stage queues behind it.
+That is a hypothesis, not a result. The change makes the session tell where it stops, whichever it is: (1) a notice at the start of stage 10 and after each step; (2) the door is placed and
+registered before the lift is touched, and the lift has its own stage 30 after the door's stages (21..24); (3) the lift lands 5 m ahead and 3 m to the right; (4) `EnableNoWait` when the base scripts
+declare it (the stager keeps the optional line only if it compiles), else the blocking `Enable` as before. If the notices still stop at one step, that step is the finding.

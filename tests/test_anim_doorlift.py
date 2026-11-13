@@ -56,7 +56,7 @@ class ScriptTests(unittest.TestCase):
         ran = [int(s) for s in re.findall(r"StageList\[\d+\] = (\d+)", PSC)]
         m = re.search(r"Stages = \{ ([\d, ]+) \}", TOOL_SRC)
         self.assertEqual(ran, [int(x) for x in m.group(1).split(",")])
-        self.assertEqual(ran, [10, 20, 21, 22, 23, 24, 31, 32, 33, 34, 35, 36, 40, 60])
+        self.assertEqual(ran, [10, 20, 21, 22, 23, 24, 30, 31, 32, 33, 34, 35, 36, 40, 60])
         self.assertIn(f"new int[{len(ran)}]", PSC)
         self.assertIn('string LogName = "FO4SFAnimDL"', PSC)
         self.assertTrue(mad.LOG.endswith("FO4SFAnimDL.0.log"))
@@ -108,13 +108,37 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("LiftRef = p.PlaceAtMe(liftBase, 1, true, true, false)", PSC)    # abInitiallyDisabled = true
         self.assertIn("LiftRef.Enable(false)", PSC)
         self.assertIn("if LiftRef && liftMoved", PSC)                                  # not moved, not enabled: never a platform on the player
-        self.assertIn("float LiftM = 40.0", PSC)
+        self.assertIn("float LiftAheadM = 5.0", PSC)
+        self.assertIn("float LiftSideM = 3.0", PSC)
+        self.assertNotIn("LiftM", PSC.replace("LiftMoved", ""))                      # the old 40 m constant is gone
         self.assertIn("p.PlaceAtMe(doorBase, 1, true, false, false)", PSC)
         # the move is an optional native: with no MoveTo the optional lines stay comments and the lift stays disabled
         self.assertEqual(map_.enable(PSC, []), PSC)
         on = map_.enable(PSC, ["ObjectReference.MoveTo"])
-        self.assertIn("        LiftRef.MoveTo(p, LiftM", on.replace("            ", "        "))
-        self.assertEqual(map_.optional_names(PSC), ["ObjectReference.MoveTo", "ObjectReference.Delete"])
+        self.assertIn("        LiftRef.MoveTo(p, LiftAheadM * Math.Sin(a) + LiftSideM", on.replace("            ", "        "))
+        self.assertEqual(map_.optional_names(PSC), ["ObjectReference.MoveTo", "ObjectReference.EnableNoWait", "ObjectReference.Delete"])
+
+    def test_the_lift_enable_does_not_block_when_the_game_has_a_non_blocking_one(self):
+        """PC session 13 Nov: a blocking Enable may never have returned. EnableNoWait is an optional native; the blocking Enable is the fallback only."""
+        on = map_.enable(PSC, ["ObjectReference.MoveTo", "ObjectReference.EnableNoWait"])
+        self.assertIn("LiftRef.EnableNoWait(false)", on)
+        self.assertIn("nowait = true", on)
+        self.assertIn("        if !nowait\n            LiftRef.Enable(false)", PSC)             # Enable only when the no-wait call was not kept
+        self.assertNotIn("LiftRef.EnableNoWait(false)", PSC.replace(";OPT ObjectReference.EnableNoWait         LiftRef.EnableNoWait(false)", ""))   # only as an optional line
+
+    def test_the_door_is_placed_and_registered_before_the_lift_is_touched_and_every_step_says_so(self):
+        """The 13 Nov session was silent after stage 10: a notice at the start and after each step, the door first, the lift in its own stage 30."""
+        spawn = PSC[PSC.index("Function Spawn(int stage)"):PSC.index("Function SpawnLift(int stage)")]
+        lift = PSC[PSC.index("Function SpawnLift(int stage)"):PSC.index("; ---------------------------------------------------------------- poll and steps")]
+        self.assertNotIn("Lift", spawn.split("{", 1)[1].split("}", 1)[1])                # stage 10 never touches the lift (outside its doc comment)
+        self.assertEqual(re.findall(r'Say\("(S10 [a-z ]+)', spawn), ["S10 start", "S10 door base none", "S10 door placed", "S10 door moved", "S10 done"])
+        self.assertLess(spawn.index("PlaceAtMe"), spawn.index("RegisterList(stage, \"door\""))
+        self.assertEqual(re.findall(r'Say\("(S30 [a-z() ]+)', lift), ["S30 start", "S30 lift base none", "S30 lift placed (disabled)", "S30 lift moved", "S30 lift enabled nowait", "S30 done"])
+        self.assertLess(lift.index("PlaceAtMe"), lift.index("Say(\"S30 lift moved="))                    # the order: placed, moved, enabled, registered
+        self.assertLess(lift.index("Say(\"S30 lift moved="), lift.index("LiftRef.Enable(false)"))
+        self.assertLess(lift.index("LiftRef.Enable(false)"), lift.index("RegisterList(stage, \"lift\""))
+        self.assertIn("elseif stage == 30\n        SpawnLift(stage)", PSC)
+        self.assertEqual(PSC.count("Spawn(stage)"), 1)
 
     def test_every_play_and_event_line_names_which_reference(self):
         self.assertIn('" label=" + Label(akSource)', PSC)
@@ -287,7 +311,7 @@ class StageTests(ToolBase):
         m = re.search(r"stages ([\d. ]+?):", readme)
         self.assertIsNotNone(m, readme[:400])
         self.assertEqual(m.group(1), mad.stage_list(PSC))
-        self.assertEqual(m.group(1), "10 20..24 31..36 40 60")
+        self.assertEqual(m.group(1), "10 20..24 30..36 40 60")
         ran = [int(x) for x in re.findall(r"StageList\[\d+\] = (\d+)", PSC)]
         expanded = []
         for tok in m.group(1).split():
@@ -344,7 +368,7 @@ class StageTests(ToolBase):
         self.assertEqual(mad.main(["precheck", "--content-resources", str(z), "--out", str(out)]), 0)
         r = json.loads(out.read_text())
         self.assertEqual(r["missing"], [])
-        self.assertEqual(r["optional"], {"ObjectReference.MoveTo": True, "ObjectReference.Delete": True})
+        self.assertEqual(r["optional"], {"ObjectReference.MoveTo": True, "ObjectReference.EnableNoWait": False, "ObjectReference.Delete": True})   # the fixture base declares no EnableNoWait: the blocking Enable stays
 
 
 if __name__ == "__main__":
