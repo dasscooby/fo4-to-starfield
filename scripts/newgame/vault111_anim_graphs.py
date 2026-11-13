@@ -34,9 +34,14 @@ ShipQuickLift1, 00010C35: FAL-489, the lift half of the door and lift kit): no g
   --refs-to 00010C35     every REFR and ACHR of the CELL and WRLD top groups whose NAME is that form id: count, and the first --refs-limit
                          (default 12) with the cell (form id and editor id) and the position. A count of 0 says only that no such
                          placed reference was found in those groups, not why the game never places one.
+Fourth option, `--candidates GRAPH` (repeatable): for each ACTI / FURN that names that graph (all of them, not the first dozen), one line:
+form id, editor id, model, whether the model file is in the archives given (present / NOT in the archives read / no model), the rig (BNAM)
+and clip folder (CNAM), and how many REFR / ACHR place it (one scan of the CELL and WRLD groups for all of them together). It exists to
+pick a user of a graph that can be tested: a model in the archives and a placement count above 0.
 Both write only --out.  Examples:
     python vault111_anim_probe.py --graphs --dump-form 00010C35 --out <lift.txt> --data <Starfield Data> --game-archive "Starfield - Meshes*.ba2"
     python vault111_anim_probe.py --graphs --refs-to 00010C35 --out <lift-refs.txt> --data <Starfield Data>
+    python vault111_anim_probe.py --graphs --candidates twostages --out <cand.txt> --data <Starfield Data> --game-archive "Starfield - Meshes*.ba2"
 
 usage: python vault111_anim_probe.py --graphs --out <report.txt> --data <Starfield Data>
            --game-archive "Starfield - Animations.ba2" --game-archive "Starfield - Meshes*.ba2"
@@ -890,9 +895,10 @@ def form_lines(plugin, fid, archives):
     return out + lines
 
 
-def find_refs(plugin, fid):
-    """([(sig, ref form id, cell form id, (x, y, z) or None)], {cell form id: record offset}, records scanned): REFR / ACHR whose NAME is fid."""
-    hits, cells, scanned, cur = [], {}, 0, 0
+def find_refs_many(plugin, fids):
+    """({fid: [(sig, ref form id, cell form id, (x, y, z) or None)]}, {cell form id: record offset}, records scanned): REFR / ACHR whose NAME is one of fids."""
+    fids = set(fids)
+    hits, cells, scanned, cur = {f: [] for f in fids}, {}, 0, 0
     for label in ("CELL", "WRLD"):
         for start, end in plugin.groups.get(label, []):
             for item in plugin.walk(start, end):
@@ -906,10 +912,18 @@ def find_refs(plugin, fid):
                     scanned += 1
                     r = plugin.record_at(item[1])
                     name = r.get(b"NAME")
-                    if name is not None and len(name) == 4 and struct.unpack("<I", name)[0] == fid:
-                        pos = r.get(b"DATA")
-                        hits.append((r.sig.decode(), r.formid, cur, struct.unpack_from("<3f", pos, 0) if pos is not None and len(pos) >= 12 else None))
+                    if name is not None and len(name) == 4:
+                        base = struct.unpack("<I", name)[0]
+                        if base in fids:
+                            pos = r.get(b"DATA")
+                            hits[base].append((r.sig.decode(), r.formid, cur, struct.unpack_from("<3f", pos, 0) if pos is not None and len(pos) >= 12 else None))
     return hits, cells, scanned
+
+
+def find_refs(plugin, fid):
+    """The one-form case of find_refs_many: ([(sig, ref form id, cell form id, position)], cells, scanned)."""
+    hits, cells, scanned = find_refs_many(plugin, [fid])
+    return hits[fid], cells, scanned
 
 
 def refs_lines(plugin, fid, limit):
@@ -921,6 +935,35 @@ def refs_lines(plugin, fid, limit):
         out.append(f"    {sig} {rid:08X}  cell {cell:08X} {cedid or '-'}  position " + (", ".join(f"{v:.1f}" for v in pos) if pos else "unread"))
     if not hits:
         out.append("  none found: no placed reference of that base in the groups read (the game may place it another way: unread)")
+    return out
+
+
+def candidate_lines(plugin, graph, archives, limit):
+    """Every ACTI / FURN naming `graph`: model present in the archives, rig, clip folder, placement count (one placement scan for all)."""
+    base = graph.lower().rsplit(".", 1)[0] if graph.lower().endswith(".agx") else graph.lower()
+    recs, _, _, _, notes = read_records(plugin, {base})
+    recs = [h for h in recs if h["graph"] == base]
+    out = [f"=== candidates for graph {base}: {len(recs)} ACTI/FURN record(s) name it"] + notes
+    if not recs:
+        return out + ["  none found: unread or no record names this graph"]
+    found, cells, scanned = find_refs_many(plugin, [h["formid"] for h in recs])
+    out.append(f"  placement scan: {scanned} placed record(s) in the CELL and WRLD groups; model check: " + ("against the archives given" if archives else "unread (no --game-archive given)"))
+    usable = 0
+    for h in sorted(recs, key=lambda h: (-len(found[h["formid"]]), h["formid"])):
+        n = len(found[h["formid"]])
+        if not h["model"]:
+            state = "no model"
+        elif not archives:
+            state = "model unread"
+        else:
+            _, got = model_entry(archives, h["model"])
+            state = "model NOT in the archives read" if got is None else "model unreadable" if isinstance(got[1], Exception) else "model in the archives"
+        usable += state == "model in the archives" and n > 0
+        out.append(f"  {h['sig']} {h['formid']:08X} {h['edid'] or '-'}  placed {n}  {state}  model={h['model'] or '-'}  BNAM={h['BNAM'] or '-'}  CNAM={h['CNAM'] or '-'}")
+        for sig, rid, cell, pos in found[h["formid"]][:limit]:
+            cedid = plugin.record_at(cells[cell]).edid if cell in cells else "-"
+            out.append(f"      {sig} {rid:08X}  cell {cell:08X} {cedid or '-'}  position " + (", ".join(f"{v:.1f}" for v in pos) if pos else "unread"))
+    out.append(f"  usable (model in the archives AND placed at least once): {usable} of {len(recs)}")
     return out
 
 
@@ -942,6 +985,8 @@ def run_form(a):
                 out += [""] + form_lines(plugin, parse_form_id(h), archives)
             for h in a.refs_to:
                 out += [""] + refs_lines(plugin, parse_form_id(h), a.refs_limit)
+            for g in a.candidates:
+                out += [""] + candidate_lines(plugin, g, archives, min(a.refs_limit, 3))
     except (esm.EsmError, OSError, struct.error) as e:
         out.append(f"unread: {esm_path}: {e}")
     return "\n".join(out) + "\n"
@@ -957,6 +1002,7 @@ def build_parser():
     ap.add_argument("--dump-graph", action="append", default=[], help="a graph name: write only the complete dump of it (repeatable; no esm, no models)")
     ap.add_argument("--dump-form", action="append", default=[], help="a hex form id: write only every subrecord of that record and a check of its model against the archives (repeatable)")
     ap.add_argument("--refs-to", action="append", default=[], help="a hex form id: write only the REFR / ACHR placements of that base (repeatable; reads the whole CELL and WRLD groups)")
+    ap.add_argument("--candidates", action="append", default=[], help="a graph name: write only every ACTI/FURN naming it, with its model checked against the archives and its placement count (repeatable)")
     ap.add_argument("--refs-limit", type=int, default=12)
     ap.add_argument("--model", action="append", default=[], help="a model path to read (repeatable)")
     ap.add_argument("--per-graph", type=int, default=12)
@@ -966,7 +1012,7 @@ def build_parser():
 
 def main(argv=None):
     a = build_parser().parse_args(argv)
-    text = run_dump(a) if a.dump_graph else run_form(a) if (a.dump_form or a.refs_to) else run(a)
+    text = run_dump(a) if a.dump_graph else run_form(a) if (a.dump_form or a.refs_to or a.candidates) else run(a)
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     with open(a.out, "w", encoding="utf-8") as f:
         f.write(text)
