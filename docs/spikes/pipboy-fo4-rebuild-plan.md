@@ -241,8 +241,9 @@ player sees the real boot screen. Proof 2 follows by whichever route proof 1 lea
 
 ## Look and function: the seam
 
-- **Function** (one, shared by every look): the pages, what each row or widget is fed, and input.
-  - The values the plugin promises every look: today's value providers (`make_pipboy_kit.py` `VALUE_PROVIDERS`:
+- **Function** (one, shared by every look): the pages, what each row or widget is fed, and input. It is the
+  **union** of what every game's Pip-Boy needs (owner, 13 Nov), not Fallout 4's list alone; the next section lists it.
+  - The values the plugin promises every look today: the value providers (`make_pipboy_kit.py` `VALUE_PROVIDERS`:
     health, level, xp, carry_max, rads, cell, world, time, days, position, heading, grid, `av:<id>`).
   - The lists: inventory and quests, and later markers.
   - The events: tab and sub-tab moves, selection, click, open and close.
@@ -262,6 +263,65 @@ player sees the real boot screen. Proof 2 follows by whichever route proof 1 lea
   - A world map belongs to the world the player is in. It is chosen by WORLD, never fixed in code. The Commonwealth's
     map comes with the Fallout 4 conversion; another game's world brings its own.
   - Fallout 76's map style and extra features are function, decided by the owner later.
+
+## The function union: a first inventory by game
+
+Owner, 13 Nov: "the main functioning should just be a combination of everything that's needed from each of the
+games." So the function side is one Pip-Boy holding every feature that Fallout 3, New Vegas, 4 and 76 need (more
+games later). The looks stay per game.
+
+**Source of this table.** Written from memory of the games, without reading their files. **None of it is verified.**
+`known` means what players of that game see; `unread` means it is not certain whether, or where, that game has it.
+No other game's files are surveyed now.
+
+Games: **3** = Fallout 3, **NV** = New Vegas, **4** = Fallout 4, **76** = Fallout 76.
+
+| Function id | What it shows or does | 3 | NV | 4 | 76 | Ours today |
+| --- | --- | --- | --- | --- | --- | --- |
+| `stat.status` | health, condition of limbs, rads, the player figure, use a stimpak or RadAway | known | known | known | known | rows: health, rads, level, xp |
+| `stat.needs` | hunger, thirst, sleep | - | known (Hardcore) | unread (Survival mode, shown elsewhere?) | known | - |
+| `stat.effects` | active effects: chems, perks, illness | unread | unread | known | known | - |
+| `stat.special` | the seven S.P.E.C.I.A.L. values | known | known | known | known (with perk cards) | rows: `av:2C2` to `av:2C8` |
+| `stat.skills` | skills (Small Guns, Lockpick ...) | known | known | - | - | - |
+| `stat.perks` | the perks taken; Fallout 4's perk chart; Fallout 76's perk cards | known (list) | known (list) | known (chart) | known (cards, legendary perks) | - |
+| `stat.general` | statistics, karma, level progress | known | known | unread (under DATA as Stats) | unread | - |
+| `stat.reputation` | standing with each faction | - | known | - | unread (factions, reputation) | - |
+| `stat.mutations` | mutations | - | - | - | known | - |
+| `inv.items` | items by category (weapons, apparel, aid, misc, junk, mods, ammo, notes, holotapes), equip, drop, inspect, favourite | known | known | known | known | list: inventory (names, counts) |
+| `inv.weight` | carry weight, current and maximum | known | known | known | known | row: carry_max |
+| `inv.junk_components` | junk's components, tag for search | - | - | known | known | - |
+| `data.quests` | quests and objectives, the active quest | known | known | known | known | list: quests (our mission) |
+| `data.notes` | notes and holotapes, play a holotape | known | known | known (under INV) | known | - |
+| `data.challenges` | challenges and their progress | - | known | - | known | - |
+| `data.workshops` | settlements: people, food, water, power, defence, happiness | - | - | known | unread (camp, workshops) | - |
+| `data.stats` | game statistics | unread (STATS / General) | unread | known | unread | - |
+| `map.world` | the world map with the player's arrow and markers | known | known | known | known (its own style) | rows: world, position, heading, grid |
+| `map.local` | the local map around the player | known | known | known | unread | - |
+| `map.travel` | fast travel from the map | known | known | known | known (with a cost) | **not designed (owner's later decision)** |
+| `radio.stations` | stations found, tune and turn off | known (under DATA) | known (under DATA) | known | known | notice only |
+| `social` | team, friends, other players | - | - | - | known (outside the Pip-Boy?) | - |
+| `device.light` | the Pip-Boy's light | known | known | known | known | - |
+
+**The function contract every look is fed from.**
+- Every function has a stable id (the table's first column). It has a home tab that is the same for every look:
+  STAT, INV, DATA, MAP, RADIO. In Fallout 3 and New Vegas the map and radio sit under DATA, so a look also says
+  where its own tabs put each id.
+- For each id, the function side promises the same feed to every look: its values (value providers), its lists
+  (list providers), and its events (move, select, click, open, close). These are today's kit pieces, extended by id.
+- A look declares which ids it has a page of its own for. For example, a Fallout 4 look has no `stat.skills` page,
+  and a Fallout 3 look has no `data.workshops` page.
+- **A function the look's game lacks gets a generic page in that look's style:** the look's frame, font and list and
+  value widgets, filled from the same feed. The kit's text rows are the ultimate fallback, so no feature is ever left
+  without a place.
+- A **stated gap** is used only when a function cannot be drawn in a look at all, for example a world map in a look
+  that has no map component and no image to show. The gap is logged once with the look and the id, and the page says
+  so in words.
+- Which functions exist at all is the owner's choice per function, as with travel and Fallout 76's additions. This
+  table is the shape, not a promise to build every row.
+
+**The first build stays Fallout 4.** Fallout 4's look and Fallout 4's functions come first: the rows that are
+`known` under 4. The union is the shape the code keeps room for (ids, the home tab, generic pages), not the first
+delivery.
 
 ## What this plan does not do
 

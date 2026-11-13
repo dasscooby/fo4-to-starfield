@@ -31,6 +31,20 @@ class RebuildPlanTests(unittest.TestCase):
                       "fonts_en.swf"):
             self.assertIn(f"`{movie}`", self.plan, movie)
 
+    def test_the_function_union(self):
+        for text in ("## The function union: a first inventory by game", "**None of it is verified.**",
+                     "**A function the look's game lacks gets a generic page in that look's style:**",
+                     "A **stated gap**", "**The first build stays Fallout 4.**",
+                     "| `map.travel` | fast travel from the map |", "**not designed (owner's later decision)**"):
+            self.assertIn(text, self.plan, text)
+        union = self.plan[self.plan.index("## The function union"):self.plan.index("**The function contract")]
+        rows = [line for line in union.splitlines() if re.match(r"\| `[a-z_.]+` \|", line)]
+        self.assertGreaterEqual(len(rows), 20)
+        for row in rows:
+            cells = [c.strip() for c in row.strip("|").split("|")]
+            self.assertEqual(len(cells), 7, row)
+            self.assertTrue(all(cells[i] for i in range(2, 6)), row)   # each game marked: known, unread or -
+
     def test_what_we_load_is_the_source(self):
         self.assertIn('"MovieRoot@AS3@GFx@Scaleform@@"sv', self.main)
         self.assertIn("kLoadMovieRva = 0x2551AB0;", self.main)
