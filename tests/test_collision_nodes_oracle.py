@@ -2,6 +2,7 @@ import importlib.util
 import struct
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from test_collision import fake_template
 from fo4sf import nif, sfnif
@@ -67,6 +68,35 @@ class CollisionNodesTests(unittest.TestCase):
         self.assertEqual([o["target"] for o in rep["objects"]], ["Collision0", "Collision1"])
         self.assertFalse(rep["has_NiControllerManager"])
         self.assertIn("no NiControllerSequence", rep["reading"])
+
+    def test_bounds_are_per_body_not_the_whole_shared_system(self):
+        """PC run 13 Nov printed one identical box on all 17 FO4 rows: bounds came from every body of the shared system."""
+        from fo4sf import fo4collision as fc
+        positions = {0: (0.0, 0.0, 0.0), 1: (10.0, 0.0, 5.0)}
+        shapes = {0: 1000, 1: 2000}
+
+        class Pack:
+            def __init__(self, blob):
+                pass
+
+            def objects(self):
+                return [(1, "hknpPhysicsSystemData"), (1000, "hknpConvexPolytopeShape"), (2000, "hknpConvexPolytopeShape")]
+
+            def array(self, at):
+                return (100, 2)
+
+            def pointer(self, at):
+                return shapes[(at - 100) // fc.BODY_SIZE]
+
+            def unpack(self, fmt, at):
+                k = (at - 100) // fc.BODY_SIZE
+                return (0.0, 0.0, 0.0, 1.0) if fmt == "<4f" else positions[k]
+
+        with patch.object(tool.hkpackfile, "Packfile", Pack), \
+                patch.object(tool.fc, "_convex", lambda p, shape: ([(0.0, 0.0, 0.0), (1.0, 2.0, 3.0)], [])):
+            self.assertEqual(tool._bounds(b"x", 0), [[0.0, 0.0, 0.0], [1.0, 2.0, 3.0]])
+            self.assertEqual(tool._bounds(b"x", 1), [[10.0, 0.0, 5.0], [11.0, 2.0, 8.0]])
+            self.assertIsNone(tool._bounds(b"x", 5))                  # index out of range: unread
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ parser); the sequence controlled-block layout (29 bytes per block: interpolator,
 indices; the same layout nif.door_hinge reads for its first block) is checked in range only, so a name list shorter
 than the block count is printed as such; FO4 motion class follows fo4collision.body_mass (static / keyframed /
 dynamic); Starfield motion is the u32 at offset 240 of the body blob (0 static, 1 keyframed, 2 dynamic), as the door
-oracle reads it. Rotated FO4 bodies are not decoded by fo4collision.decode_bodies, so their bounds are "unread".
+oracle reads it. Bounds are those of the object's own body index (not the whole shared system); rotated bodies and shape classes other than compressed mesh / convex polytope (e.g. DynamicCompound) print None = unread.
 """
 import argparse
 import json
@@ -99,11 +99,30 @@ def _sf_motion(blob):
 
 
 def _bounds(blob, body):
+    """Bounds of body `body` only (the FO4 system can hold many bodies; objects share it and each owns one index).
+    Mirrors fo4collision.decode_bodies for one body; rotated bodies and unsupported shape classes are unread (None)."""
     try:
-        bodies, _ = fc.decode_bodies(blob)
+        p = hkpackfile.Packfile(blob)
+        classes = dict(p.objects())
+        sysobj = next(o for o, c in classes.items() if c == "hknpPhysicsSystemData")
+        at, n = p.array(sysobj + fc.SYS_BODIES)
+        if at is None or not 0 <= body < n:
+            return None
+        b = at + fc.BODY_SIZE * body
+        if any(abs(x) > 1e-4 for x in p.unpack("<4f", b + fc.BODY_ROT)[:3]):
+            return None
+        shape = p.pointer(b)
+        cls = classes.get(shape, "?")
+        if cls == "hknpCompressedMeshShape":
+            pts, _ = fc._compressed_mesh(p, p.pointer(shape + fc.CMS_DATA))
+        elif cls == "hknpConvexPolytopeShape":
+            pts, _ = fc._convex(p, shape)
+        else:
+            return None
+        pos = p.unpack("<3f", b + fc.BODY_POS)
+        return _box([tuple(c + t for c, t in zip(v, pos)) for v in pts])
     except Exception:  # noqa: BLE001 - diagnostic: any decode failure means "unread"
         return None
-    return None if not bodies else _box([p for _, pts, _ in bodies for p in pts])
 
 
 def _box(pts):
