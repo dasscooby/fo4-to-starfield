@@ -1552,3 +1552,12 @@ steps. Restricting only `instance run` leaves the same installers reachable thro
 `build`. Requiring managed metadata on all staging commands was rejected because
 staging and legacy targets retain their existing contracts. This is an explicit
 target check, not an arbitrary-command sandbox or package authenticity proof.
+
+### 2026-11-14 — native identity gates release finalization
+
+Codex / Lone, FAL-247 part 11. Declaration publication uses the same installed
+native validator as Play, before writes and at publication boundaries. A complete
+release receipt must not hide a native stack that Play already refuses. Keep
+begin-install permissive toward old native bytes, so an installer can replace
+them while ownership is pending; finalization validates the resulting files.
+Separate validators or requiring old bytes before installation were rejected.

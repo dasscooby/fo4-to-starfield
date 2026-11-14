@@ -132,6 +132,13 @@ def _input(values, candidate_path):
     return root, receipt_path, receipt_raw, receipt, target, release, raw, old_raw, old, previous
 
 
+def _check_native(root):
+    from . import runtimes
+    problems = runtimes.installed_native_problems(root)
+    if problems:
+        raise sr.BindingError(problems[0])
+
+
 def publish(values, candidate_path, *, apply=False, running=restore.game_running, say=print):
     """Preview, or install, declaration metadata only. Existing saves stay untouched."""
     (root, receipt_path, receipt_raw, receipt, target, release, raw,
@@ -144,6 +151,7 @@ def publish(values, candidate_path, *, apply=False, running=restore.game_running
         raise sr.BindingError(problems[0])
     from . import release_load
     release_load.check(release, root, values.get("my_games"))
+    _check_native(root)
     say(f"Release {release['release_id']}: publish declaration only; no saves adopted or changed")
     if not apply:
         say("Preview only; --apply publishes after the game-closed check")
@@ -160,10 +168,12 @@ def publish(values, candidate_path, *, apply=False, running=restore.game_running
     if running() or read(receipt_path) != pending_raw:
         raise sr.BindingError("game or instance changed; release publication remains pending")
     release_load.check(release, root, values.get("my_games"))
+    _check_native(root)
     _write(target, raw, old_raw)
     if running() or read(target) != raw:
         raise sr.BindingError("game or declaration changed; release publication remains pending")
     release_load.check(release, root, values.get("my_games"))
+    _check_native(root)
     complete = dict(pending, **{FIELD: {"schema": 1, "complete": True,
                                      "declaration": pin(raw), "previous": None}})
     _write(receipt_path, encode(complete), pending_raw)

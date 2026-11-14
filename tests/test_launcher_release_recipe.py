@@ -258,6 +258,22 @@ with (root.parent / 'calls.txt').open('a') as stream:
                 self.build()
         self.assertEqual(self.calls(), [self.names[0]])
 
+    def test_native_refusal_keeps_managed_recipe_pending_including_cached_retry(self):
+        with self.script.open("a") as stream:
+            stream.write("\nplugins = root / 'Data/SFSE/Plugins'\nplugins.mkdir(parents=True, exist_ok=True)\n"
+                         "(plugins / 'FOCCPing.dll').write_bytes(b'unknown synthetic native')\n")
+        report = self.build()
+        self.assertFalse(report["complete"])
+        self.assertEqual(report["release"]["status"], "refused")
+        self.assertIn("no measured identity", report["release"]["detail"])
+        self.assertFalse(json.loads((self.game / instance.RECORD).read_bytes())[ri.FIELD]["complete"])
+        report = self.build()
+        self.assertFalse(report["complete"])
+        self.assertEqual([s["status"] for s in report["steps"]], ["reused", "reused"])
+        (self.data / "SFSE/Plugins/FOCCPing.dll").unlink()
+        self.assertTrue(self.build()["complete"])
+        self.assertEqual(self.calls(), list(self.names))
+
 
 if __name__ == "__main__":
     unittest.main()

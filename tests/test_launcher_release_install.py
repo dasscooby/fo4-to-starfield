@@ -403,6 +403,111 @@ class ReleaseInstallTests(unittest.TestCase):
                 self.publish(apply=apply)
         self.assertEqual(before, self.snapshot())
 
+    def native_fixture(self):
+        from fo4sf.launcher import runtimes as rt
+        folder = self.data / "SFSE/Plugins"
+        folder.mkdir(parents=True, exist_ok=True)
+        dll = folder / "FOCCPing.dll"
+        dll.write_bytes(b"synthetic probe")
+        library = folder / rt._native_table()["address_library"]["file"]
+        library.write_bytes(b"synthetic library")
+        (self.game / "sfse_loader.exe").write_bytes(b"synthetic loader")
+        sfse = self.game / "sfse_1_16_244.dll"
+        sfse.write_bytes(b"synthetic sfse")
+        runtime = rt._native_table()["runtime"]
+        entry = {"exe_sha256": ri.pin(b"synthetic exe")["sha256"], "exe_version": runtime,
+                 "sfse": {"loader_sha256": ri.pin(b"synthetic loader")["sha256"],
+                          "dlls": {sfse.name: ri.pin(sfse.read_bytes())["sha256"]}},
+                 "native": {"schema": 1, "plugins": {dll.name: dict(ri.pin(dll.read_bytes()),
+                     runtime=runtime, required=False, needs_address_library=True,
+                     source_commit="c" * 40, artifact_receipt="synthetic fixture")},
+                     "address_library": dict(ri.pin(library.read_bytes()), file=library.name,
+                                             provenance="synthetic fixture")}}
+        patch = mock.patch.object(rt, "load_runtimes", return_value={"schema": 1, "runtimes": [entry]})
+        patch.start()
+        self.addCleanup(patch.stop)
+        return dll, library, sfse
+
+    def test_native_publication_unknown_identity_refuses_wet_dry_and_cli(self):
+        folder = self.data / "SFSE/Plugins"
+        folder.mkdir(parents=True)
+        (folder / "FOCCPing.dll").write_bytes(b"unknown synthetic native")
+        before = self.snapshot()
+        for apply in (False, True):
+            with self.assertRaisesRegex(ValueError, "no measured identity"):
+                self.publish(apply=apply)
+        argv = [sys.executable, "-I", str(ROOT / "scripts/launcher.py"), "install-release",
+                "--settings", str(self.settings_path), "--declaration", str(self.candidate)]
+        for extra in ([], ["--apply"]):
+            result = subprocess.run(argv + extra, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertIn("no measured identity", result.stdout + result.stderr)
+        self.assertEqual(before, self.snapshot())
+
+    def test_native_publication_matching_and_changed_dependency_controls(self):
+        paths = self.native_fixture()
+        before = self.snapshot()
+        self.publish()
+        self.assertEqual(before, self.snapshot())
+        for path in paths:
+            raw = path.read_bytes()
+            for bad in (None, b"changed"):
+                if bad is None:
+                    path.unlink()
+                else:
+                    path.write_bytes(bad)
+                # Optional absent probe does not need its library/SFSE at all.
+                if path == paths[0] and bad is None:
+                    self.publish()
+                else:
+                    with self.assertRaises(ValueError):
+                        self.publish(apply=True)
+                self.assertFalse(self.target.exists())
+            path.write_bytes(raw)
+        self.publish(apply=True)
+        self.assertEqual(ri.installed(self.game), sr.declaration(self.release))
+        paths[0].write_bytes(b"changed after complete")
+        before = self.snapshot()
+        with self.assertRaises(ValueError):
+            self.publish(apply=True)
+        self.assertEqual(before, self.snapshot())
+
+    def test_native_change_at_each_publication_boundary_stays_pending_and_resumes(self):
+        dll, _, _ = self.native_fixture()
+        valid = dll.read_bytes()
+        real = ri._write
+        for boundary in (self.receipt, self.target):
+            self.receipt.write_bytes(ri.encode(self.original))
+            self.target.unlink(missing_ok=True)
+            dll.write_bytes(valid)
+            def changed(path, raw, expected):
+                real(path, raw, expected)
+                if path == boundary:
+                    dll.write_bytes(b"changed during publication")
+            with mock.patch.object(ri, "_write", side_effect=changed):
+                with self.assertRaises(ValueError):
+                    self.publish(apply=True)
+            self.assertFalse(json.loads(self.receipt.read_bytes())[ri.FIELD]["complete"])
+            dll.write_bytes(valid)
+            self.publish(apply=True)
+            self.assertEqual(ri.installed(self.game), sr.declaration(self.release))
+
+    def test_managed_installer_can_replace_unknown_native_but_cannot_finalize_wrong_bytes(self):
+        dll, _, _ = self.native_fixture()
+        valid = dll.read_bytes()
+        dll.write_bytes(b"old native to replace")
+        def install(*args, **kwargs):
+            self.assertFalse(json.loads(self.receipt.read_bytes())[ri.FIELD]["complete"])
+            dll.write_bytes(valid)
+            return 0
+        self.assertEqual(self.managed(install), 0)
+        dll.write_bytes(b"wrong final native")
+        with self.assertRaises(ValueError):
+            self.managed()
+        self.assertFalse(json.loads(self.receipt.read_bytes())[ri.FIELD]["complete"])
+        dll.write_bytes(valid)
+        self.assertEqual(self.managed(), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

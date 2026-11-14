@@ -286,3 +286,18 @@ infer a target hidden in a script, environment or default. It enables no accepte
 package and does not complete distribution policy. Native artifact/order acceptance
 and provenance-safe new-save binding publication remain required. Keep #716 draft;
 Windows/native/Tk/game NOT_RUN. No saves, bindings or native state are written.
+
+Part 11 applies the shared measured-native gate to declaration publication, both
+preview and apply. Installed unknown or changed owned DLLs, missing required
+components and invalid SFSE/Address Library dependencies refuse before metadata
+writes. Publication rechecks native identity after pending ownership and again
+before completion; observed changes leave the release pending. The same gate
+runs at managed command/recipe finalization, including fully cached retries.
+Restoring the approved bytes permits the original publication to resume.
+
+Beginning an install does not require old native bytes to match: its installer may
+replace them under pending ownership. Only the resulting native stack can pass
+finalization. Optional absent probes remain optional. This reuses the Play gate;
+it supplies no new release identities or native behavior evidence. No accepted
+package or save provenance is established. Keep #716 draft and preserve all
+native/package/new-save gates; Windows/native/Tk/game NOT_RUN.

@@ -2985,3 +2985,14 @@ The instance runner and driver share target parsing. Synthetic subprocess contro
 cover the previous path, target spellings, no-write refusal, legacy success and
 ownership appearing between commands. Exact-head results and independent QA go
 on FAL-247; #716 remains draft, native/package/save-provenance gates preserved.
+
+## 14 November 2026 — Codex: native validation before release completion
+
+Consumed Scribe FAL-761 CLEAR 95af7247 for part 10. Publication now checks the
+shared measured-native gate before writes and at durable metadata boundaries;
+managed command/recipe finalization inherits it. Unknown or changed native files
+cannot produce a completed release receipt, and observed changes retain pending
+ownership for same-input retry. Beginning an installer can still replace old
+native files. Synthetic CLI, publisher and cached recipe controls cover the gap.
+Exact-head evidence and independent review are on FAL-247. Keep #716 draft;
+native artifacts/order, package policy and proven new-save publication remain.
