@@ -12,8 +12,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 KEYWORDS = {"state", "auto", "autoreadonly", "event", "function", "property", "import", "native", "global", "new", "self", "parent", "extends",
             "scriptname", "as", "is", "none", "true", "false", "return", "while", "if", "else", "elseif", "endif", "endwhile", "endfunction",
-            "endevent", "endstate", "endproperty", "length", "const", "conditional", "hidden", "mandatory", "collapsed", "debugonly", "betaonly"}
-KEYWORDS.discard("length")                                              # an ordinary identifier in Papyrus (Array.Length is a member, not reserved)
+            "endevent", "endstate", "endproperty", "length", "const", "conditional", "hidden", "mandatory", "collapsed", "debugonly", "betaonly",
+            "bool", "int", "float", "string", "var", "group", "endgroup", "struct", "endstruct", "customevent", "customeventname",
+            "scripteventname", "structvarname"}      # Length is a keyword too (Papyrus Language Keywords table): `int length` is refused like `int state`
 TYPE = r"(?:int|float|bool|string|var|[A-Za-z_][A-Za-z0-9_:]*)(?:\[\])?"
 LOCAL = re.compile(r"^\s*(%s)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|$)" % TYPE, re.I)          # `int state = ...` and `int state`
 PROPERTY = re.compile(r"^\s*(%s)\s+Property\s+([A-Za-z_][A-Za-z0-9_]*)" % TYPE, re.I)
@@ -61,6 +62,10 @@ class ReservedNameTests(unittest.TestCase):
         self.assertEqual(offenders("int Property auto = 3 Auto Const\n"), [(1, "auto")])
         self.assertEqual(offenders('    Say("S" + x + " state=" + openState)   ; int state = 1\n'), [])
         self.assertEqual(offenders("    int openState = d.GetOpenState()\n    if state != LastState\n"), [])
+        for name in ("length", "group", "struct", "int", "bool", "string", "customevent", "structvarname"):
+            self.assertEqual(offenders("    int %s = 1\\n" % name), [(1, name)], name)
+        self.assertEqual(offenders("Function F(float Length, string var)\\n"), [(1, "Length"), (1, "var")])
+        self.assertEqual(offenders("    while i < Markers.Length\\n    string Function Id(Form f)\\nAuto State Waiting\\n"), [])
         self.assertEqual(offenders("Function F()\n{prose, logged\n as is; more prose}\n    int state = 1\n"), [(4, "state")])        # a doc block is skipped, the code after it is not
 
     def test_no_script_in_the_repo_names_a_variable_after_a_keyword(self):
