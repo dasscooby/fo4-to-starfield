@@ -630,6 +630,96 @@ def _pose_boxes(plan, local_pts, unit_scale):
     return rest, ends
 
 
+MAX_DOOR_MESH_PART_TRIS = 48      # a FO4 door collision mesh part above this is not a thin deck / rail: refused, not boxed
+
+
+def fo4_door_bodies(src, plan, unit_scale, report=None):
+    """FO4's own collision of a multipart door as oriented boxes in the space of the moving rig bone that carries them.
+
+    Returns {bone node block: [(centre, half, rotation row-major, source collision node)]} (metres), or None when the source
+    has no collision object on a moving bone (the caller then keeps the one-box-per-bone fallback). Each body is boxed with
+    sfcollision.convex_obb, so a thin walkway deck stays thin instead of becoming a block up to its rails. Bodies with a
+    rotation (the quaternion convention is unverified against a real body), convex parts without faces, and spheres are
+    skipped and listed in report["skipped"]/report["bodies"]; a bone left with no carried body keeps its bounding box
+    (report["fallback_nodes"]) so it still blocks; a bone with some carried bodies does not get one. A mesh part with more
+    than MAX_DOOR_MESH_PART_TRIS triangles, or a scaled collision node, is refused (NifError)."""
+    from . import door_collision, fo4collision as fc, hkpackfile, meshcollision
+    try:
+        found = door_collision.plan(src, plan)
+    except (nifmod.NifError, hkpackfile.PackfileError) as e:    # unreadable source collision: the one-box fallback, said so
+        if report is not None:
+            report["unreadable"] = str(e)
+        return None
+    moving = [a for a in found["attachments"] if a["follows_animated_ancestor"]]
+    if not moving:
+        return None
+    worlds = nifmod.world_transforms(src, placed=True)      # FO4 body transforms are absolute (model space), not node-relative
+    packs = {}
+    out, skipped, carried, fallback, listing = {}, [], [], set(), []
+
+    def node_name(i):
+        k, = struct.unpack_from("<i", src.blocks[i], 0)
+        return src.strings[k].decode("latin-1") if 0 <= k < len(src.strings) else ""
+
+    for a in moving:
+        bone_node = plan["bones"][a["bone"]]["node"]
+        entry = {"bone": plan["bones"][a["bone"]]["name"], "source_node": a["node"], "source_node_name": node_name(a["node"]),
+                 "body": a["body_id"]}
+        wt, wr, ws = worlds(bone_node)                       # bone -> model, source units
+        if abs(ws - 1.0) > 1e-4:
+            raise nifmod.NifError("door rig bone is scaled")
+        if a["system_block"] not in packs:
+            pack = hkpackfile.Packfile(src.blocks[a["system_block"]][4:])
+            packs[a["system_block"]] = (pack, dict(pack.objects()))
+        pack, classes = packs[a["system_block"]]
+        root = next(o for o, c in classes.items() if c == "hknpPhysicsSystemData")
+        at, _ = pack.array(root + fc.SYS_BODIES)
+        body = at + fc.BODY_SIZE * a["body_id"]
+        label = f"block {a['collision_block']} body {a['body_id']}"
+        if any(abs(x) > 1e-4 for x in pack.unpack("<4f", body + fc.BODY_ROT)[:3]):
+            skipped.append(label + " (rotated body)")
+            listing.append({**entry, "status": "skipped", "reason": "rotated body"})
+            continue
+        pos = pack.unpack("<3f", body + fc.BODY_POS)
+        for kind, obj, R, tr in meshcollision._shape_parts(pack, classes, pack.pointer(body), meshcollision.IDENTITY3, (0.0, 0.0, 0.0)):
+            if kind == "convex":
+                pts, tris = fc._convex(pack, obj)
+            elif kind == "mesh":
+                pts, tris = fc._compressed_mesh(pack, obj)
+                if len(tris) > MAX_DOOR_MESH_PART_TRIS:
+                    raise nifmod.NifError(f"door collision mesh part has {len(tris)} triangles ({label}); not a thin deck")
+            else:
+                skipped.append(f"{label} ({kind} part)")
+                listing.append({**entry, "status": "skipped", "reason": f"{kind} part"})
+                continue
+            if not tris:
+                skipped.append(f"{label} (part without faces)")
+                listing.append({**entry, "status": "skipped", "reason": "part without faces"})
+                continue
+            pts = [tuple(sum(R[3 * r + k] * v[k] for k in range(3)) + tr[r] + pos[r] for r in range(3)) for v in pts]   # model metres
+            centre, half, rot = sfcollision.convex_obb(pts, tris)
+            local = tuple(sum(wr[3 * k + r] * (centre[k] / unit_scale - wt[k]) for k in range(3)) * unit_scale for r in range(3))
+            rot_local = tuple(sum(wr[3 * k + r] * rot[3 * k + c] for k in range(3)) for r in range(3) for c in range(3))
+            out.setdefault(bone_node, []).append((local, half, rot_local, a["node"]))
+            carried.append({"node": a["node"], "bone": plan["bones"][a["bone"]]["name"], "model_centre_m": [round(v, 3) for v in centre],
+                            "half_m": [round(v, 3) for v in half]})
+            listing.append({**entry, "status": "carried", "shape": "oriented box", "source_shape": kind,
+                            "half_m": [round(v, 4) for v in half], "model_position_m": [round(v, 4) for v in centre]})
+    for a in moving:                                            # a bone whose FO4 bodies were all skipped keeps its bounding box
+        node = plan["bones"][a["bone"]]["node"]
+        if node not in out:
+            fallback.add(node)
+    if report is not None:
+        report["skipped"] = skipped
+        report["carried_bodies"] = carried
+        report["bodies"] = listing                      # every moving body, carried or skipped, so a run reads without a second tool
+        report["box_fallback_bones"] = sorted(plan["bones"][i]["name"] for i in range(len(plan["bones"])) if plan["bones"][i]["node"] in fallback)
+    if report is not None:
+        report["fallback_nodes"] = sorted(fallback)
+    return out
+
+
+
 def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, clip_files, unit_scale: float = UNIT_SCALE,
                            collision_template: bytes = None, leaf_physics_donor: bytes = None,
                            rest_pose_check: bool = False, aliases: dict = None,
@@ -746,16 +836,27 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
         all_pts += [_apply(world[a["bone"]], p) for p in pts]
         if a["bone"] in moving:
             bone_pts.setdefault(a["bone"], []).extend(pts)
-    collision = {}
+    collision, child_bodies, fo4_report = {}, {}, {}
+    fo4_bodies = fo4_door_bodies(src, plan, unit_scale, fo4_report)
+    if fo4_bodies is not None:      # FO4's own thin bodies carry the walkway; no one-box-per-bone block on top of them
+        for node, boxes in fo4_bodies.items():
+            for k, (centre, half, rot, source_node) in enumerate(boxes):
+                blob = sfcollision.box_blob(collision_template, (0.0, 0.0, 0.0), tuple(max(sfcollision.MIN_LEAF_HALF, h) for h in half))
+                child_bodies.setdefault(node, []).append((f"Collision_{source_node}_{k}", centre, rot,
+                                                          sfcollision.keyframed(blob, leaf_physics_donor)))
+    keep_box = {bones[i]["node"] for i in bone_pts} & set(fo4_report.get("fallback_nodes", [])) if fo4_bodies is not None else set()
     for i, pts in sorted(bone_pts.items()):
+        if fo4_bodies is not None and bones[i]["node"] not in keep_box:
+            continue
         lo = [min(p[k] for p in pts) for k in range(3)]
         hi = [max(p[k] for p in pts) for k in range(3)]
         blob = sfcollision.box_blob(collision_template, tuple((lo[k] + hi[k]) / 2 for k in range(3)),
                                     tuple(max(sfcollision.MIN_LEAF_HALF, (hi[k] - lo[k]) / 2) for k in range(3)))
         collision[bones[i]["node"]] = sfcollision.keyframed(blob, leaf_physics_donor)
-    if not collision:
+    if not collision and not child_bodies:
         raise nifmod.NifError("door has no moving geometry")
-    model = door_model.build(plan, sf_shapes, unit_scale, collision, name=("FO4Port_" + base).encode())
+    model = door_model.build(plan, sf_shapes, unit_scale, collision, name=("FO4Port_" + base).encode(),
+                             child_bodies={bones_node: v for bones_node, v in child_bodies.items()})
     files[f"meshes/{out_name}.nif"] = nifmod.serialize(model)
     extra = clip_files(plan, unit_scale)
     if native_door.RIG_FILE not in extra or not any(k.startswith(native_door.CLIP_DIR + "/") for k in extra):
@@ -769,9 +870,11 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
             "animations": f"{out_name}/{native_door.CLIP_DIR}".replace("/", "\\"),
             "rig": "native",
             "animated_bones": sorted({bones[i]["name"] for i in range(len(bones)) if bones[i]["node"] in animated}),
-            "moving_bodies": len(collision),
+            "moving_bodies": len(collision) + sum(len(v) for v in child_bodies.values()),
             "open_motion": door_rig.open_motion(plan, unit_scale, motion_clip),
             "files": sorted(f"meshes/{out_name}/{relative}" for relative in extra)}
+    if fo4_report:                                   # FO4 body notes: what the carry skipped, or why it fell back to boxes
+        door["fo4_collision"] = {"carried": fo4_bodies is not None, **fo4_report}
     if plan.get("ignored_tracks"):                  # shader / visibility tracks FO4 also plays: not ported, said so
         door["ignored_tracks"] = sorted({f'{t["target"]} ({t["reason"]})' for t in plan["ignored_tracks"]})
     if dropped_skinned:
