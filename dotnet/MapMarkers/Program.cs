@@ -57,8 +57,8 @@
 // The quest's VMAD shape is dotnet/Bridge's (vanilla Starfield quests: version 6, object format 2, extra-bind-data
 // version 3, an empty fragment script entry, object properties with alias -1; record version 581 / 12).
 //
-// usage: MapMarkers build --core <FO4TerrainCore.esm> --out <dir> [--plugin FO4SFMapMarkers.esm] [--z-lift <m>] [--world control|nosmall|city] [--extra <json>] [--landing <json>] [--star-map <json>] [--reload]
-//        MapMarkers check <plugin> <FO4TerrainCore.esm> [--z-lift <m>] [--world control|nosmall|city] [--extra <json>] [--landing <json>] [--star-map <json>] [--reload]   reads both back (exit 1 on a mismatch)
+// usage: MapMarkers build --core <FO4TerrainCore.esm> --out <dir> [--plugin FO4SFMapMarkers.esm] [--z-lift <m>] [--world control|nosmall|city] [--extra <json>] [--landing <json> [--landing-undiscovered]] [--star-map <json>] [--reload]
+//        MapMarkers check <plugin> <FO4TerrainCore.esm> [--z-lift <m>] [--world control|nosmall|city] [--extra <json>] [--landing <json> [--landing-undiscovered]] [--star-map <json>] [--reload]   reads both back (exit 1 on a mismatch)
 // --extra: {"markers": [{"tag", "name", "pos": [x, y, z], "cell": [x, y]}, ...]} (fo4sf.map_markers.overlay_markers
 // entries: local metres, z the ground before the lift), written by make_map_markers.py stage --fo4-map-markers.
 // --landing: {"landing": {"tag", "name", "pad" | "trigger" | "marker" | "heading": {"pos": [x, y, z], "rot": [x, y, z],
@@ -84,6 +84,10 @@ const uint LandingPad = 0x7145, LandingTrigger = 0x267F4C, XMarkerHeading = 0x34
 const uint LandingZoneTriggerKeyword = 0x267F4D, LinkShipLandingOverlayMapMarker = 0x3A866F;
 const uint ShipLandingMarkerRefType = 0x9105, ShipLandingMarkerRefTypeLarge = 0x9102;
 const PlacedObjectMapMarker.Flag LandingMarkerFlags = (PlacedObjectMapMarker.Flag)0x33;
+// --landing-undiscovered: the same flags without Discovered (0x20): the landing marker is then written undiscovered and the quests' ShowLandingMarker is
+// false, so nothing discovers it at the start; no script can undo Discovered (Starfield's SetMarkerDiscovered takes no argument and nothing clears it:
+// PC read of the Papyrus sources, 14 Nov 2026), so the plugin has to start it that way.
+const PlacedObjectMapMarker.Flag LandingMarkerFlagsUndiscovered = (PlacedObjectMapMarker.Flag)0x13;
 const PlacedObjectMapMarker.Flag VisibleOnStarMap = (PlacedObjectMapMarker.Flag)0x10;
 const sbyte LandingMarkerType = 45;
 const float LandingMarkerRadius = 100;
@@ -96,8 +100,8 @@ var sfKey = ModKey.FromFileName("Starfield.esm");
 
 static int Usage()
 {
-    Console.Error.WriteLine("usage: MapMarkers build --core <FO4TerrainCore.esm> --out <dir> [--plugin FO4SFMapMarkers.esm] [--z-lift <m>] [--world control|nosmall|city] [--extra <json>] [--landing <json>] [--star-map <json>] [--reload] | " +
-                            "MapMarkers check <plugin> <FO4TerrainCore.esm> [--z-lift <m>] [--world control|nosmall|city] [--extra <json>] [--landing <json>] [--star-map <json>] [--reload]");
+    Console.Error.WriteLine("usage: MapMarkers build --core <FO4TerrainCore.esm> --out <dir> [--plugin FO4SFMapMarkers.esm] [--z-lift <m>] [--world control|nosmall|city] [--extra <json>] [--landing <json> [--landing-undiscovered]] [--star-map <json>] [--reload] | " +
+                            "MapMarkers check <plugin> <FO4TerrainCore.esm> [--z-lift <m>] [--world control|nosmall|city] [--extra <json>] [--landing <json> [--landing-undiscovered]] [--star-map <json>] [--reload]");
     return 2;
 }
 if (args.Length == 0) return Usage();
@@ -116,6 +120,12 @@ if (Math.Abs(zLift / ZLiftStep - Math.Round(zLift / ZLiftStep)) > 1e-3)
 }
 var world = Arg("--world", "control");
 var reload = args.Contains("--reload");
+var landingUndiscovered = args.Contains("--landing-undiscovered");
+if (landingUndiscovered && Arg("--landing", "") == "")
+{
+    Console.Error.WriteLine("--landing-undiscovered needs --landing (it changes the landing marker's flags)");
+    return 2;
+}
 if (world is not ("control" or "nosmall" or "city"))
 {
     Console.Error.WriteLine($"--world {world}: want control (the core's world record), nosmall or city (dotnet/BorderProbe's variants of it)");
@@ -250,7 +260,7 @@ if (args[0] == "build")
                               $"LCSR rows in the override of {loc.FormKey} {loc.EditorID}");
         if (landing != null)
         {
-            var pieces = LandingRecords(markers[0], modKey, w, landing);
+            var pieces = LandingRecords(markers[0], modKey, w, landing, landingUndiscovered);
             var taken = pieces.FirstOrDefault(r => known.Contains(r.EditorID!));
             if (taken != null)
             {
@@ -310,6 +320,8 @@ if (args[0] == "build")
             foreach (var m in part) list.Data.Add(pick(lifted[m]));     // the override's (or own marker's) position
             script.Properties.Add(list);
         }
+        if (landingUndiscovered)                                     // every quest: the one that holds the landing pieces runs ShowLanding
+            script.Properties.Add(new ScriptBoolProperty { Name = "ShowLandingMarker", Flags = ScriptProperty.Flag.Edited, Data = false });
         if (MaxMovesFor(part.Length) is int cap)                     // every marker may need a move, plus retries
             script.Properties.Add(new ScriptIntProperty { Name = "MaxMoves", Flags = ScriptProperty.Flag.Edited, Data = cap });
         if (reload && k == 0)                                        // the first quest does the reload
@@ -455,7 +467,7 @@ if (args[0] == "check" && args.Length >= 3)
     {
         if (ownWorld == null || want.Count == 0) problems.Add("--landing: the plugin has no world copy, or the core no marker to copy");
         else
-            foreach (var exp in LandingRecords(want[0], mod.ModKey, ownWorld, landing))
+            foreach (var exp in LandingRecords(want[0], mod.ModKey, ownWorld, landing, landingUndiscovered))
             {
                 expect[exp.FormKey] = exp.Position;
                 wantKeys.Add(exp.FormKey);
@@ -594,6 +606,9 @@ if (args[0] == "check" && args.Length >= 3)
             if (data == null || !data.SequenceEqual(part.Select(m => pick(expect[m]))))
                 problems.Add($"{tag}{name} does not hold the markers' overridden positions");
         }
+        var show = s.Properties.OfType<IScriptBoolPropertyGetter>().FirstOrDefault(p => p.Name == "ShowLandingMarker");
+        if (landingUndiscovered ? show == null || show.Data : show != null)
+            problems.Add($"{tag}ShowLandingMarker {(show == null ? "missing" : show.Data ? "true" : "false")}: {(landingUndiscovered ? "--landing-undiscovered wants false on every quest" : "only --landing-undiscovered writes it")}");
         var cap = s.Properties.OfType<IScriptIntPropertyGetter>().FirstOrDefault(p => p.Name == "MaxMoves")?.Data;
         if (cap != MaxMovesFor(part.Length))
             problems.Add($"{tag}MaxMoves {(cap?.ToString() ?? "default")} != {(MaxMovesFor(part.Length)?.ToString() ?? "default")}");
@@ -672,7 +687,7 @@ static LocationCellStaticReference[] LandingRows(ModKey mod, FormKey world, Land
 };
 // the landing spot's four REFRs (pad, trigger, marker, heading), as LandingOverlay01 has them, at --landing's spots;
 // the marker is a copy of the core's first marker (as --extra's) with LandingOverlay01's map-marker data
-static List<PlacedObject> LandingRecords(IPlacedObjectGetter template, ModKey mod, IWorldspaceGetter w, Landing l)
+static List<PlacedObject> LandingRecords(IPlacedObjectGetter template, ModKey mod, IWorldspaceGetter w, Landing l, bool undiscovered = false)
 {
     var sf = ModKey.FromFileName("Starfield.esm");
     FormKey Id(int k) => new FormKey(mod, LandingId + (uint)k);
@@ -712,7 +727,7 @@ static List<PlacedObject> LandingRecords(IPlacedObjectGetter template, ModKey mo
     marker.IsLinkedRefTransient = true;
     marker.Radius = LandingMarkerRadius;
     if (marker.MapMarker == null) throw new InvalidDataException($"{template.FormKey} has no map-marker data");
-    marker.MapMarker.Flags = LandingMarkerFlags;
+    marker.MapMarker.Flags = undiscovered ? LandingMarkerFlagsUndiscovered : LandingMarkerFlags;
     marker.MapMarker.Type = LandingMarkerType;
     marker.MapMarker.Name = l.Name;
     var heading = Placed(3, "LandingHeading", XMarkerHeading, l.Heading);
