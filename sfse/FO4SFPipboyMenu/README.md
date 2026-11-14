@@ -392,7 +392,7 @@ movie drawn onto a model in a menu scene, as the game's own menus with a model d
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `Probe` | `0` | `1` = the probe, at `Stage=2` and `KeepAlive=0` (`refuse step=ini reason=probe_keep_alive`: the probe's renderer and scene go when their menu object does, and a menu object kept for ever would keep its scene) |
+| `Probe` | `0` | `1` = the probe, at `Stage=2` and `KeepAlive=1` (`refuse step=ini reason=probe_keep_alive`). `KeepAlive=0` is refused at every stage (`refuse step=ini reason=keep_alive`): in the PC's session at c47abdc1 the game released the menu object to zero at its create (`step=destroy` in the same millisecond) and then used it. The extra reference is the count the engine expects |
 | `ProbeMovie` | empty | the privately staged movie, `Interface/<ProbeMovie>.swf`: `FO4SF_` and up to 58 letters, digits or `_`, never a game menu's name (`refuse step=ini reason=probe_movie`). The movie comes from the player's own files and never enters Git |
 | `ProbeModelForm` | empty | a vanilla data-slate book's Starfield.esm form id, in hex (`refuse step=ini reason=probe_model_form`); its model already has shapes named `Display*`, so the probe needs no new asset |
 | `ProbeWidth`, `ProbeHeight` | `1280`, `720` | the render texture's size, the staged movie's stage; 16 to 4096 (`refuse step=ini reason=probe_size`) |
@@ -426,10 +426,15 @@ reads and logs exactly the ids it did before.
    geometry. Read only: each object is checked by RTTI before it is read.
 4. Once the texture is usable and the scene has a geometry named `Display*`: `step=probe_bind shape= result=` for each,
    once per renderer.
-5. Close: `step=probe_hide`. The renderer and its scene stay with the menu object. When the engine destroys the menu
-   object after the close, the renderer goes before it: `step=probe_destroy result=1`, and the next show makes a new
-   one. If the engine shows the same menu object again, the log has `step=probe_open ... result=kept`. A second menu
-   object while the first one's renderer lives is refused (`what=open reason=other_menu`): one scene name, one scene.
+5. Close: `step=probe_hide`. Nothing of the probe is torn down at a close: the renderer and its scene stay with the
+   menu object until the engine destroys it. What a later open logs tells the three outcomes apart, and each is a
+   result to record, not a failure:
+   - **(a)** `step=destroy` after the close, with `step=probe_destroy result=1` before the engine's destructor; the
+     next open has `step=create n=2` and a new renderer.
+   - **(b)** no `step=destroy`, and the next open has `step=probe_open ... result=kept`: the engine kept the menu
+     object, and the scene lived on while the menu was hidden.
+   - **(c)** `step=create n=2` with no `step=destroy`: the first object was not destroyed. The open is refused,
+     `refuse step=probe what=open n=2 reason=other_menu` (one scene name, one scene), and the probe stays off.
 
 A check that fails is one `refuse step=probe what=<w> ... (the probe stays off)` line; nothing more of the probe is
 called until the game closes.
@@ -739,7 +744,8 @@ menu and the pause menu open.
 | the log ends after `step=message ... type=show`, and the picture freezes | the engine's work after the show did not return (at `b3f352b7`: its cast on an object without a locator) | take a hang dump: each thread's instruction pointer as module plus offset, and the stack of the thread that created the menu |
 | `step=state ... match=no` | the menu did not open or close as asked | read the `step=message` lines around it |
 | `step=load_movie ... result=0` | (b): the engine's loader did not take our movie | check that the plugin is active and the archive is named after it. Then try the variant with an empty ActionScript 3 document class (the generator gains it then) |
-| the log ends without `step=destroy` after a close, then a crash | the engine freed or used our object differently | collect the crash log; try `KeepAlive=1` if it was 0 |
+| the log ends without `step=destroy` after a close, then a crash | the engine freed or used our object differently | collect the crash log |
+| `refuse step=ini reason=keep_alive` | `KeepAlive=0` frees the menu at its create: refused at every stage, and the plugin stays idle | set `KeepAlive=1` |
 | `refuse step=ini snapshot_key=` | (c): `SnapshotKey` above 0xFE or equal to `Key` | fix the ini |
 | `refuse step=channel_ids name=GFx.Value.<f> rva=<r> sfse_rva=<s>` | (c): libxse's id for a Scaleform Value function is not SFSE 0.2.21's address | stop: one of the two is stale for this runtime |
 | `refuse step=channel_ids name=<x>.RTTI type=<t>` | (c): an RTTI id does not name its type | the id is stale: look it up again |

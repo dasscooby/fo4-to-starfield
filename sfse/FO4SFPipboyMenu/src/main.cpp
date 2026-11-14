@@ -3661,7 +3661,7 @@ namespace
 			imenu->flagsUpdated = true;
 		}
 		if (g_keepAlive && ctorRefs == 1) {
-			REX::W32::InterlockedIncrement(refs);   // a public precedent's count: never released to zero
+			REX::W32::InterlockedIncrement(refs);   // a public precedent's count, and the one the engine expects (FAL-780)
 		}
 		REX::INFO("step=create n={} menu={} vtables={} rtti={} refcount={} keep_alive={} ctor_flags={} flags={} depth={}{}",
 			n, Hex(base), vtables ? "engine" : "UNEXPECTED", rtti ? "engine" : "UNEXPECTED", ctorRefs, g_keepAlive ? 1 : 0,
@@ -4176,7 +4176,7 @@ namespace
 	}
 
 	// FAL-739, the probe's keys: at Probe=0 (as shipped) nothing more is read and nothing is logged. At Probe=1: Stage=2
-	// and KeepAlive=0 only; ProbeMovie is FO4SF_ and up to 58 more letters, digits or _ (a privately staged movie, never a game menu's
+	// and KeepAlive=1 only; ProbeMovie is FO4SF_ and up to 58 more letters, digits or _ (a privately staged movie, never a game menu's
 	// name); ProbeModelForm is a Starfield.esm form id in hex; ProbeWidth and ProbeHeight are 16 to 4096
 	bool ReadProbe(const std::filesystem::path& a_ini)
 	{
@@ -4186,8 +4186,8 @@ namespace
 		if (g_stage != 2) {
 			return Refuse("ini", std::format("reason=probe_stage stage={} (Probe=1 is read at Stage=2 only)", g_stage));
 		}
-		if (g_keepAlive) {   // the renderer goes with its menu object: a menu object kept for ever would keep its scene
-			return Refuse("ini", "reason=probe_keep_alive (Probe=1 needs KeepAlive=0)");
+		if (!g_keepAlive) {   // FAL-780: the menu object needs its extra reference; the renderer goes when the engine destroys it
+			return Refuse("ini", "reason=probe_keep_alive (Probe=1 needs KeepAlive=1)");
 		}
 		g_probeMovie = ReadText(a_ini, L"ProbeMovie");
 		const bool named = g_probeMovie.size() > 6 && g_probeMovie.size() <= 64 && g_probeMovie.starts_with("FO4SF_") &&
@@ -4330,6 +4330,12 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 		return true;
 	}
 	if (!ReadProbe(ini)) {   // FAL-739: at Probe=0 (the default) nothing is read or logged
+		return true;
+	}
+	// FAL-780: KeepAlive=0 is refused at every stage. Without the extra reference the engine releases the menu object
+	// to zero at its create and then uses it (the PC's session at c47abdc1); the shipped KeepAlive=1 is unchanged
+	if (!g_keepAlive) {
+		Refuse("ini", "reason=keep_alive (KeepAlive=0 frees the menu at its create; set KeepAlive=1)");
 		return true;
 	}
 	if (!CheckEverything(dir)) {

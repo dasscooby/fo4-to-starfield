@@ -87,9 +87,46 @@ class PipboyProbe1Test(unittest.TestCase):
         for reason in ("probe_stage", "probe_movie", "probe_model_form", "probe_size"):
             self.assertIn(f'Refuse("ini", std::format("reason={reason}', read, reason)
             self.assertIn(reason, self.readme, reason)
-        self.assertIn('if (g_keepAlive) {', read)                                  # the renderer goes with its menu object
-        self.assertIn('Refuse("ini", "reason=probe_keep_alive (Probe=1 needs KeepAlive=0)")', read)
+        self.assertIn('if (!g_keepAlive) {', read)                                 # the menu object needs its extra reference
+        self.assertIn('Refuse("ini", "reason=probe_keep_alive (Probe=1 needs KeepAlive=1)")', read)
+        self.assertNotIn("needs KeepAlive=0", self.src)
         self.assertIn("probe_keep_alive", self.readme)
+
+    def test_keep_alive_zero_is_refused_at_every_stage(self):
+        load = self.src[self.src.index("SFSE_PLUGIN_LOAD"):]
+        refusal = ('if (!g_keepAlive) {\n\t\tRefuse("ini", "reason=keep_alive (KeepAlive=0 frees the menu at its create; '
+                   'set KeepAlive=1)");\n\t\treturn true;\n\t}')
+        self.assertIn(refusal, load)
+        # not behind a stage or the probe, and before any check of the game or any registration
+        at = load.index(refusal)
+        self.assertEqual(load[:at].rstrip().splitlines()[-1].startswith("\t//"), True)
+        for later in ("CheckEverything(dir)", "RegisterListener(", "World::Configure("):
+            self.assertLess(at, load.index(later), later)
+        # the shipped default keeps the extra reference, and Create adds it as before
+        self.assertIn("\nKeepAlive=1\n", self.ini)
+        self.assertIn('g_keepAlive = ReadNumber(ini, L"KeepAlive", 1) != 0;', load)
+        self.assertIn("if (g_keepAlive && ctorRefs == 1) {\n\t\t\tREX::W32::InterlockedIncrement(refs);", self.src)
+        self.assertIn("refuse step=ini reason=keep_alive", self.readme)
+        self.assertIn("refuse step=ini reason=keep_alive", self.ini)
+        self.assertNotIn("try `KeepAlive=1` if it was 0", self.readme)
+
+    def test_no_teardown_at_close_and_the_three_outcomes_are_logged(self):
+        hide = function(self.src, "void ProbeHide(")
+        self.assertNotIn("ProbeAddress(", hide)                                    # a close calls nothing in the game
+        self.assertNotIn("_aligned_free", hide)
+        self.assertEqual(self.src.count("ProbeAddress(kProbeRendererDtor)"), 1)   # only from ProbeDestroy
+        self.assertIn("ProbeAddress(kProbeRendererDtor)", function(self.src, "void ProbeDestroy("))
+        open_ = function(self.src, "void ProbeOpen(")
+        self.assertIn('"step=probe_open n={} result=kept renderer={} scene={} bound={} menu_flags={}"', open_)   # (b)
+        self.assertIn('"what=open n={} reason=other_menu menu={}"', open_)                                        # (c)
+        self.assertIn('REX::INFO("step=probe_destroy result=1");', function(self.src, "void ProbeDestroy("))     # (a)
+        self.assertIn('"step=create n={} menu={}', self.src)
+        self.assertIn('"step=destroy menu={} flags={}"', self.src)
+        for text in ("**(a)**", "**(b)**", "**(c)**", "result=kept", "reason=other_menu", "step=probe_destroy result=1"):
+            self.assertIn(text, self.readme, text)
+
+    def test_probe_movie_form_and_size_are_checked(self):
+        read = function(self.src, "bool ReadProbe(")
         self.assertIn("if (g_stage != 2) {", read)
         self.assertIn('g_probeMovie.starts_with("FO4SF_")', read)                 # never a game menu's movie
         self.assertIn("SameText(g_probeMovie, kMenuName)", read)
