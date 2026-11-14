@@ -384,6 +384,88 @@ a slight glow and a better font come next. The colour is already one setting. Th
   player's own Fallout 4 interface files on their PC, as the port does for everything else, after the PC survey names
   those files.
 
+## Probe 1: a menu movie on a model (FAL-739)
+
+Off by default (`Probe=0`): nothing below runs, and the log has none of its lines. `Probe=1` is read at `Stage=2`
+only (at another stage: `refuse step=ini reason=probe_stage`). It answers one question: can a menu of ours have its
+movie drawn onto a model in a menu scene, as the game's own menus with a model do? It is a probe, not a feature.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `Probe` | `0` | `1` = the probe, at `Stage=2` and `KeepAlive=1` (`refuse step=ini reason=probe_keep_alive`). `KeepAlive=0` is refused at every stage (`refuse step=ini reason=keep_alive`): in the PC's session at c47abdc1 the game released the menu object to zero at its create (`step=destroy` in the same millisecond) and then used it. The extra reference is the count the engine expects |
+| `ProbeMovie` | empty | the privately staged movie, `Interface/<ProbeMovie>.swf`: `FO4SF_` and up to 58 letters, digits or `_`, never a game menu's name (`refuse step=ini reason=probe_movie`). The movie comes from the player's own files and never enters Git |
+| `ProbeModelForm` | empty | a vanilla data-slate book's Starfield.esm form id, in hex (`refuse step=ini reason=probe_model_form`); its model already has shapes named `Display*`, so the probe needs no new asset |
+| `ProbeWidth`, `ProbeHeight` | `1280`, `720` | the render texture's size, the staged movie's stage; 16 to 4096 (`refuse step=ini reason=probe_size`) |
+
+**Checked first (at load, `Probe=1`):** the keys, then nine ids in the same Address Library file with the checks
+every other id gets (below the count, non-zero, inside the image, libxse's own lookup the same offset):
+`step=probe_id name= id= checked=1`, or `refuse step=probe_id`. They are kept out of the shared id list, so `Probe=0`
+reads and logs exactly the ids it did before.
+
+| Id | Used for |
+| --- | --- |
+| 43207, 43209 | the item renderer: made at the first show, destroyed before the menu object |
+| 43211 | the renderer's model request |
+| 44195 | the renderer's scene onto the menu's scene list |
+| 140022 | the scene's render texture |
+| 130595 | the bind of that texture onto one `Display*` shape |
+| 909463 | the data-slate menu cell's default object |
+| 47401 | `TESForm::LookupByID`, for the model's form |
+| 43215 | the renderer's per-frame update, `bool (renderer, float dt)`: it loads the menu cell, then the model, and attaches both under the scene's root; true on the frame the model is ready |
+
+**The per-frame slot (`Probe=1` only).** The game's menus with an item renderer call its update (43215) from their
+`IMenu` slot 0x0B, `void (IMenu*, float dt, u64)`, once per frame. With `Probe=1` our copy of the vtable replaces
+slot 0x0B too (`step=ready ... replaced=...,0x0B`): the engine's own slot first, then 43215 on the probe's renderer.
+The engine calls that slot only for a menu it lists that frame. That needs flag 0x40, the "shown" bit the engine sets
+at the show, and the two `IMenu` bytes at +0xCD and +0xCE non-zero; the state line logs the flags and both bytes
+(`menu_cd_ce=`) for that check.
+
+**The steps** (one line each, on the menu's thread, after the engine's own handling of the message):
+
+1. Load of the movie: `step=probe_movie name= file=` before the usual `step=load_movie` lines. The menu keeps its own
+   name, `FO4SF_PipboyMenu`; only the movie file's name differs.
+2. First show: `step=probe_open n= menu= movie= movie_name= menu_flags=`. Then `step=probe_inputs` (the cell is a
+   `TESObjectCELL` and the form a `TESObjectBOOK`, each by RTTI), `step=probe_renderer result= type=` (the object is a
+   `UICellRenderer_InventoryItem` by RTTI), `step=probe_scene` (the scene carries our menu's name),
+   `step=probe_scene_push result= index=`, `step=probe_texture result= texture= width= height= state=` and
+   `step=probe_model requested=1`.
+3. Every frame while the engine lists the menu: the renderer's update (43215). `step=probe_update first=1 dt=
+   menu_flags=` at its first call, and `step=probe_update ready=1 updates= polls=` the first time it returns true.
+   Nothing else per frame.
+4. Every update while open (one about every 0.5 s): `step=probe_state poll= menu_flags= menu_cd_ce= updated= ready=
+   texture= state= usable= root= nodes= display_shapes= bound= names=`, logged when it changes. `updated=1` once slot 0x0B
+   has run for the renderer. `usable=1` at texture phase 3 (bits 28 to 30: 2 being made, 3 ready, 5 failed; the
+   engine's own test also takes 4). The names are the scene's objects, a `*` before each geometry. Read only: each
+   object is checked by RTTI before it is read; a `NiNode`'s children are its array's data at +0x138 with a u16 count
+   at +0x142, null entries skipped.
+5. Once the texture is usable and the scene has a geometry named `Display*`: `step=probe_bind shape= result=` for each,
+   once per renderer.
+6. Close: `step=probe_hide ... updates= ready=`. Nothing of the probe is torn down at a close: the renderer and its scene stay with the
+   menu object until the engine destroys it. What a later open logs tells the three outcomes apart, and each is a
+   result to record, not a failure:
+   - **(a)** `step=destroy` after the close, with `step=probe_destroy result=1` before the engine's destructor; the
+     next open has `step=create n=2` and a new renderer.
+   - **(b)** no `step=destroy`, and the next open has `step=probe_open ... result=kept`: the engine kept the menu
+     object, and the scene lived on while the menu was hidden.
+   - **(c)** `step=create n=2` with no `step=destroy`: the first object was not destroyed. The open is refused,
+     `refuse step=probe what=open n=2 reason=other_menu` (one scene name, one scene), and the probe stays off.
+
+A check that fails is one `refuse step=probe what=<w> ... (the probe stays off)` line; nothing more of the probe is
+called until the game closes.
+
+**Left out of this probe:**
+
+- **Shapes outside the menu scene** (a world object, the player's first-person hands). The probe has no way yet to
+  put a shape's original texture back, and a bind that cannot be undone is not made.
+- **The movie's own viewport.** The texture has the size the ini gives; the movie keeps the viewport the engine gave
+  it.
+- **The game's calls after the update returns true** (the renderer's view set-up). If the model is in the scene
+  (`ready=1`) but not in the picture, that is the session's finding.
+- **The game's engine object for a Fallout 4 movie** (its sounds and menu calls): nothing stands in for it here.
+
+**Not verified until a session:** every step above at runtime, whether the room stays visible around the model, and
+what the menu flags do.
+
 ## Build (PC)
 
 From a checkout at the PR head, in the PC's x64 environment:
@@ -676,7 +758,8 @@ menu and the pause menu open.
 | the log ends after `step=message ... type=show`, and the picture freezes | the engine's work after the show did not return (at `b3f352b7`: its cast on an object without a locator) | take a hang dump: each thread's instruction pointer as module plus offset, and the stack of the thread that created the menu |
 | `step=state ... match=no` | the menu did not open or close as asked | read the `step=message` lines around it |
 | `step=load_movie ... result=0` | (b): the engine's loader did not take our movie | check that the plugin is active and the archive is named after it. Then try the variant with an empty ActionScript 3 document class (the generator gains it then) |
-| the log ends without `step=destroy` after a close, then a crash | the engine freed or used our object differently | collect the crash log; try `KeepAlive=1` if it was 0 |
+| the log ends without `step=destroy` after a close, then a crash | the engine freed or used our object differently | collect the crash log |
+| `refuse step=ini reason=keep_alive` | `KeepAlive=0` frees the menu at its create: refused at every stage, and the plugin stays idle | set `KeepAlive=1` |
 | `refuse step=ini snapshot_key=` | (c): `SnapshotKey` above 0xFE or equal to `Key` | fix the ini |
 | `refuse step=channel_ids name=GFx.Value.<f> rva=<r> sfse_rva=<s>` | (c): libxse's id for a Scaleform Value function is not SFSE 0.2.21's address | stop: one of the two is stale for this runtime |
 | `refuse step=channel_ids name=<x>.RTTI type=<t>` | (c): an RTTI id does not name its type | the id is stale: look it up again |
@@ -709,5 +792,10 @@ menu and the pause menu open.
 | `step=listen name=root ... added=0` | (e): no listener on the root, so clicks do nothing; the keys still work | report the line |
 | `step=kit_click ... target=0` or `name=-` | (e): the click's event had no target or no name | report: one listener per object is the fallback |
 | `step=kit_av av:<id>:...:refused` | (e): that form id gave no `ActorValueInfo`; its row prints `?` | report the line |
+| `refuse step=ini reason=probe_stage` / `probe_keep_alive` / `probe_movie` / `probe_model_form` / `probe_size` | (b), `Probe=1`: that probe key is wrong; the plugin stays idle | fix the ini |
+| `refuse step=probe_id ...` | (b), `Probe=1`: a probe id is beyond the file, zero, outside the image or another offset through libxse; the plugin stays idle | `NEEDS-PC lookup <id>` |
+| `refuse step=probe what=<w> ... (the probe stays off)` | (b), `Probe=1`: the movie, the cell, the model's form, the renderer, the scene, the scene list or the texture was not what the probe checks for | report the line |
+| `step=probe_state ... root=0` and no change | (b): the model did not reach the scene | report the line: the renderer's per-frame update is the next read |
+| `step=probe_bind ... result=0` | (b): the engine's bind did not take that shape | report the line and the `names=` list |
 
 The probe changes no Starfield interface file, and nothing it makes goes into Git: no dll, no movie, no archive.

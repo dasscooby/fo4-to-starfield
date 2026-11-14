@@ -68,8 +68,8 @@
       "reads_address_library": true,
       "needs_address_library": true,
       "refuse_steps": ["address_library", "channel", "channel_ids", "close", "create", "ctor", "id", "image", "ini",
-                       "key_thread", "listen", "object", "page", "page_ids", "pages", "register", "rtti", "slots",
-                       "toggle", "version", "world", "world_key_thread", "world_toggle"]
+                       "key_thread", "listen", "object", "page", "page_ids", "pages", "probe", "probe_id", "register",
+                       "rtti", "slots", "toggle", "version", "world", "world_key_thread", "world_toggle"]
     }
   },
   "refuse_causes": {
@@ -88,6 +88,8 @@
     "page": "The string reader's self-test or the player's actor-value slot did not match what the dll expects; those reads show ? and the dll keeps running. (A form-list refusal is step object.)",
     "page_ids": "An id a page needs failed its check against the game.",
     "pages": "The page kit's own check failed, so the kit stays off.",
+    "probe": "Probe 1 (Probe=1 only) found its movie, cell, model form, renderer, scene or texture was not what it checks for; the probe stays off and the dll keeps running.",
+    "probe_id": "An id probe 1 needs (Probe=1 only) is missing or points outside the game.",
     "register": "The game would not register our menu.",
     "rtti": "A game type the dll checks by name is not the one it expects.",
     "runtime_dir": "FO4SF-Runtime.ini is missing or malformed, or the save folder it names does not exist.",
