@@ -12,12 +12,19 @@ def plan(source, rig):
     bone_indices={bone['node']:i for i,bone in enumerate(rig['bones'])}
     animated={track['node'] for clip in rig['clips'] for track in clip['tracks']}
     systems={};attachments=[];assigned={}
+    parents={}
+    for node in range(len(source.blocks)):
+        if source.type_of(node).endswith('Node'):
+            for child in nif.node_children(source,node):parents.setdefault(child,node)
     for index in range(len(source.blocks)):
         if source.type_of(index)!='bhkNPCollisionObject':continue
         block=source.blocks[index]
         if len(block)!=14:raise nif.NifError('invalid door collision attachment layout')
         node,flags,data,body=struct.unpack('<iHiI',block)
-        if node not in bone_indices:raise nif.NifError('door collision target absent from rig')
+        carrier=node                     # FO4 keeps thin walkway collision on helper nodes (c_WalkWay01Base) under a rig bone
+        while carrier not in bone_indices:
+            if carrier not in parents:raise nif.NifError('door collision target absent from rig')
+            carrier=parents[carrier]
         if not 0<=data<len(source.blocks) or source.type_of(data)!='bhkPhysicsSystem':
             raise nif.NifError('invalid door physics system link')
         if data not in systems:
@@ -42,10 +49,10 @@ def plan(source, rig):
         identity=(data,body)
         if identity in assigned:raise nif.NifError('source door body attached to multiple nodes')
         assigned[identity]=node
-        ancestor=bone_indices[node];moving=False
+        ancestor=bone_indices[carrier];moving=False
         while ancestor!=-1:
             bone=rig['bones'][ancestor];moving=moving or bone['node'] in animated;ancestor=bone['parent']
-        attachments.append({'collision_block':index,'node':node,'bone':bone_indices[node],'flags':flags,
+        attachments.append({'collision_block':index,'node':node,'bone':bone_indices[carrier],'off_rig':carrier!=node,'flags':flags,
                             'system_block':data,'body_id':body,'follows_animated_ancestor':moving,
                             **systems[data][body]})
     unassigned=[{'system_block':system,'body_id':body['body_id']} for system,bodies in systems.items()
