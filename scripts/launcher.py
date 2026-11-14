@@ -70,12 +70,13 @@ instance   the FO4SF game folder, separate from the player's own Starfield and i
 import argparse
 import json
 import os
+import subprocess
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "src"))
 from fo4sf.launcher import (bundle, crashwatch, detect, driver, files, instance, locate, manifest,  # noqa: E402
-                            paths, plugin_checks, recovery, restore, runtimes, same_ids, selfupdate, settings)
+                            paths, plugin_checks, recovery, restore, runtimes, same_ids, selfupdate, settings, test_kits)
 
 SOURCES = os.path.join(REPO, "scripts", "launcher_recipes", "known_sources.json")
 
@@ -386,6 +387,28 @@ def cmd_recover_install(a):
     return 0
 
 
+def cmd_tests(a):
+    try:
+        return _cmd_tests(a)
+    except OSError as error:
+        raise ValueError(f"Cannot access test-kit files: {error}") from None
+
+
+def _cmd_tests(a):
+    path = a.settings or default_settings_path()
+    if a.action == "register":
+        test_kits.register(test_kits.registry_path(path), a.kit, a.stage)
+        print("Test stage registered. Refresh the Tests page.")
+        return 0
+    if a.action == "list":
+        print(json.dumps(test_kits.inventory(path, REPO), indent=2))
+        return 0
+    if os.name != "nt":
+        raise ValueError("Installing and removing test kits is available on Windows")
+    return test_kits.execute(a.kit, a.action, path, REPO, expected_folder=a.starfield,
+                             running=lambda: bool(crashwatch.System().pids()), run=subprocess.run)
+
+
 def cmd_paths(a):
     """Each location the launcher needs: the saved one, or what was found on this PC and is waiting to be confirmed."""
     path = a.settings or default_settings_path()
@@ -565,6 +588,12 @@ def main(argv=None):
     s.add_argument("--starfield", default="")
     s.add_argument("--settings", default="")
     s.add_argument("--apply", action="store_true", help="apply the rollback (default: preview only)")
+    s = sub.add_parser("tests", help="list staged kits or use their existing installers; never build or download")
+    s.add_argument("action", choices=("list", "register", "install", "remove"))
+    s.add_argument("--kit", choices=tuple(test_kits.BY_KEY))
+    s.add_argument("--stage", default="")
+    s.add_argument("--settings", default="")
+    s.add_argument("--starfield", default="", help="expected saved game folder; changes refuse")
     s = sub.add_parser("watch", help="watch a game something else starts (the test runner): ProcDump as play attaches it")
     s.add_argument("--settings", default="")
     s.add_argument("--pid", type=int, default=None, help="follow this process only (default: the next Starfield.exe)")
@@ -595,7 +624,7 @@ def main(argv=None):
                 "check-plugins": cmd_check_plugins, "find": cmd_find, "bundle": cmd_bundle, "measure": cmd_measure,
                 "status": cmd_status, "settings": cmd_settings, "play": cmd_play,
                 "watch": cmd_watch, "gui": cmd_gui, "paths": cmd_paths, "update": cmd_update,
-                "instance": cmd_instance, "recover-install": cmd_recover_install}[a.cmd](a)
+                "instance": cmd_instance, "recover-install": cmd_recover_install, "tests": cmd_tests}[a.cmd](a)
     except driver.RecipeError as e:
         print(f"recipe: {e}")
         return 2

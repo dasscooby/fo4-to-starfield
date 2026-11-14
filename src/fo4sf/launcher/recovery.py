@@ -11,14 +11,19 @@ import subprocess
 import sys
 import tempfile
 
-from . import restore
+from . import restore, test_kits
+
+
+COMPONENTS = dict(restore.COMPONENTS, **{kit.key: (kit.receipt, kit.installer) for kit in test_kits.KITS})
+UNINSTALL_ORDER = tuple(kit.key for kit in reversed(test_kits.KITS)
+                        if kit.key not in restore.COMPONENTS) + restore.UNINSTALL_ORDER
 
 
 def inspect(starfield):
     """Return (receipt bytes, pending components, errors), without reading game assets."""
     records, pending, errors = {}, [], []
-    for comp in restore.UNINSTALL_ORDER:
-        name = restore.COMPONENTS[comp][0]
+    for comp in UNINSTALL_ORDER:
+        name = COMPONENTS[comp][0]
         try:
             with open(os.path.join(starfield, "Data", name), "rb") as stream:
                 raw = stream.read()
@@ -32,6 +37,12 @@ def inspect(starfield):
             rec = json.loads(raw.decode("utf-8-sig"))
             if not isinstance(rec, dict) or not rec:
                 raise ValueError("receipt is not an object")
+            # Core deploy records a list of paths, with identities in artifacts;
+            # the ride-along installers record a path-to-digest object instead.
+            # Leave missing legacy fields alone; each installer validates ownership.
+            files_type = list if comp == "port" else dict
+            if "files" in rec and not isinstance(rec["files"], files_type):
+                raise ValueError("receipt files do not match the component's format")
         except (UnicodeError, ValueError):
             errors.append(f"cannot read {name}; preserve it for a failure report")
             continue
@@ -112,8 +123,12 @@ def recover(starfield, repo, *, apply=False, env=None, running=restore.game_runn
         return
     if apply and running():
         raise ValueError("Close Starfield before recovering (an unknown process state also blocks recovery).")
+    if apply:
+        for comp in pending:
+            if not os.path.isfile(os.path.join(repo, *COMPONENTS[comp][1].split("/"))):
+                raise ValueError(f"Recovery installer for {comp} is unavailable; keep all journals and ask the PC helper.")
     for comp in pending:
-        argv = [sys.executable, "-I", os.path.join(repo, restore.COMPONENTS[comp][1]),
+        argv = [sys.executable, "-I", os.path.join(repo, *COMPONENTS[comp][1].split("/")),
                 "uninstall", "--starfield", starfield]
         say(f"Recover install: roll back interrupted {comp}")
         if apply:

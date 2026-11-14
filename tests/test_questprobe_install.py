@@ -10,6 +10,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -79,6 +80,26 @@ class ProbeInstallTests(unittest.TestCase):
 
     def lines(self):
         return Path(self.plugins).read_text(encoding="utf-8-sig").splitlines()
+
+    def test_prepacked_path_never_calls_archive_builder(self):
+        archive = os.path.join(self.staged, qi.NAMES["ARCHIVE"])
+        write(archive, archive_from_tree(Path(self.staged) / "Data"))
+        with patch.object(exp_install, "build_ba2", side_effect=AssertionError("must not build")):
+            qi.main(["install", "--dir", self.staged, "--starfield", self.game, "--prepacked", archive])
+        self.assertTrue(Path(self.data, qi.NAMES["RECORD"]).exists())
+        self.assertEqual(self.packed, [])
+
+    def test_wrong_prepacked_archive_refuses_without_writing_receipt(self):
+        archive = os.path.join(self.staged, qi.NAMES["ARCHIVE"])
+        write(archive, archive_from_tree(Path(self.staged) / "Data"))
+        write(os.path.join(self.staged, "Data", "Scripts", SCRIPTS[0] + ".pex"), b"changed")
+        self.write_plan()  # stage is valid, supplied archive is stale
+        before = Path(self.plugins).read_bytes()
+        with patch.object(exp_install, "build_ba2", side_effect=AssertionError("must not build")):
+            with self.assertRaises((ValueError, SystemExit)):
+                qi.main(["install", "--dir", self.staged, "--starfield", self.game, "--prepacked", archive])
+        self.assertFalse(Path(self.data, qi.NAMES["RECORD"]).exists())
+        self.assertEqual(Path(self.plugins).read_bytes(), before)
 
     def test_install_packs_the_three_scripts_and_activates_last(self):
         self.run_cmd("install")

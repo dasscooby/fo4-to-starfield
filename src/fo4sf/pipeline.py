@@ -28,8 +28,10 @@ NOT_HINGED_RE = re.compile(r"vault|elevator|garage|gate|hatch|slid", re.I)   # s
 # Animated FO4 objects that open like a door but name their clips otherwise (model basename -> {FO4 sequence: door clip}):
 # the Vault 111 cog door VltGearDoor01, an Activator whose quest plays Stage2 (43.3 s: the cog rolls back and aside, the
 # catwalk slides out; docs/spikes/B4-mission-anatomy.md "cog door": GO as a door rig). It gets its own rig with Stage2 as
-# Open and Stage2 backwards as Close; the plugin writer makes it a DOOR as any rigged model. Its skinned shapes cannot ride
-# a rig and are left out (listed in the manifest). If the rig fails it stays the solid static it was, never passable.
+# Open and Stage2 backwards as Close; the plugin writer makes it a DOOR as any rigged model. Its skinned shapes ride the rig
+# when every vertex follows one bone (convert_static.rigid_skinned_parts); a triangle across hinged bones rides the bone with the
+# smaller error within SEAM_LIMIT_M (the catwalk's WalkWay01:7, FAL-489); the rest are left out (listed in the manifest as
+# dropped_skinned_shapes). If the rig fails it stays the solid static it was, never passable.
 OWN_RIG_ALIASES = {"vltgeardoor01.nif": {"Stage2": "Open"}}
 LOAD_DOOR_RE = re.compile(r"door[^\\/]*load[^\\/]*\.nif$|load[^\\/]*door[^\\/]*\.nif$", re.I)
 # BSLightingShaderProperty flags1 bit 15 (nif.xml Fallout4ShaderPropertyFlags1 "Refraction"): heat shimmer over fires and

@@ -12,6 +12,9 @@ touches FO4Port's own deployment (deploy_starfield.py).
 
 --pack builds one stored General archive, including terrain overlay masks, outside the staged input folder.
 This matches Claude's current terrain packing policy; runtime terrain acceptance is a separate game test.
+With --textures-archive, Data/Textures instead goes into a separate DX10 texture archive.
+--prepacked uses an existing Main archive and never builds. With --textures-archive and staged textures, it also
+requires '<first plugin> - Textures.ba2' beside that Main archive; both are verified before publication.
 Plugin-only experiments need no archive. --needs refuses queues this runner cannot execute before installing.
 order moves every selected experiment plugin after its active masters immediately before launch, using a guarded
 Plugins.txt rewrite. It refuses missing/disabled masters, cycles, changed plugins and incomplete installs.
@@ -576,7 +579,9 @@ def refuse_while_held(data, what):
 
 
 def install(a):
-    if getattr(a, "pack", False):
+    if getattr(a, "prepacked", "") and not getattr(a, "pack", False):
+        sys.exit("--prepacked requires --pack; nothing installed")
+    if getattr(a, "pack", False) and not getattr(a, "prepacked", ""):
         with tempfile.TemporaryDirectory(prefix="fo4sf-exp-pack-") as packing_dir:
             return _install(a, packing_dir)
     return _install(a)
@@ -650,14 +655,24 @@ def _install(a, packing_dir=None):
         key = "plugin/" + plugin if plugin is not None else "Data/" + relative.replace("\\", "/")
         identities[relative] = inputs[key]
     if packed:
-        built = (build_ba2(a, os.path.join(a.exp_dir, "Data"), os.path.join(packing_dir, ba2), textures=False) if tex_ba2
-                 else build_ba2(a, os.path.join(a.exp_dir, "Data"), os.path.join(packing_dir, ba2)))
-        files.append((built, ba2))
-        identities[ba2] = digest(built)
-        if tex_ba2:
-            built_tex = build_ba2(a, os.path.join(a.exp_dir, "Data"), os.path.join(packing_dir, tex_ba2), textures=True)
-            files.append((built_tex, tex_ba2))
-            identities[tex_ba2] = digest(built_tex)
+        try:
+            prepacked = getattr(a, "prepacked", "")
+            if prepacked:
+                built = prepacked
+                if tex_ba2:
+                    built_tex = os.path.join(os.path.dirname(prepacked), tex_ba2)
+            else:
+                built = (build_ba2(a, os.path.join(a.exp_dir, "Data"), os.path.join(packing_dir, ba2), textures=False)
+                         if tex_ba2 else build_ba2(a, os.path.join(a.exp_dir, "Data"), os.path.join(packing_dir, ba2)))
+                if tex_ba2:
+                    built_tex = build_ba2(a, os.path.join(a.exp_dir, "Data"), os.path.join(packing_dir, tex_ba2), textures=True)
+            files.append((built, ba2))
+            identities[ba2] = digest(built)
+            if tex_ba2:
+                files.append((built_tex, tex_ba2))
+                identities[tex_ba2] = digest(built_tex)
+        except (OSError, ValueError) as error:
+            sys.exit(f"experiment archive preparation failed; nothing installed: {error}")
     if source_inventory(a.exp_dir, plugins) != inputs:
         sys.exit("experiment source inputs changed during preparation; nothing installed")
     if packed:
@@ -765,6 +780,8 @@ def main(argv=None):
     ap.add_argument("--plugins", default="", help="comma-separated plugin file names to activate")
     ap.add_argument("--textures-archive", action="store_true", help="with --pack: the staged Data\\Textures tree goes into '<first plugin> - Textures.ba2' (DX10), everything else into Main")
     ap.add_argument("--pack", action="store_true", help="install the staged Data tree as '<first plugin> - Main.ba2'")
+    ap.add_argument("--prepacked", default="", help="with --pack, verify and install this existing Main archive; never build. "
+                    "With --textures-archive and staged textures, also require '<first plugin> - Textures.ba2' beside it")
     ap.add_argument("--needs", default="", help="runner features the queue needs (runner_features.py); refuse without")
     a = ap.parse_args(argv)
     if a.cmd == "install":

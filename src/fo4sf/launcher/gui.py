@@ -9,7 +9,7 @@ import subprocess
 import sys
 import threading
 
-from . import paths, recovery, settings
+from . import paths, recovery, settings, test_kits
 
 
 def controls():
@@ -90,6 +90,30 @@ class SettingsModel:
             return argv + ["play", "--settings", self.path, "--starfield", folder or starfield]
         raise ValueError(f"Unknown window action {action!r}")
 
+    def kit_command(self, action, raw, key, pids, *, stage="", windows=None):
+        if key not in test_kits.BY_KEY or action not in ("register", "install", "remove"):
+            raise ValueError("Unknown test kit or action")
+        if self.values(raw) != self.saved or settings.load(self.path) != self.saved:
+            raise ValueError("Save or reload settings and locations before changing a test kit")
+        folder = self.saved["instance"] or self.saved["starfield"]
+        if not folder:
+            raise ValueError("Confirm the game folder on the Locations tab")
+        if action != "register":
+            if not (os.name == "nt" if windows is None else windows):
+                raise ValueError("Installing and removing test kits is available on Windows")
+            if pids is None or pids:
+                raise ValueError("Close Starfield and wait for the process check before changing test kits")
+            reason = recovery.play_reason(folder)
+            if reason:
+                raise ValueError(reason)
+        argv = [sys.executable, "-I", "-u", self.launcher, "tests", action,
+                "--kit", key, "--settings", self.path, "--starfield", folder]
+        if action == "register":
+            if not stage:
+                raise ValueError("Choose a staged test-kit folder")
+            argv += ["--stage", stage]
+        return argv
+
     def play_reason(self, raw, starfield, pids, *, windows=None):
         if windows is None:
             windows = os.name == "nt"
@@ -139,6 +163,22 @@ class SettingsModel:
 
 
 REPORT_ACTIONS = ("status", "detect", "update-check", "update", "recover-install")
+
+
+class CommandFeedback:
+    """Keep the Tests CLI's readable refusal visible after its process exits."""
+    def __init__(self, action):
+        self.action = action
+        self.refusal = ""
+
+    def observe(self, line):
+        if self.action.startswith("tests-") and line.startswith("tests: "):
+            self.refusal = line[len("tests: "):].strip()
+
+    def finished(self, code):
+        if self.action.startswith("tests-") and code:
+            return self.refusal or f"Test kit command stopped (exit {code}); open Log for details"
+        return f"{self.action} finished (exit {code})"
 
 
 def run_command(argv, on_line, *, popen=subprocess.Popen):
@@ -262,14 +302,15 @@ def launch(launcher, path, *, recipe="", overrides=(), fo4_data=(), starfield=""
 
             self.notebook = ttk.Notebook(root)
             self.notebook.grid(row=1, column=0, sticky="nsew", padx=12, pady=(8, 0))
-            places, status, config, logs = (ttk.Frame(self.notebook, padding=16) for _ in range(4))
+            places, status, config, tests, logs = (ttk.Frame(self.notebook, padding=16) for _ in range(5))
             for frame, label in ((places, "Locations"), (status, "Status"), (config, "Settings"),
-                                 (logs, "Log")):
+                                 (tests, "Tests"), (logs, "Log")):
                 self.notebook.add(frame, text=label)
             self.places_tab = places
             self.build_locations(places)
             self.build_status(status)
             self.build_settings(config)
+            self.build_tests(tests)
             self.build_log(logs)
 
             footer = ttk.Frame(root, padding=(16, 10))
@@ -298,6 +339,121 @@ def launch(launcher, path, *, recipe="", overrides=(), fo4_data=(), starfield=""
             self.detect_locations()
             root.after(75, self.drain)
             self.poll_processes()
+            self.refresh_tests()
+
+        # --- Tests -------------------------------------------------------------------------------------------
+        def build_tests(self, tab):
+            ttk.Label(tab, text="Choose a staged test kit below. Install and Remove use its installer with the game closed.",
+                      wraplength=860).pack(anchor="w")
+            bar = ttk.Frame(tab)
+            bar.pack(fill="x", pady=(8, 12))
+            self.kit_choice = ttk.Combobox(bar, state="readonly", values=[k.title for k in test_kits.KITS], width=16)
+            self.kit_choice.current(0)
+            self.kit_choice.pack(side="left")
+            add = ttk.Button(bar, text="Add staged kit…", command=self.add_kit)
+            add.pack(side="left", padx=8)
+            refresh = ttk.Button(bar, text="Refresh", command=self.refresh_tests)
+            refresh.pack(side="left")
+            standalone = ttk.Button(bar, text="Standalone owner card", command=lambda: self.show_card(
+                os.path.join(os.path.dirname(os.path.dirname(model.launcher)), "docs", "testing", "standalone")))
+            standalone.pack(side="right")
+            self.widgets += [(self.kit_choice, "readonly"), (add, "normal"), (refresh, "normal"), (standalone, "normal")]
+            self.kit_list = ttk.Frame(tab)
+            self.kit_list.pack(fill="both", expand=True)
+            self.kit_buttons, self.kit_generation = [], 0
+            self.kit_status = ttk.Label(tab, text="Refresh to read the staged and installed test kits.",
+                                        style="Muted.TLabel", wraplength=860)
+            self.kit_status.pack(anchor="w", pady=(8, 0))
+
+        def refresh_tests(self):
+            if self.busy:
+                return
+            self.kit_generation += 1
+            generation = self.kit_generation
+            self.kit_status.configure(text="Reading test kits…")
+            def read():
+                try:
+                    value = test_kits.inventory(model.path, os.path.dirname(os.path.dirname(model.launcher)))
+                    self.events.put(("kits", (generation, value, "")))
+                except (OSError, ValueError) as error:
+                    self.events.put(("kits", (generation, [], str(error))))
+            threading.Thread(target=read, daemon=True).start()
+
+        def render_kits(self, rows, error):
+            for child in self.kit_list.winfo_children():
+                child.destroy()
+            self.kit_buttons = []
+            self.kit_status.configure(text=error or ("No test kits registered or installed. Add a staged kit above." if not rows
+                else "Install uses a prepared archive. Ask the PC helper if a kit is unavailable or refuses."))
+            for row in rows:
+                panel = ttk.Frame(self.kit_list, padding=(0, 8))
+                panel.pack(fill="x", anchor="n")
+                panel.columnconfigure(0, weight=1)
+                ttk.Label(panel, text=row["title"] + " — " + row["state"]).grid(row=0, column=0, sticky="w")
+                for col, action, text in ((1, "install", "Install"), (2, "remove", "Remove")):
+                    button = ttk.Button(panel, text=text, command=lambda r=row, a=action: self.start_kit(a, r["key"]))
+                    button.grid(row=0, column=col, padx=(8, 0))
+                    available = row["installer_available"] and (row["installed"] == (action == "remove"))
+                    self.kit_buttons.append((button, action, row["key"], available))
+                ttk.Button(panel, text="Show card", command=lambda r=row: self.show_card(r["stage"])).grid(
+                    row=0, column=3, padx=(8, 0))
+                note = "; ".join(row["problems"])
+                if not row["installer_available"]:
+                    note = (note + "; " if note else "") + "Installer unavailable in this checkout"
+                if row["notice"]:
+                    ttk.Label(panel, text=row["notice"], style="warn.TLabel").grid(row=1, column=0, columnspan=4, sticky="w")
+                if note:
+                    ttk.Label(panel, text=note, style="Muted.TLabel", wraplength=850).grid(
+                        row=2, column=0, columnspan=4, sticky="w")
+            self.refresh_kit_controls()
+
+        def refresh_kit_controls(self):
+            for button, action, key, available in getattr(self, "kit_buttons", []):
+                enabled = available and not self.busy
+                if enabled:
+                    try:
+                        model.kit_command(action, self.raw(), key, None if self.process_error else self.pids)
+                    except (OSError, ValueError):
+                        enabled = False
+                button.configure(state="normal" if enabled else "disabled")
+
+        def show_card(self, stage):
+            try:
+                text = test_kits.owner_card(stage) if stage else ""
+                if not text:
+                    raise ValueError("No owner-card folder was recorded; ask the PC helper for the kit's card")
+            except OSError:
+                self.message.set("Cannot read owner card; ask the PC helper to check the card file")
+                return
+            except ValueError as error:
+                self.message.set(f"Cannot show owner card: {error}")
+                return
+            dialog = tk.Toplevel(root)
+            dialog.title("FO4SF owner test card")
+            dialog.geometry("800x420")
+            box = tk.Text(dialog, wrap="word", **dict(text_style, padx=16, pady=16))
+            box.pack(fill="both", expand=True)
+            box.insert("1.0", text)
+            box.configure(state="disabled")
+            ttk.Button(dialog, text="Close", command=dialog.destroy).pack(pady=8)
+
+        def add_kit(self):
+            if self.busy:
+                return
+            key = test_kits.KITS[self.kit_choice.current()].key
+            folder = filedialog.askdirectory(title="Choose the staged test-kit folder", parent=root)
+            if folder:
+                self.start_kit("register", key, folder)
+
+        def start_kit(self, action, key, stage=""):
+            if self.busy:
+                return
+            try:
+                argv = model.kit_command(action, self.raw(), key, None if self.process_error else self.pids, stage=stage)
+            except (OSError, ValueError) as error:
+                self.message.set(str(error))
+                return
+            self.launch_command("tests-" + action, argv)
 
         # --- Locations ---------------------------------------------------------------------------------------
         def build_locations(self, tab):
@@ -502,6 +658,7 @@ def launch(launcher, path, *, recipe="", overrides=(), fo4_data=(), starfield=""
             except (OSError, ValueError) as e:
                 self.message.set(str(e))
             self.refresh_play()
+            self.refresh_tests()
 
         def refresh_play(self):
             if not hasattr(self, "play"):
@@ -510,6 +667,7 @@ def launch(launcher, path, *, recipe="", overrides=(), fo4_data=(), starfield=""
                 self.raw(), self.location_value("starfield"), self.pids)
             self.reason.set(reason)
             self.play.configure(state="disabled" if reason else "normal")
+            self.refresh_kit_controls()
 
         def append(self, widget, text):
             widget.configure(state="normal")
@@ -536,7 +694,11 @@ def launch(launcher, path, *, recipe="", overrides=(), fo4_data=(), starfield=""
             if argv is None:
                 self.message.set("Nothing changed; nothing written")
                 return
+            self.launch_command(action, argv, part)
+
+        def launch_command(self, action, argv, part="all"):
             self.busy, self.action, self.part = True, action, part
+            self.feedback = CommandFeedback(action)
             for widget, _state in self.widgets:
                 widget.configure(state="disabled")
             self.message.set(f"Running {action}…")
@@ -584,13 +746,18 @@ def launch(launcher, path, *, recipe="", overrides=(), fo4_data=(), starfield=""
                         self.message.set("Ready. Some optional locations wait on the Locations tab.")
                     else:
                         self.message.set("Ready.")
+                elif kind == "kits":
+                    generation, rows, error = value
+                    if generation == self.kit_generation and not self.busy:
+                        self.render_kits(rows, error)
                 elif kind == "line":
+                    self.feedback.observe(value)
                     self.append(self.log, value)
                     if self.action in REPORT_ACTIONS:
                         self.append(self.report, value)
                 else:
                     self.busy = False
-                    self.message.set(f"{self.action} finished (exit {value})" if kind == "done" else value)
+                    self.message.set(self.feedback.finished(value) if kind == "done" else value)
                     for widget, state in self.widgets:
                         widget.configure(state=state)
                     if kind == "done" and value == 0 and self.action == "update":
@@ -608,6 +775,8 @@ def launch(launcher, path, *, recipe="", overrides=(), fo4_data=(), starfield=""
                         except (OSError, ValueError) as e:
                             self.message.set(str(e))
                 self.refresh_play()
+                if kind in ("done", "error"):
+                    self.refresh_tests()
             root.after(75, self.drain)
 
         def poll_processes(self):
