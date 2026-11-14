@@ -249,11 +249,12 @@ def native_problems(runtime, starfield, table=None):
         if folder is not None:
             for path in folder.iterdir():
                 entries.setdefault(path.name.casefold(), []).append(path)
-        out, needs_library = [], False
+        out, needs_library, uses_native = [], False, False
         for name, source in table["plugins"].items():
             paths = entries.get(name.casefold(), [])
             pin = pins.get(name)
             required = source["required"] or bool(pin and pin["required"])
+            uses_native |= required or bool(paths)
             needs_library |= required and source["needs_address_library"]
             if len(paths) > 1:
                 out.append(f"{name}: installed names collide ignoring case")
@@ -268,6 +269,9 @@ def native_problems(runtime, starfield, table=None):
             if not _native_identity(paths[0], pin):
                 out.append(f"{name}: installed bytes differ from the measured release")
             needs_library |= source["needs_address_library"]
+        if uses_native and runtime is not None:
+            from . import manifest
+            out.extend(sfse_problems(runtime, manifest.game_pins(starfield)))
         if needs_library:
             library = ((runtime or {}).get("native") or {}).get("address_library")
             if library is None:

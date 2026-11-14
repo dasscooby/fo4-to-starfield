@@ -69,6 +69,11 @@ class NativeRuntimeTests(unittest.TestCase):
         self.put(self.library.upper(), self.lib)
         self.assertEqual(self.problems(), [])
 
+    def test_installed_native_enforces_sfse_on_every_route(self):
+        self.install()
+        self.entry["sfse"] = {"loader_sha256": "0" * 64, "dlls": {}}
+        self.assertIn("sfse_loader.exe", " ".join(self.problems()))
+
     def test_wrong_same_size_hash_and_size_refuse(self):
         self.install()
         for raw in (b'x' * len(self.dll), self.dll + b'x'):
