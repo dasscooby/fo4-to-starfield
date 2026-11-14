@@ -1,0 +1,17 @@
+{
+  "plugin": "FO4SFVault111Exit.esm",
+  "cell": "FO4Port_Vault111Cryo",
+  "pickup": {
+    "pos": [-54.456, -0.325, 0.631],
+    "rot": [0, 0, 3.804386],
+    "base_edid": "FO4Port_NpcPipboyGroundTake01",
+    "name": "Pip-Boy"
+  },
+  "terminal": {
+    "pos": [-55.337, -1.975, 1.865],
+    "rot": [0, 0, 3.1415927],
+    "base_edid": "FO4Port_V111GearDoorConsole02",
+    "name": "Door control"
+  },
+  "cog_door": {"plugin": "FO4Port.esm", "id": "00126D"}
+}
