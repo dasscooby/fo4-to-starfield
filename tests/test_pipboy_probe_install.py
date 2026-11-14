@@ -279,7 +279,94 @@ class PipboyProbeInstallTests(unittest.TestCase):
 
     def test_extra_movie_belongs_to_install(self):
         code, _ = self.run_main("status", "--extra-movie", "FO4SF_Fo4Boot")
-        self.assertIn("--extra-movie belongs to install", str(code))
+        self.assertIn("--extra-movie and --page-movie belong to install", str(code))
+        code, _ = self.run_main("uninstall", "--page-movie", "Pipboy_StatsPage")
+        self.assertIn("--extra-movie and --page-movie belong to install", str(code))
+
+    def stage_shell(self, pages=pbi.PAGE_MOVIES):
+        # FAL-614 S1: the shell as the extra movie and its pages under Fallout 4's own names; ours stand in for them
+        self.stage_extra("FO4SF_Fo4Shell")
+        return [self.stage_extra(page) for page in pages]
+
+    def page_args(self, pages=pbi.PAGE_MOVIES):
+        return [arg for page in pages for arg in ("--page-movie", page)]
+
+    def test_the_shell_and_its_pages_are_packed_and_uninstalled(self):
+        self.stage_shell()
+        code, out = self.run_main("install", "--dir", self.staged, "--extra-movie", "FO4SF_Fo4Shell", *self.page_args())
+        self.assertEqual(code, 0, out)
+        self.assertTrue(os.path.isfile(os.path.join(self.data, ARCHIVE)))
+        self.assertFalse(os.path.exists(os.path.join(self.data, "Interface")))  # packed, not loose
+        code, out = self.run_main("uninstall")
+        self.assertEqual(code, 0, out)
+        for name in (PLUGIN, ARCHIVE, pbi.RECORD):
+            self.assertFalse(os.path.exists(os.path.join(self.data, name)), name)
+        self.assertEqual(self.lines(), BEFORE)
+        self.assertEqual(self.exp_record(), EXP_RECORD)
+
+    def test_the_page_names_are_fallout_4s(self):
+        self.assertEqual(pbi.PAGE_MOVIES, ("Pipboy_StatsPage", "Pipboy_InvPage", "Pipboy_DataPage", "Pipboy_MapPage",
+                                           "Pipboy_RadioPage"))
+        self.assertTrue(all(not p.startswith(pbi.EXTRA_PREFIX) for p in pbi.PAGE_MOVIES))
+
+    def test_one_page_alone_installs(self):
+        self.stage_shell(["Pipboy_StatsPage"])
+        code, out = self.run_main("install", "--dir", self.staged, "--extra-movie", "FO4SF_Fo4Shell",
+                                  *self.page_args(["Pipboy_StatsPage"]))
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.run_main("uninstall")[0], 0)
+
+    def test_a_page_is_refused_unless_named(self):
+        self.stage_shell()
+        code, _ = self.run_main("install", "--dir", self.staged, "--extra-movie", "FO4SF_Fo4Shell",
+                                *self.page_args(pbi.PAGE_MOVIES[:-1]))
+        self.assertIn("the twin Interface/Pipboy_RadioPage.swf is not the movie byte for byte", str(code))
+        self.assert_untouched()
+
+    def test_a_page_needs_the_shell(self):
+        self.stage_shell(["Pipboy_StatsPage"])
+        code, _ = self.run_main("install", "--dir", self.staged, *self.page_args(["Pipboy_StatsPage"]))
+        self.assertIn("--page-movie needs --extra-movie", str(code))
+        self.assert_untouched()
+
+    def test_page_names_outside_the_five_are_refused(self):
+        self.stage_extra("FO4SF_Fo4Shell")
+        for bad in ("PipboyMenu", "PipboyMessageBox", "pipboy_statspage", "Pipboy_StatsPage.swf", "../Pipboy_StatsPage",
+                    "FO4SF_PipboyMenu", "terminalmenu"):
+            code, _ = self.run_main("install", "--dir", self.staged, "--extra-movie", "FO4SF_Fo4Shell", "--page-movie", bad)
+            self.assertIn(f"--page-movie {bad!r}: one of", str(code), bad)
+        self.assert_untouched()
+
+    def test_a_page_named_twice_is_refused(self):
+        self.stage_shell(["Pipboy_StatsPage"])
+        code, _ = self.run_main("install", "--dir", self.staged, "--extra-movie", "FO4SF_Fo4Shell",
+                                *self.page_args(["Pipboy_StatsPage", "Pipboy_StatsPage"]))
+        self.assertIn("each page once", str(code))
+        self.assert_untouched()
+
+    def test_a_missing_page_is_refused(self):
+        self.stage_shell(["Pipboy_StatsPage"])
+        code, _ = self.run_main("install", "--dir", self.staged, "--extra-movie", "FO4SF_Fo4Shell",
+                                *self.page_args(["Pipboy_StatsPage", "Pipboy_MapPage"]))
+        self.assertIn("the page movie Interface/Pipboy_MapPage.swf is not in the stage's Data", str(code))
+        self.assert_untouched()
+
+    def test_a_page_that_is_not_a_swf_is_refused(self):
+        self.stage_shell(["Pipboy_StatsPage"])
+        self.stage_extra("Pipboy_StatsPage", raw=b"not a movie")
+        code, _ = self.run_main("install", "--dir", self.staged, "--extra-movie", "FO4SF_Fo4Shell",
+                                *self.page_args(["Pipboy_StatsPage"]))
+        self.assertIn("the page movie Interface/Pipboy_StatsPage.swf does not read back as a SWF", str(code))
+        self.assert_untouched()
+
+    def test_a_page_outside_interface_is_refused(self):
+        self.stage_extra("FO4SF_Fo4Shell")
+        movie = os.path.join(self.staged, "Data", *make_pipboy_probe.MOVIE.split("/"))
+        write(os.path.join(self.staged, "Data", "Interface", "Pages", "Pipboy_StatsPage.swf"), other_swf(movie))
+        code, _ = self.run_main("install", "--dir", self.staged, "--extra-movie", "FO4SF_Fo4Shell",
+                                *self.page_args(["Pipboy_StatsPage"]))
+        self.assertIn("the page movie Interface/Pipboy_StatsPage.swf is not in the stage's Data", str(code))
+        self.assert_untouched()
 
 
 if __name__ == "__main__":

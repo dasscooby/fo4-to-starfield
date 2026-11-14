@@ -285,6 +285,28 @@ class RebuildPlanTests(unittest.TestCase):
         for text in ("refuse step=ini code_obj_calls=", "`CodeObjCalls` (empty)", "step=code_obj_root_call n= name="):
             self.assertIn(text, readme, text)
 
+    def test_s1_shell_with_its_pages(self):
+        # FAL-614 / FAL-762: step ii recorded; S1 loads the shell with its five pages, scripts only, the dll unchanged
+        for text in ("**Proof 2b step ii, the result (owner PC, 13 Nov, 07:05 to 07:09 UTC, at `e3a754b4`): verified.**",
+                     "**S1, the card: the shell with its pages (owner PC; scripts only, the dll of `e3a754b4` unchanged",
+                     "**PASS S1:**", "`Movie=FO4SF_Fo4Shell`", "`CodeObjInit=` empty", "876 x 700", "No kit screen",
+                     "`Stats`,\n`Special`, `Perks`, `Inventory`, `Quests`, `Workshop`, `Log`, `Map`, `Radio`, `PlayerInfo`, `Status`"):
+            self.assertIn(text, self.plan, text)
+        import pipboy_probe_install as pbi
+        card = self.plan[self.plan.index("**S1, the card:"):self.plan.index("**PASS S1:**")]
+        self.assertEqual(re.findall(r"--page-movie (\w+)", card), list(pbi.PAGE_MOVIES))   # every page, in order
+        self.assertIn("--extra-movie FO4SF_Fo4Shell", card)
+        self.assertIsNone(pbi.extra_movie_problem("FO4SF_Fo4Shell"))
+        for page in pbi.PAGE_MOVIES:
+            self.assertIn(f"`{page}.swf`" if page == "Pipboy_StatsPage" else f"`{page}`", card, page)
+        paths = card[card.index("`CodeObjProbe=BGSCodeObj,") + len("`CodeObjProbe="):]
+        paths = paths[:paths.index("`")].split(",")
+        self.assertEqual(len(paths), 16)                      # kMaxCodeNames
+        self.assertEqual(len(set(paths)), 16)
+        self.assertTrue(all(re.fullmatch(r"[A-Za-z0-9_]{1,64}", p) for p in paths), paths)
+        self.assertIn("constexpr std::size_t   kMaxCodeNames = 16;", self.main)
+        self.assertIn('g_movie = ReadText(ini, L"Movie");', self.main)   # the shell loads as any FO4SF_ movie
+
     def test_reads_recorded(self):
         for text in ("**Read on the PC (D1, 13 Nov,", "**Read on the PC (D3, 13 Nov): verified.**",
                      "`Interface\\Pip-Boy\\WorldMap_d.dds`, 2048 x 2048", "**D2 (data names; needed"):

@@ -422,6 +422,10 @@ Install:
    With `Movie=<name>` (stage (b)), add `--extra-movie <name>` to install: the stage's `Data\Interface\<name>.swf`,
    the player's private movie, is packed too (`<name>` is `FO4SF_` and letters, digits, `_`; the file must be a
    whole SWF: signature, FileLength and every tag's length, no tag's contents read). Anything else in `Data` that is not a byte-for-byte twin is still refused.
+   With the extra movie only, `--page-movie <page>` (once per page) packs `Data\Interface\<page>.swf` too, the
+   player's own tab movie under Fallout 4's name, for the shell to load (FAL-614 S1). `<page>` is one of
+   `Pipboy_StatsPage`, `Pipboy_InvPage`, `Pipboy_DataPage`, `Pipboy_MapPage`, `Pipboy_RadioPage`; each is checked as a
+   whole SWF like the extra movie.
 
 Uninstall:
 

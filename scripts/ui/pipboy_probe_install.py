@@ -1,7 +1,8 @@
 """Install / uninstall / status / order / active of the staged Pip-Boy probe (scripts/ui/make_pipboy_probe.py stage),
 next to whatever experiment is installed, reversibly (FAL-187; sfse/FO4SFPipboyMenu/README.md, stage (b)).
 
-usage: python scripts/ui/pipboy_probe_install.py install --dir <stage> [--extra-movie <name>] --starfield <game dir>
+usage: python scripts/ui/pipboy_probe_install.py install --dir <stage> [--extra-movie <name> [--page-movie <page>]...]
+                                                       --starfield <game dir>
        python scripts/ui/pipboy_probe_install.py uninstall|status|order|active --starfield <game dir>
 
 exp_install.py keeps exactly one experiment record (Data\\FO4SFExp.install.json, today the core set); this tool runs
@@ -12,7 +13,10 @@ Data tree holding the movie Interface/FO4SF_PipboyMenu.swf, which must read back
 twins (make_pipboy_probe.py twin, FAL-250): the same bytes at a vanilla movie's path under Interface/, and, only when
 named with --extra-movie <name> (FAL-614, proof 1), one private movie Interface/<name>.swf that the player copied in
 for the plugin's Movie= setting: <name> is FO4SF_ and 1 to 58 of A-Z a-z 0-9 _ (never our own movie's name), and the
-file must read back as a SWF; its bytes are the player's, never checked against ours and never in Git. It then
+file must read back as a SWF; its bytes are the player's, never checked against ours and never in Git. With the extra
+movie only, each --page-movie <page> (FAL-614, S1) packs one of Fallout 4's five tab movies, Interface/<page>.swf, under
+the very name Fallout 4's shell PipboyMenu.swf loads it by: <page> is one of PAGE_MOVIES, named once, and the file must
+read back as a SWF, the player's own as above. It then
 activates the plugin and packs Data into "FO4SFPipboyProbe - Main.ba2" (loose files are not read on this install),
 the "*FO4SFPipboyProbe.esm" line appended to the end of Plugins.txt. Everything else is exp_install.py's behaviour:
 no existing game file is overwritten, every added file is recorded before it is published, uninstall removes exactly
@@ -36,6 +40,8 @@ import make_probe_swf  # noqa: E402
 
 RECORD = "FO4SFPipboyProbe.install.json"
 EXTRA_PREFIX = "FO4SF_"   # an extra movie can never take a vanilla movie's name
+# FAL-614 S1: the tab movies the shell (the extra movie) loads by these names; Fallout 4's own names, none of Starfield's
+PAGE_MOVIES = ("Pipboy_StatsPage", "Pipboy_InvPage", "Pipboy_DataPage", "Pipboy_MapPage", "Pipboy_RadioPage")
 
 
 def installer(argv):
@@ -55,6 +61,18 @@ def extra_movie_problem(name):
         return f"--extra-movie {name!r}: {EXTRA_PREFIX} then letters, digits and _ only, 64 at most"
     if f"Interface/{name}.swf".lower() == make_pipboy_probe.MOVIE.lower():
         return f"--extra-movie {name!r}: that is our own movie"
+    return None
+
+
+def page_movies_problem(pages, extra_movie):
+    """Why `pages` cannot ride with the extra movie (the shell), or None."""
+    if pages and not extra_movie:
+        return "--page-movie needs --extra-movie <name>, the shell that loads the pages"
+    for page in pages:
+        if page not in PAGE_MOVIES:
+            return f"--page-movie {page!r}: one of {', '.join(PAGE_MOVIES)}"
+    if len(set(pages)) != len(pages):
+        return "--page-movie: each page once"
     return None
 
 
@@ -95,16 +113,20 @@ def swf_problem(path):
     return "no End tag"
 
 
-def stage_problems(d, extra_movie=""):
+def stage_problems(d, extra_movie="", pages=()):
     """What is wrong with the staged folder, as a list (empty: it is the probe as make_pipboy_probe.py stages it, plus
-    the one extra movie when named)."""
+    the one extra movie when named, and its named pages)."""
     problems = []
     extra = ""
+    why = page_movies_problem(pages, extra_movie)
+    if why:
+        return [why]
     if extra_movie:
         why = extra_movie_problem(extra_movie)
         if why:
             return [why]
         extra = f"Interface/{extra_movie}.swf"
+    paged = [f"Interface/{page}.swf" for page in pages]
     names = sorted(n for n in os.listdir(d) if n.lower().endswith(".esm"))
     if names != [make_pipboy_probe.PLUGIN]:
         problems.append(f"the stage holds plugins {names}, expected [{make_pipboy_probe.PLUGIN!r}]")
@@ -118,7 +140,10 @@ def stage_problems(d, extra_movie=""):
                    for r, _, fs in os.walk(data) for f in fs)
     if extra and extra not in found:
         return problems + [f"the extra movie {extra} is not in the stage's Data"]
-    twins = [f for f in found if f not in (make_pipboy_probe.MOVIE, extra)]
+    missing = [p for p in paged if p not in found]
+    if missing:
+        return problems + [f"the page movie {missing[0]} is not in the stage's Data"]
+    twins = [f for f in found if f not in (make_pipboy_probe.MOVIE, extra, *paged)]
     if make_pipboy_probe.MOVIE not in found or any(make_pipboy_probe.twin_problem(t) for t in twins):
         problems.append(f"Data holds {found}, expected [{make_pipboy_probe.MOVIE!r}] and twins under Interface/")
     else:
@@ -132,6 +157,10 @@ def stage_problems(d, extra_movie=""):
         why = swf_problem(os.path.join(data, *extra.split("/")))
         if why:
             problems.append(f"the extra movie {extra} does not read back as a SWF: {why}")
+    for p in paged:
+        why = swf_problem(os.path.join(data, *p.split("/")))
+        if why:
+            problems.append(f"the page movie {p} does not read back as a SWF: {why}")
     return problems
 
 
@@ -149,7 +178,7 @@ def twin_problems(data, twins):
 
 def install(a):
     d = os.path.abspath(a.dir)
-    problems = stage_problems(d, a.extra_movie)
+    problems = stage_problems(d, a.extra_movie, a.page_movie)
     if problems:
         sys.exit("pipboy probe not installed (re-stage with make_pipboy_probe.py stage): " + "; ".join(problems))
     return installer(["install", "--exp-dir", d, "--starfield", a.starfield, "--pack",
@@ -162,14 +191,17 @@ def main(argv=None):
     ap.add_argument("--dir", default="", help="the staged probe folder (install)")
     ap.add_argument("--extra-movie", default="", help="install: also pack Interface/<name>.swf from the stage, the "
                     "player's private movie for the plugin's Movie= setting (FAL-614 proof 1)")
+    ap.add_argument("--page-movie", action="append", default=[], help="install, with --extra-movie: also pack "
+                    "Interface/<page>.swf, one of Fallout 4's tab movies the shell loads by name (FAL-614 S1); repeat "
+                    "for each page")
     ap.add_argument("--starfield", required=True, help="the game folder (Starfield.exe)")
     a = ap.parse_args(argv)
     if a.cmd == "install":
         if not a.dir:
             sys.exit("install needs --dir <stage>")
         return install(a)
-    if a.extra_movie:
-        sys.exit("--extra-movie belongs to install")
+    if a.extra_movie or a.page_movie:
+        sys.exit("--extra-movie and --page-movie belong to install")
     return installer([a.cmd, "--starfield", a.starfield])
 
 

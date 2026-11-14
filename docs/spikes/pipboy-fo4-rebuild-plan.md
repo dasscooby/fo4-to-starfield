@@ -603,6 +603,61 @@ probed as 1, no crash. What it decides: if new data names appear on the root, or
 (`code_call`), step iii uses them; if nothing changes, step iii takes the second lead and dispatches the change event
 on `stage`, which needs an event the plugin builds, or loads `PipboyMenu.swf` around the page.
 
+**Proof 2b step ii, the result (owner PC, 13 Nov, 07:05 to 07:09 UTC, at `e3a754b4`): verified.**
+`code_obj_root_call n=1 name=onAcquiredByNativeCode found=1 type=11 called=1 result_type=0`, and
+`bAcquiredByNativeCode` then probes `value=1` (it was 0). The other fifteen probe lines are unchanged; no `code_call`,
+no `refuse`, no crash. So acquiring the page opens nothing on its root. With the owner's direction (13 Nov, "do what
+you think is best off of seeing how it works in fallout 4"), the next step is Fallout 4's own way of feeding a page:
+the shell `PipboyMenu.swf` around it. That is S1 below (`pipboy-device-plan` rev 11, the screen side).
+
+**S1, the shell with its pages: what Fallout 4 has (the engine read, FAL-680; names only).** Fallout 4 draws the
+Pip-Boy menu at 876 x 700 (D1's stage), and feeds it from 11 data classes, one per top-level branch: `Stats`,
+`Special`, `Perks`, `Inventory`, `Quests`, `Workshop`, `Log`, `Map`, `Radio`, `PlayerInfo`, `Status`. S1 does not feed
+any of them: it shows the frame. S3, the data feed, builds those branches later, STAT's first.
+
+**S1, the card: the shell with its pages (owner PC; scripts only, the dll of `e3a754b4` unchanged, FAL-614).** The
+installer's new `--page-movie <page>` (with `--extra-movie` only) packs the player's own tab movies into the private
+probe archive under the very names the shell loads them by: `Pipboy_StatsPage`, `Pipboy_InvPage`, `Pipboy_DataPage`,
+`Pipboy_MapPage`, `Pipboy_RadioPage` (each named once, each checked as a whole SWF; nothing else). The plugin is not
+changed: `Movie=` already loads any `FO4SF_` movie, and the stand-in, `CodeObjProbe=` and their logs are the ones of
+`e3a754b4`. No kit screen, no device path: this is the flat menu (F10), the power-armor mode's floor.
+0. **Read first (PC, private, names only; no launch).**
+   - From D2's private output for `PipboyMenu.swf`: the page file names the shell names beside `PipboyLoader`. If they
+     are the five bare names above, go on. If they carry a folder or another name: **STOP**, report the names only,
+     and the next commit adds them. NEEDS-SOLE.
+   - The names-only listing of `Starfield - Interface.ba2` (the look survey's tool): none of the five names, and no
+     `PipboyMenu.swf`, may be there (Starfield has no Pip-Boy movie, **hypothesis**). A hit is a **STOP**: report it.
+1. **Stage** (a clean worktree at this card's head): `make_pipboy_probe.py stage <exp>`. Copy, unchanged, from the
+   player's `Fallout4 - Interface.ba2` into `<exp>\Data\Interface\`: `PipboyMenu.swf` as `FO4SF_Fo4Shell.swf`, and the
+   five pages under their own names (`Pipboy_StatsPage.swf` ...). `make_pipboy_probe.py check`. Then, between
+   `plugin_toggle.py on` and `off`: `pipboy_probe_install.py install --dir <exp> --extra-movie FO4SF_Fo4Shell
+   --page-movie Pipboy_StatsPage --page-movie Pipboy_InvPage --page-movie Pipboy_DataPage --page-movie Pipboy_MapPage
+   --page-movie Pipboy_RadioPage --starfield <game>`. A refusal is a **STOP**: report its line.
+2. **The plugin:** the dll built from `e3a754b4` (the one proof 2b step ii ran), its ini, `versionlib-1-16-244-0.bin`.
+   In the ini: `Stage=2`, `Movie=FO4SF_Fo4Shell`, `CodeObj=1`, `CodeObjHide=0`, `CodeObjSound=0`, `CodeObjInit=` empty,
+   `CodeObjCalls=` empty, `CodeObjNames=` proof 2a's line (the PC may put the shell's own verbs from D2 in its place,
+   16 at most, and records the line it used), and
+   `CodeObjProbe=BGSCodeObj,codeObj,InitCodeObj,bAcquiredByNativeCode,onAcquiredByNativeCode,ProcessUserEvent,ReleaseCodeObj,onPipboyChangeEvent,onPipboyChangeEventInternal,InvalidateData,DataObj,_DataObj,UpdateMask,Pipboy_DataObj,PipboyLoader,stage`.
+3. **Run:** outdoors, F10, wait 15 seconds, one screenshot at 5 s and one at 15 s, F10 again. Once more if the first
+   shows nothing (a second open loads the movie afresh). Then uninstall and restore as for proof 2b.
+4. **Send:** the `step=load_movie`, `step=code_obj`, every `step=code_obj_probe` and `step=code_call` line, any
+   `refuse` line, the two screenshots (described: frame, tab bar, which page shows, placeholders, font, size and
+   place on screen), and whether the game stayed playable.
+
+**PASS S1:** `load_movie ... result=1 movie_name=FO4SF_Fo4Shell`; on screen the shell's frame and its tab bar (STAT,
+INV, DATA, MAP, RADIO), with the STAT page inside it showing its design-time placeholders (2a's `ALBERT`, the bars);
+no crash. A picture at the stage's own size, not filling the screen, still passes; the size is S1's later work. What
+each other outcome means:
+- `code_obj ... read_back=1`: the shell's root takes `BGSCodeObj` as the boot sequence's did, and the probe lines show
+  which of its names are public. `read_back=0` with `set=` one short: the root is sealed like the page's; the next card
+  hands the stand-in over through a name the probe or D2 shows.
+- The frame and tabs show but no page: the shell did not load the page. Either it waits for a call or data (the
+  `code_call` lines and the probe say which), or the name in step 0 was wrong.
+- `code_call` lines: the shell's verbs on our object, with their arguments. They are the list for S4 (input) and S3.
+- Nothing shows, or it freezes: the shell waits for the engine. The probe lines say what it has; send the log.
+- A crash: send the crash log privately; `Movie=FO4SF_Fo4Boot` is proof 1 as it passed.
+- The font: if the text is not Fallout 4's typeface, that is S2 (`fonts_en.swf` is also Starfield's name).
+
 **Proof 2, the outline (route A): the STAT page.** Each step has its own card once the one before it has run.
 - **2a, the page alone:** `Movie=FO4SF_Fo4Stats`, the player's `Pipboy_StatsPage.swf` installed with
   `--extra-movie FO4SF_Fo4Stats`, and `CodeObj=1` with the page's own names in `CodeObjNames`. Shows: the page's frame
@@ -709,6 +764,7 @@ delivery.
 3. Done: proof 1b (13 Nov, third run) and proof 1c (13 Nov, `CodeObjHide=1`).
 4. Done: read D4 and proof 1d (13 Nov, the sounds by route S2, PASS by the log; the owner's ear still to hear it).
 5. Done: proof 2a, the STAT page alone (13 Nov, second run: the page draws and takes our object through
-   `InitCodeObj`). Done: proof 2b step i (no data entry on the root). Step ii, the acquire step (`CodeObjCalls=`):
-   its card is written. Then 2b, HP by name, from 2a's log, with its
-   own card, tests, a CARRY line, the Scribe's review, and the PC's run.
+   `InitCodeObj`). Done: proof 2b step i (no data entry on the root) and step ii (the acquire step opens nothing).
+6. Now: S1, the shell with its pages (the card above; scripts only, the dll of `e3a754b4`). Then S3's first branch
+   (STAT, HP by name) through the shell, from S1's log, with its own card, tests, a CARRY line, a review, and the PC's
+   run.
