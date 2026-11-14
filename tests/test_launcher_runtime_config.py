@@ -2,6 +2,7 @@
 import contextlib
 import importlib.util
 import io
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -65,6 +66,23 @@ class RuntimeConfigTests(unittest.TestCase):
         # An installed consumer makes configuration mandatory even for a legacy
         # instance. This is a synthetic opaque file, never a native binary.
         (self.plugins / "FOCCSidecar.dll").write_bytes(b"synthetic consumer")
+        # The installed synthetic consumer now also needs a measured release
+        # identity. Keep the native gate real while isolating runtime INI behavior.
+        from fo4sf.launcher import runtimes as rt
+        blob = b"synthetic consumer"
+        library = b"synthetic library"
+        native = {"schema": 1, "plugins": {"FOCCSidecar.dll": {
+            "runtime": "1.16.244.0", "sha256": hashlib.sha256(blob).hexdigest(), "size": len(blob),
+            "required": False, "needs_address_library": True, "source_commit": "c" * 40,
+            "artifact_receipt": "synthetic fixture"}}, "address_library": {
+            "file": "versionlib-1-16-244-0.bin", "sha256": hashlib.sha256(library).hexdigest(),
+            "size": len(library), "provenance": "synthetic fixture"}}
+        (self.plugins / native["address_library"]["file"]).write_bytes(library)
+        measured = {"schema": 1, "runtimes": [{"exe_version": "1.16.244.0", "native": native,
+            "exe_sha256": hashlib.sha256(b"synthetic exe").hexdigest()}]}
+        runtime_table = mock.patch.object(rt, "load_runtimes", return_value=measured)
+        runtime_table.start()
+        self.addCleanup(runtime_table.stop)
         self.target = self.plugins / rc.NAME
         self.values = settings.defaults()
         self.values.update(instance=str(self.game), starfield=str(self.game), my_games=str(self.my_games),
@@ -121,6 +139,7 @@ class RuntimeConfigTests(unittest.TestCase):
             with self.subTest(missing=missing):
                 if missing == self.plugins:
                     (missing / "FOCCSidecar.dll").unlink()
+                    (self.plugins / "versionlib-1-16-244-0.bin").unlink()
                 missing.rmdir()
                 before = self.snapshot()
                 with self.assertRaisesRegex(ValueError, "missing"):
