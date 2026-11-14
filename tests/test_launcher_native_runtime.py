@@ -27,10 +27,13 @@ class NativeRuntimeTests(unittest.TestCase):
         self.plugins.mkdir(parents=True)
         (self.game / 'Starfield.exe').write_bytes(b'game')
         (self.game / 'sfse_loader.exe').write_bytes(b'loader')
+        (self.game / 'sfse_1_16_244.dll').write_bytes(b'sfse dll')
         self.source = rt._native_table()
         self.dll, self.lib = b'probe dll bytes', b'library bytes'
         self.library = self.source['address_library']['file']
-        self.entry = {'exe_version': self.source['runtime'], 'native': {'schema': 1,
+        self.entry = {'label': 'synthetic', 'exe_version': self.source['runtime'],
+            'sfse': {'loader_sha256': pin(b'loader')['sha256'],
+                     'dlls': {'sfse_1_16_244.dll': pin(b'sfse dll')['sha256']}}, 'native': {'schema': 1,
             'plugins': {'FOCCPing.dll': dict(pin(self.dll), runtime=self.source['runtime'], required=False,
                 needs_address_library=True, source_commit='c' * 40, artifact_receipt='synthetic build receipt')},
             'address_library': dict(pin(self.lib), file=self.library, provenance='synthetic measurement')}}
@@ -71,8 +74,87 @@ class NativeRuntimeTests(unittest.TestCase):
 
     def test_installed_native_enforces_sfse_on_every_route(self):
         self.install()
-        self.entry["sfse"] = {"loader_sha256": "0" * 64, "dlls": {}}
+        self.entry["sfse"]["loader_sha256"] = "0" * 64
         self.assertIn("sfse_loader.exe", " ".join(self.problems()))
+
+    def test_measured_native_missing_or_malformed_sfse_refuses_every_play_route(self):
+        self.install()
+        self.entry['exe_sha256'] = pin(b'game')['sha256']
+        valid = copy.deepcopy(self.entry['sfse'])
+        bad = [None, {}, [], {'loader_sha256': '', 'dlls': valid['dlls']},
+               {'loader_sha256': valid['loader_sha256'], 'dlls': {}},
+               {'loader_sha256': valid['loader_sha256'], 'dlls': {'../sfse_bad.dll': 'a' * 64}},
+               {'loader_sha256': valid['loader_sha256'], 'dlls': {'sfse_bad.dll': []}},
+               {'loader_sha256': valid['loader_sha256'], 'dlls': {
+                   'sfse_a.dll': 'a' * 64, 'sfse_A.dll': 'b' * 64}}]
+        for sfse in bad:
+            for route in ('exe', 'steam', 'sfse'):
+                for dry in (False, True):
+                    entry = copy.deepcopy(self.entry)
+                    if sfse is None:
+                        entry.pop('sfse')
+                    else:
+                        entry['sfse'] = sfse
+                    v = settings.defaults()
+                    v.update(route=route, load_order='off')
+                    system = FakeSystem([])
+                    with self.subTest(sfse=sfse, route=route, dry=dry), mock.patch.object(
+                            rt, 'load_runtimes', return_value={'runtimes': [entry]}), mock.patch.object(
+                            crashwatch, 'apply_papyrus') as apply:
+                        with self.assertRaisesRegex(ValueError, 'SFSE'):
+                            crashwatch.play(v, str(self.game), system=system, dry_run=dry)
+                        apply.assert_not_called()
+                        self.assertIsNone(system.started_at)
+        self.entry.pop('sfse')
+        result = detect.detect(fo4_data=[], starfield=str(self.game), sources={'sources': []},
+            runtimes={'runtimes': [self.entry]}, allow_unknown_runtime=True, require_sfse=False)
+        self.assertTrue(any('native' in p and 'SFSE' in p for p in result['refusals']))
+
+    def test_complete_sfse_pins_allow_play_but_missing_or_wrong_files_refuse(self):
+        self.install()
+        self.entry['exe_sha256'] = pin(b'game')['sha256']
+        for route in ('exe', 'steam', 'sfse'):
+            v = settings.defaults()
+            v.update(route=route, load_order='off')
+            with mock.patch.object(rt, 'load_runtimes', return_value={'runtimes': [self.entry]}):
+                system = FakeSystem([])
+                crashwatch.play(v, str(self.game), system=system)
+                self.assertIsNotNone(system.started_at)
+                for name, original in (('sfse_loader.exe', b'loader'), ('sfse_1_16_244.dll', b'sfse dll')):
+                    path = self.game / name
+                    for raw in (None, b'wrong SFSE'):
+                        if raw is None:
+                            path.unlink()
+                        else:
+                            path.write_bytes(raw)
+                        system = FakeSystem([])
+                        with self.subTest(route=route, name=name, raw=raw):
+                            with self.assertRaisesRegex(ValueError, 'sfse_'):
+                                crashwatch.play(v, str(self.game), system=system)
+                            self.assertIsNone(system.started_at)
+                        path.write_bytes(original)
+
+    def test_final_gate_refuses_sfse_pins_removed_by_tool(self):
+        self.install()
+        self.entry['exe_sha256'] = pin(b'game')['sha256']
+        v = settings.defaults()
+        v.update(route='exe', load_order='off')
+        system = FakeSystem([])
+        def late(*args, **kwargs):
+            self.entry.pop('sfse')
+        with mock.patch.object(rt, 'load_runtimes', return_value={'runtimes': [self.entry]}), mock.patch.object(
+                crashwatch, 'apply_load_order', side_effect=late):
+            with self.assertRaisesRegex(ValueError, 'measured SFSE'):
+                crashwatch.play(v, str(self.game), system=system)
+        self.assertIsNone(system.started_at)
+
+    def test_hardlinked_native_bytes_refuse(self):
+        self.install()
+        try:
+            os.link(self.plugins / 'FOCCPing.dll', self.game / 'aliased.dll')
+        except OSError as error:
+            self.skipTest(str(error))
+        self.assertIn('hard links', ' '.join(self.problems()))
 
     def test_wrong_same_size_hash_and_size_refuse(self):
         self.install()

@@ -142,6 +142,24 @@ def native_declaration_problems(entry, table=None):
     out = []
     if entry.get("exe_version") != table["runtime"]:
         out.append("native block runtime differs from the source declaration")
+    # Native components depend on a measured SFSE build. Never let an empty
+    # comparison target make alternate Play routes silently waive that dependency.
+    if native["plugins"] or any(p["required"] for p in table["plugins"].values()):
+        sfse = entry.get("sfse")
+        if (not isinstance(sfse, dict) or set(sfse) != {"loader_sha256", "dlls"}
+                or not isinstance(sfse.get("loader_sha256"), str)
+                or not _HEX64.fullmatch(sfse["loader_sha256"])
+                or not isinstance(sfse.get("dlls"), dict) or not sfse["dlls"]):
+            out.append("native components require measured SFSE loader and DLL identities")
+        else:
+            names = set()
+            for name, digest in sfse["dlls"].items():
+                if (not isinstance(name, str) or not re.fullmatch(r"sfse_[A-Za-z0-9_]+\.dll", name)
+                        or name.casefold() in names or not isinstance(digest, str)
+                        or not _HEX64.fullmatch(digest)):
+                    out.append("native SFSE DLL identities are malformed or ambiguous")
+                if isinstance(name, str):
+                    names.add(name.casefold())
     seen, needs_library = set(), False
     for name, pin in native["plugins"].items():
         if not isinstance(name, str):
@@ -204,9 +222,11 @@ def _native_identity(path, expected):
     before = path.stat()
     if not stat.S_ISREG(before.st_mode):
         raise ValueError("native path is not a regular file")
+    if before.st_nlink != 1:
+        raise ValueError("native file has hard links")
     if before.st_size != expected["size"]:
         return False
-    stamp = lambda s: (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
+    stamp = lambda s: (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns, s.st_nlink)
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         if stamp(before) != stamp(os.fstat(stream.fileno())):

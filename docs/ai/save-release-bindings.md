@@ -267,3 +267,6 @@ Synthetic fixtures use invented bytes only in tests. No native/game acceptance,
 filesystem-wide lock, save adoption or complete item-7 claim is made. Keep #716
 draft; package policy, native load/order acceptance, provenance-safe save binding,
 and items 8/9 remain unfinished. Windows/native/Tk/game NOT_RUN.
+
+
+Part 9 review correction (14 Nov): a native block listing components requires a measured SFSE loader SHA256 and nonempty DLL basename/SHA256 map. Missing or malformed SFSE metadata refuses even when `require_sfse` is false or Play uses exe/Steam. Actual matching files must pass both early and final checks. Synthetic Play controls cover absent/empty/malformed metadata, missing/wrong loader and DLL bytes, and metadata removed by a load-order tool. Hardlinked native identity files refuse as aliases; no release identities or native acceptance are supplied.

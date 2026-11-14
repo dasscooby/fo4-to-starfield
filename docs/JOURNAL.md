@@ -2969,3 +2969,8 @@ fixtures cover optional/required/library/runtime/route and concurrent-read contr
 No native identities added; source version metadata is not a measured binary receipt.
 Verification receipts are on FAL-247. Windows/native/Tk/game NOT_RUN. Keep #716 draft;
 save provenance, package policy and native-order acceptance remain open.
+
+
+## 14 November 2026 — Codex: correct FAL-751 native SFSE metadata bypass
+
+Courier independently found that missing/empty SFSE pins could let matching native DLLs pass exe/Steam Play at 63975271. The correction requires measured loader and nonempty DLL hashes; actual Play/detect/final-tool tests include refusal before writes and matching synthetic positives. Native hardlink aliases now refuse. Runtime INI/schema fixtures supply complete synthetic SFSE pins instead of bypassing the gate. No production hashes, native source, game actions or save adoption. Exact-head checks and remaining limits are in FAL-247 item7-part9-fix-receipt; #716 stays draft pending independent delta review.

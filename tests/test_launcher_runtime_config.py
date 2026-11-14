@@ -78,7 +78,10 @@ class RuntimeConfigTests(unittest.TestCase):
             "file": "versionlib-1-16-244-0.bin", "sha256": hashlib.sha256(library).hexdigest(),
             "size": len(library), "provenance": "synthetic fixture"}}
         (self.plugins / native["address_library"]["file"]).write_bytes(library)
+        (self.game / "sfse_1_16_244.dll").write_bytes(b"synthetic sfse dll")
         measured = {"schema": 1, "runtimes": [{"exe_version": "1.16.244.0", "native": native,
+            "sfse": {"loader_sha256": hashlib.sha256(b"synthetic loader").hexdigest(),
+                     "dlls": {"sfse_1_16_244.dll": hashlib.sha256(b"synthetic sfse dll").hexdigest()}},
             "exe_sha256": hashlib.sha256(b"synthetic exe").hexdigest()}]}
         runtime_table = mock.patch.object(rt, "load_runtimes", return_value=measured)
         runtime_table.start()

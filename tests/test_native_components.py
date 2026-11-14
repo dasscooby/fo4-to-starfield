@@ -166,7 +166,8 @@ class KnownRuntimeTests(unittest.TestCase):
             self.assertEqual(native_problems(entry), [], entry.get("label"))
 
     def good(self):
-        return {"exe_version": RUNTIME, "native": {
+        return {"exe_version": RUNTIME,
+                "sfse": {"loader_sha256": "f" * 64, "dlls": {"sfse_1_16_244.dll": "e" * 64}}, "native": {
             "schema": 1,
             "address_library": {"file": TABLE["address_library"]["file"], "sha256": "a" * 64, "size": 5099968,
                                 "provenance": "synthetic"},

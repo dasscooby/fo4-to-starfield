@@ -1537,3 +1537,8 @@ probes do not. Refuse unknown installed own DLLs instead of inferring compatibil
 from a source version string. No hashes are manufactured and no native table entry
 is published without artifact evidence. Separate per-route validators and implicit
 approval of installed probes were rejected because they allow inconsistent refusals.
+
+
+### 2026-11-14 — measured native metadata includes SFSE
+
+Codex / Lone, FAL-247 / Courier FAL-751: require complete SFSE loader and DLL hashes in each native component release declaration. Optional comparison keys allowed a missing loader through exe/Steam; refusing malformed dependency metadata preserves the shared Play gate. Native identity files must also have a single filesystem link to prevent aliases being accepted as plain owned files. Alternative of requiring SFSE only on its launch route rejected because installed native components still depend on it. Synthetic evidence only; runtime artifacts and native behavior remain unaccepted.
