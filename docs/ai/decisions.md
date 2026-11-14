@@ -1446,3 +1446,15 @@ is acceptable is the owner's eye in a session (unseen).
 Alternatives: leave the shape out (no walkway); split triangles per bone and drop the stretch strip (loses surface, more code); native skinned
 conversion (unread whether the activator rig path takes skin weights); enable it for every door (a behaviour change for models nobody measured).
 The limit is tuned between two measured numbers (2.25 and 3.0 cm), so a new model that lands near it needs its own read.
+
+## 2026-11-14: The cog door's in-game route is a DOOR override on a new model path, not a shadowed archive (Minuteman, FAL-756)
+
+Decision: `scripts/newgame/make_cog_door.py` (+ `dotnet/CogDoorProbe`, `cog_door_install.py`) converts the Fallout 4 cog door on the converter's `_anim` path and
+writes a plugin that overrides the placed door's DOOR base (model, rig, clip folder; door graph, name, flags and sounds kept) with a SetOpen quest;
+`--control` writes the quest alone for the installed door.
+Why: Plan B step 0 left no install route: the ACTI stager cannot touch a DOOR, and the session installer replaces no archived file and reads no loose
+files. A new path needs no assumption about archive order, replaces nothing, and is removed by the installer's own uninstall. Activation fails from
+where a player can stand, so the quest gives the door a trigger.
+Alternatives: prove a later plugin's archive wins for the same path (unread, a session of its own, leaves a shadowed file behind); extend the ACTI probe to
+DOORs (its check asserts exactly an ACTI and a quest); replace the archived files (forbidden by the installer).
+
