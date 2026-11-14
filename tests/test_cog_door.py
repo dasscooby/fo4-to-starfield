@@ -159,6 +159,7 @@ class CogDoorRoutingTests(unittest.TestCase):
         static.assert_not_called()
         self.assertEqual(multi.call_args.kwargs["aliases"], ALIASES)
         self.assertTrue(multi.call_args.kwargs["drop_skinned"])
+        self.assertEqual(multi.call_args.kwargs["seam_limit_m"], convert_static.SEAM_LIMIT_M)      # the catwalk's hinged seams may ride one bone
         self.assertTrue(multi.call_args.kwargs["rest_pose_check"])
         self.assertEqual(result["door"]["rig"], "native")
 
