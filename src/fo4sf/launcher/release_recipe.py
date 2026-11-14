@@ -4,6 +4,15 @@ from pathlib import Path
 from . import instance, release_install as ri, save_release as sr, settings
 
 
+def check_unmanaged(steps):
+    """Generic recipes must not bypass ownership on explicitly named release targets."""
+    for step in steps:
+        for target in instance.command_targets(step["argv"], cwd=step["cwd"]):
+            # installed() also refuses pending, corrupt or unowned declarations.
+            if ri.installed(target) is not None:
+                raise ValueError("recipe targeting a managed instance needs managed_release settings and declaration")
+
+
 class Transaction:
     def __init__(self, config, steps):
         sr._keys(config, ("settings", "declaration"), "managed release recipe")

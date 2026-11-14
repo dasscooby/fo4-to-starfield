@@ -504,6 +504,17 @@ def custom_ini_problems(my_games, values):
     return out
 
 
+def command_targets(cmd, *, cwd=None):
+    """Explicit argparse-compatible --starfield values, resolved from the tool's cwd."""
+    targets = []
+    for i, arg in enumerate(cmd):
+        name, eq, value = arg.partition("=")
+        if len(name) >= 3 and name.startswith("--") and "--starfield".startswith(name):
+            value = value if eq else (cmd[i + 1] if i + 1 < len(cmd) else "")
+            targets.append(os.path.abspath(os.path.join(cwd or os.getcwd(), value)))
+    return targets
+
+
 def check_run(folder, cmd, *, running=lambda: False, cwd=None):
     """Run one of our tools (an installer, plugin_toggle.py, load_order.py) on the folder, with its own Plugins.txt.
     Refused while Starfield runs, and unless the command names this folder by exactly one --starfield (or a prefix of it
@@ -514,15 +525,11 @@ def check_run(folder, cmd, *, running=lambda: False, cwd=None):
         raise InstanceRefused("instance run needs a command after --")
     if running():
         raise InstanceRefused("Starfield is running: close it first")
-    targets = []
-    for i, arg in enumerate(cmd):
-        name, eq, value = arg.partition("=")
-        if len(name) >= 3 and name.startswith("--") and "--starfield".startswith(name):
-            targets.append(value if eq else (cmd[i + 1] if i + 1 < len(cmd) else ""))
+    targets = command_targets(cmd, cwd=cwd)
     if len(targets) != 1:
         raise InstanceRefused(f"the command must name the FO4SF game folder once, as --starfield {folder} "
                               f"({len(targets)} --starfield found)")
-    target = os.path.join(cwd or os.getcwd(), targets[0])
+    target = targets[0]
     if os.path.normcase(os.path.abspath(target)) != os.path.normcase(os.path.abspath(folder)):
         raise InstanceRefused(f"the command's --starfield {targets[0]} is not the FO4SF game folder {folder}")
 

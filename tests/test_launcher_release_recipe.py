@@ -174,6 +174,90 @@ with (root.parent / 'calls.txt').open('a') as stream:
         self.assertEqual(self.calls(), [])
         self.assertNotIn(ri.FIELD, json.loads((self.game / instance.RECORD).read_bytes()))
 
+    def generic(self):
+        self.spec.pop("managed_release", None)
+        self.script.write_text("""import pathlib, sys
+root = pathlib.Path(sys.argv[3])
+(root / 'Data' / sys.argv[1]).write_bytes(sys.argv[1].encode())
+with (root.parent / 'calls.txt').open('a') as stream:
+    stream.write(sys.argv[1] + '\\n')
+""")
+        self.write_recipe()
+
+    def own_release(self, complete=True):
+        raw = ri.encode(sr.declaration(self.release))
+        (self.data / sr.RELEASE_FILE).write_bytes(raw)
+        receipt = json.loads((self.game / instance.RECORD).read_bytes())
+        receipt[ri.FIELD] = {"schema": 1, "complete": complete,
+                             "declaration": ri.pin(raw), "previous": None}
+        (self.game / instance.RECORD).write_bytes(ri.encode(receipt))
+
+    def test_generic_recipe_cannot_target_owned_release_wet_or_dry(self):
+        self.generic()
+        self.own_release()
+        before = self.snapshot()
+        for dry in (False, True):
+            with self.assertRaisesRegex(ValueError, "needs managed_release"):
+                self.build(dry_run=dry)
+            self.assertEqual(before, self.snapshot())
+        self.assertEqual(self.calls(), [])
+
+    def test_generic_recipe_checks_abbreviated_equals_relative_and_multiple_targets(self):
+        self.generic()
+        self.own_release()
+        for args in (("--starfield=" + str(self.game),), ("--starf=instance",),
+                     ("--starf", "instance"), ("--starfield", str(self.root / "legacy"),
+                                               "--starfield", str(self.game))):
+            self.spec["steps"][0]["argv"] = [sys.executable, str(self.script), self.names[0], *args]
+            self.spec["steps"][0]["cwd"] = str(self.root)
+            self.write_recipe()
+            before = self.snapshot()
+            with self.assertRaisesRegex(ValueError, "needs managed_release"):
+                self.build()
+            self.assertEqual(before, self.snapshot())
+
+    def test_generic_pending_corrupt_and_unowned_release_refuse(self):
+        self.generic()
+        self.own_release(complete=False)
+        before = self.snapshot()
+        with self.assertRaisesRegex(ValueError, "incomplete"):
+            self.build()
+        self.assertEqual(before, self.snapshot())
+        (self.game / instance.RECORD).write_text('{"save_release":{}}')
+        before = self.snapshot()
+        with self.assertRaises(ValueError):
+            self.build()
+        self.assertEqual(before, self.snapshot())
+        (self.game / instance.RECORD).write_text('{"schema":1,"complete":true}')
+        before = self.snapshot()
+        with self.assertRaisesRegex(ValueError, "no installer ownership"):
+            self.build()
+        self.assertEqual(before, self.snapshot())
+
+    def test_generic_legacy_runs_but_cached_owned_target_refuses(self):
+        self.generic()
+        self.assertTrue(self.build()["complete"])
+        self.assertEqual(self.calls(), list(self.names))
+        self.assertEqual([s["status"] for s in self.build()["steps"]], ["reused", "reused"])
+        self.own_release()
+        before = self.snapshot()
+        with self.assertRaisesRegex(ValueError, "needs managed_release"):
+            self.build()
+        self.assertEqual(before, self.snapshot())
+        self.assertEqual(self.calls(), list(self.names))
+
+    def test_generic_rechecks_ownership_between_commands(self):
+        self.generic()
+        real = driver.run_step
+        def changed(*args):
+            result = real(*args)
+            self.own_release()
+            return result
+        with mock.patch.object(driver, "run_step", side_effect=changed):
+            with self.assertRaisesRegex(ValueError, "needs managed_release"):
+                self.build()
+        self.assertEqual(self.calls(), [self.names[0]])
+
 
 if __name__ == "__main__":
     unittest.main()

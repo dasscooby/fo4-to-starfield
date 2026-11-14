@@ -1542,3 +1542,13 @@ approval of installed probes were rejected because they allow inconsistent refus
 ### 2026-11-14 — measured native metadata includes SFSE
 
 Codex / Lone, FAL-247 / Courier FAL-751: require complete SFSE loader and DLL hashes in each native component release declaration. Optional comparison keys allowed a missing loader through exe/Steam; refusing malformed dependency metadata preserves the shared Play gate. Native identity files must also have a single filesystem link to prevent aliases being accepted as plain owned files. Alternative of requiring SFSE only on its launch route rejected because installed native components still depend on it. Synthetic evidence only; runtime artifacts and native behavior remain unaccepted.
+
+### 2026-11-14 — generic recipes respect release ownership
+
+Codex / Lone, FAL-247 part 10. Reuse the instance runner's explicit target parser
+to refuse generic recipes naming an instance with release metadata. Require the
+managed recipe transaction before execution or cache reuse, and recheck between
+steps. Restricting only `instance run` leaves the same installers reachable through
+`build`. Requiring managed metadata on all staging commands was rejected because
+staging and legacy targets retain their existing contracts. This is an explicit
+target check, not an arbitrary-command sandbox or package authenticity proof.

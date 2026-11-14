@@ -270,3 +270,19 @@ and items 8/9 remain unfinished. Windows/native/Tk/game NOT_RUN.
 
 
 Part 9 review correction (14 Nov): a native block listing components requires a measured SFSE loader SHA256 and nonempty DLL basename/SHA256 map. Missing or malformed SFSE metadata refuses even when `require_sfse` is false or Play uses exe/Steam. Actual matching files must pass both early and final checks. Synthetic Play controls cover absent/empty/malformed metadata, missing/wrong loader and DLL bytes, and metadata removed by a load-order tool. Hardlinked native identity files refuse as aliases; no release identities or native acceptance are supplied.
+
+Part 10 closes the generic recipe path around an already managed instance. A
+recipe with an explicit `--starfield` target that owns a release must supply
+`managed_release` settings and declaration. Pending, corrupt or unowned release
+metadata also refuse. The check runs for all step targets before build-state writes
+or processes, in dry-run, and again at each reached step, including cache reuse.
+Argument abbreviations and `--starfield=value` follow the instance runner's shared
+parser; relative targets resolve from each step's working directory. A later step
+cannot continue after an earlier command introduces release ownership.
+
+Generic staging and legacy targets without release metadata keep their behavior.
+This checks explicitly named targets; it does not sandbox arbitrary commands or
+infer a target hidden in a script, environment or default. It enables no accepted
+package and does not complete distribution policy. Native artifact/order acceptance
+and provenance-safe new-save binding publication remain required. Keep #716 draft;
+Windows/native/Tk/game NOT_RUN. No saves, bindings or native state are written.

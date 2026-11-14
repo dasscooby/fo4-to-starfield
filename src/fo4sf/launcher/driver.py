@@ -384,6 +384,9 @@ def build(recipe, repo, *, dry_run=False, force=(), until=None, min_free_gb=0.0,
     if "managed_release" in recipe:
         from . import release_recipe
         managed = release_recipe.Transaction(recipe["managed_release"], recipe["steps"])
+    else:
+        from . import release_recipe
+        release_recipe.check_unmanaged(recipe["steps"])
     if dry_run:
         steps_plan = plan(recipe, state, repo, force)
         for s, would, why in steps_plan:
@@ -405,6 +408,8 @@ def build(recipe, repo, *, dry_run=False, force=(), until=None, min_free_gb=0.0,
             # the fingerprint is taken at the step's turn, after the steps before it have written its inputs
             if managed is not None and not stop:
                 managed.verify()
+            elif not stop:
+                release_recipe.check_unmanaged([s])
             fp = fingerprint(s, repo) if not stop else None
             would, why = decide(s, rec, fp, force) if not stop else ("run", "")
             if stop:
