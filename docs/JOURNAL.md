@@ -2838,6 +2838,57 @@ The day's results that this journal did not yet hold, all on the owner's test PC
   work) and 30 issues. Kept open: 83 older pull requests that hold work not on main, 13 experiments and status notes
   that nothing replaces, and every issue with work left. Nothing was deleted; every branch is kept.
 
+## 2026-11-11 — Codex / Lone: FAL-274 Tests catalog foundation
+
+Paperclip Ubuntu OptiPlex; isolated codex/fal274-launcher-tests, based on main
+5d497862 after #711 merged. Added the read-only five-kit catalog and bounded owner-card
+reader, a standalone owner card derived from FAL-224, and recovery inspection/dispatch
+for Pip-Boy, radiation and power armor receipts. Missing recovery installers refuse
+before mutations. Tests use synthetic local stages, receipts and plugin lists only.
+Focused catalog/recovery/GUI checks and guard results are recorded on the draft PR.
+No installed kit, game, Windows UI or source game asset was touched. UI and no-build
+installer actions follow in the next source slice; independent review remains required.
+
+## 2026-11-11 — Codex / Lone: FAL-274 Tests page and prebuilt installer path
+
+Continues draft #723 after Scribe CLEAR fe7a54f0 (FAL-288). Added the Tests tab,
+registration, per-kit install/remove/card buttons and standalone-card viewer. CLI uses
+saved locations and selected-profile environment; checks processes, recovery, settings,
+registry and journal state before the fixed installer. Existing archive-only flags let
+planet/Pip-Boy/quest installers validate a prebuilt archive without calling Archive2.
+Synthetic round trips preserve owner sentinel/plugin bytes and cover orphan removal,
+wrong/missing archives and action refusals. Windows helper card is source-only here.
+Radiation/power-armor wrapper flag coordination sent to their writer on FAL-273.
+No PC, game, actual install or game input on this Ubuntu source worker.
+
+## 2026-11-11 — Codex / Lone: FAL-274 PC fixture follow-up
+
+Owner-PC comment09ba26ab reports PC PASS at40407e12 for 47 tests/guard and the hidden
+Windows Tk fixture; real kit inventory/running-game/five-kit acceptance stay NOT_RUN.
+Fixed footer loss of a Tests CLI refusal, missing-card absolute-path disclosure, and
+unreadable/non-UTF-8 plugin-list preflight (initial and late). Added synthetic negative
+controls plus real Tk fixture assertions. Recorded editor/file-lock and detector/poll
+limits instead of claiming every tool lock is detected or changing broad process APIs.
+Existing locked-plugin cleanup/retry regression was replayed. Ubuntu source worker;
+no new Windows/game run, no real owner files or operational PC evidence accessed.
+
+## 2026-11-13 — Codex / Lone: FAL-274 core receipt regression (FAL-726)
+
+Claude's actual-PC report at 56d249a1 passed five-stage inventory/cards and the wrong
+folder refusal, but every Install rejected FO4Port.deploy.json because recovery
+required an object for every files field. The same reason would block Play; Play was
+not pressed. Core deploy's publish function writes a list and separate artifacts.
+Fixed the launcher check by component (core list, kit object), preserving legacy
+missing fields, pending flags and the installers' ownership checks. No receipt edits.
+
+Three synthetic regression controls failed before the fix. Added a receipt produced
+by the real core publisher on synthetic bytes, Play eligibility, healthy no-rollback
+and interrupted core rollback, kit install/remove beside a core receipt, malformed
+shape refusals and pending flags across every known component. Ubuntu 26.04.1 LTS,
+Python 3.14.4, numpy 2.5.4/Pillow 12.3.0; commands and final results are in the FAL-274
+core-receipt-fix task receipt. Native Windows/game checks remain NOT_RUN at the fix.
+Missing archives/installers/cards and the bridge hold stay separate gates. Added a
+bounded read-only PC recheck; no merge until PC Play eligibility is observed.
 ## 2026-11-11: Codex / The Lone Wanderer — preserve two-kit launcher load order (FAL-354)
 
 Paperclip Ubuntu OptiPlex (`games`), synthetic files only; base `ba286735f320a80d10164e0327559bfb68202ba7`.
@@ -2855,3 +2906,27 @@ move MapMarkers behind two active kits and leave Bridge unticked. The launcher f
 the reported console index during play reflects the old order; its reproduction alone does not attribute the
 post-session PC write. See `docs/testing/load-order.md` for interpretation and the one-kit-until-PC-validation
 test-list line. Independent exact-head QA, CI and PC session acceptance precede integration.
+
+
+## 2026-11-14 — Codex / Lone: prepacked Main plus texture archives (FAL-743 / #723)
+
+Paperclip Ubuntu 26.04.1 LTS OptiPlex; normal merge of main c2578da3 into the existing
+codex/fal274-launcher-tests line at dde84927. Preserved both journal append histories.
+Current producer/receipt contract separates Data/Textures into a DX10 archive only
+with --textures-archive. Reconciled --prepacked so that mode requires the existing
+<first plugin> - Textures.ba2 beside the selected Main archive and never builds either.
+Missing or wrong archives refuse before publication. The default single General
+archive and normal separate-archive builds retain their behavior.
+
+Seven new synthetic controls reproduce the naive merge failure, then pass, including
+combined CLI install/relaunch/remove, missing either archive, wrong texture bytes/type/
+inventory, wrong Main coverage, no-texture inputs and default mode. Owner/core/plugin
+bytes and input archives stay unchanged; uninstall retains its normal receipt history.
+The main merge also brought the radiation/armor installers: three launcher tests now
+use an explicitly absent checkout for missing-installer refusals instead of relying on
+old source absence. 286 installer, 412 launcher (4 platform/display skips), and 16
+prepacked/packed-verifier tests pass; guard/diff clean. Full discovery and exact-head
+receipts are tracked in FAL-743 document reconciliation. Independent delta review and
+Minuteman FAL-741 landing gates remain. Earlier PC PASS dde84927 covers only the core
+receipt/Play-eligibility regression; actual kit/archive/Remove/instance/bridge gates
+remain separate. No native Windows, game, deploy or real-kit action in this run.

@@ -399,6 +399,15 @@ def run(root):
     w.start("detect")
     pump(root, 0.5)
     out["detect_argv"] = ran[0][4:] if ran else w.message.get()
+    def refused(_argv, on_line, **_kw):
+        on_line("tests: Synthetic missing archive; nothing built\n")
+        return 2
+    gui.run_command = refused
+    w.launch_command("tests-install", [sys.executable, "-I", "-u", sys.argv[2], "tests", "install"])
+    pump(root, 0.4)
+    out["refusal_footer"] = w.message.get()
+    w.show_card(os.path.join(d, "private-owner-marker", "missing kit"))
+    out["missing_card"] = w.message.get()
     out["errors"] = errors
     print(json.dumps(out))
     root.destroy()
@@ -424,6 +433,9 @@ class GuiWindowTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         out = json.loads(result.stdout.strip().splitlines()[-1])
         self.assertEqual(out["errors"], [])
+        self.assertEqual(out["refusal_footer"], "Synthetic missing archive; nothing built")
+        self.assertIn("Owner card is missing", out["missing_card"])
+        self.assertNotIn("private-owner-marker", out["missing_card"])
         self.assertTrue(out["after_detect"].endswith("MyGame"), out)
         self.assertTrue(out["after_redetect"].endswith("MyGame"), out)
         # Check installation uses the folders on screen, not the saved ones (Codex, #481)
@@ -431,6 +443,32 @@ class GuiWindowTests(unittest.TestCase):
         self.assertEqual(argv[argv.index("--fo4-data"):], ["--fo4-data", "Data A", "--fo4-data", "Data B",
                                                            "--my-games", "Other My Games"], out)
         self.assertTrue(argv[argv.index("--starfield") + 1].endswith("MyGame"), out)
+
+
+class TestCommandFeedback(unittest.TestCase):
+    def test_refused_test_keeps_the_reason_in_the_footer_after_exit(self):
+        feedback = gui.CommandFeedback("tests-install")
+        feedback.observe("tests: The prebuilt test archive is missing; nothing built\n")
+        self.assertEqual(feedback.finished(2), "The prebuilt test archive is missing; nothing built")
+
+    def test_register_success_and_other_actions_keep_normal_completion(self):
+        for action in ("tests-register", "save", "detect"):
+            feedback = gui.CommandFeedback(action)
+            feedback.observe("tests: earlier output is not a failure\n")
+            self.assertEqual(feedback.finished(0), f"{action} finished (exit 0)")
+
+    def test_unrecognized_child_error_points_to_log_without_reusing_an_old_reason(self):
+        previous = gui.CommandFeedback("tests-install")
+        previous.observe("tests: missing archive\n")
+        current = gui.CommandFeedback("tests-remove")
+        current.observe("a child installer wrote a diagnostic\n")
+        self.assertEqual(current.finished(1), "Test kit command stopped (exit 1); open Log for details")
+        self.assertEqual(previous.finished(2), "missing archive")
+
+    def test_non_test_action_does_not_treat_output_as_a_test_refusal(self):
+        feedback = gui.CommandFeedback("status")
+        feedback.observe("tests: a line in a build report\n")
+        self.assertEqual(feedback.finished(2), "status finished (exit 2)")
 
 
 class GuiEntryTests(unittest.TestCase):

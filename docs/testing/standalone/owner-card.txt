@@ -1,0 +1,9 @@
+FO4SF separate-folder check
+1. Wait for the PC helper to say the separate-folder test is prepared and ready.
+2. Watch the helper open the prepared FO4SF copy of the game.
+3. Check that the game reaches its main menu.
+4. Stay on the main menu for this check.
+5. Choose Quit to Desktop.
+6. Wait for the helper to confirm the game has closed and finished checking your usual game and saves.
+7. Tell the helper if the game did not reach the menu, closed unexpectedly, or showed an error.
+8. Leave the prepared test files in place for the helper to check.

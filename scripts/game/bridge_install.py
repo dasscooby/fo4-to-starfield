@@ -14,6 +14,7 @@ usage: python bridge_install.py install|uninstall|status --dir <staged bridge di
 """
 import argparse
 import base64
+from contextlib import nullcontext
 from collections import Counter
 import json
 import os
@@ -179,9 +180,10 @@ def install(a):
         sys.exit(f"refusing to overwrite existing game files: {clash}")
     rec = {"schema": 2, "dir": d, "plugin": PLUGIN, "source_sha256": source,
            "files": {}, "published_files": [], "complete": False}
-    with tempfile.TemporaryDirectory(prefix=f"fo4sf-{KIT}-pack-") as tmp:
-        ba2 = exp_install.build_ba2(SimpleNamespace(starfield=a.starfield), os.path.join(d, "Data"),
-                                    os.path.join(tmp, ARCHIVE))
+    prepacked = getattr(a, "prepacked", "")
+    with (nullcontext(None) if prepacked else tempfile.TemporaryDirectory(prefix=f"fo4sf-{KIT}-pack-")) as tmp:
+        ba2 = prepacked or exp_install.build_ba2(SimpleNamespace(starfield=a.starfield), os.path.join(d, "Data"),
+                                                os.path.join(tmp, ARCHIVE))
         if source_inventory(d) != source:
             raise OSError(f"{KIT} source changed while packing; nothing installed")
         exp_install.verify_archive(ba2, archive_inputs(source))
@@ -337,6 +339,7 @@ def main(argv=None):
     ap.add_argument("cmd", choices=("install", "uninstall", "status", "order"))
     ap.add_argument("--dir", default="", help="the staged bridge folder (install)")
     ap.add_argument("--starfield", required=True)
+    ap.add_argument("--prepacked", default="", help="verify and install this existing archive; never build")
     a = ap.parse_args(argv)
     if a.cmd == "install":
         if not a.dir:
