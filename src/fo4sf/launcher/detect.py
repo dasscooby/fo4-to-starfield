@@ -188,14 +188,15 @@ def detect(*, fo4_data, starfield, sources=None, out_dir=None, need_gb=0.0, floo
         exe_sha = (f.get("Starfield.exe") or {}).get("sha256")
         table_rt = runtimes if isinstance(runtimes, dict) else rt.load_runtimes(runtimes)
         known = rt.match_runtime(table_rt, exe_sha)
+        native_bad = rt.native_problems(known, starfield)
         if exe_sha and known is None:
             (warnings if allow_unknown_runtime else refusals).append(
                 f"Starfield: this Starfield.exe (sha256 {exe_sha[:12]}...) is not listed as a good runtime yet; "
                 "keep Steam set to update Starfield only when launched until support is published")
-        elif known is not None and g["sfse"]:
+        elif known is not None and g["sfse"] and not native_bad:
             for p in rt.sfse_problems(known, g):
                 (refusals if require_sfse else warnings).append(f"Starfield: SFSE: {p}")
-        refusals += [f"Starfield: native: {p}" for p in rt.native_problems(known, starfield)]
+        refusals += [f"Starfield: native: {p}" for p in native_bad]
         out["game"] = {"sfse": g["sfse"], "creation_kit": g["creation_kit"],
                        "archive2": f.get("Tools/Archive2/Archive2.exe") is not None,
                        "exe_sha256": exe_sha, "runtime": None if known is None else known["label"],

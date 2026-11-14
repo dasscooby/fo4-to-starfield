@@ -95,6 +95,9 @@ class NativeRuntimeTests(unittest.TestCase):
                         entry.pop('sfse')
                     else:
                         entry['sfse'] = sfse
+                    result = detect.detect(fo4_data=[], starfield=str(self.game), sources={'sources': []},
+                        runtimes={'runtimes': [entry]}, allow_unknown_runtime=True, require_sfse=False)
+                    self.assertTrue(any('native' in p and 'SFSE' in p for p in result['refusals']))
                     v = settings.defaults()
                     v.update(route=route, load_order='off')
                     system = FakeSystem([])
