@@ -658,6 +658,87 @@ each other outcome means:
 - A crash: send the crash log privately; `Movie=FO4SF_Fo4Boot` is proof 1 as it passed.
 - The font: if the text is not Fallout 4's typeface, that is S2 (`fonts_en.swf` is also Starfield's name).
 
+**S1, the result (owner PC, 14 Nov, 07:58 to 08:02 UTC, at `92244e49` with the dll of `e3a754b4`): PARTIAL, verified.
+The card's "frame and tabs show but no page".** Step 0 passed: the shell names the five pages bare, and none is in
+`Starfield - Interface.ba2`. The installer took the shell and the five pages without a refusal.
+- The log, the same on both opens: `load_movie ... result=1 movie_name=FO4SF_Fo4Shell`, then `code_obj when=load try=1
+  ... set=17 of=17 read_back=1`. Unlike the STAT page's sealed root, the shell's root takes `BGSCodeObj`. The probe
+  finds only `BGSCodeObj` (8) and `stage` (10); the other 14 are `found=0`, `PipboyLoader` among them. There is no
+  `code_call` in 15 seconds and no `refuse`.
+- On screen: the tab bar (STAT, INV, DATA, MAP, RADIO, with STAT selected and the LT and RT hints), and a sub-tab row
+  reading STATUS five times. The footer shows its placeholders (`HP 80/80`, LEVEL with a full bar, `AP 90/90`). All
+  of it is white and grey, stretched across the screen over the live world, and nothing animates. There is no page
+  body, no bezel and no green tint, and the typeface does not look like Fallout 4's (S2). F10 closes the menu, and the
+  game stays playable; no crash, no save.
+- The plugin logs nothing for the page loads or for the missing `PipboyMobileSettings.swf`, so this log cannot say
+  whether the shell asked for them.
+
+**What the result settles (a reading).**
+- The missing bezel and tint are expected. Fallout 4's bezel is the device model, and its engine tints the movies (S5).
+  The stretch is the menu's scale mode, which is later S1 work.
+- The shell is waiting, not failing. Its design-time placeholders are untouched (STATUS five times), so none of its
+  code that fills them from data has run.
+- The probe cannot see where the shell's logic sits. It reads members of the root once, at the hand-over (`when=load`,
+  try 1), and the shell's code is not under those 14 names there. Either it sits in a placed child clip or another
+  class, or it uses names we did not list.
+- D2's `onCodeObjCreate` and `onCodeObjDestruction` were neither probed nor called. **Hypothesis**: as in Fallout 4's
+  other menus, the engine sets `BGSCodeObj` and then calls `onCodeObjCreate`, and nothing calls it here.
+- The engine read (PB-RE-1 part A, A6) says Fallout 4 feeds the menu from 11 `Pipboy*Data` classes. **Hypothesis**:
+  the shell shows a page only once its data or a tab arrives.
+
+**S1's next slice: the decision (14 Nov, FAL-786). Read first, then an ini-only card on the same dll.**
+1. **S1-R1, a names-only read** of the player's `PipboyMenu.swf` with `scripts/ui/swf_names.py`, with no launch. It
+   says which class each name sits in, which instances are placed by name, and which names each method uses. The next
+   card's probe and calls then use paths that exist, not guesses.
+2. **S1-b, ini only, with the dll of `e3a754b4`:** probe the paths R1 shows, and list the shell's own engine verbs in
+   `CodeObjNames=` so `code_call` shows what it asks for. Then make the shell's arrival call (`onCodeObjCreate`, or
+   what R1 shows) with `CodeObjCalls=`.
+
+Not chosen now:
+- **Logging the shell's page loads in the plugin:** that is plugin code and a PC rebuild for a yes or no. S1-b reads it
+  from the loader's own members if R1 finds them. It becomes the next card only if S1-b cannot tell whether a page was
+  asked for.
+- **Supplying data:** R1 says which call or event is needed, and what shape it has. A call that needs an argument, or
+  an event the plugin builds, is plugin code, so it waits for R1. S3 starts there.
+
+**S1-R1, the card (Claude PC; read-only, no launch; names only, the output stays private).** Environment: PowerShell,
+this branch at the commit that adds `swf_names.py` (a clean checkout, or `git archive` into a scratch folder), Python
+as for D1. Nothing is written under the game folders.
+1. `python scripts/ui/swf_names.py --ba2 "<Fallout 4>\Data\Fallout4 - Interface.ba2" PipboyMenu.swf
+   Pipboy_StatsPage.swf`, with its output redirected into the PC's private evidence folder.
+   - It reads both movies in memory and prints names only: the classes and their members, the instances placed by
+     name, and, for each method, the names it calls and reads and the identifier strings it pushes.
+   - A string that is not an identifier is counted, never printed. No code and no bytes are printed.
+2. Send back names and counts only:
+   - **a. The root:** the `symbol id=0` line, that class's `class` line and its `trait of=instance` lines, and the
+     `place in=0` lines (the root's named instances, with their classes).
+   - **b. The loader:** every `place` or `trait` line whose name holds `Loader`, `Page`, `Tab` or `Swap`. Also the
+     `uses` lines of the methods whose `strings=` hold a page's file name (`Pipboy_StatsPage.swf` ...).
+   - **c. The engine calls:** the `uses` lines whose `names=` hold `BGSCodeObj` or whose `calls=` hold `call`, and the
+     identifier strings in them (the verbs passed to the engine).
+   - **d. The arrival and the data:** the `uses` lines of `onCodeObjCreate`, `onCodeObjDestruction`, `InitCodeObj`
+     and `onAcquiredByNativeCode`. Also those of any method whose `names=` or `strings=` hold `DataObj`, `ChangeEvent`,
+     `UpdateMask` or `PipboyData`. Each line names its class.
+   - **e. For `Pipboy_StatsPage.swf`:** only the `uses` lines of the methods that d shows the shell calling on a page.
+   - **f. Counts:** the lines of each kind, and every `partial` line (a method body the reader could not finish; its
+     names stop there).
+3. A `partial` or `not_swf` line is not a STOP: report it.
+
+**What S1-b does with R1 (its card follows R1; ini only, the dll of `e3a754b4` unchanged).**
+- `CodeObjNames=`: the shell's verbs from c, 16 at most, so every `code_call` line names what the shell asks for.
+- `CodeObjProbe=`: paths from a, b and d through the placed instances (for example `<instance>.<member>`), 16 at
+  most. They show where the loader and the data entry sit, and whether they are public.
+- `CodeObjCalls=`: the arrival call from d (for example `onCodeObjCreate` or `<instance>.onCodeObjCreate`), once,
+  with no arguments, right after the hand-over.
+- PASS S1-b: the STAT page's body inside the shell (2a's `ALBERT`, the bars), or `code_call` lines that name what the
+  shell waits for.
+- Each of these is a plugin card instead:
+  - a call that needs an argument;
+  - a value returned from our object;
+  - an event the plugin builds;
+  - a loader that R1 shows is created by a method rather than placed (the probe runs at load only, so it cannot see
+    it).
+
 **Proof 2, the outline (route A): the STAT page.** Each step has its own card once the one before it has run.
 - **2a, the page alone:** `Movie=FO4SF_Fo4Stats`, the player's `Pipboy_StatsPage.swf` installed with
   `--extra-movie FO4SF_Fo4Stats`, and `CodeObj=1` with the page's own names in `CodeObjNames`. Shows: the page's frame
@@ -765,6 +846,7 @@ delivery.
 4. Done: read D4 and proof 1d (13 Nov, the sounds by route S2, PASS by the log; the owner's ear still to hear it).
 5. Done: proof 2a, the STAT page alone (13 Nov, second run: the page draws and takes our object through
    `InitCodeObj`). Done: proof 2b step i (no data entry on the root) and step ii (the acquire step opens nothing).
-6. Now: S1, the shell with its pages (the card above; scripts only, the dll of `e3a754b4`). Then S3's first branch
-   (STAT, HP by name) through the shell, from S1's log, with its own card, tests, a CARRY line, a review, and the PC's
-   run.
+6. Done: S1, the shell with its pages (14 Nov, PARTIAL: the tab bar and footer draw; no page).
+7. Now: S1-R1 (names only, no launch, with `scripts/ui/swf_names.py`), then S1-b (ini only, the dll of `e3a754b4`),
+   each with its own card. Then S3's first branch (STAT, HP by name) through the shell, with its own card, tests, a
+   CARRY line, a review, and the PC's run.

@@ -307,6 +307,32 @@ class RebuildPlanTests(unittest.TestCase):
         self.assertIn("constexpr std::size_t   kMaxCodeNames = 16;", self.main)
         self.assertIn('g_movie = ReadText(ini, L"Movie");', self.main)   # the shell loads as any FO4SF_ movie
 
+    def test_s1_result_and_the_r1_read(self):
+        # FAL-614 / FAL-786: S1 recorded as PARTIAL; the next slice is a names-only read (S1-R1) with swf_names.py,
+        # then an ini-only card on the same dll
+        for text in ("**S1, the result (owner PC, 14 Nov, 07:58 to 08:02 UTC, at `92244e49` with the dll of `e3a754b4`): PARTIAL, verified.",
+                     "**S1's next slice: the decision (14 Nov, FAL-786). Read first, then an ini-only card on the same dll.**",
+                     "**S1-R1, the card (Claude PC; read-only, no launch; names only, the output stays private).**",
+                     "**What S1-b does with R1 (its card follows R1; ini only, the dll of `e3a754b4` unchanged).**",
+                     "6. Done: S1, the shell with its pages (14 Nov, PARTIAL", "7. Now: S1-R1"):
+            self.assertIn(text, self.plan, text)
+        card = self.plan[self.plan.index("**S1-R1, the card"):self.plan.index("**What S1-b does with R1")]
+        self.assertIn("python scripts/ui/swf_names.py --ba2", card)
+        self.assertIn("PipboyMenu.swf\n   Pipboy_StatsPage.swf", card)
+        self.assertTrue((ROOT / "scripts" / "ui" / "swf_names.py").is_file())
+        # the card asks only for line kinds the reader documents
+        import swf_names
+        kinds = re.findall(r"`(symbol|class|trait|place|uses|partial|not_swf)\b", card)
+        self.assertEqual(set(kinds), {"symbol", "class", "trait", "place", "uses", "partial", "not_swf"})
+        for kind in set(kinds):
+            self.assertRegex(swf_names.__doc__, rf"\n  {kind}[ =]" if kind != "not_swf" else r" not_swf=1", kind)
+        # S1-b's ini settings exist in the dll of e3a754b4, at 16 paths most, read and called once at the hand-over
+        s1b = self.plan[self.plan.index("**What S1-b does with R1"):self.plan.index("**Proof 2, the outline")]
+        for setting in ("CodeObjNames", "CodeObjProbe", "CodeObjCalls"):
+            self.assertIn(f"`{setting}=`", s1b)
+            self.assertIn(f'ReadText(ini, L"{setting}")', self.main)
+        self.assertIn("16 at\n  most", s1b)
+
     def test_reads_recorded(self):
         for text in ("**Read on the PC (D1, 13 Nov,", "**Read on the PC (D3, 13 Nov): verified.**",
                      "`Interface\\Pip-Boy\\WorldMap_d.dds`, 2048 x 2048", "**D2 (data names; needed"):
