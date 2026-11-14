@@ -73,3 +73,9 @@ Before: `state.json` kept every Plugins.txt line as a Get-Content object, with P
 Windows with the real script, real Get-Content/ConvertTo-Json, the same synthetic ten-line Plugins.txt and a stubbed
 capture: **4,551,695 bytes before, 794 bytes after** (parent vs 1da8aba3). The list keeps the same strings in the same
 order.
+
+### 2026-11-10 Minuteman: CI unit tests run one process per module (FAL-185)
+Before: `python -m unittest discover -s tests -v`, one process: 229 s on the 4-core dev server (i7-7700, Python 3.14);
+1,055 s of the 17 min 55 s `checks` job on the GitHub runner (run 42839731979). After: `python scripts/ci/run_tests.py
+--jobs 4`, 71 to 74 s on the same server (3 runs), same totals (4,388 run, 0 failures, 0 errors, 166 skipped). The
+floor is `test_ai_guard`, which waits a real 60 s in one test. GitHub-runner time to be read from the PR's own run.
