@@ -52,6 +52,7 @@ try
     if (rest.Count == 4 && rest[0] == "build") return CogDoorProbe.Build(rest[1], rest[2], rest[3], refId, control ? null : (model!, rig!, anims!));
     if (rest.Count == 4 && rest[0] == "check") return CogDoorProbe.Check(rest[1], rest[2], rest[3], refId, control ? null : (model!, rig!, anims!));
     if (rest.Count == 2 && rest[0] == "fixture") return CogDoorProbe.Fixture(rest[1]);
+if (rest.Count == 4 && rest[0] == "fixture") return CogDoorProbe.Fixture(rest[1], rest[2], rest[3]);   // fixture <dir> <DNAM> <ENAM>
 }
 catch (CogDoorProbe.Refusal r)
 {
@@ -116,7 +117,7 @@ static class CogDoorProbe
     {
         var g = d.Components.OfType<IAnimationGraphComponentGetter>().FirstOrDefault();
         return $"DOOR {d.FormKey} {d.EditorID} name '{d.Name?.String}' model {d.Model?.File} graph component " +
-               (g == null ? "none" : $"ANAM {g.ANAM} BNAM {g.BNAM} CNAM {g.CNAM}");
+               (g == null ? "none" : $"ANAM {g.ANAM} BNAM {g.BNAM} CNAM {g.CNAM} DNAM {g.DNAM ?? "none"} ENAM {g.ENAM ?? "none"}");
     }
 
     public static int Info(string portPath, string sfPath, uint refId)
@@ -162,8 +163,11 @@ static class CogDoorProbe
             var ov = baseRec.DeepCopy();                                           // an override: the same form key, FO4Port.esm
             ov.Model ??= new Model();
             ov.Model.File = f.Model;
-            foreach (var old in ov.Components.OfType<AnimationGraphComponent>().ToList()) ov.Components.Remove(old);
-            ov.Components.Add(new AnimationGraphComponent { ANAM = graph.ANAM, BNAM = f.Rig, CNAM = f.Anims });
+            // the copy keeps its own graph component: set ONLY BNAM (rig) and CNAM (clip folder); ANAM, DNAM, ENAM and anything else it carries stay as the
+            // base's (the FAL-579 construction of AnimGenericControl; FAL-760 HOLD: a rebuilt component dropped DNAM and ENAM and Check could not see it)
+            var comp = ov.Components.OfType<AnimationGraphComponent>().Single();
+            comp.BNAM = f.Rig;
+            comp.CNAM = f.Anims;
             mod.Doors.Add(ov);
         }
         mod.Quests.Add(MakeQuest());
@@ -235,10 +239,10 @@ static class CogDoorProbe
                 Need(Equals(ovr.OpenSound, baseRec.OpenSound) && Equals(ovr.CloseSound, baseRec.CloseSound), "the override's sounds changed");
                 var wantModel = new Model { File = files.Value.Model }.File.ToString();                 // Mutagen files a model path as Meshes/<path>
                 Need(ovr.Model?.File?.ToString() == wantModel, $"the model is not {wantModel}");
-                Need(ovr.Model?.File?.ToString() != baseRec.Model?.File?.ToString(), "the model path is the port's own: the override would shadow an archived file, not use a new path");
+                Need(!string.Equals(ovr.Model?.File?.ToString(), baseRec.Model?.File?.ToString(), StringComparison.OrdinalIgnoreCase), "the model path is the port's own: the override would shadow an archived file, not use a new path");
                 var g = ovr.Components.OfType<IAnimationGraphComponentGetter>().ToList();
-                Need(g.Count == 1 && baseGraph != null && g[0].ANAM == baseGraph.ANAM && g[0].BNAM == files.Value.Rig && g[0].CNAM == files.Value.Anims,
-                     "the animation graph component is not (the base's door graph, the new rig, the new clip folder) exactly once");
+                Need(g.Count == 1 && baseGraph != null && g[0].ANAM == baseGraph.ANAM && g[0].DNAM == baseGraph.DNAM && g[0].ENAM == baseGraph.ENAM && g[0].BNAM == files.Value.Rig && g[0].CNAM == files.Value.Anims,
+                     "the animation graph component is not (the base's own fields except the new rig and the new clip folder) exactly once");
                 Need(ovr.Components.Count() == baseRec.Components.Count(), "the override dropped or added another component");
             }
         }
@@ -259,7 +263,7 @@ static class CogDoorProbe
 
     // ---------------------------------------------------------------- fixture
 
-    public static int Fixture(string outDir)
+    public static int Fixture(string outDir, string dnam = "KEEP-DNAM", string enam = "KEEP-ENAM")
     {
         Directory.CreateDirectory(outDir);
         var sf = new StarfieldMod(SfEsm, Release);
@@ -276,6 +280,7 @@ static class CogDoorProbe
             ANAM = "AnimTextData\\Tables\\Graphs\\SimpleOpenClose01.agx",
             BNAM = "fo4port\\interiors\\vault\\doors\\vltgeardoor\\vltgeardoor01\\characterassets\\skeleton.rig",
             CNAM = "fo4port\\interiors\\vault\\doors\\vltgeardoor\\vltgeardoor01\\animations",
+            DNAM = dnam, ENAM = enam,                                              // non-default, so a build that drops them is seen (FAL-760)
         });
         port.Doors.Add(door);
         var cell = new Cell(new FormKey(PortEsm, 0x0016D8), Release) { EditorID = "FO4Port_Vault111Cryo", Flags = Cell.Flag.IsInteriorCell };

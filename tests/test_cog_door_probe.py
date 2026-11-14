@@ -243,6 +243,20 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(wrong.returncode, 1)
         self.assertIn("the model is not Meshes/other.nif", norm(wrong.stdout))
 
+    def test_the_override_keeps_the_base_graph_fields_it_does_not_change_and_check_sees_a_drop(self):
+        # FAL-760 HOLD 1: the override copies the graph component and sets only BNAM and CNAM; DNAM and ENAM stay the base's, and Check compares them
+        port, sf = self.paths()
+        out = self.root / "b3"
+        self.assertEqual(self.run_tool("build", port, sf, out, *MARGS).returncode, 0)
+        ok = self.run_tool("check", out / PLUGIN, port, sf, *MARGS)
+        self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
+        self.assertIn("DNAM KEEP-DNAM ENAM KEEP-ENAM", norm(ok.stdout))
+        other = self.root / "DataOther"                                   # the same port with other DNAM / ENAM: the override now differs from its base
+        self.assertEqual(self.run_tool("fixture", other, "OTHER-DNAM", "OTHER-ENAM").returncode, 0)
+        bad = self.run_tool("check", out / PLUGIN, other / "FO4Port.esm", other / "Starfield.esm", *MARGS)
+        self.assertEqual(bad.returncode, 1, bad.stdout)
+        self.assertIn("the animation graph component is not", norm(bad.stdout))
+
     def test_a_model_path_equal_to_the_ports_own_is_refused_by_check(self):
         port, sf = self.paths()
         own = ["--model", "fo4port\\interiors\\vault\\doors\\vltgeardoor\\vltgeardoor01.nif", "--rig", RIG, "--anims", ANIMS]
@@ -251,6 +265,13 @@ class ToolTests(unittest.TestCase):
         check = self.run_tool("check", out / PLUGIN, port, sf, *own)
         self.assertEqual(check.returncode, 1)
         self.assertIn("the override would shadow an archived file", check.stdout)
+        # FAL-760 HOLD 2: Windows archive lookup ignores case, so the same path in other case shadows the archived file too
+        loud = [own[0], own[1].upper(), *own[2:]]
+        out2 = self.root / "b2case"
+        self.assertEqual(self.run_tool("build", port, sf, out2, *loud).returncode, 0)
+        loud_check = self.run_tool("check", out2 / PLUGIN, port, sf, *loud)
+        self.assertEqual(loud_check.returncode, 1, loud_check.stdout)
+        self.assertIn("the override would shadow an archived file", loud_check.stdout)
 
     def test_the_control_is_the_quest_alone_and_the_full_check_refuses_it(self):
         port, sf = self.paths()
