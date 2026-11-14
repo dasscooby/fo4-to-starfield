@@ -26,7 +26,7 @@ ramp end (about 6 m from the cog); the cog and the view stayed identical over 13
 (the owner's word, game closed). Two kits from one stager:
 - **control** (`--control`): the quest alone, no DOOR override. The installed port's own door answers the stages: step 0 repeated with a trigger.
 - **full**: the DOOR override plus the quest: step 1.
-Quest stages (set one at a time, `setstage FO4SF_CogDoorQuest <n>`, after the previous watch closed; each of 20/30/40 logs the open state every 2 s
+Quest stages (set one at a time, `setstage <quest form id> <n>`: the plugin's load index plus 000800, e.g. `setstage 0E000800 20` when it loaded as 0E; the name form `setstage FO4SF_CogDoorQuest <n>` is refused by the console, "Item ... not found for parameter Quest", observed in the PC session of 14 Nov; after the previous watch closed; each of 20/30/40 logs the open state every 2 s
 for 60 s; console closed through the watch): 10 read, 20 `SetOpen(true)`, 30 `SetOpen(false)`, 40 `Activate(player)`, 50 read. Log:
 `My Games\Starfield\Logs\Script\User\FO4SFCogDoor.0.log`, read with `make_cog_door.py log`. Every line also shows on screen ("AP ...").
 
