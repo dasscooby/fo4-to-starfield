@@ -8,7 +8,7 @@ import struct
 from . import nif,sfnif,native_door,door_rig
 
 
-def build(plan, shapes, unit_scale, collision_by_node=None, name=b'FO4Port_DoorModel'):
+def build(plan, shapes, unit_scale, collision_by_node=None, name=b'FO4Port_DoorModel', child_bodies=None):
     native_door.prepare(plan,unit_scale)
     collision_by_node=dict(collision_by_node or {})
     expected={a['shape'] for a in plan['attachments']}
@@ -19,6 +19,11 @@ def build(plan, shapes, unit_scale, collision_by_node=None, name=b'FO4Port_DoorM
         raise ValueError('collision attachment references absent rig bone')
     if any(not isinstance(blob,bytes) or not blob for blob in collision_by_node.values()):
         raise ValueError('collision attachment requires a nonempty native blob')
+    child_bodies={k:list(v) for k,v in (child_bodies or {}).items()}
+    if not set(child_bodies)<=node_ids:
+        raise ValueError('child body references absent rig bone')
+    if any(not isinstance(b[3],bytes) or not b[3] for v in child_bodies.values() for b in v):
+        raise ValueError('child body requires a nonempty native blob')
     if name.decode('utf-8') in {b['name'] for b in plan['bones']}:
         raise ValueError('model wrapper name collides with rig bone')
     f=nif.NifFile(endian=1,user_version=12,bs_version=173,author=b'\0',unknown_int=0,export_script=b'\0',sf_data=b'\x7a\0')
@@ -35,7 +40,7 @@ def build(plan, shapes, unit_scale, collision_by_node=None, name=b'FO4Port_DoorM
         pending[index]=[f.string_index(node_name),extras,t,r,scale,collision,[]]
         return index
     root=node(name,(0,0,0),identity,retained=False)
-    flags=f.add_block('BSXFlags',struct.pack('<iI',f.string_index(b'BSX'),0x0A if collision_by_node else 0))
+    flags=f.add_block('BSXFlags',struct.pack('<iI',f.string_index(b'BSX'),0x0A if collision_by_node or child_bodies else 0))
     pending[root][1].append(flags)
     target_nodes=[]
     for bone in plan['bones']:
@@ -45,6 +50,8 @@ def build(plan, shapes, unit_scale, collision_by_node=None, name=b'FO4Port_DoorM
                    blob=collision_by_node.get(bone['node']))
         parent=root if bone['parent']==-1 else target_nodes[bone['parent']]
         pending[parent][-1].append(index);target_nodes.append(index)
+        for body_name,t,r,blob in child_bodies.get(bone['node'],[]):   # collision-only child node, e.g. a thin walkway deck
+            pending[index][-1].append(node(body_name.encode('utf-8'),list(t),tuple(r),blob=blob))
     for attachment in plan['attachments']:
         local=attachment['local_transform'];door_rig.quaternion_from_matrix(local['rotation_row_major'])
         wrapper=node(('GeometryAttachment_'+str(attachment['shape'])).encode(),
