@@ -80,6 +80,20 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(sorted(used - listed), [])
 
 
+class StageCommandTextTests(unittest.TestCase):
+    """The PC's 14 Nov session: `setstage FO4SF_CogDoorQuest <n>` is refused ("Item ... not found for parameter Quest", nothing set); the form id works."""
+
+    def test_the_readme_and_the_doc_give_the_form_id_form_and_name_the_refused_one(self):
+        for rel in ("scripts/newgame/make_cog_door.py", "docs/research/cog-door-probe.md"):
+            text = (ROOT / rel).read_text(encoding="utf-8")
+            self.assertIn("setstage <quest form id> <n>", text, rel)
+            self.assertIn("000800", text, rel)
+            self.assertIn("not found for parameter Quest", text, rel)
+            # the name form may appear only as the refused one: "refused" follows it within 120 characters
+            for m in re.finditer(re.escape("setstage FO4SF_CogDoorQuest <n>"), text):
+                self.assertIn("refused", text[m.end():m.end() + 120], f"{rel}: the name form is given as an instruction")
+
+
 class RefIdTests(unittest.TestCase):
     def test_the_ref_id_is_written_once_and_a_bad_one_is_refused(self):
         on = mcd.set_ref_id(PSC, "0x00126D")
