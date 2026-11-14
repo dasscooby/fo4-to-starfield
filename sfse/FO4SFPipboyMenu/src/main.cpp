@@ -84,11 +84,19 @@
 // menu's through `text` and `visible` only, each change read back. Keys (polled while the page is open and the game in
 // front) and clicks (one listener on the movie's root, which reads the click's target name) move the selection, the
 // sub-tab and the main tab; CLOSE keeps stage d's handler. Stage (d)'s checks and ids; nothing new is called.
+//
+// Stage (e) with Device=1, FAL-714 (step 3b, the device raise; off by default): DeviceKey (F7) looks up the raise and
+// lower idles by editor id (TESForm::LookupByEditorID, libxse id 47403, checked in the Address Library file like the
+// others), sends the raise idle's animation event to the player (IAnimationGraphManagerHolder at +0x60, slot 0x01
+// NotifyAnimationGraphImpl, checked by RTTI), opens the kit DeviceRaiseMs later with its root moved into DeviceBox, and
+// every close of a menu opened that way sends the lower idle's event. Key (F10) stays the full flat screen. At Device=0
+// nothing of it runs and no line of it is logged.
 
 #include "pch.h"
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
@@ -249,6 +257,26 @@ namespace
 		"time", "days", "position" };
 	constexpr std::array<std::string_view, 3> kKitLists{ "kit_test", "inventory", "quests" };
 	constexpr std::string_view kKitActorValue = "av:";
+
+	// FAL-714, the device raise (step 3b; Device=1 at Stage=5 only; README, "The device raise"). The idles are named by
+	// editor id in the ini, never by form id: step 3a's playidle by form id showed nothing
+	constexpr std::uint32_t kLookupByEditorId = 47403;       // libxse 9d090c4 ID::TESForm::LookupByEditorID (not in kIds)
+	constexpr std::size_t   kFormTypeAt = 0x2E;              // libxse RE::TESForm::formType (a u8)
+	constexpr std::uint8_t  kIdleType = 0x5C;                // libxse FormType kIDLE (TESIdleForm)
+	constexpr std::size_t   kIdleGraphAt = 0x68;             // 1.16.244, FAL-719, inferred from the 3b session; the Sep 2025 libxse header has 0x60/0x68
+	constexpr std::size_t   kIdleEventAt = 0x70;             // 1.16.244, FAL-719, inferred from the 3b session; the Sep 2025 libxse header has 0x60/0x68
+	constexpr std::size_t   kIdleSlotFirst = 0x58;           // FAL-719: step=device_idle_slots reads s58 to s80, 8 bytes apart
+	constexpr std::size_t   kIdleSlotLast = 0x80;
+	constexpr std::uint32_t kAnimHolderAt = 0x60;            // libxse RE::TESObjectREFR: IAnimationGraphManagerHolder base
+	constexpr std::size_t   kNotifyGraphSlot = 0x01;         // libxse IAnimationGraphManagerHolder::NotifyAnimationGraphImpl
+	constexpr std::size_t   kMaxIdleName = 96;               // an idle's editor id in the ini: letters, digits, '_'
+	constexpr std::uint32_t kMaxDeviceMs = 5000;             // DeviceRaiseMs and DeviceLowerMs, at most
+	constexpr std::int64_t  kDeviceRetryEveryMs = 100;       // FAL-725: a refused raise or lower is resent this often
+	constexpr std::uint32_t kQuickSaveKey = 0x74;           // FAL-719: F5, the game's Quick Save; DeviceKey refuses it
+	constexpr std::uint32_t kQuickLoadKey = 0x78;            //   and F9, its Quick Load (the 3b session at 6040290d)
+	constexpr double        kStageWidth = 1920.0;            // make_pipboy_kit.py STAGE: DeviceBox is in its fractions
+	constexpr double        kStageHeight = 1080.0;
+	constexpr double        kBoxReadBack = 0.05;             // a property read back this close (Scaleform keeps twips)
 	// the menus a main-thread snapshot asks the engine about (IsMenuRegistered, IsMenuOpen); only Console is named by
 	// libxse, the rest are guesses, and the first snapshot logs which of them are registered
 	constexpr std::array<const char*, 14> kKnownMenus{ "FO4SF_PipboyMenu", "HUDMenu", "CursorMenu", "PauseMenu",
@@ -447,6 +475,51 @@ namespace
 	std::atomic<bool>                        g_closeNow{ false };      // CLOSE: the key thread closes the menu
 	std::mutex                               g_pageLock;
 	std::array<std::array<std::string, kPageLines + 1>, 2> g_pageText;   // [tab][0] the tab line, [1..7] the lines
+
+	// FAL-714, the device raise (INI Device ... DeviceBox; read only at Stage=5, used only at Device=1)
+	bool                                     g_device = false;
+	std::uint32_t                            g_deviceKey = 0x76;       // F7 (FAL-719: F9 is the game's Quick Load)
+	std::string                              g_deviceRaiseIdle;        // editor ids
+	std::string                              g_deviceLowerIdle;
+	std::uint32_t                            g_deviceRaiseMs = 900;
+	std::uint32_t                            g_deviceLowerMs = 700;
+	std::array<double, 3>                    g_deviceBox{ 0.078, 0.271, 0.309 };   // left, top (stage fractions), scale
+	std::uint32_t                            g_deviceLookupRva = 0;    // TESForm::LookupByEditorID, CheckDeviceId
+	std::atomic<std::int64_t>                g_devicePressAt{ 0 };     // the last DeviceKey press, steady clock ms
+	std::atomic<std::uint32_t>               g_deviceN{ 0 };           // that press's n
+	std::atomic<std::int64_t>                g_deviceLowerUntil{ 0 };  // DeviceKey ignored until then (DeviceLowerMs)
+	std::uint32_t                            g_deviceRetryMs = 2000;   // FAL-725: a refused raise or lower is resent this long
+
+	// FAL-725: one pending send (the raise or the lower). The main thread sends and writes the outcome; the key thread's
+	// 30 ms tick queues the next try at nextAt. kIdle: nothing pending; kInFlight: a try is queued on the main thread;
+	// kWaiting: the last try gave 0 and the next is due at nextAt
+	enum : int
+	{
+		kRetryIdle,
+		kRetryInFlight,
+		kRetryWaiting
+	};
+	struct DeviceRetry
+	{
+		std::atomic<int>           state{ kRetryIdle };
+		std::atomic<std::uint32_t> n{ 0 };
+		std::atomic<std::int64_t>  firstAt{ 0 };    // the first try, steady ms
+		std::atomic<std::int64_t>  nextAt{ 0 };
+		std::atomic<std::int64_t>  deadline{ 0 };   // firstAt + DeviceRetryMs
+		std::atomic<std::uint32_t> tries{ 0 };
+	};
+	DeviceRetry                              g_raiseRetry;
+	DeviceRetry                              g_lowerRetry;
+	std::atomic<std::int64_t>                g_deviceShowAt{ 0 };      // FAL-725: DeviceShow due (0 = none), set by the raise's outcome
+	std::string                              g_deviceRaiseOutcome;     // main thread only: "1", "gave_up", or a stop word
+	std::atomic<bool>                        g_deviceOpening{ false }; // the next kShow is the device's
+	std::atomic<bool>                        g_asDevice{ false };      // the menu is open as the device
+	std::atomic<bool>                        g_deviceShown{ false };   // our ProcessMessage saw kShow and no kHide since
+	int                                      g_deviceState = -1;       // main thread only: -1 unresolved, 0 refused, 1 ready
+	std::uintptr_t                           g_raiseIdle = 0;          // main thread only: the TESIdleForms
+	std::uintptr_t                           g_lowerIdle = 0;
+	std::uintptr_t                           g_deviceHolderVtable = 0; // the player's IAnimationGraphManagerHolder vtable
+	std::uintptr_t                           g_deviceNotify = 0;       // its checked slot 0x01
 
 	std::uintptr_t Address(std::size_t a_id) { return g_base + g_rva[a_id]; }
 
@@ -1622,6 +1695,282 @@ namespace
 			REX::INFO("step=page n={} update={} tab={} root={} fields={}/{} set={} match={} text=\"{}\"", n, a_update, tab,
 				gotRoot ? 1 : 0, found, text.size(), set, match, all);
 		}
+	}
+
+	// ------------------------------------------------------------------------------------------- FAL-714: the device raise
+	// Device=1 at Stage=5 (README, "The device raise"). DeviceKey sends the raise idle's animation event to the player,
+	// opens the kit DeviceRaiseMs later moved into DeviceBox, and every close of a menu opened that way sends the lower
+	// idle's event. Key (F10) opens the full flat screen, no raise. Every device line carries t_ms, the milliseconds
+	// since the last DeviceKey press (steady clock). At Device=0 none of this runs and none of its lines is logged.
+	std::int64_t NowMs()
+	{
+		return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+	}
+
+	std::int64_t SincePress() { return NowMs() - g_devicePressAt.load(); }
+
+	using LookupByEditorId_t = void* (*)(const RE::BSFixedString&);
+	using NotifyGraph_t = bool (*)(void*, const RE::BSFixedString&);
+
+	// FAL-719: an event name that looks like a file path: a '\' or '/', or ending .agx, .hkx or .hkt (any case)
+	bool EventIsPath(std::string_view a_event)
+	{
+		if (a_event.find_first_of("\\/") != std::string_view::npos) {
+			return true;
+		}
+		for (const std::string_view ext : { ".agx"sv, ".hkx"sv, ".hkt"sv }) {
+			if (a_event.size() >= ext.size() && SameText(a_event.substr(a_event.size() - ext.size()), ext)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// one idle by its editor id, through the engine's lookup (libxse TESForm::LookupByEditorID, CheckDeviceId), on the
+	// main thread: a TESIdleForm by its RTTI, form type IDLE (+0x2E), with an animation event. Its form id, graph and
+	// event are logged: step 3a's playidle by form id showed nothing, and this line says what the editor id resolves to
+	std::uintptr_t DeviceIdleForm(std::string_view a_which, const std::string& a_editorId)
+	{
+		static std::vector<RE::BSFixedString*> names;   // process lifetime: a BSFixedString destructor calls the engine
+		names.push_back(new RE::BSFixedString(a_editorId.c_str()));
+		const auto form = reinterpret_cast<std::uintptr_t>(
+			reinterpret_cast<LookupByEditorId_t>(g_base + g_deviceLookupRva)(*names.back()));
+		if (!form) {
+			Refuse("device_idle", std::format("which={} editor_id={} reason=not_found t_ms={}", a_which, a_editorId, SincePress()));
+			return 0;
+		}
+		ObjectType    type;
+		std::uint32_t formId = 0;
+		std::uint8_t  formType = 0;
+		const bool    typed = IsType(form, "TESIdleForm@@", type);
+		Peek(form + kFormIdAt, formId);
+		Peek(form + kFormTypeAt, formType);
+		if (!typed || formType != kIdleType) {
+			Refuse("device_idle", std::format("which={} editor_id={} reason=not_idle form={:08X} type={:#x} rtti={} t_ms={}",
+				a_which, a_editorId, formId, formType, type.name.empty() ? "unreadable" : type.name, SincePress()));
+			return 0;
+		}
+		// FAL-719: every pool-string slot from +0x58 to +0x80, once per idle, read only: the 3b session read the graph's
+		// .agx path at +0x68, where the Sep 2025 libxse header puts the event, so the layout is shown, not assumed
+		std::string slots;
+		for (std::size_t at = kIdleSlotFirst; at <= kIdleSlotLast; at += 8) {
+			std::uintptr_t entry = 0;
+			std::string    text;
+			const bool     read = Peek(form + at, entry) && ReadPoolString(entry, text);
+			slots += std::format(" s{:x}={}", at, read && !text.empty() ? text : "-");
+		}
+		REX::INFO("step=device_idle_slots which={} form={:08X}{} t_ms={}", a_which, formId, slots, SincePress());
+		std::uintptr_t graphEntry = 0;
+		std::uintptr_t eventEntry = 0;
+		std::string    graph;
+		std::string    event;
+		const bool     gotGraph = Peek(form + kIdleGraphAt, graphEntry) && ReadPoolString(graphEntry, graph);
+		const bool     gotEvent = Peek(form + kIdleEventAt, eventEntry) && ReadPoolString(eventEntry, event);
+		if (!gotEvent || event.empty()) {
+			Refuse("device_idle", std::format("which={} editor_id={} reason=no_event form={:08X} type={:#x} graph={} t_ms={}",
+				a_which, a_editorId, formId, formType, gotGraph && !graph.empty() ? graph : "-", SincePress()));
+			return 0;
+		}
+		if (EventIsPath(event)) {   // FAL-719: a file path is not an animation event (6040290d sent the graph's .agx)
+			Refuse("device_idle", std::format("which={} editor_id={} reason=event_is_path slot={:#x} value={} form={:08X} t_ms={}",
+				a_which, a_editorId, kIdleEventAt, event, formId, SincePress()));
+			return 0;
+		}
+		REX::INFO("step=device_idle which={} editor_id={} form={:08X} type={:#x} graph={} event={} t_ms={}", a_which,
+			a_editorId, formId, formType, gotGraph && !graph.empty() ? graph : "-", event, SincePress());
+		return form;
+	}
+
+	// the player's IAnimationGraphManagerHolder, as CheckActorValues checks ActorValueOwner: the base's offset from
+	// PlayerCharacter's RTTI hierarchy (libxse: 0x60), its vtable's locator naming PlayerCharacter there, slot 0x00 the
+	// adjustor thunk to the player's own destructor, and slot 0x01 (NotifyAnimationGraphImpl, libxse's declaration after
+	// the destructor) inside the image. -1: no player yet (not cached), 0: refused, 1: checked
+	int DeviceHolder()
+	{
+		ObjectType type;
+		const auto player = Singleton(kPlayerSingleton);
+		if (!player) {
+			return -1;
+		}
+		if (!CheckSingleton("PlayerCharacter", kPlayerSingleton, kPlayerRtti, g_playerOk) || !TypeOf(player, type)) {
+			Refuse("device_holder", std::format("reason=player_type t_ms={}", SincePress()));
+			return 0;
+		}
+		const auto     at = BaseOffset(type, "IAnimationGraphManagerHolder@@");
+		std::uintptr_t primary = 0;
+		std::uintptr_t holder = 0;
+		if (!at || *at != kAnimHolderAt || !CheckSubobject(player, type, *at) || !Peek(player, primary) ||
+			!Peek(player + *at, holder) || !InImage(primary, 8) || !InImage(holder, (kNotifyGraphSlot + 1) * 8)) {
+			Refuse("device_holder", std::format("reason=holder offset={} expected={} t_ms={}", at ? Hex(*at) : "none",
+				Hex(kAnimHolderAt), SincePress()));
+			return 0;
+		}
+		const auto* slots = reinterpret_cast<const std::uintptr_t*>(holder);
+		const auto  destructor = *reinterpret_cast<const std::uintptr_t*>(primary);
+		const auto  target0 = ThunkTarget(slots[0], *at);
+		const auto  rva = [](std::uintptr_t a_addr) { return InImage(a_addr, 1) ? Hex(a_addr - g_base) : Hex(a_addr); };
+		if (target0 != destructor || !InImage(slots[kNotifyGraphSlot], 1)) {
+			Refuse("device_holder", std::format("reason=slots offset={} slot0={} target0={} destructor={} slot1={} t_ms={}",
+				Hex(*at), rva(slots[0]), rva(target0), rva(destructor), rva(slots[kNotifyGraphSlot]), SincePress()));
+			return 0;
+		}
+		g_deviceHolderVtable = holder;
+		g_deviceNotify = slots[kNotifyGraphSlot];
+		REX::INFO("step=device_holder offset={} vtable={} destructor_slot=0x00 notify_slot=0x01 slot={} t_ms={}", Hex(*at),
+			rva(holder), rva(g_deviceNotify), SincePress());
+		return 1;
+	}
+
+	// main thread, once (on the first DeviceKey with a player): both idles and the player's holder
+	bool DeviceResolve()
+	{
+		if (g_deviceState >= 0) {
+			return g_deviceState == 1;
+		}
+		const int holder = DeviceHolder();
+		if (holder < 0) {
+			return false;   // no player yet: tried again on the next press
+		}
+		g_raiseIdle = DeviceIdleForm("raise", g_deviceRaiseIdle);
+		g_lowerIdle = DeviceIdleForm("lower", g_deviceLowerIdle);
+		g_deviceState = holder == 1 && g_raiseIdle && g_lowerIdle ? 1 : 0;
+		return g_deviceState == 1;
+	}
+
+	// the idle's animation event to the player (NotifyAnimationGraphImpl, called with this = player + 0x60), main
+	// thread only. The event is the idle's own BSFixedString (no string of ours). "no_player" if there is none,
+	// "holder_changed" if the player's holder vtable is no longer the one DeviceHolder checked
+	std::string DeviceNotify(std::uintptr_t a_idle)
+	{
+		const auto     player = Singleton(kPlayerSingleton);
+		std::uintptr_t holder = 0;
+		if (!player) {
+			return "no_player";
+		}
+		if (!Peek(player + kAnimHolderAt, holder) || holder != g_deviceHolderVtable) {
+			return "holder_changed";
+		}
+		const auto& event = *reinterpret_cast<const RE::BSFixedString*>(a_idle + kIdleEventAt);
+		const bool  sent = reinterpret_cast<NotifyGraph_t>(g_deviceNotify)(reinterpret_cast<void*>(player + kAnimHolderAt), event);
+		return sent ? "1" : "0";
+	}
+
+	// FAL-725: a pending send begins (the key thread for the raise, our kHide handling for the lower): its first try is
+	// queued on the main thread now, the retries until DeviceRetryMs from now
+	void DeviceRetryStart(DeviceRetry& a_retry, std::uint32_t a_n)
+	{
+		const auto now = NowMs();
+		a_retry.n = a_n;
+		a_retry.firstAt = now;
+		a_retry.nextAt = now;
+		a_retry.deadline = now + g_deviceRetryMs;
+		a_retry.tries = 0;
+		a_retry.state = kRetryInFlight;
+	}
+
+	// FAL-725, main thread, after a try: "0" (the graph did not take the event; a no-op there) is tried again every
+	// kDeviceRetryEveryMs, on the key thread's tick, while that stays inside DeviceRetryMs. "1", the deadline
+	// ("gave_up") or any other word (holder_changed, no_player, refused) ends it. "" while a try is still due
+	std::string DeviceRetryOutcome(DeviceRetry& a_retry, const std::string& a_result)
+	{
+		const auto now = NowMs();
+		if (a_result == "0" && now + kDeviceRetryEveryMs <= a_retry.deadline.load()) {
+			a_retry.nextAt = now + kDeviceRetryEveryMs;
+			a_retry.state = kRetryWaiting;
+			return {};
+		}
+		a_retry.state = kRetryIdle;
+		return a_result == "0" ? std::string("gave_up") : a_result;
+	}
+
+	// main thread: DeviceKey while closed, and each retry of it. The first try is logged, then one closing line;
+	// DeviceShow is due DeviceRaiseMs after the accepted (or given-up) raise, on the key thread's tick
+	void DeviceRaise(std::uint32_t a_n)
+	{
+		const auto  tries = ++g_raiseRetry.tries;
+		std::string result;
+		if (!DeviceResolve()) {
+			result = g_deviceState == 0 ? "refused" : "no_player";
+		} else {
+			result = DeviceNotify(g_raiseIdle);
+		}
+		if (tries == 1) {
+			REX::INFO("step=device_raise n={} result={} try=1 t_ms={}", a_n, result, SincePress());
+		}
+		if (g_deviceRetryMs == 0) {   // b89ead09's behaviour: one send, the kit DeviceRaiseMs later
+			g_raiseRetry.state = kRetryIdle;
+			g_deviceRaiseOutcome = result;
+			g_deviceShowAt = NowMs() + g_deviceRaiseMs;
+			return;
+		}
+		const auto outcome = DeviceRetryOutcome(g_raiseRetry, result);
+		if (outcome.empty()) {
+			return;
+		}
+		g_deviceRaiseOutcome = outcome;
+		REX::INFO("step=device_raise_done n={} result={} tries={} waited_ms={} t_ms={}", a_n, outcome, tries,
+			NowMs() - g_raiseRetry.firstAt.load(), SincePress());
+		g_deviceShowAt = NowMs() + g_deviceRaiseMs;
+	}
+
+	// main thread: a menu opened as the device was hidden (any route), so the lower, and each retry of it. DeviceKey
+	// waits DeviceLowerMs from the accepted lower (with DeviceRetryMs=0: from this send, as b89ead09)
+	void DeviceLower(std::uint32_t a_n)
+	{
+		const auto tries = ++g_lowerRetry.tries;
+		const auto result = g_deviceState == 1 ? DeviceNotify(g_lowerIdle) : std::string("refused");
+		if (g_deviceRetryMs == 0) {
+			g_deviceLowerUntil = NowMs() + g_deviceLowerMs;
+			g_lowerRetry.state = kRetryIdle;
+		}
+		if (tries == 1) {
+			REX::INFO("step=device_lower n={} result={} try=1 lock_ms={} t_ms={}", a_n, result, g_deviceLowerMs, SincePress());
+		}
+		if (g_deviceRetryMs == 0) {
+			return;
+		}
+		const auto outcome = DeviceRetryOutcome(g_lowerRetry, result);
+		if (outcome.empty()) {
+			return;
+		}
+		if (outcome == "1") {   // the lock counts from the accepted lower; none after gave_up, so the next key tries again
+			g_deviceLowerUntil = NowMs() + g_deviceLowerMs;
+		}
+		REX::INFO("step=device_lower_done n={} result={} tries={} waited_ms={} lock_ms={} t_ms={}", a_n, outcome, tries,
+			NowMs() - g_lowerRetry.firstAt.load(), outcome == "1" ? g_deviceLowerMs : 0, SincePress());
+	}
+
+	// one of the root's numbers set and read back (Scaleform keeps twips: kBoxReadBack)
+	void DeviceSetNumber(RE::Scaleform::GFx::Value& a_root, const char* a_name, double a_value, int& a_set, int& a_back)
+	{
+		RE::Scaleform::GFx::Value back;
+		a_set += a_root.SetMember(a_name, RE::Scaleform::GFx::Value(a_value)) ? 1 : 0;
+		if (a_root.GetMember(a_name, &back) && back.IsNumber() && std::fabs(back.GetNumber() - a_value) <= kBoxReadBack) {
+			++a_back;
+		}
+	}
+
+	// at kShow after the kit's own handling, on the menu's thread: opened as the device, the movie's root is moved into
+	// DeviceBox (stage 1920x1080: x, y from the fractions, scaleX and scaleY the scale); opened by Key, it is reset to
+	// 0, 0, 1, 1, so F10 stays the full flat screen. Set by SetMember, each read back
+	void DevicePlace(const void* a_menu, bool a_asDevice)
+	{
+		auto* const               root = RootOf(a_menu);
+		RE::Scaleform::GFx::Value top;
+		const bool                gotRoot = root && root->GetVariable(&top, "root") && top.IsObject();
+		const double              x = a_asDevice ? g_deviceBox[0] * kStageWidth : 0.0;
+		const double              y = a_asDevice ? g_deviceBox[1] * kStageHeight : 0.0;
+		const double              scale = a_asDevice ? g_deviceBox[2] : 1.0;
+		int                       set = 0;
+		int                       back = 0;
+		if (gotRoot) {
+			DeviceSetNumber(top, "x", x, set, back);
+			DeviceSetNumber(top, "y", y, set, back);
+			DeviceSetNumber(top, "scaleX", scale, set, back);
+			DeviceSetNumber(top, "scaleY", scale, set, back);
+		}
+		REX::INFO("step=device_box by={} root={} set={} back={} x={:.2f} y={:.2f} scale={:.3f} t_ms={}",
+			a_asDevice ? "device" : "key", gotRoot ? 1 : 0, set, back, x, y, scale, SincePress());
 	}
 
 	// ------------------------------------------------------------------------------------------- stage e: the kit
@@ -3129,6 +3478,12 @@ namespace
 				if (g_stage == 5) {   // the kit opens on the page it showed last
 					KitListen(a_self);
 					KitWrite(a_self, 0, true);
+					if (g_device) {   // FAL-714: into DeviceBox if DeviceKey opened it, else the full screen
+						const bool asDevice = g_deviceOpening.exchange(false);
+						g_asDevice = asDevice;
+						g_deviceShown = true;
+						DevicePlace(a_self, asDevice);
+					}
 				} else if (g_stage == 4) {   // the page opens on its first tab
 					g_tab = 0;
 					PageListen(a_self);
@@ -3152,6 +3507,14 @@ namespace
 				}
 			} else if (type == RE::UI_MESSAGE_TYPE::kHide) {
 				Snapshot("hide");
+				if (g_device) {   // FAL-714: a close by any route (DeviceKey, Key, Tab or Esc, CLOSE) lowers the device
+					g_deviceShown = false;
+					if (g_asDevice.exchange(false)) {
+						const auto n = g_deviceN.load();
+						DeviceRetryStart(g_lowerRetry, n);   // FAL-725: pending from here, so DeviceKey waits for it
+						g_task->AddTask([n]() { DeviceLower(n); });
+					}
+				}
 			}
 		}
 		return result;
@@ -3556,6 +3919,27 @@ namespace
 		REX::INFO("step=close n={} by={} was_open={} sent={}", a_n, a_by, open ? 1 : 0, open ? "hide" : "none");
 	}
 
+	// FAL-714, main thread, DeviceRaiseMs after the raise: the kit opened as the device (Toggle, flagged for our kShow).
+	// Not if the raise was refused, nor if the menu was opened another way meanwhile (then the raise is lowered again)
+	void DeviceShow(std::uint32_t a_n)
+	{
+		auto* ui = RE::UI::GetSingleton();
+		if (g_deviceState != 1) {
+			REX::INFO("step=device_show n={} result=skipped reason=not_ready t_ms={}", a_n, SincePress());
+			return;
+		}
+		if (!ui || ui->IsMenuOpen(MenuName())) {
+			const auto lower = DeviceNotify(g_lowerIdle);
+			REX::INFO("step=device_show n={} result=skipped reason={} lower={} t_ms={}", a_n, ui ? "already_open" : "no_ui",
+				lower, SincePress());
+			return;
+		}
+		g_deviceOpening = true;
+		Toggle(a_n);
+		REX::INFO("step=device_show n={} sent=show raise={} t_ms={}", a_n, g_deviceRaiseOutcome.empty() ? "-" : g_deviceRaiseOutcome,
+			SincePress());
+	}
+
 	void CheckState(std::uint32_t a_n)
 	{
 		auto* ui = RE::UI::GetSingleton();
@@ -3603,6 +3987,9 @@ namespace
 		std::uint32_t ticks = 0;
 		bool          down = false;
 		bool          snapDown = false;
+		bool          deviceDown = false;         // FAL-714: DeviceKey
+		std::uint32_t deviceCheckN = 0;           // FAL-725: the device's state check, due on the tick (no sleep)
+		std::int64_t  deviceCheckAt = 0;
 		std::array<std::uint32_t, 6> kitHeld{};   // stage e: how many 30 ms ticks each kit key has been held
 		for (;;) {
 			REX::W32::Sleep(30);
@@ -3623,6 +4010,62 @@ namespace
 				} else {
 					kitHeld.fill(0);
 				}
+			}
+			if (g_device) {   // FAL-714: DeviceKey raises and opens, or closes (the kHide lowers); ignored while lowering
+				// FAL-725: no sleep on the device path. The tick queues each due retry (DeviceRetry: waiting -> in flight),
+				// the kit's show DeviceRaiseMs after the accepted raise, and the state check 750 ms after a show or close
+				const auto tick = NowMs();
+				for (auto* retry : { &g_raiseRetry, &g_lowerRetry }) {
+					int waiting = kRetryWaiting;
+					if (retry->state.load() == kRetryWaiting && tick >= retry->nextAt.load() &&
+						retry->state.compare_exchange_strong(waiting, kRetryInFlight)) {
+						const auto rn = retry->n.load();
+						if (retry == &g_raiseRetry) {
+							g_task->AddTask([rn]() { DeviceRaise(rn); });
+						} else {
+							g_task->AddTask([rn]() { DeviceLower(rn); });
+						}
+					}
+				}
+				if (auto showAt = g_deviceShowAt.load(); showAt && tick >= showAt && g_deviceShowAt.compare_exchange_strong(showAt, 0)) {
+					const auto sn = g_deviceN.load();
+					g_task->AddTask([sn]() { DeviceShow(sn); });
+					deviceCheckN = sn;
+					deviceCheckAt = tick + 750;   // the engine handles the message on a later frame
+				}
+				if (deviceCheckAt && tick >= deviceCheckAt) {
+					deviceCheckAt = 0;
+					const auto cn = deviceCheckN;
+					g_task->AddTask([cn]() { CheckState(cn); });
+				}
+				const bool deviceNow = (W32_IMPL_GetAsyncKeyState(static_cast<std::int32_t>(g_deviceKey)) & 0x8000) != 0;
+				if (deviceNow && !deviceDown && GameInFront()) {
+					const auto at = NowMs();
+					const bool opening = g_raiseRetry.state.load() != kRetryIdle || g_deviceShowAt.load() != 0 || deviceCheckAt != 0;
+					if (g_lowerRetry.state.load() != kRetryIdle) {   // FAL-725: a lower is still being sent
+						REX::INFO("step=device_key ignored=lowering pending=1 t_ms={}", at - g_devicePressAt.load());
+					} else if (at < g_deviceLowerUntil.load()) {
+						REX::INFO("step=device_key ignored=lowering lock_left_ms={} t_ms={}", g_deviceLowerUntil.load() - at,
+							at - g_devicePressAt.load());
+					} else if (opening) {   // FAL-725: a raise, its show or a state check is still due (was the sleep)
+						REX::INFO("step=device_key ignored=opening pending=1 t_ms={}", at - g_devicePressAt.load());
+					} else {
+						const auto n = ++presses;
+						g_devicePressAt = at;
+						g_deviceN = n;
+						const bool shown = g_deviceShown.load();
+						REX::INFO("step=device_key n={} open={} t_ms=0", n, shown ? 1 : 0);
+						if (shown) {
+							g_task->AddTask([n]() { Close(n, "device"); });
+							deviceCheckN = n;
+							deviceCheckAt = at + 750;
+						} else {
+							DeviceRetryStart(g_raiseRetry, n);
+							g_task->AddTask([n]() { DeviceRaise(n); });
+						}
+					}
+				}
+				deviceDown = deviceNow;
 			}
 			if (g_stage >= 4) {   // the buttons (and the kit's moves), heard on the menu's thread; a close counts as a press
 				if (g_refreshNow.exchange(false)) {   // SendUpdate sends nothing once the menu is closed
@@ -3773,6 +4216,128 @@ namespace
 			}
 		}
 	}
+
+	// FAL-714: an idle's editor id from the ini: 1 to 96 letters, digits and '_'
+	bool IdleName(std::string_view a_name)
+	{
+		return !a_name.empty() && a_name.size() <= kMaxIdleName && std::all_of(a_name.begin(), a_name.end(), [](char c) {
+			return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+		});
+	}
+
+	// FAL-714: DeviceBox=<left>,<top>,<scale>: left and top stage fractions from 0, scale above 0, the box inside the stage
+	bool ParseDeviceBox(const std::string& a_text)
+	{
+		if (a_text.empty()) {
+			return true;   // the default
+		}
+		std::array<double, 3> box{};
+		const char*           at = a_text.c_str();
+		for (std::size_t i = 0; i < box.size(); ++i) {
+			char* end = nullptr;
+			box[i] = std::strtod(at, &end);
+			if (end == at || !std::isfinite(box[i])) {
+				return false;
+			}
+			at = end;
+			if (i + 1 < box.size()) {
+				if (*at != ',') {
+					return false;
+				}
+				++at;
+			}
+		}
+		if (*at || box[0] < 0.0 || box[1] < 0.0 || box[2] <= 0.0 || box[0] + box[2] > 1.0 || box[1] + box[2] > 1.0) {
+			return false;
+		}
+		g_deviceBox = box;
+		return true;
+	}
+
+	// FAL-714, the device keys (Stage=5 only): at Device=0 nothing more is read and nothing is logged. At Device=1
+	// DeviceKey (1 to 0xFE, not Key, SnapshotKey, WorldKey or any Kit key), the two idles' editor ids, DeviceRaiseMs and
+	// DeviceLowerMs (0 to 5000) and DeviceBox are checked, and any wrong one is refused as the other ini checks are
+	bool ReadDevice(const std::filesystem::path& a_ini)
+	{
+		if (ReadNumber(a_ini, L"Device", 0) == 0) {
+			return true;
+		}
+		if (g_stage != 5) {
+			return Refuse("ini", std::format("reason=device_stage stage={} (Device=1 is read at Stage=5 only)", g_stage));
+		}
+		g_deviceKey = ReadNumber(a_ini, L"DeviceKey", 0x76);
+		// FAL-719: the key thread only polls, so a closed-state press also reaches the game: F5 is Quick Save, F9 Quick
+		// Load (the 3b session at 6040290d loaded a save on F9)
+		if (g_deviceKey == kQuickSaveKey || g_deviceKey == kQuickLoadKey) {
+			return Refuse("ini", std::format("reason=device_key detail=game_bound device_key={} (F5 Quick Save, F9 Quick Load)",
+				Hex(g_deviceKey)));
+		}
+		const auto worldKey = ReadNumber(a_ini, L"WorldKey", 0x77);
+		bool       kitKey = false;
+		for (const auto& binding : g_kitKeys) {
+			for (std::size_t k = 0; k < binding.count; ++k) {
+				kitKey = kitKey || binding.vk[k] == g_deviceKey;
+			}
+		}
+		if (g_deviceKey == 0 || g_deviceKey > 0xFE || g_deviceKey == g_key || g_deviceKey == g_snapshotKey ||
+			g_deviceKey == worldKey || kitKey) {
+			return Refuse("ini", std::format("reason=device_key device_key={} key={} snapshot_key={} world_key={} kit_key={} "
+				"(1 to 0xFE, not Key, SnapshotKey, WorldKey or a Kit key)", Hex(g_deviceKey), Hex(g_key), Hex(g_snapshotKey),
+				Hex(worldKey), kitKey ? 1 : 0));
+		}
+		g_deviceRaiseIdle = ReadText(a_ini, L"DeviceRaiseIdle");
+		g_deviceLowerIdle = ReadText(a_ini, L"DeviceLowerIdle");
+		if (!IdleName(g_deviceRaiseIdle) || !IdleName(g_deviceLowerIdle)) {
+			return Refuse("ini", std::format("reason=device_idle raise={} lower={} (an editor id each: letters, digits, _)",
+				g_deviceRaiseIdle.empty() ? "-" : g_deviceRaiseIdle, g_deviceLowerIdle.empty() ? "-" : g_deviceLowerIdle));
+		}
+		g_deviceRaiseMs = ReadNumber(a_ini, L"DeviceRaiseMs", 900);
+		g_deviceLowerMs = ReadNumber(a_ini, L"DeviceLowerMs", 700);
+		g_deviceRetryMs = ReadNumber(a_ini, L"DeviceRetryMs", 2000);   // FAL-725: 0 = one send, as b89ead09
+		if (g_deviceRaiseMs > kMaxDeviceMs || g_deviceLowerMs > kMaxDeviceMs || g_deviceRetryMs > kMaxDeviceMs) {
+			return Refuse("ini", std::format("reason=device_ms raise_ms={} lower_ms={} retry_ms={} (0 to {})", g_deviceRaiseMs,
+				g_deviceLowerMs, g_deviceRetryMs, kMaxDeviceMs));
+		}
+		const auto box = ReadText(a_ini, L"DeviceBox");
+		if (!ParseDeviceBox(box)) {
+			return Refuse("ini", std::format("reason=device_box device_box={} (<left>,<top>,<scale>: inside the stage)", box));
+		}
+		g_device = true;
+		REX::INFO("step=load_device device_key={} raise_idle={} lower_idle={} raise_ms={} lower_ms={} retry_ms={} "
+			"box={:.3f},{:.3f},{:.3f}", Hex(g_deviceKey), g_deviceRaiseIdle, g_deviceLowerIdle, g_deviceRaiseMs, g_deviceLowerMs,
+			g_deviceRetryMs, g_deviceBox[0], g_deviceBox[1], g_deviceBox[2]);
+		return true;
+	}
+
+	// FAL-714, Device=1: libxse's TESForm::LookupByEditorID id in the same Address Library file, with ReadAddressLibrary's
+	// checks (below the count, non-zero, inside the image) and libxse's own lookup giving the same offset. It is not one
+	// of kIds, so Device=0 reads and logs exactly the ids it did before. No SFSE address is compared (none is pinned here)
+	bool CheckDeviceId(const std::filesystem::path& a_file)
+	{
+		std::ifstream in(a_file, std::ios::binary);
+		std::uint32_t count = 0;
+		std::uint32_t offset = 0;
+		in.seekg(92);   // libxse HEADER_V5: the offset count (ReadAddressLibrary checked the header)
+		in.read(reinterpret_cast<char*>(&count), sizeof count);
+		if (!in || kLookupByEditorId >= count) {
+			return Refuse("device_id", std::format("name=TESForm.LookupByEditorID id={} reason=beyond_count count={}",
+				kLookupByEditorId, count));
+		}
+		in.seekg(static_cast<std::streamoff>(kHeaderBytes + 4ull * kLookupByEditorId));
+		in.read(reinterpret_cast<char*>(&offset), sizeof offset);
+		if (!in || !offset || offset >= g_imageSize) {
+			return Refuse("device_id", std::format("name=TESForm.LookupByEditorID id={} rva={} reason={}", kLookupByEditorId,
+				Hex(offset), !in ? "short_file" : !offset ? "missing" : "outside_image"));
+		}
+		const auto viaLibrary = REL::ID(kLookupByEditorId).offset();
+		if (viaLibrary != offset) {
+			return Refuse("device_id", std::format("name=TESForm.LookupByEditorID id={} reason=library_mismatch file={} libxse={}",
+				kLookupByEditorId, Hex(offset), Hex(viaLibrary)));
+		}
+		g_deviceLookupRva = offset;
+		REX::INFO("step=device_id name=TESForm.LookupByEditorID id={} rva={} source=libxse", kLookupByEditorId, Hex(offset));
+		return true;
+	}
 }
 
 SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
@@ -3845,7 +4410,13 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	if (g_stage == 5 && (!ReadKitKeys(ini) || !ReadKit(ini))) {   // the kit's keys and pages, before any check of the game
 		return true;
 	}
+	if (!ReadDevice(ini)) {   // FAL-714: at Device=0 (the default) nothing is read or logged
+		return true;
+	}
 	if (!CheckEverything(dir)) {
+		return true;
+	}
+	if (g_device && !CheckDeviceId(dir / "versionlib-1-16-244-0.bin")) {
 		return true;
 	}
 	World::Configure(ini, g_stage, g_key, g_base, g_imageSize);
