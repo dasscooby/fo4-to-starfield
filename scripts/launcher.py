@@ -77,7 +77,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "src"))
 from fo4sf.launcher import (bundle, crashwatch, detect, driver, files, instance, locate, manifest,  # noqa: E402
                             paths, plugin_checks, recovery, release_install, restore, runtimes, same_ids,
-                            save_release, selfupdate, settings)
+                            runtime_config, save_release, selfupdate, settings)
 
 SOURCES = os.path.join(REPO, "scripts", "launcher_recipes", "known_sources.json")
 
@@ -406,6 +406,16 @@ def cmd_install_release(a):
     return 0
 
 
+def cmd_configure_runtime(a):
+    values = settings.load(a.settings or default_settings_path())
+    try:
+        runtime_config.publish(values, values.get("instance", ""), apply=a.apply, resume=True, required=True,
+                               running=restore.game_running)
+    except (OSError, RecursionError) as error:
+        raise ValueError(f"runtime configuration refused: {error}") from None
+    return 0
+
+
 def cmd_paths(a):
     """Each location the launcher needs: the saved one, or what was found on this PC and is waiting to be confirmed."""
     path = a.settings or default_settings_path()
@@ -602,6 +612,9 @@ def main(argv=None):
     s.add_argument("--declaration", required=True)
     s.add_argument("--settings", default="")
     s.add_argument("--apply", action="store_true")
+    s = sub.add_parser("configure-runtime", help="preview or resume the instance-owned runtime INI; no save writes")
+    s.add_argument("--settings", default="")
+    s.add_argument("--apply", action="store_true")
     s = sub.add_parser("watch", help="watch a game something else starts (the test runner): ProcDump as play attaches it")
     s.add_argument("--settings", default="")
     s.add_argument("--pid", type=int, default=None, help="follow this process only (default: the next Starfield.exe)")
@@ -634,7 +647,8 @@ def main(argv=None):
                 "status": cmd_status, "settings": cmd_settings, "play": cmd_play,
                 "watch": cmd_watch, "gui": cmd_gui, "paths": cmd_paths, "update": cmd_update,
                 "instance": cmd_instance, "recover-install": cmd_recover_install,
-                "check-save-release": cmd_check_save_release, "install-release": cmd_install_release}[a.cmd](a)
+                "check-save-release": cmd_check_save_release, "install-release": cmd_install_release,
+                "configure-runtime": cmd_configure_runtime}[a.cmd](a)
     except driver.RecipeError as e:
         print(f"recipe: {e}")
         return 2

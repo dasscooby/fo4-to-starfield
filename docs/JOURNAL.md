@@ -2942,3 +2942,17 @@ move MapMarkers behind two active kits and leave Bridge unticked. The launcher f
 the reported console index during play reflects the old order; its reproduction alone does not attribute the
 post-session PC write. See `docs/testing/load-order.md` for interpretation and the one-kit-until-PC-validation
 test-list line. Independent exact-head QA, CI and PC session acceptance precede integration.
+
+## 2026-11-14 — Codex / Lone, FAL-247 item 7 part 8: guarded runtime configuration
+
+**Offline tested**, synthetic folders/configuration only. FAL-736 adds deterministic
+UTF-8 runtime INI publication under the confirmed instance's existing receipt.
+Pending ownership precedes atomic INI replacement; completion and a pre-start
+comparison follow. Interrupted, unowned/conflicting, linked/reparse and concurrently
+changed inputs refuse. Explicit same-settings configure-runtime resumes pending
+work; Play and the GUI CLI worker share the gate. The existing resolved save parent
+must exist. No runtime/save folders, saves, state or bindings are written. Current
+accepted runtime reader/vectors come from main merged with both lineages retained;
+the journal conflict retains both append-only entries. Exact heads, checks, log
+hashes and independent QA are recorded on FAL-736. Native/Windows/Tk/game NOT_RUN;
+#716 stays draft with native identity/order and safe save publication unfinished.

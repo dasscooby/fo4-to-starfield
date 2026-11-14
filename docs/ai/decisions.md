@@ -1512,3 +1512,16 @@ and recheck metadata between steps. Reused steps still require final installed
 validation. Alternative rejected: finalize independently after each component or
 trust cached exit codes as installed release acceptance. Generic staging remains
 available; this template does not authenticate a package or prove save provenance.
+
+## 2026-11-14 — Runtime INI ownership belongs to the existing instance receipt
+
+Codex / Lone, FAL-736 / FAL-247 item 7 part 8. Reuse the instance receipt's
+pending/complete identity pattern for `FO4SF-Runtime.ini`; do not add a parallel
+ownership database or write runtime directories under Documents. Managed release
+Play always checks the config; legacy installs require it when runtime consumers,
+config or config ownership are present. Optional absent probes remain optional.
+The native consumers own directory creation beneath an existing save parent.
+Explicit same-input `configure-runtime --apply` resumes pending config publication;
+Play refuses pending ownership. Automatic Play retry was rejected because it could
+silently complete an interrupted configuration transaction. Unowned config adoption
+was rejected because identical bytes do not establish ownership for later uninstall.

@@ -12,7 +12,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "tests"))
-from fo4sf.launcher import crashwatch, gui, release_install as ri, save_release as sr, settings  # noqa: E402
+from fo4sf.launcher import crashwatch, gui, release_install as ri, runtime_config, save_release as sr, settings  # noqa: E402
 from test_launcher_crashwatch import FakeSystem  # noqa: E402
 
 
@@ -30,6 +30,12 @@ class SaveProfileTests(unittest.TestCase):
         self.my_games = self.root / "My Games"
         self.saves = self.my_games / "Saves" / "FO4SF"
         self.saves.mkdir(parents=True)
+        (self.data / "SFSE" / "Plugins").mkdir(parents=True)
+        # Keep these existing load-gate controls past the new runtime preflight.
+        # Real Windows spelling is covered independently by runtime config tests.
+        runtime_path = mock.patch.object(runtime_config, "_runtime_dir", return_value=r"C:\Profiles\FO4SF\FO4SF-Runtime")
+        runtime_path.start()
+        self.addCleanup(runtime_path.stop)
         (self.data / "FO4Port.esm").write_bytes(b"synthetic master")
         self.release = {"schema": 2, "implicit_loaders": {"game": None, "my_games": None}, "release_id": "A", "masters": [
             dict(sr.identity(self.data / "FO4Port.esm"), name="FO4Port.esm")], "state_layouts": {}}

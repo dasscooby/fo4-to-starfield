@@ -581,7 +581,7 @@ def play(values, starfield, system=None, say=print, start_timeout_s=180.0, dump_
     refusal (nothing started). folder: the FO4SF game folder (setting `instance`, docs/ai/fo4sf-instance.md): the game
     starts from it, our tools run on its own Plugins.txt, its own Starfield.ini takes the saves path and the Papyrus
     keys, and its Plugins.txt stands in the player's place only while the game runs (instance.swap_in / swap_out)."""
-    from . import instance as inst, recovery, release_load, save_release
+    from . import instance as inst, recovery, release_load, runtime_config, save_release
     reason = recovery.play_reason(folder or starfield) or save_release.play_reason(values, folder or starfield)
     if reason:
         raise ValueError(reason)
@@ -619,6 +619,10 @@ def play(values, starfield, system=None, say=print, start_timeout_s=180.0, dump_
                    "the watcher follows a game it started)")
     if bad:
         raise ValueError("; ".join(bad))
+    # None/unknown is never a closed-game receipt. Both the GUI's CLI worker and
+    # every Play route pass this same configuration gate, including preview.
+    runtime_running = lambda: system.pids() != []
+    runtime_config.publish(values, starfield, running=runtime_running, say=lambda *_: None)
     if folder and not values["my_games"]:
         say("StarfieldCustom.ini not checked for lines that would undo the FO4SF folder's own Starfield.ini (its saves "
             "folder, Papyrus logging): set my_games to have play check it")
@@ -676,6 +680,7 @@ def play(values, starfield, system=None, say=print, start_timeout_s=180.0, dump_
             raise ValueError(reason)
         if folder:
             inst.ensure_saves(folder, say)
+        runtime_receipt = runtime_config.publish(values, starfield, running=runtime_running, apply=True, say=say)
         order = system.plugin_order()               # compared at the end: the game may rewrite Plugins.txt
         if folder:
             inst.swap_in(folder, player, say)
@@ -692,6 +697,7 @@ def play(values, starfield, system=None, say=print, start_timeout_s=180.0, dump_
     try:
         t0 = system.now()
         try:
+            runtime_config.verify(runtime_receipt, runtime_running)
             system.start_game(values["route"], starfield)
         except OSError as e:                        # no steam:// handler, or the exe would not start (Codex, #465)
             why = f"could not start the game by {values['route']} ({e.strerror or e})"

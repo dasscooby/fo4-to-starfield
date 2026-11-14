@@ -199,3 +199,46 @@ channel or a migration of every existing staging recipe. No accepted release
 package is newly enabled. Native runtime/implicit-order acceptance and proven
 new-save binding publication remain required before completing item 7. Keep #716
 draft; Windows/native/Tk/game NOT_RUN. No saves, state or bindings are written.
+
+Part 8 owns `Data/SFSE/Plugins/FO4SF-Runtime.ini` through the existing
+`FO4SF-instance.json` receipt's `runtime_config` field (schema 1, `ini` identity,
+`complete`, and pending `previous` identity). Managed releases require this gate,
+even with no optional native DLL installed. A legacy instance with a Sidecar or
+Border consumer, an existing INI, or config ownership also requires it. Legacy
+unmanaged installs without those inputs keep their existing behavior.
+
+Play requires the confirmed instance and My Games location, a complete instance
+and release, existing real `Data/SFSE/Plugins` and `My Games/Starfield/Saves/FO4SF`
+folders, and a closed game. Paths through symlinks/reparse points, multiply linked
+metadata, ambiguous config names and `. / ..` inputs refuse. The save root is
+**launcher-resolved**, not observed H3 placement. No guessed Documents path,
+environment expansion, save adoption, or runtime/save directory creation occurs.
+Native DLLs create `FO4SF-Runtime`, `sidecars` and `logs` later; that player data
+stays by default. Missing save parent refuses even on a first launch.
+
+The writer emits deterministic UTF-8 with one literal absolute Windows `Dir` under
+`[Runtime]`, checked against the accepted `runtime_dir_vectors.json`. It never
+adopts an unowned INI, even with identical bytes. Owned missing/changed bytes refuse.
+An owned config can change profile only while its current bytes still match the
+receipt. Pending ownership goes first; the INI uses an atomic temporary replacement;
+completion goes last. Each write rechecks process state, real directory identity,
+current bytes and ownership. Changed config/receipt bytes and folder replacements
+refuse; no cross-process lock or power-loss durability claim is made.
+
+An interruption before completion blocks Play (including preview). Restore the
+same settings/input, then preview or explicitly resume:
+
+```text
+python scripts/launcher.py configure-runtime --settings <confirmed-settings.json>
+python scripts/launcher.py configure-runtime --settings <confirmed-settings.json> --apply
+```
+
+Preview writes nothing; `--apply` never starts the game. Unknown/running process
+state refuses both. The same gate runs in the Play CLI used by the GUI worker,
+after tool/load checks and before start, with a final comparison after the plugin
+list swap. Runtime config checks do not hash files on Tk's polling path.
+
+This is source-only partial item 7, not a PC-ready release. Keep #716 draft.
+Measured installed-native identity/order, package policy, provenance-safe atomic
+new-save publication, and items 8/9 remain separate gates. FAL-216 is closed with
+P1 unsupported; closure grants no save adoption. Native/Windows/Tk/game NOT_RUN.
