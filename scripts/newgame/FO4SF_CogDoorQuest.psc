@@ -133,10 +133,10 @@ Function Step(int stage)
 EndFunction
 
 Function Reading(string when, int stage, ObjectReference d)
-    int state = d.GetOpenState()
+    int openState = d.GetOpenState()
     Actor p = Game.GetPlayer()
-    Trace("read stage=" + stage + " when=" + when + " ref=" + Id(d) + " base=" + Id(d.GetBaseObject()) + " loaded=" + d.Is3DLoaded() + " openstate=" + state + " cell=" + Id(d.GetParentCell()) + " pos=" + d.GetPositionX() + "," + d.GetPositionY() + "," + d.GetPositionZ() + " dist=" + p.GetDistance(d))
-    Say("S" + stage + " " + when + " state=" + state + " 3d=" + d.Is3DLoaded() + " dist=" + p.GetDistance(d))
+    Trace("read stage=" + stage + " when=" + when + " ref=" + Id(d) + " base=" + Id(d.GetBaseObject()) + " loaded=" + d.Is3DLoaded() + " openstate=" + openState + " cell=" + Id(d.GetParentCell()) + " pos=" + d.GetPositionX() + "," + d.GetPositionY() + "," + d.GetPositionZ() + " dist=" + p.GetDistance(d))
+    Say("S" + stage + " " + when + " state=" + openState + " 3d=" + d.Is3DLoaded() + " dist=" + p.GetDistance(d))
 EndFunction
 
 Function BeginWatch(int stage, ObjectReference d)
@@ -152,17 +152,17 @@ Function Watch()
         return
     endif
     float after = Utility.GetCurrentRealTime() - WatchStartRt
-    int state = d.GetOpenState()
+    int openState = d.GetOpenState()
     string changed = ""
-    if state != LastState
+    if openState != LastState
         changed = " changed=true from=" + LastState
-        LastState = state
-        Say("S" + WatchStage + " t" + after + " state=" + state)
+        LastState = openState
+        Say("S" + WatchStage + " t" + after + " state=" + openState)
     endif
-    Trace("watch stage=" + WatchStage + " after=" + after + " openstate=" + state + changed)
+    Trace("watch stage=" + WatchStage + " after=" + after + " openstate=" + openState + changed)
     if after >= WatchS
-        Trace("watch done stage=" + WatchStage + " seconds=" + after + " openstate=" + state)
-        Say("S" + WatchStage + " watch done state=" + state)
+        Trace("watch done stage=" + WatchStage + " seconds=" + after + " openstate=" + openState)
+        Say("S" + WatchStage + " watch done state=" + openState)
         WatchStage = 0
     else
         StartTimer(PollS, TIMER_WATCH)
