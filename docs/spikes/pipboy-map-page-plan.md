@@ -74,6 +74,11 @@ Visible result: HEADING turns as the player turns, and GRID changes when they cr
 
 ### Step 2: a text map in the kit (code: medium, no new movie)
 
+**Parked for later uses (a warfare mode, settlement management views), not the Pip-Boy's map page** (owner, 13 Nov,
+FAL-614). The Pip-Boy's map page is the Fallout 4 rebuild (`pipboy-fo4-rebuild-plan.md`, section c). The groundwork is
+kept, not removed: `claude/fal614-pipboy-text-map` at `3133640d` (the cell list from the converter's
+`overlays_params.json`, held, not on GitHub).
+
 A map drawn in characters in the kit's list area, the same 16 rows the kit already draws:
 - the player's character in the centre (`^ > v <` by HEADING);
 - the converted cells around them as `.`, and cells we have no terrain for as blank;
@@ -102,7 +107,7 @@ Fallout 4 and Skyrim.
 
 Visible result: the overlay's marker shows, and appears or changes when the player discovers it.
 
-### Step 4: the real Fallout 4 map look (after the look plan)
+### Step 4: the real Fallout 4 map look (after the look plan; now `pipboy-fo4-rebuild-plan.md`)
 
 The look survey (#759, PC run 12 Nov) found `Pipboy_MapPage.swf` in the player's own `Fallout4 - Interface.ba2`.
 The world map's texture name is not known yet.

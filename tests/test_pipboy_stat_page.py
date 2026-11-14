@@ -237,14 +237,14 @@ class PagePluginTests(unittest.TestCase):
         self.assertIn("constexpr std::uint32_t kLookupByIdRva = 0x5DE3B0;", self.main)
         self.assertIn("kIdCountC,", self.main)
         self.assertIn("kDataHandlerSingleton = kIdCountC,", self.main)
-        self.assertIn("std::size_t IdCount() { return g_stage >= 4 ? kIdCount : g_stage == 3 ? kIdCountC : kIdCountB; }",
+        self.assertIn("std::size_t IdCount() { return g_stage >= 4 ? kIdCount : ChannelIdsNeeded() ? kIdCountC : kIdCountB; }",
                       self.main)
         self.assertIn("constexpr std::uint32_t kDataHandlerRva = 0x5FD9B28;", self.main)
         check = function(self.main, "bool CheckPageIds()")
         self.assertIn("std::pair{ kDataHandlerSingleton, kDataHandlerRva }, std::pair{ kLookupById, kLookupByIdRva }", check)
         self.assertIn("if (g_rva[id] != rva) {", check)
         self.assertIn('return Refuse("page_ids"', check)
-        self.assertIn("(g_stage >= 3 && !CheckChannelIds()) || (g_stage >= 4 && !CheckPageIds())", self.main)
+        self.assertIn("(ChannelIdsNeeded() && !CheckChannelIds()) || (g_stage >= 4 && !CheckPageIds())", self.main)
         # libxse and SFSE 0.2.21 agree on the list layout and the two types
         for line in ("constexpr std::size_t   kFormArraysAt = 0x70;", "constexpr std::size_t   kFormArrayBytes = 0x18;",
                      "constexpr std::size_t   kGlobType = 0x0A;", "constexpr std::size_t   kAvifType = 0x6D;"):
@@ -335,7 +335,7 @@ class PagePluginTests(unittest.TestCase):
         listen = function(self.main, "void PageListen(")
         self.assertLess(listen.index("RootOf(a_menu)"), listen.index("GetVariable("))
         self.assertIn('args[0] = "click";', listen)
-        close = function(self.main, "void Close(")
+        close = function(self.main, "void Close(std::uint32_t a_n, const char* a_by = ")
         self.assertIn("if (open) {\n\t\t\tqueue->AddMessage(MenuName(), RE::UI_MESSAGE_TYPE::kHide);", close)
         key = function(self.main, "std::uint32_t KeyThread(")
         self.assertIn("if (g_closeNow.exchange(false)) {", key)

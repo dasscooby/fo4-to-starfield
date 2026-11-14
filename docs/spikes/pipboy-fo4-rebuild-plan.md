@@ -1,0 +1,852 @@
+# Pip-Boy: rebuilding Fallout 4's own Pip-Boy in Starfield (plan, FAL-614)
+
+Claude (sole survivor), 13 Nov 2026. **A plan, no code.** Labels as in the other plans: **verified** = read from our
+source or a PC log, **hypothesis** = to be proven by the read named beside it. The pause default (`Pause=0`) does not
+change.
+
+## The direction (owner, 13 Nov, FAL-614)
+
+- Rebuild the Fallout 4 Pip-Boy in Starfield: its screen movies, map page, fonts and images, later the device on the
+  arm. Do it by **converting the player's own installed copy on their PC at install time**, as the world's meshes and
+  textures are converted. It is not a look-alike drawn by us.
+- Converted game files never go into Git, a release, a task, a comment or a receipt. Only the converter goes into Git
+  (`docs/research/framework/findings/legal-policy.md`, point 1).
+- One Pip-Boy, one set of functions, one data feed. Fallout 3, New Vegas, 4 and 76, and later others, are
+  selectable **looks** on top of it. Fallout 4 is the first look.
+- Travel from the map (fast travel, moving between maps) is **not designed here**; it is the owner's later decision.
+  Fallout 76's map style and extra Pip-Boy features are function, and also later.
+- The kit's text rows stay as the debug view. The text map of our converted cells is **parked** for later uses (a
+  warfare mode, settlement management views). It is a separate, later page, not the Pip-Boy's map page; its groundwork
+  is held on `claude/fal614-pipboy-text-map` (`3133640d`).
+
+## (a) What the files are, and what Starfield loads
+
+**What we load today (verified, source).**
+- The plugin registers its own menu and loads `Interface/FO4SF_PipboyMenu.swf` from our archive through the engine's
+  `IMenu::LoadMovie` (`sfse/FO4SFPipboyMenu/src/main.cpp`, `kLoadMovieRva`).
+- Starfield's player runs it as an ActionScript 3 movie: the plugin accepts the movie's root only when its RTTI is
+  `MovieRoot@AS3@GFx@Scaleform` (`kMovieRootRtti`).
+- Our movie is built by `scripts/ui/make_pipboy_kit.py`: CWS (zlib), SWF version 12, the AS3 bit set in
+  `FileAttributes`, and **no ActionScript at all**. The plugin drives it from outside: `getChildByName`,
+  `addEventListener` on a click, and `SetMember` of `text` and `visible`.
+- Starfield's own `almanacmenu.swf` is also CWS version 12 (`ui-pipboy-vats.md`, item 1).
+
+**What Fallout 4's files are (hypothesis, read D1 settles it).**
+
+| File (in `Fallout4 - Interface.ba2`) | What it is expected to be |
+| --- | --- |
+| `PipboyMenu.swf` | the shell: the frame, the tab bar, the bottom bar, and the loader of each tab's movie |
+| `Pipboy_StatsPage.swf`, `Pipboy_InvPage.swf`, `Pipboy_DataPage.swf`, `Pipboy_MapPage.swf`, `Pipboy_RadioPage.swf` | one movie per tab, loaded into the shell |
+| `PipboyMessageBox.swf` | the in-Pip-Boy confirmation box |
+| `pipboybootsequence.swf` | the boot animation shown when the Pip-Boy first opens |
+| `fonts_en.swf` | the shared fonts the other movies import by name, with `FontConfig.txt` mapping font names |
+
+- All are expected to be AS3 Scaleform movies, CWS, with a SWF version near ours.
+- They are expected to carry ActionScript (`DoABC` tags) that expects things from Fallout 4's engine:
+  - a code object the engine puts on the menu (sounds, tab changes, closing);
+  - the Pip-Boy's data, pushed as a tree of named values (player info, inventory, quests, map, radio). This is the
+    same tree the Fallout 4 companion app received.
+- What each movie imports from `fonts_en.swf`, and which classes it defines, is what D1 prints.
+
+**Read on the PC (D1, 13 Nov, at `c28a8d5d`, the script unchanged; PR #764 comment 6840521845): verified.**
+- All nine files were found. Each is `CWS` **version 15**, ActionScript 3, with **one `DoABC`** each: the pages hold
+  37 to 119 kB of it, the boot sequence only 2,203 bytes.
+- Stage 876 x 700 (the boot sequence 826 x 700), 30 frames a second.
+- Each imports only `fonts_en.swf`. No Scaleform tag of code 1000 and up, so no image file is named inside the movies.
+- Starfield's two files: version 12, ActionScript 3, 1920 x 1080.
+- So route A is open in principle: the same script generation on both sides, with the version (15 against 12) the
+  first difference to watch. D2 is needed for the pages. The boot sequence, with the least code, stays proof 1.
+
+## (b) The routes, and what proves or kills each
+
+**Route A: load the converted original movies, feed them what they expect.**
+- **How it works.**
+  - The PC's install step reads the player's movies from their archive and writes them, with only the conversion the
+    load needs (for example the SWF version byte, or import paths), into a private archive beside ours.
+  - Our plugin loads the shell instead of our kit movie. It then plays Fallout 4's engine: it supplies the code
+    object's functions and pushes the data tree in the shape the movies read.
+- **Proves it.** The converted `pipboybootsequence.swf` (no data needed) plays in our menu, and the plugin's log shows
+  the movie root accepted, with no ActionScript error.
+- **Kills it.** Any of these:
+  - the movie does not load;
+  - Starfield's player refuses or faults on Fallout 4's ActionScript;
+  - the movies need a native class from Fallout 4's executable that Starfield's player does not have.
+- **Cost if it lives.** The data tree: every page reads its own names. The plugin must learn them from the movies'
+  own class and member names (D1, D2), never by copying their code into Git.
+
+**Route B: rebuild each page in our own movie from the original's parts, extracted on the PC.**
+- **How it works.**
+  - The install step reads the player's movies on the PC and copies the shapes, images, fonts and placements of a
+    page into our kit movie. The kit generator already writes these tag kinds.
+  - Our named fields go where the original's text sits. The plugin keeps feeding our fields exactly as it does today,
+    so no Fallout 4 ActionScript runs.
+- **Proves it.** Our menu shows the original STAT page's frame and font, with live HP from our plugin in it.
+- **Kills it.** The page's look is built by its ActionScript at run time (lists filled, text created, layout computed)
+  rather than placed on its timeline, so the copied parts come out empty or broken.
+- **Cost.** Each page's layout is ours to keep in step with the original's pieces. Animations that the original's
+  code drives are lost.
+
+**Expected outcome (hypothesis).** A mix: the static frame, fonts and images come by route B; pages whose look is made
+by their code need route A or a rebuild of that code's behaviour in our plugin. The first proof below decides route A
+early, because it costs nothing to try.
+
+## (c) The map page
+
+**Where its parts live (hypothesis, read D3 settles it).**
+- The map page's movie is `Pipboy_MapPage.swf`. The look survey found it in the player's `Fallout4 - Interface.ba2`
+  (#759, PC run 12 Nov).
+- The marker icons are expected to be symbols inside that movie (one per marker type).
+- The world map image is expected to be a texture under `Textures\Interface\` (a `.dds`). It is named by the worldspace
+  record, or found by a name holding `map`. The MAP plan's R5 lists those names.
+
+**Read on the PC (D3, 13 Nov): verified.**
+- The worldspace `Commonwealth`: `ICON` = `Interface\Pip-Boy\WorldMap_d.dds`, 2048 x 2048, BC1, 12 mips.
+- `MNAM`: usable size 0 x 0; north-west cell (-33, 25), south-east cell (28, -36): 62 x 62 Fallout 4 cells.
+  `ONAM`: scale 1, offsets 0. `NAM0` / `NAM9`: -393216 / 393216.
+- So, as a **hypothesis** for the map card: the image spans those 62 cells of 4096 units. A Fallout 4 position (x, y)
+  falls at pixel ((x / 4096 + 33) / 62 x 2048, (25 + 1 - y / 4096) / 62 x 2048), the south-east cell included. The
+  first map card checks it against one marker the player can see on both maps.
+- `Pipboy_MapPage.swf` holds 92 marker symbol classes. A separate `Interface\MapMarkers.swf` also exists; D2 below
+  reads its names with the others.
+
+**What our page must supply.** These come from the Fallout 4 data tree's map branch (hypothesis: the companion app's
+`Map` → `World` values):
+
+| Value | From us |
+| --- | --- |
+| The player's x, y | POSITION, back in Fallout 4's frame: (Starfield metres − the merge offset) × 70. The merge offset is `vmad_patch.MERGE_MEASURED`, and the core is built at Fallout 4 position / 70 (`core64c.md`) |
+| The player's rotation | HEADING (FAL-595: `HeadingAt=88`, compass degrees, verified on the PC) |
+| The map's extents (the world corners the image spans) | from the worldspace record of the player's own `Fallout4.esm`, read at install time |
+| Markers: x, y, name, type, discovered | our converted markers (the marker conversion, MAP plan step 3), their discovered flag once read R3 and R4 find it |
+| Which world the player is in | WORLD and GRID (FAL-595); indoors there is no world map, as in Fallout 4 |
+
+The local map (Fallout 4 draws it from the scene at run time) and travel are not in this plan.
+
+## (d) The reads the PC runs first (names and header fields only)
+
+Environment: the owner's PC, PowerShell, the repository checkout at this branch's head, Python as for the look survey.
+No game launch, nothing written under the Fallout 4 or Starfield folders.
+
+The script reads each file **in memory** from the archive with `src/fo4sf/ba2.py` and prints only:
+- the header: signature, version, length, stage size, frame rate, frame count;
+- the `FileAttributes` flags;
+- the count of each tag code;
+- names: `SymbolClass` class names, `ExportAssets` names, `ImportAssets2` URLs and names, the `DoABC` name, and font
+  names;
+- the file names that Scaleform's own tags (code 1000 and up) refer to.
+
+No shape, image, sound or code is written anywhere.
+
+**D1 (movies).** For each of `PipboyMenu.swf`, `Pipboy_StatsPage.swf`, `Pipboy_InvPage.swf`, `Pipboy_DataPage.swf`,
+`Pipboy_MapPage.swf`, `Pipboy_RadioPage.swf`, `PipboyMessageBox.swf`, `pipboybootsequence.swf`, `fonts_en.swf` (in
+`Fallout4 - Interface.ba2`), print the lines below. If a name is not found, check the survey's spelling. Print the same
+for two Starfield files for comparison: `interface/almanacmenu.swf` and `interface/fonts_en.swf` (in
+`Starfield - Interface.ba2`).
+
+```python
+import re, struct, sys, zlib
+sys.path.insert(0, "src")
+
+NAMED = {76: "SymbolClass", 56: "ExportAssets", 71: "ImportAssets2", 82: "DoABC", 75: "DefineFont3",
+         91: "DefineFont4", 88: "DefineFontName", 69: "FileAttributes"}
+
+
+def cstr(b, at):
+    end = b.index(b"\0", at)
+    return b[at:end].decode("latin-1"), end + 1
+
+
+def describe(name, data):
+    """Header fields and names of one SWF or Scaleform GFX file; nothing else."""
+    sig, version, length = data[:3], data[3], struct.unpack_from("<I", data, 4)[0]
+    body = zlib.decompress(data[8:]) if sig in (b"CWS", b"CFX") else data[8:]
+    if sig not in (b"FWS", b"CWS", b"GFX", b"CFX"):
+        return [f"file={name} signature={sig!r} not_swf=1"]
+    nbits = body[0] >> 3
+    pos = (5 + 4 * nbits + 7) // 8
+    bits = int.from_bytes(body[:pos], "big")
+    shift = pos * 8 - 5
+    rect = []
+    for _ in range(4):
+        shift -= nbits
+        v = (bits >> shift) & ((1 << nbits) - 1)
+        rect.append(v - (1 << nbits) if nbits and v >> (nbits - 1) else v)
+    rate, frames = body[pos + 1] + body[pos] / 256, struct.unpack_from("<H", body, pos + 2)[0]
+    out = [f"file={name} signature={sig.decode()} version={version} length={length} "
+           f"stage={(rect[1] - rect[0]) / 20:g}x{(rect[3] - rect[2]) / 20:g} rate={rate:g} frames={frames}"]
+    pos += 4
+    counts = {}
+    while pos + 2 <= len(body):
+        head = struct.unpack_from("<H", body, pos)[0]
+        code, size, pos = head >> 6, head & 0x3F, pos + 2
+        if size == 0x3F:
+            size, pos = struct.unpack_from("<I", body, pos)[0], pos + 4
+        tag = body[pos:pos + size]
+        pos += size
+        counts[code] = counts.get(code, 0) + 1
+        if code == 69:
+            out.append(f"  FileAttributes flags=0x{tag[0]:02x} as3={(tag[0] >> 3) & 1}")
+        elif code in (76, 56):
+            n, at = struct.unpack_from("<H", tag)[0], 2
+            for _ in range(n):
+                at += 2
+                s, at = cstr(tag, at)
+                out.append(f"  {NAMED[code]} name={s}")
+        elif code == 71:
+            url, at = cstr(tag, 0)
+            n, at = struct.unpack_from("<H", tag, at + 2)[0], at + 4
+            names = []
+            for _ in range(n):
+                at += 2
+                s, at = cstr(tag, at)
+                names.append(s)
+            out.append(f"  ImportAssets2 url={url} names={','.join(names)}")
+        elif code == 82:
+            out.append(f"  DoABC name={cstr(tag, 4)[0]!r} bytes={size}")
+        elif code in (75, 91):
+            at = 4 if code == 75 else 3
+            if code == 75:
+                s = tag[at + 1:at + 1 + tag[at]].decode("latin-1").rstrip("\0")
+            else:
+                s = cstr(tag, at)[0]
+            out.append(f"  {NAMED[code]} name={s}")
+        elif code == 0:
+            break
+        elif code >= 1000:
+            for s in sorted(set(re.findall(rb"[\w\\/.-]{3,}\.(?:dds|tga|png|swf|gfx)", tag, re.I))):
+                out.append(f"  GFxTag{code} file={s.decode('latin-1')}")
+    out.append("  tags=" + ",".join(f"{c}x{counts[c]}" for c in sorted(counts)))
+    return out
+
+
+if __name__ == "__main__":
+    from fo4sf.ba2 import Ba2
+    archive = Ba2(sys.argv[1])
+    for want in sys.argv[2:]:
+        hit = [n for n in archive.names if n.lower().replace("/", "\\").endswith("\\" + want.lower())]
+        if not hit:
+            print(f"file={want} found=0")
+            continue
+        print("\n".join(describe(hit[0], archive.read(hit[0]))))
+```
+
+Run it once per archive, with the file names as arguments, and send the output back. The output stays in the PC's
+private evidence folder; the comment carries the lines.
+
+**D2 (data names; needed, D1 found `DoABC` in every movie).** The names the movies' ActionScript uses: classes,
+members, and the names of the data the engine sends. It prints the ABC's version and its constant pool of strings,
+filtered to identifiers (letters, digits, `_`, `$`, `.` and `:`, at most 64 characters). No code, no bytes, no
+sentences. Run it on the same nine files as D1 plus `MapMarkers.swf`, in memory as D1:
+
+```python
+import re, struct, zlib
+
+NAME = re.compile(r"[A-Za-z_$][A-Za-z0-9_$.:]{0,63}")
+
+
+def u30(b, at):
+    value = shift = 0
+    while True:
+        byte = b[at]
+        at += 1
+        value |= (byte & 0x7F) << shift
+        shift += 7
+        if not byte & 0x80 or shift >= 35:
+            return value, at
+
+
+def names(data):
+    """The ABC version and the identifier strings of each DoABC tag's constant pool: names only, nothing else."""
+    body = zlib.decompress(data[8:]) if data[:3] in (b"CWS", b"CFX") else data[8:]
+    pos = ((5 + 4 * (body[0] >> 3) + 7) // 8) + 4
+    out = []
+    while pos + 2 <= len(body):
+        head = struct.unpack_from("<H", body, pos)[0]
+        code, size, pos = head >> 6, head & 0x3F, pos + 2
+        if size == 0x3F:
+            size, pos = struct.unpack_from("<I", body, pos)[0], pos + 4
+        tag, pos = body[pos:pos + size], pos + size
+        if code == 0:
+            break
+        if code not in (72, 82):
+            continue
+        at = 0 if code == 72 else tag.index(b"\0", 4) + 1
+        minor, major = struct.unpack_from("<HH", tag, at)
+        at += 4
+        n, at = u30(tag, at)                       # ints: signed varints
+        for _ in range(max(n - 1, 0)):
+            at = u30(tag, at)[1]
+        n, at = u30(tag, at)                       # uints
+        for _ in range(max(n - 1, 0)):
+            at = u30(tag, at)[1]
+        n, at = u30(tag, at)                       # doubles
+        at += 8 * max(n - 1, 0)
+        n, at = u30(tag, at)                       # strings
+        found = set()
+        for _ in range(max(n - 1, 0)):
+            length, at = u30(tag, at)
+            text = tag[at:at + length].decode("utf-8", "replace")
+            at += length
+            if NAME.fullmatch(text):
+                found.add(text)
+        out.append(f"  abc={major}.{minor} strings={max(n - 1, 0)} names={len(found)}")
+        out.extend(f"  name={t}" for t in sorted(found))
+    return out
+
+
+if __name__ == "__main__":
+    import sys
+    sys.path.insert(0, "src")
+    from fo4sf.ba2 import Ba2
+    archive = Ba2(sys.argv[1])
+    for want in sys.argv[2:]:
+        hit = [n for n in archive.names if n.lower().replace("/", "\\").endswith("\\" + want.lower())]
+        print(f"file={want} found={len(hit)}")
+        if hit:
+            print("\n".join(names(archive.read(hit[0]))))
+```
+
+The output stays in the PC's private evidence folder. Send back, per file, the `abc=` line and the count of names, and
+for `PipboyMenu.swf`, `Pipboy_StatsPage.swf` and `pipboybootsequence.swf` the names themselves. The STAT page's names
+are the data proof 2 must feed; the boot sequence's are what proof 1 may ask the engine for.
+
+**D3 (the world map).**
+- The look survey's names-only listing over `Fallout4 - Textures*.ba2` and `Fallout4 - Interface.ba2`, for names
+  holding `map` (the MAP plan's R5).
+- For each hit, the DDS header only: width, height, format, mip count.
+- The worldspace record `Commonwealth` in the player's `Fallout4.esm`: the names of its subrecords and the map-related
+  ones' sizes (`MNAM`, `NAM3`, `NAM4`, `ICON` if present). No values beyond what names the map image and its extents.
+
+## (e) The smallest first proof a player can see
+
+The owner PC suggested the boot sequence or the STAT page's frame with live HP. Weighed:
+
+| Proof | Needs | Tells us |
+| --- | --- | --- |
+| **1. `pipboybootsequence.swf`, converted, playing inside our menu** | D1; a private converted copy; the plugin loading a second movie name from the ini (one setting) | Whether Starfield's player runs Fallout 4's ActionScript at all: route A alive or dead, with no data feed to build first |
+| 2. The original STAT page's frame and font around our live HP | D1 (and D2 if route A); route B's extraction of one page, or route A's data tree for HP | The first page a player would call the real Pip-Boy |
+
+**Recommendation: proof 1 first, then proof 2.** Proof 1 is the cheapest test that decides between the routes, and a
+player sees the real boot screen. Proof 2 follows by whichever route proof 1 leaves standing.
+- If the boot sequence plays: proof 2 is route A, the shell with the STAT page and the HP value pushed by name.
+- If it does not: proof 2 is route B, the STAT frame's shapes and font copied into our kit movie on the PC.
+
+**Proof 1, the card (owner PC; the plugin's `Movie=` setting, FAL-614).** Environment: the owner's PC, the plugin
+built from this branch's head, the probe staged as for `Stage=2`. Nothing of the player's goes into Git.
+1. Stage the probe as usual (`make_pipboy_probe.py stage`). Before packing, copy the player's own
+   `Interface\pipboybootsequence.swf`, read from their `Fallout4 - Interface.ba2`, unchanged, into the staged
+   `Data\Interface\` as `FO4SF_Fo4Boot.swf`. Install with the one extra movie named:
+   `pipboy_probe_install.py install --dir <stage> --extra-movie FO4SF_Fo4Boot --starfield <game>`. Without
+   `--extra-movie` the installer refuses it as a twin that is not our movie; with it, it checks only the name and that
+   the file is a whole SWF (signature, FileLength, every tag's length; no tag's contents), packs it into the probe archive and `uninstall` removes it with that archive. This
+   private archive stays on the PC.
+2. In `FO4SFPipboyMenu.ini`: `Stage=2`, `Movie=FO4SF_Fo4Boot`.
+3. Load a save outdoors, press F10, wait 5 seconds, take a screenshot, press F10 again.
+
+PASS: `step=movie name=FO4SF_Fo4Boot`, `step=load_movie ... result=1 movie=<non-zero> movie_name=FO4SF_Fo4Boot
+name_asks=<1 or more>`, and the screenshot shows Fallout 4's boot screen inside our menu, with no crash.
+What each other outcome means:
+- `name_asks=0`: the engine does not name the file after `GetName` in that call. Whatever loaded, the setting's
+  hypothesis is wrong; send the log.
+- `result=0` with `name_asks` of 1 or more: the engine refused the file. The next card converts it, the SWF version
+  15 to 12 first.
+- It loads but shows nothing, or freezes: its ActionScript waits for something of Fallout 4's engine. D2's boot names
+  say what.
+- A crash: send the crash log; the next card is the version conversion.
+
+**Proof 1, the result (owner PC, 13 Nov, 02:46 to 02:50 UTC, at `2db64a83`): PASS, verified.** The player's own
+`pipboybootsequence.swf`, unchanged, installed with `--extra-movie FO4SF_Fo4Boot`; `Stage=2`, `Movie=FO4SF_Fo4Boot`.
+- The log: `step=movie name=FO4SF_Fo4Boot`, then `step=load_movie ... result=1 movie=<non-zero>
+  movie_name=FO4SF_Fo4Boot name_asks=2`. The `GetName` hypothesis holds.
+- On screen: Fallout 4's boot text types itself out in its font over the game view; the header and seven lines stand
+  at 16 seconds. F10 closed it; no crash, nothing left installed.
+- **Route A is alive:** Starfield's player runs this version 15 movie with its ActionScript 3 as it is. No version
+  conversion was needed for this file.
+- Not seen: sound (the movie asks for `PlaySound`); whether the timeline reaches its end and `HideMenu` (frame 371 is
+  about 12.4 seconds at 30 fps; the text still stood at 16 seconds); framing and scale against Fallout 4's own; the
+  movie has no background of its own and draws over the game.
+
+**What Fallout 4's movies ask of the engine (D2's names; a reading, not verified).**
+- Each movie reaches its engine through one object, `BGSCodeObj`, by `Shared:BGSExternalInterface`'s `call`. The
+  boot sequence names two of its functions, `PlaySound` and `HideMenu`. Proof 1 ran with no such object and did not
+  fail, so `call` is expected to skip a missing object (**hypothesis**: the PASS shows no fault, not how it skips).
+- The STAT page and the shell name more: the object's arrival (`InitCodeObj`, `ReleaseCodeObj`, `onCodeObjCreate`,
+  `onCodeObjDestruction`, `bAcquiredByNativeCode`) and the data (`Pipboy_DataObj`, `PipboyChangeEvent`,
+  `onPipboyChangeEvent`, `PipboyUpdateMask`), with the values by name (`CurrHP`, `MaxHP`, `CurrAP`, `MaxAP`,
+  `XPLevel`, `XPProgressPct`, `HeadCondition`, ...). Which names are functions the page calls and which are values
+  the engine pushes is not in D2: names only.
+- The shell `PipboyMenu.swf` loads its pages by file name (`Pipboy_StatsPage.swf` and the others) through
+  `PipboyLoader`. In Starfield those names are not under `Interface/`, so the shell alone would show its frame and no
+  page. Carrying the pages under their own names is a later installer change, not now.
+- Every movie imports `fonts_en.swf`, and in Starfield that name is Starfield's own file. Whether the boot text's
+  font is Fallout 4's or a Starfield font under the same export name is not settled.
+
+**Proof 1b, the card: the stand-in engine object (owner PC; the plugin's `CodeObj=` setting, FAL-614).**
+Environment as for proof 1, with the plugin built from this branch's head.
+1. Install as for proof 1 (`--extra-movie FO4SF_Fo4Boot`).
+2. In `FO4SFPipboyMenu.ini`: `Stage=2`, `Movie=FO4SF_Fo4Boot`, `CodeObj=1`, `CodeObjNames=` empty (that is
+   `PlaySound,HideMenu`).
+3. Outdoors: F10, wait 20 seconds, take a screenshot, F10 again.
+
+**First run (owner PC, 13 Nov, 03:29 to 03:34 UTC, at `f5114524`): verified.** The movie loaded and played as in
+proof 1, but `step=code_obj root=0 holder_type=0 set=0 of=3 read_back=0`, logged in the same millisecond as
+`load_movie result=1`; the menu's `step=state n=1 open=1` came 0.74 seconds later. No root existed on that thread right
+after `LoadMovie` returned, so nothing about the holder was tested. No crash.
+
+**The fix (this card's head):** the plugin tries again after the engine's own `kShow` (`when=show`) and after each
+`kUpdate` (`when=update`). The key thread sends a `kUpdate` about every half second while the stand-in is not set, up to
+40 tries per movie. The first five tries and the one that sets it are logged:
+`step=code_obj when= try= root_of= get_variable= root= root_type= holder_type= set= of= read_back= names=`.
+
+**Second run (owner PC, 13 Nov, 03:45 to 03:49 UTC, at `aadf1372`): verified.** Every try, from `when=load try=1`
+to `when=update try=40` (+20.1 seconds), logged `root_of=0 get_variable=0 root=0 root_type=0`. The movie played; no
+`code_call`; no crash. So it was not timing.
+
+**The cause, read from the source (not yet confirmed by a run):** at stage 2 the plugin reads only stage a and b's
+Address Library ids (`IdCount()` gave `kIdCountB`). `RootOf` compares the movie root's type with
+`Address(kMovieRootRtti)`, one of stage c's ids, which stage 2 had never read. So the first try refused, once, with
+`refuse step=channel what=movie_root ...`, and that turns the channel off: every later try returns at once with no
+root. Stage 3, where our own movie's channel works on this PC, reads and checks those ids
+(`step=channel_ids value_functions=sfse_equal rtti_names=ok`).
+
+**The fix (this card's head):** with `CodeObj=1`, stage 2 reads and checks stage c's ids as stage 3 does. At load, the
+log then shows `step=channel_ids value_functions=sfse_equal rtti_names=ok` before `step=ready stage=b`.
+
+PASS: one `step=code_obj ... root=1 ... set=3 of=3 read_back=1 names=PlaySound,HideMenu`, with the `when=` and
+`try=` that found the root. Then `step=code_call` lines, `name=PlaySound` with their `arg0`, and one `name=HideMenu`.
+D2 names three `PlaySound` calls; any made before the set (the timeline starts at the load) are not seen, so fewer
+than three is not a failure. That settles the object contract (functions called by name on `root.BGSCodeObj`) and
+whether the timeline reaches its end. The stand-in only logs: no sound plays, and `HideMenu` leaves the menu open.
+What each other outcome means:
+- No try finds `root=1` (`root_of=0`: our root check refused; `get_variable=0` or `root=0`: the movie has no root
+  object yet even after 40 tries): send the log; the next card reads the root another way.
+- `set` below 3 or `read_back=0` with `root=1`: a function object does not take members here. The next card makes the
+  holder a plain object (the root's object-creating slot, not read yet).
+- `step=code_obj` passes but no `step=code_call`: the movie reads the object another way, or before our set. Send the
+  log.
+- A crash: send the crash log; `CodeObj=0` is proof 1 as it passed.
+
+**Third run (owner PC, 13 Nov, 04:05 to 04:09 UTC, at `5db70734`): PASS, verified.**
+- `step=movie_root ... root_type=.?AVMovieRoot@AS3@GFx@Scaleform@@`, then `step=code_obj when=load try=1 root_of=1
+  get_variable=1 root=1 root_type=10 holder_type=8 set=3 of=3 read_back=1`. The diagnosis above holds.
+- Calls: `PlaySound` `UIPipBoyBootSequenceA` 30 ms after the set, `...B` at +5.1 seconds, `...C` at +10.4 seconds, then
+  `HideMenu` with no arguments at +15.4 seconds. With the menu left open, the movie repeats B, C and `HideMenu` every
+  10.3 seconds.
+- **Settled:** a function object takes members; the movie calls by name on `root.BGSCodeObj`; a set at load is early
+  enough; the timeline ends in `HideMenu`.
+
+**Proof 1c, the card: a real `HideMenu` (owner PC; the plugin's `CodeObjHide=` setting, FAL-614).** As proof 1b, with
+`CodeObjHide=1` added: the stand-in's `HideMenu` still logs, and also closes our menu on the main thread, as the CLOSE
+button and F10 do. Outdoors: F10, then wait 20 seconds without pressing anything.
+PASS: `step=code_call ... name=HideMenu` at about +15 seconds, then `step=close n=<k> by=hide_menu was_open=1
+sent=hide`, the menu gone from the screen, and no further `code_call` lines. The game stays playable; F10 opens it
+again from the start. The sounds (`UIPipBoyBootSequenceA`, `B`, `C`) are the next card after this one, converted on the
+PC with nothing in Git.
+
+**Proof 1c, the result (owner PC, 13 Nov, 04:38 to 04:42 UTC, at `9550c00a`): PASS twice in one session, verified.**
+`HideMenu` at +15.4 seconds, then `step=close n=4 by=hide_menu was_open=1 sent=hide` in the same millisecond; the menu
+was gone from the screen at 18 seconds, with no further `code_call`. The second F10 loaded the movie again (`result=1`,
+stand-in set on try 1), with the same three `PlaySound` calls and the same close at +15.4 seconds. MSVC accepts the
+forward declaration of `Close`. No crash, nothing left installed.
+
+**The boot sequence's sounds, step 1: read D4 (owner PC; names and header fields only).** The movie asks for three
+sounds by name: `UIPipBoyBootSequenceA`, `B` and `C`. That these are the editor ids of sound descriptors (`SNDR`) in
+the player's `Fallout4.esm` is a **hypothesis**; D4 settles it and names the files behind them.
+- In the player's `Fallout4.esm`: the records whose editor id is one of the three names. For each, print the record
+  type, the names of its subrecords, and the file names it lists (`ANAM` in a sound descriptor). Nothing else.
+- For each file name: whether `Fallout4 - Sounds.ba2` (or another of the player's archives) holds it, and its audio
+  header only: the container (`RIFF`/`WAVE` or `XWMA`), the format tag, channels, sample rate, bits per sample and
+  the length in seconds. No samples.
+- D4 reads in memory and writes nothing. The audio stays on the PC.
+
+**The sounds, step 2 (written from D4's lines; a proposal, nothing built).** Two ways a converted sound can play:
+- **S1, Starfield's own audio engine** (Wwise). New sounds need authored sound banks. Not proposed now.
+- **S2, the plugin plays the player's converted file itself** through Windows audio, from a private folder next to
+  the plugin, when the stand-in's `PlaySound` names it. It does not follow the game's volume sliders. It is the
+  cheapest proof that the sounds play at the right moments, and it is the proposal for proof 1d.
+- If D4 shows `XWMA`, the PC converts it to plain `WAVE` with its own tool first; no audio enters Git, a task or a
+  receipt.
+
+**Read D4, the result (owner PC, 13 Nov, at `df7e5c0f`): verified.** The hypothesis holds: three `SNDR` records,
+`0CAC68`, `0CAC69` and `0CAC6A`, each with one `ANAM` naming
+`data\Sound\FX\UI\PipBoy\BootSequence\UI_PipBoy_BootSequence_A.wav` (and `_B`, `_C`). `Fallout4 - Sounds.ba2`
+holds them as `.xwm`: `RIFF`/`XWMA`, format tag `0x0161`, mono, 44100 Hz, 16 bit, about 5.95, 6.32 and 7.06 seconds.
+With the calls at 0, +5.1 and +10.4 seconds, each sound runs about a second into the next, and C ends about 2 seconds
+after the movie's `HideMenu` at +15.4. So the player must mix, not cut, and closing the menu must not stop C. A record
+names `.wav` where the archive holds `.xwm`: the PC's extraction looks for the `.xwm`. No xWMA converter is on the PC
+yet; a download (ffmpeg, kept on the PC) waits for the owner's yes.
+
+**Proof 1d, the card: the three sounds by route S2.** Plugin code, so the PC rebuilds. `CodeObjSound=1` (with
+`CodeObj=1` and `PlaySound` among its names only): the stand-in's `PlaySound` still logs, then plays the player's own
+converted file `FO4SFPipboyMenuSounds\<arg0>.wav` beside the dll, through Windows audio (waveOut), one stream and one
+thread per call, so overlapping sounds mix and closing the menu does not cut one; at most 4 at once. The file must be
+PCM 16 bit `RIFF`/`WAVE` with 1 or 2 channels; anything else (an unconverted `XWMA` too) is logged and not played.
+It does not follow the game's volume sliders. The steps, once the owner has said yes to the converter:
+1. On the PC only: take `UI_PipBoy_BootSequence_A.xwm`, `_B` and `_C` from `Fallout4 - Sounds.ba2` and convert each to
+   PCM 16 bit WAVE, named by the editor id the movie passes, into `Data\SFSE\Plugins\FO4SFPipboyMenuSounds\` beside
+   the dll: `UIPipBoyBootSequenceA.wav`, `UIPipBoyBootSequenceB.wav`, `UIPipBoyBootSequenceC.wav` (for example
+   `ffmpeg -i UI_PipBoy_BootSequence_A.xwm -c:a pcm_s16le UIPipBoyBootSequenceA.wav`). The folder is the player's; no
+   installer here writes or removes it, and none of it enters Git, a task or a receipt.
+2. Install as for proof 1c (`--extra-movie FO4SF_Fo4Boot`).
+3. `Stage=2`, `Movie=FO4SF_Fo4Boot`, `CodeObj=1`, `CodeObjHide=1`, `CodeObjSound=1`, `CodeObjNames=` empty.
+4. Outdoors: F10, then wait 25 seconds without pressing anything, listening.
+5. Send the `step=code_obj_sound`, `step=code_call`, `step=sound` and `step=close` lines, and say what was heard.
+
+PASS: `step=code_obj_sound folder=FO4SFPipboyMenuSounds max_playing=4` at load; for each of A, B and C a
+`step=sound ... result=start rate=44100 channels=1 ms=<about 5950, 6320, 7060>` within a few milliseconds of its
+`code_call`, then `result=end`; B starts while A plays (`playing=2`); `step=close ... by=hide_menu` at about +15.4
+seconds and C's `result=end` about 2 seconds after it; the three sounds heard in time with the text, the last one not
+cut; no crash. Other outcomes: `missing` (the file's name or folder), `not_pcm16` or `not_riff_wave` (not converted),
+`open_failed` (no audio device for that format), no `step=sound` at all (`CodeObjSound` not read: check the
+`refuse` lines).
+
+**Proof 1d, the result (owner PC, 13 Nov, 05:26 to 05:31 UTC, at `e86d2059`): PASS by the log, verified; not yet
+heard.** No download was needed: the player's Fallout 4 install carries its own `xwmaencode.exe`, which converted the
+three files privately (PCM 16 bit, mono, 44100 Hz; real lengths 5.15, 5.39 and 6.08 seconds, shorter than D4's
+estimate). `step=code_obj_sound folder=FO4SFPipboyMenuSounds max_playing=4`; A started 86 ms after its call
+(`playing=1`), B and C 8 ms after theirs (`playing=2` each: they overlap); every sound reached `result=end`
+(`took_ms` 5276, 5421, 6111); `step=close by=hide_menu` at +15.36 seconds and C's end 1.15 seconds after it, so the
+close did not cut C. No crash; the sounds folder was moved out again. Nobody listened: whether it sounds right is for
+the owner's ear.
+
+**Proof 2a, the card: the STAT page alone.** Plugin code (one new setting), so the PC rebuilds. D2's STAT page names
+`InitCodeObj`, `codeObj` and `bAcquiredByNativeCode`, but not `HideMenu`: a page is handed its engine object by the
+shell (`PipboyMenu.swf`) rather than reading `root.BGSCodeObj` itself (a reading, not verified). Loaded alone it has no
+shell, so `CodeObjInit=<name>` (with `CodeObj=1` only; it ships empty) makes the plugin call `root.<name>(stand-in)`
+once per movie, right after the stand-in is set, and log
+`step=code_obj_init name= got= found= type= called= result_type=`. The stand-in's names below are D2's verbs on the
+page, a guess at which are engine calls; 16 is the most the stand-in takes.
+1. On the PC only: copy your own `Interface\Pipboy_StatsPage.swf`, unchanged, into the staged `Data\Interface\` as
+   `FO4SF_Fo4Stats.swf`, and install with `--extra-movie FO4SF_Fo4Stats`.
+2. `Stage=2`, `Movie=FO4SF_Fo4Stats`, `CodeObj=1`, `CodeObjHide=0`, `CodeObjSound=0`, `CodeObjInit=InitCodeObj`,
+   `CodeObjNames=PlaySound,PlayPerkSound,PlaySmallTransition,UseStimpak,UseRadaway,ToggleShowingEffects,GetUpdateMask,UpdateStimpakRadawayEnabled,CanSwitchTabs,CanLowerPipboy,SetIsDirty,AnnounceDataChange,onPerksTabOpen,onPerksTabClose,onNextPerk,onPrevPerk`.
+3. Outdoors: F10, wait 10 seconds, take a screenshot, F10 again.
+4. Send the `step=load_movie`, `step=code_obj`, `step=code_obj_init` and every `step=code_call` line, any `refuse`
+   line, and the screenshot.
+
+What it shows, whatever the result: whether Starfield draws the page's frame from the player's file alone (the
+screenshot), whether the page has `InitCodeObj` at its root and takes our object (`found=1 called=1`), and which of
+the 16 names it calls, with what. PASS: `result=1`, `step=code_obj ... set=17 of=17 read_back=1`, the page's frame on
+screen with empty values, no crash. `found=0`: the page takes its object some other way, and 2b's card starts from
+the call lines and D2's `PipboyMenu` names. Values stay empty until 2b.
+
+**Proof 2a, the first run (owner PC, 13 Nov, 05:48 to 05:52 UTC, at `95e79c5a`): the page draws; the hand-over did not
+happen. Verified.** Starfield draws the player's STAT page from the file alone: a highlighted `INTELLIGENCE` row with
+`( + )`, the six condition bars, two weapon tiles and the placeholder name `ALBERT`, mid-screen at the stage's own size,
+with no frame or tabs (those are the shell's). But `step=code_obj ... set=16 of=17 read_back=0` on all five logged
+tries: the stand-in was built with its 16 functions, and `root.BGSCodeObj = stand-in` failed. No `code_obj_init`, no
+`code_call`, no `refuse`, no crash. The reading (the PC's, and mine): the page's root is its own sealed class, which
+takes no new member, where the boot sequence's timeline root did; and since the set never counted as done,
+`InitCodeObj` was never called. The page shows its design-time placeholders, so 2b can be judged by a placeholder
+(`ALBERT`, a bar) being replaced.
+
+**Proof 2a, the second run: the card.** Plugin code, so the PC rebuilds. The stand-in is now handed over by
+`CodeObjInit=` whether or not `root.BGSCodeObj` takes it: once the stand-in is built with all its functions, the
+plugin calls `root.<name>(stand-in)`, then reads `root.codeObj` back, and logs
+`step=code_obj_init when= try= name= got= found= type= called= result_type= code_obj= code_obj_type=`. A call that
+went through ends the tries for this movie; for a movie whose root takes `BGSCodeObj` (the boot sequence) nothing
+changes. Same steps and settings as the first run.
+PASS: `step=code_obj_init ... found=1 called=1 ... code_obj=1 code_obj_type=8` (the page kept our object as its
+`codeObj`), then `code_call` lines for whatever the page calls on it, with the page drawn as before and no crash.
+`found=0`: `InitCodeObj` is not a public member of the page's root, and the hand-over is the shell's
+(`PipboyMenu.swf`); 2b then starts from D2's `PipboyMenu` names. `called=1 code_obj=0`: the page took the call but
+keeps the object elsewhere; the `code_call` lines show whether it uses it.
+
+**Proof 2a, the second run (owner PC, 13 Nov, 06:07 to 06:11 UTC, at `9858bc26`): PASS, verified.** `step=code_obj_init
+when=load try=1 name=InitCodeObj got=1 found=1 type=11 called=1 result_type=0 code_obj=1 code_obj_type=8`: the page
+has a public `InitCodeObj` and kept our object as its `codeObj`, which confirms the D2 reading. `set=16 of=17
+read_back=0` as expected for the sealed root. No `code_call` in 14 seconds with the page left alone, no `refuse`, no
+crash; the page shows its design-time contents. So the page's values do not come through any call it makes: the data
+arrives another way, which 2b has to find.
+
+**Proof 2b, step i, the card: what the page exposes (read-only).** Plugin code, so the PC rebuilds. D2's STAT page names
+a data path (`PipboyChangeEvent`, `PIPBOY_CHANGE_EVENT`, `onPipboyChangeEvent`, `onPipboyChangeEventInternal`,
+`DataObj`, `_DataObj`, `UpdateMask`, `Pipboy_DataObj`, `InvalidateData`, `onAnnounceDataChange`) and the values by name
+(`CurrHP`, `MaxHP`). The reading (not verified): Fallout 4's shell hands each page a `PipboyChangeEvent` carrying the
+data object and an update mask, and the page's `onPipboyChangeEvent` copies the values it needs. Before anything is
+pushed, this step reads which of those names are public on the page's root and of what type.
+`CodeObjProbe=<path>,...` (with `CodeObj=1` only; it ships empty): once per movie, right after the hand-over, each path
+(a root member, or members joined by `.`) is read with `GetMember` and logged as `step=code_obj_probe n= name= found=
+type= value=` (the value only for a boolean or a number). Nothing is set or called.
+1. Install and settings as for proof 2a's second run, plus
+   `CodeObjProbe=onPipboyChangeEvent,onPipboyChangeEventInternal,ProcessUserEvent,InvalidateData,onAnnounceDataChange,DataObj,_DataObj,UpdateMask,codeObj,bAcquiredByNativeCode,onAcquiredByNativeCode,ReleaseCodeObj,CurrHP,MaxHP,PlayerInfo,stage`.
+2. Outdoors: F10, wait 5 seconds, F10 again.
+3. Send every `step=code_obj_probe` line and the `step=code_obj_init` line.
+
+PASS: sixteen `code_obj_probe` lines, no crash. Types: 11 is a function, 8 an object, 10 a display object, 0 missing or
+undefined. What it decides: if `onPipboyChangeEvent` (or `onPipboyChangeEventInternal`) is a public function, step ii
+calls it with an event the plugin builds; if only `DataObj` or `_DataObj` is public, step ii writes `CurrHP` and `MaxHP`
+into it and calls `InvalidateData`; if neither, the hand-over of data belongs to the shell, and step ii loads
+`PipboyMenu.swf` around the page.
+
+**Proof 2b step i, the result (owner PC, 13 Nov, 06:25 to 06:29 UTC, at `3dff85fb`): verified.** Sixteen
+`code_obj_probe` lines, no crash. Public on the page's root: `ProcessUserEvent` (11, a function), `codeObj` (8, our
+object), `bAcquiredByNativeCode` (2, a boolean, value 0), `onAcquiredByNativeCode` (11), `ReleaseCodeObj` (11) and
+`stage` (10). Not found (`found=0 type=-1`; -1 means nothing was read): `onPipboyChangeEvent`,
+`onPipboyChangeEventInternal`, `InvalidateData`, `onAnnounceDataChange`, `DataObj`, `_DataObj`, `UpdateMask`,
+`CurrHP`, `MaxHP` and `PlayerInfo`. So by the decision table there is no data entry point on the root. Two leads from
+the PC before loading the whole shell: `bAcquiredByNativeCode` is false while `onAcquiredByNativeCode` is public, an
+acquire step Fallout 4's engine makes and nobody has made here; and the change event may be dispatched on `stage`
+rather than called as a method.
+
+**Proof 2b step ii, the card: the acquire step, then the same probe.** Plugin code, so the PC rebuilds.
+`CodeObjCalls=<path>,...` (with `CodeObj=1` only; it ships empty): once per movie, on the try that finished the
+hand-over and before the probe, each path is called with no arguments and logged as `step=code_obj_root_call n= name=
+found= type= called= result_type=`. A path that is not a function is not called.
+1. Install and settings as for step i (the same `CodeObjProbe=` line), plus `CodeObjCalls=onAcquiredByNativeCode`.
+2. Outdoors: F10, wait 10 seconds, take a screenshot, F10 again.
+3. Send the `step=code_obj_init`, `step=code_obj_root_call`, every `step=code_obj_probe` and every `step=code_call`
+   line, and the screenshot.
+
+PASS: `code_obj_root_call ... name=onAcquiredByNativeCode found=1 type=11 called=1`, then `bAcquiredByNativeCode`
+probed as 1, no crash. What it decides: if new data names appear on the root, or calls come in on our object
+(`code_call`), step iii uses them; if nothing changes, step iii takes the second lead and dispatches the change event
+on `stage`, which needs an event the plugin builds, or loads `PipboyMenu.swf` around the page.
+
+**Proof 2b step ii, the result (owner PC, 13 Nov, 07:05 to 07:09 UTC, at `e3a754b4`): verified.**
+`code_obj_root_call n=1 name=onAcquiredByNativeCode found=1 type=11 called=1 result_type=0`, and
+`bAcquiredByNativeCode` then probes `value=1` (it was 0). The other fifteen probe lines are unchanged; no `code_call`,
+no `refuse`, no crash. So acquiring the page opens nothing on its root. With the owner's direction (13 Nov, "do what
+you think is best off of seeing how it works in fallout 4"), the next step is Fallout 4's own way of feeding a page:
+the shell `PipboyMenu.swf` around it. That is S1 below (`pipboy-device-plan` rev 11, the screen side).
+
+**S1, the shell with its pages: what Fallout 4 has (the engine read, FAL-680; names only).** Fallout 4 draws the
+Pip-Boy menu at 876 x 700 (D1's stage), and feeds it from 11 data classes, one per top-level branch: `Stats`,
+`Special`, `Perks`, `Inventory`, `Quests`, `Workshop`, `Log`, `Map`, `Radio`, `PlayerInfo`, `Status`. S1 does not feed
+any of them: it shows the frame. S3, the data feed, builds those branches later, STAT's first.
+
+**S1, the card: the shell with its pages (owner PC; scripts only, the dll of `e3a754b4` unchanged, FAL-614).** The
+installer's new `--page-movie <page>` (with `--extra-movie` only) packs the player's own tab movies into the private
+probe archive under the very names the shell loads them by: `Pipboy_StatsPage`, `Pipboy_InvPage`, `Pipboy_DataPage`,
+`Pipboy_MapPage`, `Pipboy_RadioPage` (each named once, each checked as a whole SWF; nothing else). The plugin is not
+changed: `Movie=` already loads any `FO4SF_` movie, and the stand-in, `CodeObjProbe=` and their logs are the ones of
+`e3a754b4`. No kit screen, no device path: this is the flat menu (F10), the power-armor mode's floor.
+0. **Read first (PC, private, names only; no launch).**
+   - From D2's private output for `PipboyMenu.swf`: the page file names the shell names beside `PipboyLoader`. If they
+     are the five bare names above, go on. If they carry a folder or another name: **STOP**, report the names only,
+     and the next commit adds them. NEEDS-SOLE.
+   - The names-only listing of `Starfield - Interface.ba2` (the look survey's tool): none of the five names, and no
+     `PipboyMenu.swf`, may be there (Starfield has no Pip-Boy movie, **hypothesis**). A hit is a **STOP**: report it.
+1. **Stage** (a clean worktree at this card's head): `make_pipboy_probe.py stage <exp>`. Copy, unchanged, from the
+   player's `Fallout4 - Interface.ba2` into `<exp>\Data\Interface\`: `PipboyMenu.swf` as `FO4SF_Fo4Shell.swf`, and the
+   five pages under their own names (`Pipboy_StatsPage.swf` ...). `make_pipboy_probe.py check`. Then, between
+   `plugin_toggle.py on` and `off`: `pipboy_probe_install.py install --dir <exp> --extra-movie FO4SF_Fo4Shell
+   --page-movie Pipboy_StatsPage --page-movie Pipboy_InvPage --page-movie Pipboy_DataPage --page-movie Pipboy_MapPage
+   --page-movie Pipboy_RadioPage --starfield <game>`. A refusal is a **STOP**: report its line.
+2. **The plugin:** the dll built from `e3a754b4` (the one proof 2b step ii ran), its ini, `versionlib-1-16-244-0.bin`.
+   In the ini: `Stage=2`, `Movie=FO4SF_Fo4Shell`, `CodeObj=1`, `CodeObjHide=0`, `CodeObjSound=0`, `CodeObjInit=` empty,
+   `CodeObjCalls=` empty, `CodeObjNames=` proof 2a's line (the PC may put the shell's own verbs from D2 in its place,
+   16 at most, and records the line it used), and
+   `CodeObjProbe=BGSCodeObj,codeObj,InitCodeObj,bAcquiredByNativeCode,onAcquiredByNativeCode,ProcessUserEvent,ReleaseCodeObj,onPipboyChangeEvent,onPipboyChangeEventInternal,InvalidateData,DataObj,_DataObj,UpdateMask,Pipboy_DataObj,PipboyLoader,stage`.
+3. **Run:** outdoors, F10, wait 15 seconds, one screenshot at 5 s and one at 15 s, F10 again. Once more if the first
+   shows nothing (a second open loads the movie afresh). Then uninstall and restore as for proof 2b.
+4. **Send:** the `step=load_movie`, `step=code_obj`, every `step=code_obj_probe` and `step=code_call` line, any
+   `refuse` line, the two screenshots (described: frame, tab bar, which page shows, placeholders, font, size and
+   place on screen), and whether the game stayed playable.
+
+**PASS S1:** `load_movie ... result=1 movie_name=FO4SF_Fo4Shell`; on screen the shell's frame and its tab bar (STAT,
+INV, DATA, MAP, RADIO), with the STAT page inside it showing its design-time placeholders (2a's `ALBERT`, the bars);
+no crash. A picture at the stage's own size, not filling the screen, still passes; the size is S1's later work. What
+each other outcome means:
+- `code_obj ... read_back=1`: the shell's root takes `BGSCodeObj` as the boot sequence's did, and the probe lines show
+  which of its names are public. `read_back=0` with `set=` one short: the root is sealed like the page's; the next card
+  hands the stand-in over through a name the probe or D2 shows.
+- The frame and tabs show but no page: the shell did not load the page. Either it waits for a call or data (the
+  `code_call` lines and the probe say which), or the name in step 0 was wrong.
+- `code_call` lines: the shell's verbs on our object, with their arguments. They are the list for S4 (input) and S3.
+- Nothing shows, or it freezes: the shell waits for the engine. The probe lines say what it has; send the log.
+- A crash: send the crash log privately; `Movie=FO4SF_Fo4Boot` is proof 1 as it passed.
+- The font: if the text is not Fallout 4's typeface, that is S2 (`fonts_en.swf` is also Starfield's name).
+
+**S1, the result (owner PC, 14 Nov, 07:58 to 08:02 UTC, at `92244e49` with the dll of `e3a754b4`): PARTIAL, verified.
+The card's "frame and tabs show but no page".** Step 0 passed: the shell names the five pages bare, and none is in
+`Starfield - Interface.ba2`. The installer took the shell and the five pages without a refusal.
+- The log, the same on both opens: `load_movie ... result=1 movie_name=FO4SF_Fo4Shell`, then `code_obj when=load try=1
+  ... set=17 of=17 read_back=1`. Unlike the STAT page's sealed root, the shell's root takes `BGSCodeObj`. The probe
+  finds only `BGSCodeObj` (8) and `stage` (10); the other 14 are `found=0`, `PipboyLoader` among them. There is no
+  `code_call` in 15 seconds and no `refuse`.
+- On screen: the tab bar (STAT, INV, DATA, MAP, RADIO, with STAT selected and the LT and RT hints), and a sub-tab row
+  reading STATUS five times. The footer shows its placeholders (`HP 80/80`, LEVEL with a full bar, `AP 90/90`). All
+  of it is white and grey, stretched across the screen over the live world, and nothing animates. There is no page
+  body, no bezel and no green tint, and the typeface does not look like Fallout 4's (S2). F10 closes the menu, and the
+  game stays playable; no crash, no save.
+- The plugin logs nothing for the page loads or for the missing `PipboyMobileSettings.swf`, so this log cannot say
+  whether the shell asked for them.
+
+**What the result settles (a reading).**
+- The missing bezel and tint are expected. Fallout 4's bezel is the device model, and its engine tints the movies (S5).
+  The stretch is the menu's scale mode, which is later S1 work.
+- The shell is waiting, not failing. Its design-time placeholders are untouched (STATUS five times), so none of its
+  code that fills them from data has run.
+- The probe cannot see where the shell's logic sits. It reads members of the root once, at the hand-over (`when=load`,
+  try 1), and the shell's code is not under those 14 names there. Either it sits in a placed child clip or another
+  class, or it uses names we did not list.
+- D2's `onCodeObjCreate` and `onCodeObjDestruction` were neither probed nor called. **Hypothesis**: as in Fallout 4's
+  other menus, the engine sets `BGSCodeObj` and then calls `onCodeObjCreate`, and nothing calls it here.
+- The engine read (PB-RE-1 part A, A6) says Fallout 4 feeds the menu from 11 `Pipboy*Data` classes. **Hypothesis**:
+  the shell shows a page only once its data or a tab arrives.
+
+**S1's next slice: the decision (14 Nov, FAL-786). Read first, then an ini-only card on the same dll.**
+1. **S1-R1, a names-only read** of the player's `PipboyMenu.swf` with `scripts/ui/swf_names.py`, with no launch. It
+   says which class each name sits in, which instances are placed by name, and which names each method uses. The next
+   card's probe and calls then use paths that exist, not guesses.
+2. **S1-b, ini only, with the dll of `e3a754b4`:** probe the paths R1 shows, and list the shell's own engine verbs in
+   `CodeObjNames=` so `code_call` shows what it asks for. Then make the shell's arrival call (`onCodeObjCreate`, or
+   what R1 shows) with `CodeObjCalls=`.
+
+Not chosen now:
+- **Logging the shell's page loads in the plugin:** that is plugin code and a PC rebuild for a yes or no. S1-b reads it
+  from the loader's own members if R1 finds them. It becomes the next card only if S1-b cannot tell whether a page was
+  asked for.
+- **Supplying data:** R1 says which call or event is needed, and what shape it has. A call that needs an argument, or
+  an event the plugin builds, is plugin code, so it waits for R1. S3 starts there.
+
+**S1-R1, the card (Claude PC; read-only, no launch; names only, the output stays private).** Environment: PowerShell,
+this branch at the commit that adds `swf_names.py` (a clean checkout, or `git archive` into a scratch folder), Python
+as for D1. Nothing is written under the game folders.
+1. `python scripts/ui/swf_names.py --ba2 "<Fallout 4>\Data\Fallout4 - Interface.ba2" PipboyMenu.swf
+   Pipboy_StatsPage.swf`, with its output redirected into the PC's private evidence folder.
+   - It reads both movies in memory and prints names only: the classes and their members, the instances placed by
+     name, and, for each method, the names it calls and reads and the identifier strings it pushes.
+   - A string that is not an identifier is counted, never printed. No code and no bytes are printed.
+2. Send back names and counts only:
+   - **a. The root:** the `symbol id=0` line, that class's `class` line and its `trait of=instance` lines, and the
+     `place in=0` lines (the root's named instances, with their classes).
+   - **b. The loader:** every `place` or `trait` line whose name holds `Loader`, `Page`, `Tab` or `Swap`. Also the
+     `uses` lines of the methods whose `strings=` hold a page's file name (`Pipboy_StatsPage.swf` ...).
+   - **c. The engine calls:** the `uses` lines whose `names=` hold `BGSCodeObj` or whose `calls=` hold `call`, and the
+     identifier strings in them (the verbs passed to the engine).
+   - **d. The arrival and the data:** the `uses` lines of `onCodeObjCreate`, `onCodeObjDestruction`, `InitCodeObj`
+     and `onAcquiredByNativeCode`. Also those of any method whose `names=` or `strings=` hold `DataObj`, `ChangeEvent`,
+     `UpdateMask` or `PipboyData`. Each line names its class.
+   - **e. For `Pipboy_StatsPage.swf`:** only the `uses` lines of the methods that d shows the shell calling on a page.
+   - **f. Counts:** the lines of each kind, and every `partial` line (a method body the reader could not finish; its
+     names stop there).
+3. A `partial` or `not_swf` line is not a STOP: report it.
+
+**What S1-b does with R1 (its card follows R1; ini only, the dll of `e3a754b4` unchanged).**
+- `CodeObjNames=`: the shell's verbs from c, 16 at most, so every `code_call` line names what the shell asks for.
+- `CodeObjProbe=`: paths from a, b and d through the placed instances (for example `<instance>.<member>`), 16 at
+  most. They show where the loader and the data entry sit, and whether they are public.
+- `CodeObjCalls=`: the arrival call from d (for example `onCodeObjCreate` or `<instance>.onCodeObjCreate`), once,
+  with no arguments, right after the hand-over.
+- PASS S1-b: the STAT page's body inside the shell (2a's `ALBERT`, the bars), or `code_call` lines that name what the
+  shell waits for.
+- Each of these is a plugin card instead:
+  - a call that needs an argument;
+  - a value returned from our object;
+  - an event the plugin builds;
+  - a loader that R1 shows is created by a method rather than placed (the probe runs at load only, so it cannot see
+    it).
+
+**Proof 2, the outline (route A): the STAT page.** Each step has its own card once the one before it has run.
+- **2a, the page alone:** `Movie=FO4SF_Fo4Stats`, the player's `Pipboy_StatsPage.swf` installed with
+  `--extra-movie FO4SF_Fo4Stats`, and `CodeObj=1` with the page's own names in `CodeObjNames`. Shows: the page's frame
+  with no data, and which of its calls arrive. The names to list come from D2 and proof 1b; which of them are calls is
+  a guess until the log shows it.
+- **2b, HP by name:** our plugin pushes `CurrHP` and `MaxHP` into the page by the path 2a's log shows. Not written
+  until 2a has run.
+
+## Look and function: the seam
+
+- **Function** (one, shared by every look): the pages, what each row or widget is fed, and input. It is the
+  **union** of what every game's Pip-Boy needs (owner, 13 Nov), not Fallout 4's list alone; the next section lists it.
+  - The values the plugin promises every look today: the value providers (`make_pipboy_kit.py` `VALUE_PROVIDERS`:
+    health, level, xp, carry_max, rads, cell, world, time, days, position, heading, grid, `av:<id>`).
+  - The lists: inventory and quests, and later markers.
+  - The events: tab and sub-tab moves, selection, click, open and close.
+  - Added by later function work: the map's world values (section c).
+- **A look** is files plus settings. The files are the screen movies, fonts and images, later the device model,
+  animations and sounds, each converted from that game's own files on the player's PC. The settings are:
+  - the look's name;
+  - which movie is the shell;
+  - how each function value reaches it: by our field names (route B), or by the original's data names (route A).
+  The converter writes a look into its own private folder and archive.
+- **How a look is chosen:** one ini setting names the look. The plugin loads that look's shell and falls back to our
+  kit movie, which is always present and is the debug view. Fallout 4 is the first look; Fallout 3, New Vegas and 76
+  are not surveyed or converted now.
+- **Per game, not one world (the seam for Fallout 76 and later).** Nothing in the plugin or the menu may assume one
+  world map or one fixed set of pages:
+  - The page set is data. It already is: the kit's `[Page]` sections.
+  - A world map belongs to the world the player is in. It is chosen by WORLD, never fixed in code. The Commonwealth's
+    map comes with the Fallout 4 conversion; another game's world brings its own.
+  - Fallout 76's map style and extra features are function, decided by the owner later.
+
+## The function union: a first inventory by game
+
+Owner, 13 Nov: "the main functioning should just be a combination of everything that's needed from each of the
+games." So the function side is one Pip-Boy holding every feature that Fallout 3, New Vegas, 4 and 76 need (more
+games later). The looks stay per game.
+
+**Source of this table.** Written from memory of the games, without reading their files. **None of it is verified.**
+`known` means what players of that game see; `unread` means it is not certain whether, or where, that game has it.
+No other game's files are surveyed now.
+
+Games: **3** = Fallout 3, **NV** = New Vegas, **4** = Fallout 4, **76** = Fallout 76.
+
+| Function id | What it shows or does | 3 | NV | 4 | 76 | Ours today |
+| --- | --- | --- | --- | --- | --- | --- |
+| `stat.status` | health, condition of limbs, rads, the player figure, use a stimpak or RadAway | known | known | known | known | rows: health, rads, level, xp |
+| `stat.needs` | hunger, thirst, sleep | - | known (Hardcore) | unread (Survival mode, shown elsewhere?) | known | - |
+| `stat.effects` | active effects: chems, perks, illness | unread | unread | known | known | - |
+| `stat.special` | the seven S.P.E.C.I.A.L. values | known | known | known | known (with perk cards) | rows: `av:2C2` to `av:2C8` |
+| `stat.skills` | skills (Small Guns, Lockpick ...) | known | known | - | - | - |
+| `stat.perks` | the perks taken; Fallout 4's perk chart; Fallout 76's perk cards | known (list) | known (list) | known (chart) | known (cards, legendary perks) | - |
+| `stat.general` | statistics, karma, level progress | known | known | unread (under DATA as Stats) | unread | - |
+| `stat.reputation` | standing with each faction | - | known | - | unread (factions, reputation) | - |
+| `stat.mutations` | mutations | - | - | - | known | - |
+| `inv.items` | items by category (weapons, apparel, aid, misc, junk, mods, ammo, notes, holotapes), equip, drop, inspect, favourite | known | known | known | known | list: inventory (names, counts) |
+| `inv.weight` | carry weight, current and maximum | known | known | known | known | row: carry_max |
+| `inv.junk_components` | junk's components, tag for search | - | - | known | known | - |
+| `data.quests` | quests and objectives, the active quest | known | known | known | known | list: quests (our mission) |
+| `data.notes` | notes and holotapes, play a holotape | known | known | known (under INV) | known | - |
+| `data.challenges` | challenges and their progress | - | known | - | known | - |
+| `data.workshops` | settlements: people, food, water, power, defence, happiness | - | - | known | unread (camp, workshops) | - |
+| `data.stats` | game statistics | unread (STATS / General) | unread | known | unread | - |
+| `map.world` | the world map with the player's arrow and markers | known | known | known | known (its own style) | rows: world, position, heading, grid |
+| `map.local` | the local map around the player | known | known | known | unread | - |
+| `map.travel` | fast travel from the map | known | known | known | known (with a cost) | **not designed (owner's later decision)** |
+| `radio.stations` | stations found, tune and turn off | known (under DATA) | known (under DATA) | known | known | notice only |
+| `social` | team, friends, other players | - | - | - | known (outside the Pip-Boy?) | - |
+| `device.light` | the Pip-Boy's light | known | known | known | known | - |
+
+**The function contract every look is fed from.**
+- Every function has a stable id (the table's first column). It has a home tab that is the same for every look:
+  STAT, INV, DATA, MAP, RADIO. In Fallout 3 and New Vegas the map and radio sit under DATA, so a look also says
+  where its own tabs put each id.
+- For each id, the function side promises the same feed to every look: its values (value providers), its lists
+  (list providers), and its events (move, select, click, open, close). These are today's kit pieces, extended by id.
+- A look declares which ids it has a page of its own for. For example, a Fallout 4 look has no `stat.skills` page,
+  and a Fallout 3 look has no `data.workshops` page.
+- **A function the look's game lacks gets a generic page in that look's style:** the look's frame, font and list and
+  value widgets, filled from the same feed. The kit's text rows are the ultimate fallback, so no feature is ever left
+  without a place.
+- A **stated gap** is used only when a function cannot be drawn in a look at all, for example a world map in a look
+  that has no map component and no image to show. The gap is logged once with the look and the id, and the page says
+  so in words.
+- Which functions exist at all is the owner's choice per function, as with travel and Fallout 76's additions. This
+  table is the shape, not a promise to build every row.
+
+**The first build stays Fallout 4.** Fallout 4's look and Fallout 4's functions come first: the rows that are
+`known` under 4. The union is the shape the code keeps room for (ids, the home tab, generic pages), not the first
+delivery.
+
+## What this plan does not do
+
+- No code, no conversion, no movie of the player's in Git or anywhere public. Every converted byte stays on the PC.
+- No travel from the map, no `coc` from the plugin, no fast travel.
+- No survey or conversion of Fallout 3, New Vegas or 76 now.
+- No change to the pause default or to the stages. The kit's text rows stay.
+
+## Next gate
+
+1. Done: D1 and D3 (13 Nov).
+2. Done: D2 and proof 1 (13 Nov): route A is alive.
+3. Done: proof 1b (13 Nov, third run) and proof 1c (13 Nov, `CodeObjHide=1`).
+4. Done: read D4 and proof 1d (13 Nov, the sounds by route S2, PASS by the log; the owner's ear still to hear it).
+5. Done: proof 2a, the STAT page alone (13 Nov, second run: the page draws and takes our object through
+   `InitCodeObj`). Done: proof 2b step i (no data entry on the root) and step ii (the acquire step opens nothing).
+6. Done: S1, the shell with its pages (14 Nov, PARTIAL: the tab bar and footer draw; no page).
+7. Now: S1-R1 (names only, no launch, with `scripts/ui/swf_names.py`), then S1-b (ini only, the dll of `e3a754b4`),
+   each with its own card. Then S3's first branch (STAT, HP by name) through the shell, with its own card, tests, a
+   CARRY line, a review, and the PC's run.

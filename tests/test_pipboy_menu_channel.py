@@ -54,12 +54,12 @@ class ChannelPluginTests(unittest.TestCase):
         self.assertIn("kIsMovieLoaded,\n\t\tkIdCountB,", enum)
         self.assertIn("kMainSingleton = kIdCountB,", enum)
         self.assertIn("kVmRtti,\n\t\tkIdCountC,", enum)
-        self.assertIn("std::size_t IdCount() { return g_stage >= 4 ? kIdCount : g_stage == 3 ? kIdCountC : kIdCountB; }",
+        self.assertIn("std::size_t IdCount() { return g_stage >= 4 ? kIdCount : ChannelIdsNeeded() ? kIdCountC : kIdCountB; }",
                       self.main)
         library = function(self.main, "bool ReadAddressLibrary(")
         self.assertEqual(library.count("for (std::size_t i = 0; i < IdCount(); ++i) {"), 2)
         self.assertNotIn("i < kIdCount;", library)
-        self.assertIn("(g_stage >= 3 && !CheckChannelIds())", self.main)
+        self.assertIn("(ChannelIdsNeeded() && !CheckChannelIds())", self.main)
         for name, _ in IDS_C:
             self.assertIn(name.split(".")[-1] if name.startswith("GFx.Value") else name.split(".")[0], self.readme)
 

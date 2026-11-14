@@ -27,7 +27,7 @@ and logs every step. The stage is picked by `Stage` in `FO4SFPipboyMenu.ini`:
 | --- | --- |
 | `src/main.cpp` | the plugin: version guard, checks before use, the menu object, the key thread |
 | `src/pch.h` | precompiled header (libxse's game headers and SFSE layer) |
-| `FO4SFPipboyMenu.ini` | `Stage`, `Key` (default `0x79`, F10), `Flags` (0), `KeepAlive` (1); stage (c): `FlagSets` (`0x0,0x8,0x9`), `SnapshotKey` (`0x7A`, F11), `ClickCall` (empty: off); stages (d) and (e): `PageFlagSets` (`0x19`); stages (d), (e): `CancelCode1` to `CancelCode4` (`0x1B`, `0x09`: Esc and Tab as Windows virtual-key codes, as the PC's game run logged them); stage (e): `KitUp` to `KitNextTab`, and the pages (`[Kit]`, `[Page <TAB>/<SUB>]`) |
+| `FO4SFPipboyMenu.ini` | `Stage`, `Key` (default `0x79`, F10), `Flags` (0), `KeepAlive` (1); stage (b): `Movie` (empty: ours, FAL-614), `CodeObj` (0), `CodeObjNames` (empty: `PlaySound,HideMenu`), `CodeObjHide` (0), `CodeObjSound` (0), `CodeObjInit` (empty), `CodeObjProbe` (empty) and `CodeObjCalls` (empty); stage (c): `FlagSets` (`0x0,0x8,0x9`), `SnapshotKey` (`0x7A`, F11), `ClickCall` (empty: off); stages (d) and (e): `PageFlagSets` (`0x19`); stages (d), (e): `CancelCode1` to `CancelCode4` (`0x1B`, `0x09`: Esc and Tab as Windows virtual-key codes, as the PC's game run logged them); stage (e): `KitUp` to `KitNextTab`, and the pages (`[Kit]`, `[Page <TAB>/<SUB>]`) |
 | `xmake.lua`, `build.ps1` | the PC build: FOCCPing's build path (`docs/spikes/combined-core-probes.md`, B0-2) |
 | `scripts/ui/make_probe_swf.py` | writes the stage (b) movie, with `--channel` the stage (c) one and with `--page` the stage (d) one (pure Python; tests `tests/test_make_probe_swf.py`, `tests/test_pipboy_stat_page.py`) |
 | `scripts/ui/make_pipboy_kit.py` | the page kit (stage (e)): reads and checks the pages of the ini (`--check`) and writes the kit's movie for them (pure Python, on `make_probe_swf.py`; tests `tests/test_pipboy_kit.py`) |
@@ -419,6 +419,13 @@ Install:
    `FO4SFPipboyProbe - Main.ba2`, under its own record `Data\FO4SFPipboyProbe.install.json`; the installed
    experiment's `FO4SFExp.install.json` is not read or changed. A `plugin_toggle.py` hold makes it refuse, so run it
    between `plugin_toggle.py on` and `off`. `status`, `order` and `active` take `--starfield <game>` alone.
+   With `Movie=<name>` (stage (b)), add `--extra-movie <name>` to install: the stage's `Data\Interface\<name>.swf`,
+   the player's private movie, is packed too (`<name>` is `FO4SF_` and letters, digits, `_`; the file must be a
+   whole SWF: signature, FileLength and every tag's length, no tag's contents read). Anything else in `Data` that is not a byte-for-byte twin is still refused.
+   With the extra movie only, `--page-movie <page>` (once per page) packs `Data\Interface\<page>.swf` too, the
+   player's own tab movie under Fallout 4's name, for the shell to load (FAL-614 S1). `<page>` is one of
+   `Pipboy_StatsPage`, `Pipboy_InvPage`, `Pipboy_DataPage`, `Pipboy_MapPage`, `Pipboy_RadioPage`; each is checked as a
+   whole SWF like the extra movie.
 
 Uninstall:
 
@@ -567,6 +574,59 @@ Take a screenshot while the menu is open after the fifth press, and one after th
 2. `step=load_movie ... stage=b result=1 movie=<non-zero>`, and `step=sfse_movie_created` for our menu.
 3. The open screenshot shows the green rectangle, centred, about 60 % by 50 % of the screen. It carries the dark label
    `FO4SF PIP-BOY PROBE`. The closed screenshot shows the game without it.
+
+### (b) with `Movie=`: another movie in our menu (FAL-614)
+
+`Movie=<name>` (1 to 64 letters, digits and `_`; empty = ours) makes the menu load `Interface/<name>.swf` instead of
+ours. It works with `Stage=2` only, so no channel, page or kit tries to drive a movie that is not ours. Any other stage
+with `Movie=` set, or a bad name, gives `refuse step=ini movie=...` and the plugin stays idle. At load:
+`step=movie name=<name> file=Interface/<name>.swf`.
+
+How it works (**hypothesis**, the PC's run decides): the engine's `LoadMovie` names the file after the menu's
+`GetName`, as it loads `Interface/FO4SF_PipboyMenu.swf` for ours. While our `LoadMovie` runs the engine's, `GetName`
+answers with `Movie=`; at every other time it answers `FO4SF_PipboyMenu`. The load logs
+`step=load_movie ... result=<0 or 1> movie=<address> movie_name=<name> name_asks=<n>`. `name_asks=0` means the
+engine did not ask for the name in that call, so the hypothesis is wrong whatever loaded.
+
+It exists for proof 1 of `docs/spikes/pipboy-fo4-rebuild-plan.md`: the player's own Fallout 4 boot sequence, staged
+on their PC only, never in Git.
+
+`CodeObj=1` (with `Movie=` only; without it: `refuse step=ini code_obj=1`) is proof 1b's stand-in for the movie's
+engine object. With it, stage (b) reads and checks stage (c)'s ids too (`step=channel_ids ...` at load), as the root
+check needs them. The plugin sets `root.BGSCodeObj` to a function object carrying one function per name in
+`CodeObjNames` (empty: `PlaySound,HideMenu`; 1 to 16 names of letters, digits and `_`, none twice, else
+`refuse step=ini code_obj_names=`). It tries right after the engine's `LoadMovie` returns (`when=load`; proof 1b's
+first run found no root there), after the engine's own `kShow` (`when=show`) and after each `kUpdate` (`when=update`),
+which the key thread sends about every half second while the stand-in is not set, up to 40 tries per movie. The
+first five tries and the one that sets it log
+`step=code_obj when= try= root_of= get_variable= root= root_type= holder_type= set= of= read_back= names=`. Each
+call logs `step=code_call n= name= args= arg0=`
+(the first 64 characters of a string argument, else its type), up to 64 calls, and does nothing else: no sound, and
+`HideMenu` leaves the menu open. With `CodeObjHide=1` (with `CodeObj=1` only, else `refuse step=ini code_obj_hide=1`)
+`HideMenu` also closes our menu on the main thread, as the CLOSE button and F10 do: `step=close n= by=hide_menu`.
+With `CodeObjSound=1` (with `CodeObj=1` and `PlaySound` among the names only, else
+`refuse step=ini code_obj_sound=1`; at load `step=code_obj_sound folder=FO4SFPipboyMenuSounds max_playing=4`)
+`PlaySound` also plays the player's own converted file `FO4SFPipboyMenuSounds\<arg0>.wav` beside the dll (proof 1d,
+route S2): PCM 16 bit `RIFF`/`WAVE`, 1 or 2 channels, 8000 to 192000 Hz, 32 MB at most, the name 1 to 64 letters,
+digits and `_`. Each sound plays on a Windows audio (waveOut) stream and a thread of its own, so overlapping sounds mix
+and closing the menu does not cut one; at most 4 at once. It logs `step=sound n= name= result=start rate= channels=
+ms= playing=` and `result=end took_ms=`, or one of `missing`, `bad_size`, `unreadable`, `not_riff_wave`, `no_fmt`,
+`not_pcm16`, `bad_format`, `no_data`, `open_failed`, `write_failed`, `bad_name`, `busy`, `no_thread` (up to 64 lines).
+With `CodeObjInit=<name>` (with `CodeObj=1` only, 1 to 64 letters, digits and `_`, else
+`refuse step=ini code_obj_init=`; proof 2a) the plugin, once the stand-in is built with all its functions and whether
+or not `root.BGSCodeObj` took it (a page's root is a sealed class that takes no new member), calls the movie's own
+`root.<name>` with the stand-in as its one argument, as a page's shell would, reads `root.codeObj` back, and logs
+`step=code_obj_init when= try= name= got= found= type= called= result_type= code_obj= code_obj_type=`. A call that went
+through ends the tries for that movie. With `CodeObjProbe=<path>,...` (with `CodeObj=1` only, 1 to 16 paths of
+letters, digits, `_` and `.`, else `refuse step=ini code_obj_probe=`; proof 2b step i) the plugin, once per movie on the
+try that finished the hand-over, reads each path from the movie's root with `GetMember` and logs
+`step=code_obj_probe n= name= found= type= value=` (the value only for a boolean or a number; `type=-1` when the path
+was not found). It sets and calls nothing. With `CodeObjCalls=<path>,...` (same rules, else
+`refuse step=ini code_obj_calls=`; proof 2b step ii) each path that is a function is called once with no arguments,
+on the same try and before the probe, and logged as `step=code_obj_root_call n= name= found= type= called=
+result_type=`.
+It does not follow the game's volume sliders. The folder is the player's, made by hand on the PC; no installer here
+writes or removes it, and nothing of it enters Git.
 
 ### PASS at (c), `Stage=3` (steps: `docs/spikes/pipboy-channel-bridge-session.md`)
 

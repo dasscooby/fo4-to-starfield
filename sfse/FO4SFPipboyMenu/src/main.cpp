@@ -88,12 +88,16 @@
 #include "pch.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <numbers>
 #include <optional>
@@ -108,6 +112,13 @@ REX_W32_IMPORT(std::int16_t, GetAsyncKeyState, std::int32_t);
 REX_W32_IMPORT(void*, GetForegroundWindow);
 REX_W32_IMPORT(std::uint32_t, GetWindowThreadProcessId, void*, std::uint32_t*);
 REX_W32_IMPORT(std::uint32_t, GetCurrentProcessId);
+// FAL-614 proof 1d (CodeObjSound=1): Windows audio's waveOut calls (winmm, xmake.lua add_syslinks)
+REX_W32_IMPORT(std::uint32_t, waveOutOpen, void**, std::uint32_t, const void*, std::uintptr_t, std::uintptr_t, std::uint32_t);
+REX_W32_IMPORT(std::uint32_t, waveOutPrepareHeader, void*, void*, std::uint32_t);
+REX_W32_IMPORT(std::uint32_t, waveOutWrite, void*, void*, std::uint32_t);
+REX_W32_IMPORT(std::uint32_t, waveOutReset, void*);
+REX_W32_IMPORT(std::uint32_t, waveOutUnprepareHeader, void*, void*, std::uint32_t);
+REX_W32_IMPORT(std::uint32_t, waveOutClose, void*);
 
 #include "world.h"   // FAL-250: the world-surface census and candidate (World=1; README.md, "World surface")
 
@@ -137,6 +148,15 @@ namespace
 	constexpr std::size_t   kGameVmImplAt = 0xE0;            // libxse RE::GameVM::impl (BSTSmartPointer<IVirtualMachine>)
 	constexpr std::size_t   kDispatchStaticCallSlot = 0x2F;  // libxse IVirtualMachine::DispatchStaticCall
 	constexpr std::size_t   kMaxName = 64;                   // ClickCall: each of the script's and function's names
+	constexpr std::uint32_t kMaxCodeCalls = 64;              // FAL-614 proof 1b: stand-in BGSCodeObj calls logged
+	constexpr std::size_t   kMaxCodeArg = 64;                // and the first characters of a string argument
+	constexpr std::size_t   kMaxCodeNames = 16;              // CodeObjNames: the stand-in's functions
+	constexpr std::uint32_t kMaxCodeObjTries = 40;           // tries per movie (load, show, then one per kUpdate)
+	constexpr std::uint32_t kLoggedCodeObjTries = 5;
+	constexpr std::size_t   kMaxSoundBytes = 32u << 20;      // FAL-614 proof 1d: one converted sound file, at most
+	constexpr std::uint32_t kMaxSoundsPlaying = 4;           // sounds at once (the boot sequence overlaps two)
+	constexpr std::uint32_t kMaxSoundLines = 64;             // step=sound lines logged
+	constexpr auto          kSoundFolder = "FO4SFPipboyMenuSounds";   // beside the dll: the player's converted files         // the first tries logged; the one that sets it always
 
 	// stage d (the STAT page)
 	constexpr std::uint32_t kDataHandlerRva = 0x5FD9B28;     // SFSE 0.2.21 sfse/GameData.h: TESDataHandler::GetSingleton
@@ -401,6 +421,7 @@ namespace
 	std::uint32_t g_key = 0x79;     // F10
 	std::uint32_t g_flags = 0;      // OR'ed into the flags the constructor set
 	bool          g_keepAlive = true;
+	std::string   g_movie;          // FAL-614, Stage=2 only: Movie=, the movie Interface/<Movie>.swf instead of ours; "" = ours
 
 	std::uintptr_t                           g_base = 0;
 	std::size_t                              g_imageSize = 0;
@@ -417,6 +438,23 @@ namespace
 	Ctor_t                                   g_ctor = nullptr;
 	Dtor_t                                   g_engineDtor = nullptr;
 	LoadMovie_t                              g_engineLoadMovie = nullptr;
+	std::atomic<bool>                        g_loadingMovie{ false };   // FAL-614: inside our call of the engine's LoadMovie
+	std::atomic<std::uint32_t>               g_movieNameAsks{ 0 };      // GetName calls answered with Movie= in that call
+	bool                                     g_codeObj = false;         // FAL-614 proof 1b: CodeObj=1, the stand-in BGSCodeObj
+	bool                                     g_codeObjHide = false;     // FAL-614 proof 1c: CodeObjHide=1, HideMenu closes our menu
+	bool                                     g_codeObjSound = false;    // FAL-614 proof 1d: CodeObjSound=1, PlaySound plays a file
+	std::string                              g_codeObjInit;             // FAL-614 proof 2a: CodeObjInit=<root function>, handed the stand-in
+	std::array<std::string, kMaxCodeNames>   g_probeNames;              // FAL-614 proof 2b-i: CodeObjProbe=, read once after the hand-over
+	std::size_t                              g_probeCount = 0;
+	std::array<std::string, kMaxCodeNames>   g_rootCallNames;           // FAL-614 proof 2b-ii: CodeObjCalls=, called once after the hand-over
+	std::size_t                              g_rootCallCount = 0;
+	std::filesystem::path                    g_soundDir;                // <dll folder>/FO4SFPipboyMenuSounds
+	std::atomic<std::uint32_t>               g_soundsPlaying{ 0 };
+	std::atomic<std::uint32_t>               g_soundLines{ 0 };
+	std::atomic<std::uint32_t>               g_codeCalls{ 0 };          // calls of the stand-in's functions, logged up to kMaxCodeCalls
+	std::atomic<const void*>                 g_codeObjMovie{ nullptr }; // the movie the stand-in is set on (done for it)
+	std::atomic<const void*>                 g_codeObjTriedMovie{ nullptr };
+	std::atomic<std::uint32_t>               g_codeObjTries{ 0 };       // tries on g_codeObjTriedMovie
 	ProcessMessage_t                         g_engineProcessMessage = nullptr;
 	const SFSE::TaskInterface*               g_task = nullptr;
 	std::atomic<bool>                        g_registered{ false };
@@ -460,7 +498,11 @@ namespace
 
 	std::uintptr_t Address(std::size_t a_id) { return g_base + g_rva[a_id]; }
 
-	std::size_t IdCount() { return g_stage >= 4 ? kIdCount : g_stage == 3 ? kIdCountC : kIdCountB; }   // (e): (d)'s ids
+	// FAL-614 proof 1b: stage b with CodeObj=1 reaches the movie's root as stage c does (RootOf's RTTI, the Value
+	// functions), so it reads and checks stage c's ids too; without them RootOf compared against an unread RTTI address
+	bool ChannelIdsNeeded() { return g_stage >= 3 || (g_stage == 2 && g_codeObj); }
+
+	std::size_t IdCount() { return g_stage >= 4 ? kIdCount : ChannelIdsNeeded() ? kIdCountC : kIdCountB; }   // (e): (d)'s ids
 
 	bool InImage(std::uintptr_t a_addr, std::size_t a_len)
 	{
@@ -3235,6 +3277,12 @@ namespace
 			if (g_checkedMovie == movie) {
 				g_checkedMovie = nullptr;
 			}
+			if (g_codeObjMovie == movie) {   // FAL-614 proof 1b: a later movie at the same address gets its own stand-in
+				g_codeObjMovie = nullptr;
+			}
+			if (g_codeObjTriedMovie == movie) {
+				g_codeObjTriedMovie = nullptr;
+			}
 		}
 		g_engineDtor(a_self, a_flags & ~1u);   // the engine's IMenu destructor, without its delete: the memory is ours
 		if (a_flags & 1) {
@@ -3244,12 +3292,392 @@ namespace
 		return a_self;
 	}
 
-	const char* MenuGetName(const void*) { return kMenuName; }
+	// the menu's name; while our LoadMovie runs the engine's, Movie= when set (FAL-614: the engine names the movie
+	// file Interface/<name>.swf after it, as it loads Interface/FO4SF_PipboyMenu.swf for ours). Each answer with Movie=
+	// is counted and logged with the load (step=load_movie ... name_asks=)
+	const char* MenuGetName(const void*)
+	{
+		if (!g_movie.empty() && g_loadingMovie.load()) {
+			g_movieNameAsks.fetch_add(1);
+			return g_movie.c_str();
+		}
+		return kMenuName;
+	}
 
 	// "" binds no menu object in the movie: our movie has no code (a file path here is read as a clip path)
 	const char* MenuGetRootPath(const void*) { return ""; }
 
 	std::int32_t MenuGetViewScaleMode(void*) { return 1; }   // Scaleform ShowAll: the whole stage, aspect kept
+
+	// FAL-614 proof 1b (CodeObj=1, Stage=2 with Movie=): a Fallout 4 movie calls its engine through the object at
+	// root.BGSCodeObj (D2's names: BGSCodeObj, BGSExternalInterface, PlaySound, HideMenu). The stand-in answers each
+	// function named in CodeObjNames with a log line and does nothing else: no sound plays and the menu stays open (F10
+	// closes it). A name not listed is not there, as for a movie with no engine object.
+	void Close(std::uint32_t a_n, const char* a_by);
+
+	// FAL-614 proof 1d (CodeObjSound=1, with CodeObj=1): route S2. The stand-in's PlaySound plays the player's own
+	// converted file <dll folder>/FO4SFPipboyMenuSounds/<name>.wav through Windows audio. Read D4: the boot sequence's
+	// three sounds are SNDR records whose files sit in Fallout4 - Sounds.ba2 as XWMA, mono, 44100 Hz; the PC converts
+	// them to PCM 16 bit WAVE, named by the editor id the movie passes, and they never enter Git. Each call plays on a
+	// waveOut stream and a thread of its own, so the sounds overlap and Windows mixes them (each runs about a second
+	// into the next), and closing the menu does not cut one (C ends about 2 s after HideMenu). It does not follow the
+	// game's volume sliders.
+#pragma pack(push, 1)
+	struct WaveFormat   // WAVEFORMATEX
+	{
+		std::uint16_t tag;
+		std::uint16_t channels;
+		std::uint32_t rate;
+		std::uint32_t bytesPerSecond;
+		std::uint16_t blockAlign;
+		std::uint16_t bits;
+		std::uint16_t extra;
+	};
+#pragma pack(pop)
+	static_assert(sizeof(WaveFormat) == 18);
+
+	struct WaveHeader   // WAVEHDR
+	{
+		char*          data;
+		std::uint32_t  length;
+		std::uint32_t  recorded;
+		std::uintptr_t user;
+		std::uint32_t  flags;
+		std::uint32_t  loops;
+		WaveHeader*    next;
+		std::uintptr_t reserved;
+	};
+	static_assert(sizeof(WaveHeader) == 48);
+	constexpr std::uint32_t kWaveMapper = 0xFFFFFFFF;   // WAVE_MAPPER: the default output
+	constexpr std::uint32_t kWaveHeaderDone = 0x1;      // WHDR_DONE
+
+	// why the file is not PCM 16 bit RIFF/WAVE with 1 or 2 channels (empty: it is), with its format and the data's place;
+	// the chunks are walked by their sizes, "fmt " before "data", the data cut to whole frames and to the file
+	std::string WaveProblem(const std::vector<char>& a_file, WaveFormat& a_wave, std::size_t& a_at, std::size_t& a_bytes)
+	{
+		const auto u32 = [&](std::size_t a_p) {
+			std::uint32_t v;
+			std::memcpy(&v, a_file.data() + a_p, sizeof v);
+			return v;
+		};
+		if (a_file.size() < 12 || std::memcmp(a_file.data(), "RIFF", 4) != 0 || std::memcmp(a_file.data() + 8, "WAVE", 4) != 0) {
+			return "not_riff_wave";
+		}
+		bool fmt = false;
+		a_bytes = 0;
+		for (std::size_t p = 12; p + 8 <= a_file.size();) {
+			const std::size_t size = u32(p + 4);
+			const auto        body = p + 8;
+			const auto        room = a_file.size() - body;
+			if (std::memcmp(a_file.data() + p, "fmt ", 4) == 0 && size >= 16 && size <= room) {
+				std::memcpy(&a_wave, a_file.data() + body, 16);
+				a_wave.extra = 0;
+				fmt = true;
+			} else if (std::memcmp(a_file.data() + p, "data", 4) == 0 && fmt) {
+				a_at = body;
+				a_bytes = std::min(size, room);
+				break;
+			}
+			if (size > room) {
+				break;
+			}
+			p = body + size + (size & 1);
+		}
+		if (!fmt) {
+			return "no_fmt";
+		}
+		if (a_wave.tag != 1 || a_wave.bits != 16) {   // read D4's XWMA is 0x0161: converted on the PC first
+			return std::format("not_pcm16 tag={} bits={}", Hex(a_wave.tag), a_wave.bits);
+		}
+		if (a_wave.channels < 1 || a_wave.channels > 2 || a_wave.rate < 8000 || a_wave.rate > 192000 ||
+			a_wave.blockAlign != a_wave.channels * 2) {
+			return std::format("bad_format channels={} rate={} block_align={}", a_wave.channels, a_wave.rate, a_wave.blockAlign);
+		}
+		a_bytes -= a_bytes % a_wave.blockAlign;
+		if (a_bytes == 0 || a_bytes > 0xFFFFFFFFu) {
+			return "no_data";
+		}
+		a_wave.bytesPerSecond = a_wave.rate * a_wave.blockAlign;
+		return {};
+	}
+
+	struct Sound
+	{
+		std::uint32_t n;
+		std::string   name;
+	};
+
+	// one sound, start to end, on its own thread: read, check, play, wait for the end, close
+	std::uint32_t SoundThread(void* a_sound)
+	{
+		const std::unique_ptr<Sound> sound(static_cast<Sound*>(a_sound));
+		const auto                   start = std::chrono::steady_clock::now();
+		const auto                   ms = [&]() {
+			return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+		};
+		const auto line = [&](std::string_view a_result, const std::string& a_more) {
+			if (++g_soundLines <= kMaxSoundLines) {
+				REX::INFO("step=sound n={} name={} result={}{}", sound->n, sound->name, a_result, a_more);
+			}
+		};
+		const auto end = [&](std::string_view a_result, const std::string& a_more) {
+			line(a_result, a_more);
+			--g_soundsPlaying;
+			return 0u;
+		};
+		std::ifstream in(g_soundDir / (sound->name + ".wav"), std::ios::binary | std::ios::ate);
+		if (!in) {
+			return end("missing", std::format(" file={}/{}.wav", kSoundFolder, sound->name));
+		}
+		const auto size = static_cast<std::streamoff>(in.tellg());
+		if (size <= 0 || static_cast<std::size_t>(size) > kMaxSoundBytes) {
+			return end("bad_size", std::format(" bytes={}", static_cast<long long>(size)));
+		}
+		std::vector<char> file(static_cast<std::size_t>(size));
+		in.seekg(0);
+		if (!in.read(file.data(), size)) {
+			return end("unreadable", "");
+		}
+		WaveFormat  wave{};
+		std::size_t at = 0;
+		std::size_t bytes = 0;
+		if (const auto why = WaveProblem(file, wave, at, bytes); !why.empty()) {
+			return end(why, "");
+		}
+		const auto length = bytes * 1000 / wave.bytesPerSecond;
+		void*      out = nullptr;
+		if (const auto r = W32_IMPL_waveOutOpen(&out, kWaveMapper, &wave, std::uintptr_t{ 0 }, std::uintptr_t{ 0 }, 0u); r != 0) {
+			return end("open_failed", std::format(" mmresult={}", r));
+		}
+		WaveHeader header{};
+		header.data = file.data() + at;
+		header.length = static_cast<std::uint32_t>(bytes);
+		auto r = W32_IMPL_waveOutPrepareHeader(out, &header, static_cast<std::uint32_t>(sizeof header));
+		if (r == 0) {
+			r = W32_IMPL_waveOutWrite(out, &header, static_cast<std::uint32_t>(sizeof header));
+		}
+		if (r == 0) {
+			line("start", std::format(" rate={} channels={} ms={} playing={}", wave.rate, wave.channels, length, g_soundsPlaying.load()));
+			const std::atomic_ref<std::uint32_t> flags(header.flags);   // Windows sets WHDR_DONE from its own thread
+			while (!(flags.load() & kWaveHeaderDone) && ms() < static_cast<long long>(length) + 2000) {
+				REX::W32::Sleep(20);
+			}
+		}
+		W32_IMPL_waveOutReset(out);
+		W32_IMPL_waveOutUnprepareHeader(out, &header, static_cast<std::uint32_t>(sizeof header));
+		W32_IMPL_waveOutClose(out);
+		return r == 0 ? end("end", std::format(" took_ms={}", ms())) : end("write_failed", std::format(" mmresult={}", r));
+	}
+
+	// the stand-in's PlaySound with CodeObjSound=1: its first argument names the file (1 to 64 letters, digits and _)
+	void StartSound(std::uint32_t a_n, const RE::Scaleform::GFx::Value* a_arg)
+	{
+		std::string name = a_arg && a_arg->IsString() ? std::string(a_arg->GetString()) : std::string();
+		const bool  ok = !name.empty() && name.size() <= kMaxName && std::ranges::all_of(name, [](char a_c) {
+			return (a_c >= 'A' && a_c <= 'Z') || (a_c >= 'a' && a_c <= 'z') || (a_c >= '0' && a_c <= '9') || a_c == '_';
+		});
+		if (!ok) {
+			if (++g_soundLines <= kMaxSoundLines) {
+				REX::INFO("step=sound n={} result=bad_name", a_n);
+			}
+			return;
+		}
+		if (++g_soundsPlaying > kMaxSoundsPlaying) {
+			--g_soundsPlaying;
+			if (++g_soundLines <= kMaxSoundLines) {
+				REX::INFO("step=sound n={} name={} result=busy playing={}", a_n, name, kMaxSoundsPlaying);
+			}
+			return;
+		}
+		auto       sound = std::make_unique<Sound>(Sound{ a_n, std::move(name) });
+		const auto thread = REX::W32::CreateThread(nullptr, 0, &SoundThread, sound.get(), 0, nullptr);
+		if (!thread) {
+			--g_soundsPlaying;
+			REX::INFO("step=sound n={} name={} result=no_thread", a_n, sound->name);
+			return;
+		}
+		sound.release();   // the thread owns it now
+		REX::W32::CloseHandle(thread);
+	}
+
+	class CodeObjFunction final : public RE::Scaleform::GFx::FunctionHandler
+	{
+	public:
+		void Name(const std::string& a_name) { _name = a_name; }
+
+		void Call(const Params& a_params) override
+		{
+			const auto n = ++g_codeCalls;
+			if (n > kMaxCodeCalls) {
+				return;
+			}
+			std::string arg0 = "none";
+			if (a_params.argCount > 0) {
+				arg0 = a_params.args[0].IsString() ? std::string(a_params.args[0].GetString()).substr(0, kMaxCodeArg) :
+				                                     std::format("type{}", static_cast<int>(a_params.args[0].GetType()));
+			}
+			REX::INFO("step=code_call n={} name={} args={} arg0={}", n, _name, a_params.argCount, arg0);
+			// FAL-614 proof 1c (CodeObjHide=1): the movie's HideMenu closes our menu, on the main thread as the CLOSE
+			// button and F10 do; every other name only logs
+			if (g_codeObjHide && _name == "HideMenu" && g_task) {
+				g_task->AddTask([n]() { Close(n, "hide_menu"); });
+			}
+			// FAL-614 proof 1d (CodeObjSound=1): the movie's PlaySound plays the player's converted file, off this thread
+			if (g_codeObjSound && _name == "PlaySound") {
+				StartSound(n, a_params.argCount > 0 ? &a_params.args[0] : nullptr);
+			}
+		}
+
+	private:
+		std::string _name = "BGSCodeObj";   // the holder itself, in case the movie calls it
+	};
+	CodeObjFunction                                  g_codeObjSelf;
+	std::array<CodeObjFunction, kMaxCodeNames>       g_codeObjFunctions;
+	std::array<std::string, kMaxCodeNames>           g_codeObjNames;
+	std::size_t                                      g_codeObjCount = 0;
+
+	// a function object as the holder (an ActionScript 3 Function is dynamic, so it takes members) with one function per
+	// name on it, set as root.BGSCodeObj, then read back. Proof 1b found no root right after the engine's LoadMovie
+	// returned (root=0 in the same millisecond), so it is tried there ("load"), after the engine's own kShow ("show") and
+	// after each kUpdate ("update", sent while it is not set), on the menu's thread, up to kMaxCodeObjTries per movie;
+	// the first tries and the one that sets it are logged with what was found
+	// FAL-614 proof 2b: a path (members joined by '.') read from a_from with GetMember, one member at a time; false
+	// when a member is missing or the value on the way is not an object or a function
+	bool ReadPath(const RE::Scaleform::GFx::Value& a_from, const std::string& a_path, RE::Scaleform::GFx::Value& a_out)
+	{
+		RE::Scaleform::GFx::Value at = a_from;
+		for (std::size_t start = 0; start <= a_path.size();) {
+			const auto end = std::min(a_path.find('.', start), a_path.size());
+			RE::Scaleform::GFx::Value next;
+			if (!(at.IsObject() || at.GetType() == RE::Scaleform::GFx::Value::ValueType::kClosure) ||
+				!at.GetMember(a_path.substr(start, end - start), &next)) {
+				return false;
+			}
+			at = next;
+			start = end + 1;
+		}
+		a_out = at;
+		return true;
+	}
+
+	bool CodeObjInstall(const void* a_menu, const char* a_when)
+	{
+		const void* const movie = MovieOf(a_menu);
+		if (!movie || g_codeObjMovie.load() == movie) {
+			return true;
+		}
+		if (g_codeObjTriedMovie.exchange(movie) != movie) {
+			g_codeObjTries.store(0);
+		}
+		const auto attempt = ++g_codeObjTries;
+		if (attempt > kMaxCodeObjTries) {
+			return false;
+		}
+		auto* const root = RootOf(a_menu);
+		RE::Scaleform::GFx::Value top;
+		RE::Scaleform::GFx::Value holder;
+		RE::Scaleform::GFx::Value back;
+		const bool  gotVariable = root && root->GetVariable(&top, "root");
+		const bool  gotRoot = gotVariable && top.IsObject();
+		std::size_t members = 0;
+		bool        topSet = false;
+		if (gotRoot) {
+			root->CreateFunction(&holder, &g_codeObjSelf);
+			for (std::size_t i = 0; i < g_codeObjCount && !holder.IsUndefined(); ++i) {
+				RE::Scaleform::GFx::Value function;
+				root->CreateFunction(&function, &g_codeObjFunctions[i]);
+				members += !function.IsUndefined() && holder.SetMember(g_codeObjNames[i].c_str(), function) ? 1 : 0;
+			}
+			topSet = !holder.IsUndefined() && top.SetMember("BGSCodeObj", holder);
+		}
+		const std::size_t set = members + (topSet ? 1 : 0);
+		const bool        readBack = gotRoot && top.GetMember("BGSCodeObj", &back) && back.IsObject();
+		const bool        holderReady = gotRoot && !holder.IsUndefined() && members == g_codeObjCount;
+		// FAL-614 proof 2a (CodeObjInit=<name>): a page loaded alone has no shell to hand it its engine object (D2's
+		// STAT page names InitCodeObj and codeObj). Proof 2a's run: the page's root is its own sealed class, so
+		// root.BGSCodeObj could not be set (set=16 of=17 read_back=0). So once the stand-in is built the plugin calls
+		// root.<name>(stand-in) itself, whether or not root.BGSCodeObj took it, then reads root.codeObj back; a call
+		// that went through ends the tries for this movie
+		bool called = false;
+		if (holderReady && !g_codeObjInit.empty()) {
+			RE::Scaleform::GFx::Value init;
+			RE::Scaleform::GFx::Value result;
+			RE::Scaleform::GFx::Value codeObj;
+			const bool got = top.GetMember(g_codeObjInit.c_str(), &init);
+			const bool found = got && (init.GetType() == RE::Scaleform::GFx::Value::ValueType::kClosure || init.IsObject());
+			called = found && top.Invoke(g_codeObjInit.c_str(), &result, &holder, 1);
+			const bool gotCodeObj = called && top.GetMember("codeObj", &codeObj);
+			if (called || attempt <= kLoggedCodeObjTries || attempt == kMaxCodeObjTries) {
+				REX::INFO("step=code_obj_init when={} try={} name={} got={} found={} type={} called={} result_type={} "
+						  "code_obj={} code_obj_type={}",
+					a_when, attempt, g_codeObjInit, got ? 1 : 0, found ? 1 : 0, TypeCode(init), called ? 1 : 0, TypeCode(result),
+					gotCodeObj ? 1 : 0, TypeCode(codeObj));
+			}
+		}
+		const bool done = holderReady && ((readBack && topSet) || called);
+		if (done) {
+			g_codeObjMovie = movie;
+		}
+		// FAL-614 proof 2b-ii (CodeObjCalls=<path>,...): proof 2b-i found no data entry on the STAT page's root, but a
+		// public onAcquiredByNativeCode with bAcquiredByNativeCode false: an acquire step Fallout 4's engine makes and
+		// nobody made here. Once per movie, on the try that finished the hand-over and before the probe, each path is
+		// called with no arguments, and logged
+		for (std::size_t i = 0; done && i < g_rootCallCount; ++i) {
+			RE::Scaleform::GFx::Value owner;
+			RE::Scaleform::GFx::Value function;
+			RE::Scaleform::GFx::Value result;
+			const auto                last = g_rootCallNames[i].rfind('.');
+			const auto                name = last == std::string::npos ? g_rootCallNames[i] : g_rootCallNames[i].substr(last + 1);
+			bool                      read = false;
+			if (last == std::string::npos) {
+				read = ReadPath(top, name, function);
+				owner = top;
+			} else {
+				read = ReadPath(top, g_rootCallNames[i].substr(0, last), owner) && ReadPath(owner, name, function);
+			}
+			const bool found = read && function.GetType() == RE::Scaleform::GFx::Value::ValueType::kClosure;
+			const bool called = found && owner.Invoke(name.c_str(), &result, nullptr, 0);
+			REX::INFO("step=code_obj_root_call n={} name={} found={} type={} called={} result_type={}", i + 1, g_rootCallNames[i],
+				found ? 1 : 0, read ? TypeCode(function) : -1, called ? 1 : 0, TypeCode(result));
+		}
+		// FAL-614 proof 2b-i (CodeObjProbe=<path>,...): read-only. Once per movie, on the try that finished the
+		// hand-over, each path (a root member, or members joined by '.') is read with GetMember and its type logged,
+		// with the value only for a boolean or a number; nothing is set or called. type=-1: not found, nothing read
+		for (std::size_t i = 0; done && i < g_probeCount; ++i) {
+			RE::Scaleform::GFx::Value at;
+			const bool                found = ReadPath(top, g_probeNames[i], at);
+			std::string value;
+			if (found && at.IsBoolean()) {
+				value = std::format(" value={}", at.GetBoolean() ? 1 : 0);
+			} else if (found && at.IsInt()) {
+				value = std::format(" value={}", at.GetInt());
+			} else if (found && at.IsUInt()) {
+				value = std::format(" value={}", at.GetUInt());
+			} else if (found && at.IsNumber()) {
+				value = std::format(" value={}", at.GetNumber());
+			}
+			REX::INFO("step=code_obj_probe n={} name={} found={} type={}{}", i + 1, g_probeNames[i], found ? 1 : 0,
+				found ? TypeCode(at) : -1, value);
+		}
+		if (done || attempt <= kLoggedCodeObjTries || attempt == kMaxCodeObjTries) {
+			std::string names;
+			for (std::size_t i = 0; i < g_codeObjCount; ++i) {
+				names += std::format("{}{}", i ? "," : "", g_codeObjNames[i]);
+			}
+			REX::INFO("step=code_obj when={} try={} root_of={} get_variable={} root={} root_type={} holder_type={} set={} of={} "
+					  "read_back={} names={}",
+				a_when, attempt, root ? 1 : 0, gotVariable ? 1 : 0, gotRoot ? 1 : 0, TypeCode(top), TypeCode(holder), set,
+				g_codeObjCount + 1, readBack ? 1 : 0, names);
+		}
+		return done;
+	}
+
+	// stage b with CodeObj=1: true while the menu's movie has no stand-in yet and tries are left (the key thread then
+	// sends kUpdate, which stage b does not otherwise get)
+	bool CodeObjPending()
+	{
+		return g_codeObj && g_codeObjMovie.load() == nullptr && g_codeObjTries.load() < kMaxCodeObjTries;
+	}
 
 	bool MenuLoadMovie(void* a_self, bool a_dispatcher, bool a_arg2)
 	{
@@ -3262,10 +3690,18 @@ namespace
 			REX::INFO("step=load_movie menu={} dispatcher={} arg2={} stage=b result=already_loaded", menu, a_dispatcher, a_arg2);
 			return true;
 		}
-		REX::INFO("step=load_movie menu={} dispatcher={} arg2={} stage=b calling", menu, a_dispatcher, a_arg2);
+		REX::INFO("step=load_movie menu={} dispatcher={} arg2={} stage=b calling movie_name={}", menu, a_dispatcher, a_arg2,
+			g_movie.empty() ? kMenuName : g_movie.c_str());
+		g_movieNameAsks.store(0);
+		g_loadingMovie.store(true);
 		const bool loaded = g_engineLoadMovie(a_self, false, a_arg2);
-		REX::INFO("step=load_movie menu={} stage=b result={} movie={}", menu, loaded ? 1 : 0,
-			Hex(reinterpret_cast<std::uintptr_t>(MovieOf(a_self))));
+		g_loadingMovie.store(false);
+		REX::INFO("step=load_movie menu={} stage=b result={} movie={} movie_name={} name_asks={}", menu, loaded ? 1 : 0,
+			Hex(reinterpret_cast<std::uintptr_t>(MovieOf(a_self))), g_movie.empty() ? kMenuName : g_movie.c_str(),
+			g_movieNameAsks.load());
+		if (loaded && g_codeObj && MovieOf(a_self)) {
+			CodeObjInstall(a_self, "load");
+		}
 		return loaded;
 	}
 
@@ -3290,6 +3726,10 @@ namespace
 			                                                         "other"sv;
 			REX::INFO("step=message menu={} type={} raw={} result={}", Hex(reinterpret_cast<std::uintptr_t>(a_self)), name,
 				static_cast<std::uint32_t>(type), static_cast<std::int64_t>(result));
+		}
+		if (g_stage == 2 && g_codeObj &&
+			(type == RE::UI_MESSAGE_TYPE::kShow || type == RE::UI_MESSAGE_TYPE::kUpdate)) {   // FAL-614 proof 1b
+			CodeObjInstall(a_self, type == RE::UI_MESSAGE_TYPE::kShow ? "show" : "update");
 		}
 		if (g_stage >= 3) {   // stages c, d and e: after the engine's own handling, on its thread for this menu
 			if (type == RE::UI_MESSAGE_TYPE::kShow) {
@@ -3644,7 +4084,7 @@ namespace
 		if (!CheckImage() || !ReadAddressLibrary(a_dir / "versionlib-1-16-244-0.bin") ||
 			!CheckVtable(kVtblPrimary, 0x00, "primary") || !CheckVtable(kVtblInput, 0x10, "BSInputEventUser") ||
 			!CheckVtable(kVtblSink, 0x50, "BSTEventSink") || !CheckSlots() || !CheckCtor() ||
-			(g_stage >= 3 && !CheckChannelIds()) || (g_stage >= 4 && !CheckPageIds())) {
+			(ChannelIdsNeeded() && !CheckChannelIds()) || (g_stage >= 4 && !CheckPageIds())) {
 			return false;
 		}
 		const auto* engine = reinterpret_cast<const std::uintptr_t*>(Address(kVtblPrimary));
@@ -3706,6 +4146,7 @@ namespace
 	}
 
 	// stage d: the CLOSE button, heard on the menu's thread, closes the menu here, on the main thread, as F10 does
+	// (and, FAL-614 proof 1c, the movie's HideMenu through the stand-in BGSCodeObj)
 	void Close(std::uint32_t a_n, const char* a_by = "button")
 	{
 		auto* ui = RE::UI::GetSingleton();
@@ -3781,6 +4222,9 @@ namespace
 				g_task->AddTask([n]() { CheckState(n); });
 			}
 			down = now;
+			if (g_stage == 2 && CodeObjPending() && ++ticks % 17 == 0) {   // FAL-614 proof 1b: retry the stand-in
+				g_task->AddTask([]() { SendUpdate(); });   // nothing while the menu is closed
+			}
 			if (g_stage < 3) {
 				continue;
 			}
@@ -3881,9 +4325,11 @@ namespace
 	}
 
 	// a value as ASCII; any other character as '?'
+	// FAL-614 proof 2a: long enough for CodeObjNames at its most, 16 names of 64 and their commas (a longer value would
+	// be cut without a word)
 	std::string ReadText(const std::filesystem::path& a_ini, const wchar_t* a_key)
 	{
-		std::array<wchar_t, 160> text{};
+		std::array<wchar_t, kMaxCodeNames * (kMaxName + 1) + 1> text{};
 		REX::W32::GetPrivateProfileStringW(L"FO4SFPipboyMenu", a_key, L"", text.data(), static_cast<std::uint32_t>(text.size()),
 			a_ini.c_str());
 		std::string out;
@@ -3891,6 +4337,65 @@ namespace
 			out += (*at > 0x20 && *at < 0x7F) ? static_cast<char>(*at) : '?';
 		}
 		return out;
+	}
+
+	// FAL-614 proof 2b: CodeObjProbe= and CodeObjCalls=<path>,<path>,... (empty: none), 1 to 16 paths of 1 to 64
+	// letters, digits, '_' and '.', each part between dots not empty
+	bool ParsePaths(std::string_view a_list, std::array<std::string, kMaxCodeNames>& a_out, std::size_t& a_count,
+		std::string_view a_key)
+	{
+		a_count = 0;
+		if (a_list.empty()) {
+			return true;
+		}
+		const std::string list(a_list);
+		std::size_t       start = 0;
+		while (start <= list.size()) {
+			const auto end = std::min(list.find(',', start), list.size());
+			const auto name = list.substr(start, end - start);
+			const bool ok = !name.empty() && name.size() <= kMaxName && a_count < kMaxCodeNames && name.front() != '.' &&
+			                name.back() != '.' && name.find("..") == std::string::npos &&
+			                std::ranges::all_of(name, [](char a_c) {
+				                return (a_c >= 'A' && a_c <= 'Z') || (a_c >= 'a' && a_c <= 'z') || (a_c >= '0' && a_c <= '9') ||
+				                       a_c == '_' || a_c == '.';
+			                });
+			if (!ok) {
+				Refuse("ini", std::format("{}={} (with CodeObj=1 only; 1 to {} paths of letters, digits, _ and .)", a_key, list,
+					kMaxCodeNames));
+				return false;
+			}
+			a_out[a_count++] = name;
+			start = end + 1;
+		}
+		return true;
+	}
+
+	// FAL-614 proof 1b: CodeObjNames=<name>,<name>,... (empty: PlaySound,HideMenu), 1 to 16 names of 1 to 64 letters,
+	// digits and '_', none twice; each becomes one logging function on the stand-in BGSCodeObj
+	bool ParseCodeObjNames(std::string_view a_list)
+	{
+		const std::string list = a_list.empty() ? std::string("PlaySound,HideMenu") : std::string(a_list);
+		g_codeObjCount = 0;
+		std::size_t start = 0;
+		while (start <= list.size()) {
+			const auto end = std::min(list.find(',', start), list.size());
+			const auto name = list.substr(start, end - start);
+			const bool ok = !name.empty() && name.size() <= kMaxName && g_codeObjCount < kMaxCodeNames &&
+			                std::ranges::all_of(name, [](char a_c) {
+				                return (a_c >= 'A' && a_c <= 'Z') || (a_c >= 'a' && a_c <= 'z') || (a_c >= '0' && a_c <= '9') || a_c == '_';
+			                }) &&
+			                std::ranges::find(g_codeObjNames.begin(), g_codeObjNames.begin() + g_codeObjCount, name) ==
+			                    g_codeObjNames.begin() + g_codeObjCount;
+			if (!ok) {
+				Refuse("ini", std::format("code_obj_names={} (1 to {} names of letters, digits and _, none twice)", list, kMaxCodeNames));
+				return false;
+			}
+			g_codeObjNames[g_codeObjCount] = name;
+			g_codeObjFunctions[g_codeObjCount].Name(name);
+			++g_codeObjCount;
+			start = end + 1;
+		}
+		return true;
 	}
 
 	// stage c, FAL-246: ClickCall=<script>.<function>, two Papyrus names of up to 64 letters, digits and '_' (no digit
@@ -3955,6 +4460,13 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	g_key = ReadNumber(ini, L"Key", 0x79);
 	g_flags = ReadNumber(ini, L"Flags", 0);
 	g_keepAlive = ReadNumber(ini, L"KeepAlive", 1) != 0;
+	g_movie = ReadText(ini, L"Movie");   // FAL-614: checked below, after the stage
+	g_codeObj = ReadNumber(ini, L"CodeObj", 0) != 0;   // FAL-614 proof 1b: with Movie= only
+	g_codeObjHide = ReadNumber(ini, L"CodeObjHide", 0) != 0;   // FAL-614 proof 1c: with CodeObj=1 only
+	g_codeObjSound = ReadNumber(ini, L"CodeObjSound", 0) != 0;   // FAL-614 proof 1d: with CodeObj=1 only
+	g_codeObjInit = ReadText(ini, L"CodeObjInit");   // FAL-614 proof 2a: with CodeObj=1 only
+	const auto probe = ReadText(ini, L"CodeObjProbe");   // FAL-614 proof 2b-i: with CodeObj=1 only
+	const auto calls = ReadText(ini, L"CodeObjCalls");   // FAL-614 proof 2b-ii: with CodeObj=1 only
 	// FAL-414: up to four keyboard ids that close the menu while it is open (0 = unused)
 	g_cancelCodes = { ReadNumber(ini, L"CancelCode1", 0x1B), ReadNumber(ini, L"CancelCode2", 0x09), ReadNumber(ini, L"CancelCode3", 0),
 		ReadNumber(ini, L"CancelCode4", 0) };
@@ -3970,6 +4482,59 @@ SFSE_PLUGIN_LOAD(const SFSE::LoadInterface* a_sfse)
 	if (g_stage < 1 || g_stage > 5) {
 		REX::INFO("step=off (Stage=1, 2, 3, 4 or 5 in FO4SFPipboyMenu.ini to probe)");
 		return true;
+	}
+	// FAL-614: Movie=<name>, 1 to 64 letters, digits and '_', with Stage=2 only (no channel, page or kit drives it)
+	if (!g_movie.empty()) {
+		const bool name = g_movie.size() <= 64 && std::ranges::all_of(g_movie, [](char a_c) {
+			return (a_c >= 'A' && a_c <= 'Z') || (a_c >= 'a' && a_c <= 'z') || (a_c >= '0' && a_c <= '9') || a_c == '_';
+		});
+		if (!name || g_stage != 2) {
+			Refuse("ini", std::format("movie={} (Stage=2 only; 1 to 64 letters, digits and _)", g_movie));
+			return true;
+		}
+		REX::INFO("step=movie name={} file=Interface/{}.swf code_obj={}", g_movie, g_movie, g_codeObj ? 1 : 0);
+	}
+	if (g_codeObj && g_movie.empty()) {
+		Refuse("ini", "code_obj=1 (with Movie= only: our own movie has no code)");
+		return true;
+	}
+	if (g_codeObj && !ParseCodeObjNames(ReadText(ini, L"CodeObjNames"))) {
+		return true;
+	}
+	if (g_codeObjHide && !g_codeObj) {
+		Refuse("ini", "code_obj_hide=1 (with CodeObj=1 only)");
+		return true;
+	}
+	// FAL-614 proof 1d: CodeObjSound=1, with CodeObj=1 and PlaySound among its names
+	if (g_codeObjSound && (!g_codeObj || std::ranges::find(g_codeObjNames.begin(), g_codeObjNames.begin() + g_codeObjCount,
+	                                         std::string("PlaySound")) == g_codeObjNames.begin() + g_codeObjCount)) {
+		Refuse("ini", "code_obj_sound=1 (with CodeObj=1 and PlaySound in CodeObjNames only)");
+		return true;
+	}
+	// FAL-614 proof 2a: CodeObjInit=<name>, 1 to 64 letters, digits and '_', with CodeObj=1 only
+	if (!g_codeObjInit.empty() && (!g_codeObj || g_codeObjInit.size() > kMaxName || !std::ranges::all_of(g_codeObjInit, [](char a_c) {
+			return (a_c >= 'A' && a_c <= 'Z') || (a_c >= 'a' && a_c <= 'z') || (a_c >= '0' && a_c <= '9') || a_c == '_';
+		}))) {
+		Refuse("ini", std::format("code_obj_init={} (with CodeObj=1 only; 1 to 64 letters, digits and _)", g_codeObjInit));
+		return true;
+	}
+	if (!probe.empty() && !g_codeObj) {
+		Refuse("ini", std::format("code_obj_probe={} (with CodeObj=1 only; 1 to {} paths of letters, digits, _ and .)", probe,
+			kMaxCodeNames));
+		return true;
+	}
+	if (!calls.empty() && !g_codeObj) {
+		Refuse("ini", std::format("code_obj_calls={} (with CodeObj=1 only; 1 to {} paths of letters, digits, _ and .)", calls,
+			kMaxCodeNames));
+		return true;
+	}
+	if (!ParsePaths(probe, g_probeNames, g_probeCount, "code_obj_probe") ||
+		!ParsePaths(calls, g_rootCallNames, g_rootCallCount, "code_obj_calls")) {
+		return true;
+	}
+	if (g_codeObjSound) {
+		g_soundDir = dir / kSoundFolder;
+		REX::INFO("step=code_obj_sound folder={} max_playing={}", kSoundFolder, kMaxSoundsPlaying);
 	}
 	std::string clickCall;
 	bool        clickCallOk = true;

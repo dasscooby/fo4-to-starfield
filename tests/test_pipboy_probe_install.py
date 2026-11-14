@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+import zlib
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -20,12 +21,21 @@ from ba2_fixture import archive_from_tree  # noqa: E402
 from fo4sf.planet import esm  # noqa: E402
 import exp_install  # noqa: E402
 import make_pipboy_probe  # noqa: E402
+import make_probe_swf  # noqa: E402
 import pipboy_probe_install as pbi  # noqa: E402
 
 PLUGIN = "FO4SFPipboyProbe.esm"
 ARCHIVE = "FO4SFPipboyProbe - Main.ba2"
 EXP_RECORD = b'{"exp_dir": "C:/stage/core", "files": {}, "complete": true}'
 BEFORE = ["# header", "*FO4Port.esm", "*FO4TerrainCore.esm"]
+
+
+def other_swf(movie):
+    """A SWF that is not our movie byte for byte: the same movie, stored uncompressed (FWS) instead of CWS."""
+    with open(movie, "rb") as f:
+        raw = f.read()
+    assert raw[:3] == b"CWS", raw[:3]
+    return b"FWS" + raw[3:8] + zlib.decompress(raw[8:])
 
 
 def write(p, data):
@@ -185,6 +195,177 @@ class PipboyProbeInstallTests(unittest.TestCase):
         write(os.path.join(self.staged, "Data", "Textures", "x.swf"), open(movie, "rb").read())
         code, _ = self.run_main("install", "--dir", self.staged)
         self.assertIn("Data holds", str(code))
+        self.assert_untouched()
+
+    def stage_extra(self, name="FO4SF_Fo4Boot", raw=None):
+        # FAL-614 proof 1: the player's own movie copied in; here a movie of ours with other bytes stands in for it
+        path = os.path.join(self.staged, "Data", "Interface", name + ".swf")
+        movie = os.path.join(self.staged, "Data", *make_pipboy_probe.MOVIE.split("/"))
+        write(path, raw if raw is not None else other_swf(movie))
+        return path
+
+    def test_the_extra_movie_is_packed_and_uninstalled(self):
+        self.stage_extra()
+        code, out = self.run_main("install", "--dir", self.staged, "--extra-movie", "FO4SF_Fo4Boot")
+        self.assertEqual(code, 0, out)
+        self.assertTrue(os.path.isfile(os.path.join(self.data, ARCHIVE)))
+        self.assertFalse(os.path.exists(os.path.join(self.data, "Interface")))  # packed, not loose
+        code, out = self.run_main("uninstall")
+        self.assertEqual(code, 0, out)
+        for name in (PLUGIN, ARCHIVE, pbi.RECORD):
+            self.assertFalse(os.path.exists(os.path.join(self.data, name)), name)
+        self.assertEqual(self.lines(), BEFORE)
+        self.assertEqual(self.exp_record(), EXP_RECORD)
+
+    def test_the_extra_movie_is_refused_unless_named(self):
+        self.stage_extra()
+        code, _ = self.run_main("install", "--dir", self.staged)
+        self.assertIn("the twin Interface/FO4SF_Fo4Boot.swf is not the movie byte for byte", str(code))
+        self.assert_untouched()
+
+    def test_a_second_unnamed_file_is_still_refused(self):
+        self.stage_extra()
+        write(os.path.join(self.staged, "Data", "Interface", "Other.swf"),
+              other_swf(os.path.join(self.staged, "Data", *make_pipboy_probe.MOVIE.split("/"))))
+        code, _ = self.run_main("install", "--dir", self.staged, "--extra-movie", "FO4SF_Fo4Boot")
+        self.assertIn("the twin Interface/Other.swf is not the movie byte for byte", str(code))
+        self.assert_untouched()
+
+    def test_a_missing_extra_movie_is_refused(self):
+        code, _ = self.run_main("install", "--dir", self.staged, "--extra-movie", "FO4SF_Fo4Boot")
+        self.assertIn("the extra movie Interface/FO4SF_Fo4Boot.swf is not in the stage's Data", str(code))
+        self.assert_untouched()
+
+    def test_an_extra_movie_that_is_not_a_swf_is_refused(self):
+        self.stage_extra(raw=b"not a movie")
+        code, _ = self.run_main("install", "--dir", self.staged, "--extra-movie", "FO4SF_Fo4Boot")
+        self.assertIn("does not read back as a SWF", str(code))
+        self.assert_untouched()
+
+    def test_an_extra_movie_with_tags_our_writer_never_makes_installs(self):
+        # Scribe FAL-632: the player's movie holds tags of its own (D1: DefineEditText with other flags, DoABC);
+        # only the container is checked. Code 82 (DoABC) and 37 with a layout byte, short and long lengths.
+        body = (bytes([0x00]) + b"\x00\x1e\x01\x00"
+                + make_probe_swf.tag(37, b"\x01\x00" + bytes(20) + b"\x20\x00")
+                + make_probe_swf.tag(82, b"\x01\x00\x00\x00boot\x00" + bytes(80)) + make_probe_swf.tag(0))
+        raw = b"CWS\x0f" + (8 + len(body)).to_bytes(4, "little") + zlib.compress(body)
+        with self.assertRaises(make_probe_swf.SwfError):    # the writer's reader refuses it (the finding)
+            make_probe_swf.read_movie(raw)
+        self.assertIsNone(pbi.swf_problem(self.stage_extra(raw=raw)))
+        code, out = self.run_main("install", "--dir", self.staged, "--extra-movie", "FO4SF_Fo4Boot")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.run_main("uninstall")[0], 0)
+        self.assertEqual(self.exp_record(), EXP_RECORD)
+
+    def test_a_cut_or_padded_extra_movie_is_refused(self):
+        body = bytes([0x00]) + b"\x00\x1e\x01\x00" + make_probe_swf.tag(82, bytes(80)) + make_probe_swf.tag(0)
+        for cut, why in ((body[:-8], "runs past the body"), (body + b"\0\0", "after the End tag"),
+                         (body[:-2], "no End tag")):
+            raw = b"FWS\x0f" + (8 + len(cut)).to_bytes(4, "little") + cut
+            self.assertIn(why, pbi.swf_problem(self.stage_extra(raw=raw)))
+        raw = b"FWS\x0f" + (9 + len(body)).to_bytes(4, "little") + body
+        self.assertIn("FileLength", pbi.swf_problem(self.stage_extra(raw=raw)))
+
+    def test_extra_movie_names(self):
+        for bad in ("", "Fo4Boot", "pipboybootsequence", "FO4SF_", "FO4SF_a.b", "FO4SF_../x", "FO4SF_é",
+                    "FO4SF_" + "x" * 59, "FO4SF_PipboyMenu", "fo4sf_pipboymenu", "FO4SF_PIPBOYMENU"):
+            if bad:
+                self.assertIsNotNone(pbi.extra_movie_problem(bad), bad)
+        for good in ("FO4SF_Fo4Boot", "FO4SF_a", "FO4SF_" + "x" * 58):
+            self.assertIsNone(pbi.extra_movie_problem(good), good)
+        code, _ = self.run_main("install", "--dir", self.staged, "--extra-movie", "pipboybootsequence")
+        self.assertIn("FO4SF_ then letters", str(code))
+        self.assert_untouched()
+
+    def test_extra_movie_belongs_to_install(self):
+        code, _ = self.run_main("status", "--extra-movie", "FO4SF_Fo4Boot")
+        self.assertIn("--extra-movie and --page-movie belong to install", str(code))
+        code, _ = self.run_main("uninstall", "--page-movie", "Pipboy_StatsPage")
+        self.assertIn("--extra-movie and --page-movie belong to install", str(code))
+
+    def stage_shell(self, pages=pbi.PAGE_MOVIES):
+        # FAL-614 S1: the shell as the extra movie and its pages under Fallout 4's own names; ours stand in for them
+        self.stage_extra("FO4SF_Fo4Shell")
+        return [self.stage_extra(page) for page in pages]
+
+    def page_args(self, pages=pbi.PAGE_MOVIES):
+        return [arg for page in pages for arg in ("--page-movie", page)]
+
+    def test_the_shell_and_its_pages_are_packed_and_uninstalled(self):
+        self.stage_shell()
+        code, out = self.run_main("install", "--dir", self.staged, "--extra-movie", "FO4SF_Fo4Shell", *self.page_args())
+        self.assertEqual(code, 0, out)
+        self.assertTrue(os.path.isfile(os.path.join(self.data, ARCHIVE)))
+        self.assertFalse(os.path.exists(os.path.join(self.data, "Interface")))  # packed, not loose
+        code, out = self.run_main("uninstall")
+        self.assertEqual(code, 0, out)
+        for name in (PLUGIN, ARCHIVE, pbi.RECORD):
+            self.assertFalse(os.path.exists(os.path.join(self.data, name)), name)
+        self.assertEqual(self.lines(), BEFORE)
+        self.assertEqual(self.exp_record(), EXP_RECORD)
+
+    def test_the_page_names_are_fallout_4s(self):
+        self.assertEqual(pbi.PAGE_MOVIES, ("Pipboy_StatsPage", "Pipboy_InvPage", "Pipboy_DataPage", "Pipboy_MapPage",
+                                           "Pipboy_RadioPage"))
+        self.assertTrue(all(not p.startswith(pbi.EXTRA_PREFIX) for p in pbi.PAGE_MOVIES))
+
+    def test_one_page_alone_installs(self):
+        self.stage_shell(["Pipboy_StatsPage"])
+        code, out = self.run_main("install", "--dir", self.staged, "--extra-movie", "FO4SF_Fo4Shell",
+                                  *self.page_args(["Pipboy_StatsPage"]))
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.run_main("uninstall")[0], 0)
+
+    def test_a_page_is_refused_unless_named(self):
+        self.stage_shell()
+        code, _ = self.run_main("install", "--dir", self.staged, "--extra-movie", "FO4SF_Fo4Shell",
+                                *self.page_args(pbi.PAGE_MOVIES[:-1]))
+        self.assertIn("the twin Interface/Pipboy_RadioPage.swf is not the movie byte for byte", str(code))
+        self.assert_untouched()
+
+    def test_a_page_needs_the_shell(self):
+        self.stage_shell(["Pipboy_StatsPage"])
+        code, _ = self.run_main("install", "--dir", self.staged, *self.page_args(["Pipboy_StatsPage"]))
+        self.assertIn("--page-movie needs --extra-movie", str(code))
+        self.assert_untouched()
+
+    def test_page_names_outside_the_five_are_refused(self):
+        self.stage_extra("FO4SF_Fo4Shell")
+        for bad in ("PipboyMenu", "PipboyMessageBox", "pipboy_statspage", "Pipboy_StatsPage.swf", "../Pipboy_StatsPage",
+                    "FO4SF_PipboyMenu", "terminalmenu"):
+            code, _ = self.run_main("install", "--dir", self.staged, "--extra-movie", "FO4SF_Fo4Shell", "--page-movie", bad)
+            self.assertIn(f"--page-movie {bad!r}: one of", str(code), bad)
+        self.assert_untouched()
+
+    def test_a_page_named_twice_is_refused(self):
+        self.stage_shell(["Pipboy_StatsPage"])
+        code, _ = self.run_main("install", "--dir", self.staged, "--extra-movie", "FO4SF_Fo4Shell",
+                                *self.page_args(["Pipboy_StatsPage", "Pipboy_StatsPage"]))
+        self.assertIn("each page once", str(code))
+        self.assert_untouched()
+
+    def test_a_missing_page_is_refused(self):
+        self.stage_shell(["Pipboy_StatsPage"])
+        code, _ = self.run_main("install", "--dir", self.staged, "--extra-movie", "FO4SF_Fo4Shell",
+                                *self.page_args(["Pipboy_StatsPage", "Pipboy_MapPage"]))
+        self.assertIn("the page movie Interface/Pipboy_MapPage.swf is not in the stage's Data", str(code))
+        self.assert_untouched()
+
+    def test_a_page_that_is_not_a_swf_is_refused(self):
+        self.stage_shell(["Pipboy_StatsPage"])
+        self.stage_extra("Pipboy_StatsPage", raw=b"not a movie")
+        code, _ = self.run_main("install", "--dir", self.staged, "--extra-movie", "FO4SF_Fo4Shell",
+                                *self.page_args(["Pipboy_StatsPage"]))
+        self.assertIn("the page movie Interface/Pipboy_StatsPage.swf does not read back as a SWF", str(code))
+        self.assert_untouched()
+
+    def test_a_page_outside_interface_is_refused(self):
+        self.stage_extra("FO4SF_Fo4Shell")
+        movie = os.path.join(self.staged, "Data", *make_pipboy_probe.MOVIE.split("/"))
+        write(os.path.join(self.staged, "Data", "Interface", "Pages", "Pipboy_StatsPage.swf"), other_swf(movie))
+        code, _ = self.run_main("install", "--dir", self.staged, "--extra-movie", "FO4SF_Fo4Shell",
+                                *self.page_args(["Pipboy_StatsPage"]))
+        self.assertIn("the page movie Interface/Pipboy_StatsPage.swf is not in the stage's Data", str(code))
         self.assert_untouched()
 
 
