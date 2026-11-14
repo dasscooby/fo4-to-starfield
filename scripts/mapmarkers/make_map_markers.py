@@ -158,6 +158,8 @@ def stage(a):
     out = os.path.abspath(a.out)
     if os.path.exists(out) and os.listdir(out):
         sys.exit(f"{out} is not empty: stage into a new folder")
+    if a.landing_undiscovered and not a.landing:
+        sys.exit("--landing-undiscovered needs --landing")
     if bool(a.fo4_map_markers or a.landing) != bool(a.core_stage):
         sys.exit("--core-stage goes with --fo4-map-markers or --landing (the core's own stage folder, for its BTD)")
     names = [] if a.star_map_all else list(a.star_map) if a.star_map else list(STAR_MAP)
@@ -182,6 +184,8 @@ def stage(a):
     if a.landing:
         path, spot = landing(a.landing, a.landing_name, a.core_stage, ov, ground, DEFAULT_Z_LIFT if a.z_lift is None else a.z_lift, out)
         lift += ["--landing", path]                                   # build and check take the same spot
+        if a.landing_undiscovered:
+            lift += ["--landing-undiscovered"]                        # build and check take the same flags
         pad = spot["pad"]["pos"]
         extra_note += (f"\n  Plus a ship landing spot \"{spot['name']}\" (landing.json): a pad at getpos {a.landing[0]} {a.landing[1]} "
                        f"(local {pad[0]} {pad[1]}, z {pad[2]}),\n  its landing zone, map marker and heading as LandingOverlay01 "
@@ -250,6 +254,9 @@ def main(argv=None):
     s.add_argument("--landing", type=float, nargs=2, metavar=("X", "Y"), default=None,
                    help="a temporary ship landing spot: the pad at this getpos x, y (the merged frame)")
     s.add_argument("--landing-name", default="Commonwealth Landing Area", help="the landing spot's name on the map")
+    s.add_argument("--landing-undiscovered", action="store_true",
+                   help="with --landing: write the landing marker without Discovered (flags 0x13) and tell the script not to discover it "
+                        "(the default build discovers it at the start); nothing can clear Discovered later, so the plugin must start it so")
     s.add_argument("--core-stage", default="",
                    help="with --fo4-map-markers or --landing: the folder that staged --core (overlays_params.json and the BTD)")
     star = s.add_mutually_exclusive_group()
