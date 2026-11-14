@@ -210,7 +210,7 @@ def stage(a, converter=None):
         f.write(f"""Cog door probe ({datetime.date.today().isoformat()}). FAL-756 / FAL-489 Plan B step 1.
 {PLUGIN} (sha256 {plan['outputs'][PLUGIN]}): {what}, plus QUST FO4SF_CogDoorQuest (stages 10, 20, 30, 40, 50). Masters Starfield.esm +
 FO4Port.esm. Checked against Starfield.esm {before['Starfield.esm']}, FO4Port.esm {before['FO4Port.esm']}.
-Stages (set one at a time from the console, `setstage FO4SF_CogDoorQuest <n>`, after the last watch closed): 10 read, 20 SetOpen(true),
+Stages (set one at a time from the console, `setstage <load index>000800 <n>` (the console refuses the editor id: \"not found for parameter Quest\"; the quest is the plugin's first form, 0E000800 on the PC's 14 Nov load order), after the last watch closed): 10 read, 20 SetOpen(true),
 30 SetOpen(false), 40 Activate(player), 50 read. Each of 20/30/40 logs the open state every 2 s for 60 s. Keep the console closed.
 Install (the owner's word, game closed; loose files are not read, the installer packs them into a ba2):
   python scripts\\newgame\\cog_door_install.py install --dir <this folder> --starfield <game dir>
