@@ -60,6 +60,12 @@ int Property LandingPadID = 0x007145 Auto Const
  pad, trigger, marker, heading, all four in one quest, so the pad is fourth from its quest's end and the marker two
  places after it.}
 
+bool Property ShowLandingMarker = True Auto Const
+{True (the default): ShowLanding discovers the landing marker and shows it on the star map, once per session (the build before 14 Nov).
+ False: ShowLanding does nothing and the marker stays as the plugin wrote it. dotnet/MapMarkers --landing-undiscovered writes it false on every
+ quest and the marker's flags without Discovered, because no script can clear Discovered (SetMarkerDiscovered takes no argument; PC read of the
+ Papyrus sources, 14 Nov 2026), so the plugin has to start it undiscovered when a build wants it found later (FAL-489, the Vault 111 exit).}
+
 bool Property BorderSignal = True Auto Const
 {Write "border=off" / "border=on" to this log when the player enters or leaves our world, for the SFSE plugin
  FO4SFBorder (sfse/FO4SFBorder/README.md), which turns the game's border regions off only while the line says off.}
@@ -221,6 +227,9 @@ Function ShowLanding()
         return
     endif
     landingShown = True
+    if !ShowLandingMarker
+        return
+    endif
     int i = Markers.Length - 4
     if i < 0
         return
