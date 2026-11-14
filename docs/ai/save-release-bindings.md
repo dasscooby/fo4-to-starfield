@@ -242,3 +242,28 @@ This is source-only partial item 7, not a PC-ready release. Keep #716 draft.
 Measured installed-native identity/order, package policy, provenance-safe atomic
 new-save publication, and items 8/9 remain separate gates. FAL-216 is closed with
 P1 unsupported; closure grants no save adoption. Native/Windows/Tk/game NOT_RUN.
+
+
+Part 9 adds the shared measured native gate in `runtimes.py`. Detect and every
+Play route compare installed owned DLLs against the selected executable entry's
+schema-1 `native` block; `allow_unknown_runtime`, `require_sfse=False`, and an
+exe/Steam route cannot waive this comparison. Play checks before settings and
+again just before start. A later tool adding/changing a DLL refuses start.
+
+`sfse/native_components.json` supplies the owned names and source capabilities;
+it does not supply binary identities. Missing optional probes are allowed. Required
+components must be present; installed optional components need matching size and
+SHA256, runtime, source commit and artifact receipt. The Address Library is checked
+only for required/installed components declaring that dependency. Unrelated plugins
+are preserved. Unknown or malformed native metadata, case collisions, linked paths,
+unreadable files and changes observed during hashing refuse. Runtime JSON is bounded
+and duplicate keys refuse. The native source tests use the same production metadata
+validator; passing it proves metadata consistency, not artifact authenticity.
+
+No measured native block is added here: current shipped probes remain optional,
+and a real installed probe with no accepted binary receipt refuses. Known runtime
+and native artifact approval remain evidence supplied by the release producer.
+Synthetic fixtures use invented bytes only in tests. No native/game acceptance,
+filesystem-wide lock, save adoption or complete item-7 claim is made. Keep #716
+draft; package policy, native load/order acceptance, provenance-safe save binding,
+and items 8/9 remain unfinished. Windows/native/Tk/game NOT_RUN.

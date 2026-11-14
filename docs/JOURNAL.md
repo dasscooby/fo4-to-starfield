@@ -2956,3 +2956,16 @@ accepted runtime reader/vectors come from main merged with both lineages retaine
 the journal conflict retains both append-only entries. Exact heads, checks, log
 hashes and independent QA are recorded on FAL-736. Native/Windows/Tk/game NOT_RUN;
 #716 stays draft with native identity/order and safe save publication unfinished.
+
+
+## 2026-11-14 — FAL-247 item 7 part 9: native identity gate (Codex / Lone, Ubuntu)
+
+Consumed FAL-736 closeout and Scribe part8 CLEAR db9e6ac3. Added shared strict native
+metadata and installed-byte comparison to runtimes.py; detect and all Play routes
+consume it, including a final pre-start recheck. Optional absent probes remain allowed;
+unknown installed own DLLs, wrong library/bytes, links and ambiguous/malformed inputs
+refuse. Source-declaration tests now call the production metadata validator. Synthetic
+fixtures cover optional/required/library/runtime/route and concurrent-read controls.
+No native identities added; source version metadata is not a measured binary receipt.
+Verification receipts are on FAL-247. Windows/native/Tk/game NOT_RUN. Keep #716 draft;
+save provenance, package policy and native-order acceptance remain open.

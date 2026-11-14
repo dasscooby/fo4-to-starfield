@@ -1525,3 +1525,15 @@ Explicit same-input `configure-runtime --apply` resumes pending config publicati
 Play refuses pending ownership. Automatic Play retry was rejected because it could
 silently complete an interrupted configuration transaction. Unowned config adoption
 was rejected because identical bytes do not establish ownership for later uninstall.
+
+
+## 2026-11-14 — shared measured native gate (FAL-247 part 9, Codex)
+
+Use the existing executable-keyed known-runtimes table for measured native identities,
+with source capabilities in native_components.json. Detect and every Play route use
+one production comparison, before settings and immediately before launch. Required
+or installed Address Library consumers require the measured library; absent optional
+probes do not. Refuse unknown installed own DLLs instead of inferring compatibility
+from a source version string. No hashes are manufactured and no native table entry
+is published without artifact evidence. Separate per-route validators and implicit
+approval of installed probes were rejected because they allow inconsistent refusals.

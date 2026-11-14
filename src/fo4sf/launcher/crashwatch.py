@@ -597,6 +597,7 @@ def play(values, starfield, system=None, say=print, start_timeout_s=180.0, dump_
         bad.append("route=steam starts the Steam folder, not the FO4SF game folder: use route=sfse or exe")
     if folder:
         bad += inst.custom_ini_problems(values["my_games"], values)
+    bad += rt.installed_native_problems(starfield)
     cw = values["crash_watch.enabled"]
     if cw:
         if values["crash_watch.procdump"] and not os.path.isfile(values["crash_watch.procdump"]):
@@ -698,6 +699,9 @@ def play(values, starfield, system=None, say=print, start_timeout_s=180.0, dump_
         t0 = system.now()
         try:
             runtime_config.verify(runtime_receipt, runtime_running)
+            native_bad = rt.installed_native_problems(starfield)
+            if native_bad:
+                raise ValueError("; ".join(native_bad))
             system.start_game(values["route"], starfield)
         except OSError as e:                        # no steam:// handler, or the exe would not start (Codex, #465)
             why = f"could not start the game by {values['route']} ({e.strerror or e})"

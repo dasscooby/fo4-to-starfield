@@ -49,55 +49,10 @@ def pluginapi_version(code):
 
 
 def native_problems(entry, table=TABLE):
-    """What a known_runtimes.json entry's `native` block gets wrong against this file and the contract's schema 1
-    (empty = consistent). Identity values are not checked against anything here: only their shape."""
-    native = entry.get("native")
-    if native is None:
-        return []
-    problems = []
-    if entry.get("exe_version") != table["runtime"]:
-        problems.append(f"native block on {entry.get('exe_version')}, table is for {table['runtime']}")
-    if native.get("schema") != 1:
-        problems.append("native schema is not 1")
-    plugins = native.get("plugins") or {}
-    lowered = [name.lower() for name in plugins]
-    if len(set(lowered)) != len(lowered):
-        problems.append("plugin names collide ignoring case")
-    needs_library = False
-    for name, plugin in plugins.items():
-        declared = table["plugins"].get(name)
-        if declared is None or "/" in name or "\\" in name:
-            problems.append(f"{name}: not one of our dlls")
-            continue
-        if plugin.get("needs_address_library") is not declared["needs_address_library"]:
-            problems.append(f"{name}: needs_address_library differs from the source")
-        if not isinstance(plugin.get("required"), bool):
-            problems.append(f"{name}: required is not true or false")
-        if not HEX64.fullmatch(str(plugin.get("sha256", ""))):
-            problems.append(f"{name}: sha256 is not 64 lower-case hex digits")
-        if not isinstance(plugin.get("size"), int) or isinstance(plugin.get("size"), bool) or plugin["size"] <= 0:
-            problems.append(f"{name}: size is not a positive integer")
-        if not HEX40.fullmatch(str(plugin.get("source_commit", ""))):
-            problems.append(f"{name}: source_commit is not a full commit id")
-        if not str(plugin.get("artifact_receipt", "")).strip():
-            problems.append(f"{name}: no artifact_receipt")
-        if plugin.get("runtime") != table["runtime"]:
-            problems.append(f"{name}: runtime is not {table['runtime']}")
-        needs_library = needs_library or declared["needs_address_library"]
-    library = native.get("address_library")
-    if needs_library:
-        if not library:
-            problems.append("a listed dll needs the Address Library and the block measures none")
-        else:
-            if library.get("file") != table["address_library"]["file"]:
-                problems.append(f"address_library file is not {table['address_library']['file']}")
-            if not HEX64.fullmatch(str(library.get("sha256", ""))):
-                problems.append("address_library sha256 is not 64 lower-case hex digits")
-            if not isinstance(library.get("size"), int) or library["size"] <= 0:
-                problems.append("address_library size is not a positive integer")
-            if not str(library.get("provenance", "")).strip():
-                problems.append("address_library has no provenance")
-    return problems
+    import sys
+    sys.path.insert(0, str(ROOT / "src"))
+    from fo4sf.launcher.runtimes import native_declaration_problems
+    return native_declaration_problems(entry, table)
 
 
 class DeclarationTests(unittest.TestCase):

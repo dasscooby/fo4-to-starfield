@@ -195,6 +195,7 @@ def detect(*, fo4_data, starfield, sources=None, out_dir=None, need_gb=0.0, floo
         elif known is not None and g["sfse"]:
             for p in rt.sfse_problems(known, g):
                 (refusals if require_sfse else warnings).append(f"Starfield: SFSE: {p}")
+        refusals += [f"Starfield: native: {p}" for p in rt.native_problems(known, starfield)]
         out["game"] = {"sfse": g["sfse"], "creation_kit": g["creation_kit"],
                        "archive2": f.get("Tools/Archive2/Archive2.exe") is not None,
                        "exe_sha256": exe_sha, "runtime": None if known is None else known["label"],
