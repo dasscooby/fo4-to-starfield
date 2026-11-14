@@ -476,11 +476,31 @@ def _same_bind(a, b):
             and all(abs(x - y) <= BIND_TOLERANCE for x, y in zip(ra, rb)) and abs(sa - sb) <= BIND_TOLERANCE)
 
 
+SEAM_LIMIT_M = 0.025   # the farthest a spanning triangle's vertices may land from FO4's skinning when it rides one bone (rigid_skinned_parts)
+# FAL-489, the Vault 111 cog door's catwalk (PC read 13 Nov, door_skin_report rigid_error_m): its main mesh WalkWay01:7 has 288 triangles across
+# hinged bone pairs; riding the side with the smaller error costs at most 2.25 cm, every other set under 1 cm, while the paper effect Paper:0
+# costs 3.0 to 12.7 cm and stays out. Used only where a caller opts in (convert_multipart_door seam_limit_m).
 RIGID_SKIN_TOLERANCE = 1e-3   # weight a rigid vertex may put on other bones: half-float rounding, not a blend
 # (Codex on #354: 0.995 / 0.005 across two bones was accepted and drifted 5 cm from real skinning at 10 m of travel)
 
 
-def rigid_skinned_parts(src, shape, bones):
+def _seam_slot(skin, shape, slots, slot_of, poses, limit):
+    """The slot a set of triangles across several bones rides: the one whose bone leaves the vertices that follow the others closest to
+    FO4's skinning over every clip sample (skin_seams.rigid_error_m), lowest slot on a tie; None when no candidate is in the poses or the
+    best error is over limit metres."""
+    from . import skin_seams
+    tris = [t for t in shape.triangles if {slot_of[i] for i in t} == set(slots)]
+    verts = sorted({i for t in tris for i in t})
+    best = None
+    for x in sorted(slots):
+        moved = [(skin.bones[slot_of[v]], skin.skin_to_bone[slot_of[v]], shape.positions[v]) for v in verts if slot_of[v] != x]
+        got = skin_seams.rigid_error_m(poses, moved, skin.bones[x], skin.skin_to_bone[x])
+        if got is not None and (best is None or got["max_m"] < best[0]):
+            best = (got["max_m"], x)
+    return best[1] if best is not None and best[0] <= limit else None
+
+
+def rigid_skinned_parts(src, shape, bones, poses=None, seam_limit_m=SEAM_LIMIT_M):
     """A skinned door shape whose every drawn vertex follows one bone fully, cut into one piece per bone and re-expressed
     in that bone's space so the rig carries each piece as an ordinary attachment: [(bone index, shape), ...] or None.
     Weight 1 on one bone makes skinning bone_world * skin_to_bone, so bone-local positions are skin_to_bone(stored) and a
@@ -488,7 +508,11 @@ def rigid_skinned_parts(src, shape, bones):
     Door:7 has 363 vertices on b_Door and 118 on b_Handle, none blended). A vertex putting more than
     RIGID_SKIN_TOLERANCE of its weight on other bones (a blend), two slots of one bone with different skin_to_bone (the
     weighted result is then not either bind; Codex on #354), a triangle across two bones or a bone outside the rig
-    give None."""
+    give None.
+    poses (skin_seams.bone_poses of the plan): a triangle across several bones then rides one of them instead of giving None: per set of
+    bones the one with the smaller skin_seams.rigid_error_m, if that is within seam_limit_m (the hinged catwalk's seams, SEAM_LIMIT_M); the
+    triangle's vertices that follow another bone sit where that bone's skin_to_bone puts them, so a piece never stretches. Without poses
+    a spanning triangle still gives None."""
     from . import fo4skin
     try:
         skin = fo4skin.read_skin(src, shape.block)
@@ -515,10 +539,18 @@ def rigid_skinned_parts(src, shape, bones):
             return None
         slot_of[v] = per_bone[bone][1]
     by_slot = {}
+    seam = {}                                      # set of slots a triangle spans -> the slot that set rides
     for t in shape.triangles:
         slots = {slot_of[i] for i in t}
         if len(slots) != 1:
-            return None
+            if poses is None:
+                return None
+            key = frozenset(slots)
+            if key not in seam:
+                if (chosen := _seam_slot(skin, shape, key, slot_of, poses, seam_limit_m)) is None:
+                    return None
+                seam[key] = chosen
+            slots = {seam[key]}
         by_slot.setdefault(slots.pop(), []).append(t)
     index = {b.get("node"): i for i, b in enumerate(bones) if b.get("node") is not None}
     if any(skin.bones[k] not in index for k in by_slot):
@@ -550,10 +582,59 @@ def rigid_skinned_parts(src, shape, bones):
     return parts
 
 
+def _rot_from_quat(q):
+    w, x, y, z = q
+    return (1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y), 2 * (x * y + w * z), 1 - 2 * (x * x + z * z),
+            2 * (y * z - w * x), 2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y))
+
+
+def _pose_boxes(plan, local_pts, unit_scale):
+    """Where the model's attachments sit in model space (metres), at rest and at the last sample of every clip, as an
+    axis-aligned box per attachment key: ({key: [[lo], [hi]]}, {clip: {key: [[lo], [hi]]}}). It is what the written rig and clip
+    PREDICT: a bone with a track in the clip takes that track's last sample (translation x unit_scale, rotation), any other
+    bone its bind. Compare it with a screenshot: it does not read the game."""
+    from . import nif as nifmod
+    bones = plan["bones"]
+
+    def worlds(local_of):
+        out = []
+        for i, bn in enumerate(bones):
+            t, r = local_of(i, bn)
+            loc = (t, r, 1.0)
+            out.append(loc if bn["parent"] == -1 else nifmod._compose(out[bn["parent"]], loc))
+        return out
+
+    def bind_local(i, bn):
+        b = bn["bind"]
+        return tuple(v * unit_scale for v in b["translation_source_units"]), _rot_from_quat(b["quaternion_wxyz"])
+
+    def boxes(world):
+        res = {}
+        for a in plan["attachments"]:
+            lt = a["local_transform"]
+            attach = (tuple(v * unit_scale for v in lt["translation_source_units"]), tuple(lt["rotation_row_major"]), lt["scale"])
+            pts = [_apply(world[a["bone"]], _apply(attach, p)) for p in local_pts[a["shape"]]]
+            res[str(a["shape"])] = [[round(min(p[k] for p in pts), 4) for k in range(3)], [round(max(p[k] for p in pts), 4) for k in range(3)]]
+        return res
+    rest = boxes(worlds(bind_local))
+    ends = {}
+    for clip in plan["clips"]:
+        last = {t["node"]: t["samples"][-1] for t in clip["tracks"] if not t.get("static")}
+
+        def local_of(i, bn, last=last):
+            smp = last.get(bn.get("node"))
+            if smp is None:
+                return bind_local(i, bn)
+            return tuple(v * unit_scale for v in smp["translation_source_units"]), _rot_from_quat(smp["quaternion_wxyz"])
+        ends[clip["name"]] = boxes(worlds(local_of))
+    return rest, ends
+
+
 def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, clip_files, unit_scale: float = UNIT_SCALE,
                            collision_template: bytes = None, leaf_physics_donor: bytes = None,
                            rest_pose_check: bool = False, aliases: dict = None,
-                           drop_skinned: bool = False) -> Tuple[Dict[str, bytes], dict]:
+                           drop_skinned: bool = False, allowed=None, expect_clips=None, plan_hook=None,
+                           anim_graph: str = None, motion_clip: str = "Open", seam_limit_m: float = None) -> Tuple[Dict[str, bytes], dict]:
     """FO4 door whose "Open" sequence moves geometry under more than one node (frozen_door_parts: double doors,
     shutters, sliding panel sets) -> Starfield door with its OWN rig and clips, as vanilla double doors have
     (IndIntRmSmWallMid_DoorA01: one rig bone and one clip track per leaf, one keyframed body per leaf).
@@ -570,15 +651,25 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
     rest_pose_check: refuse a door whose Open does not start, or whose Close does not end, at the bind pose
     (door_rig.rest_pose_issue; the sliding / lifting route, which takes every NOT_HINGED_RE door).
     aliases: door_rig.plan's sequence aliases (an animated activator converted as a door, pipeline.OWN_RIG_ALIASES).
+    seam_limit_m: a skinned shape whose triangles run across hinged bones may ride the bone with the smaller error when it is within this
+    many metres of FO4's skinning (rigid_skinned_parts poses; None: such a shape is refused or dropped as before).
     drop_skinned: leave skinned shapes out instead of refusing the door (a rig cannot carry them); the door entry lists
-    them under "dropped_skinned_shapes"."""
+    them under "dropped_skinned_shapes".
+    allowed / expect_clips / plan_hook / anim_graph / motion_clip: an animated object that is no door (anim_object, the
+    Vault 111 console on an activator graph): the clip-slot names the sequences may take, the exact clip names the plan
+    must end with, a function plan -> plan run after the identity binds (it adds the one-frame hold clips), the graph the
+    entry names, and the clip open_motion reports. All default to the door's own."""
     from . import door_model, door_rig, native_door
     if collision_template is None or leaf_physics_donor is None:
         raise ValueError("multi-part door needs the box template and a keyframed donor body")
     src = nifmod.parse(fo4_nif)
-    plan = door_rig.animated_identity_binds(door_rig.plan(src, placed=True, aliases=aliases))
-    if sorted(c["name"] for c in plan["clips"]) != ["Close", "Open"]:
-        raise nifmod.NifError("door needs exactly one Open and one Close sequence")   # the graph plays both
+    plan = door_rig.animated_identity_binds(door_rig.plan(src, placed=True, aliases=aliases, allowed=allowed))
+    if plan_hook is not None:
+        plan = plan_hook(plan)
+    want = sorted(expect_clips) if expect_clips is not None else ["Close", "Open"]
+    if sorted(c["name"] for c in plan["clips"]) != want:
+        raise nifmod.NifError("door needs exactly one Open and one Close sequence" if expect_clips is None else
+                              f"the object needs exactly the clips {want}, the plan has {sorted(c['name'] for c in plan['clips'])}")   # the graph plays them
     if rest_pose_check and (issue := door_rig.rest_pose_issue(plan)):
         raise nifmod.NifError(issue)
     base = out_name.rsplit("/", 1)[-1]
@@ -591,13 +682,18 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
     kept = {s.block: (s, m) for s, m in zip(shapes, material_paths) if m is not None}
     shape_name = lambda b, s: (s.name or f"Shape{b}".encode()).decode("latin-1")    # noqa: E731
     rebound = {}                         # piece key -> rig bone it rides rigidly (rigid_skinned_parts); one piece per bone
+    seam_poses = None
+    if seam_limit_m is not None and any(s.skinned for s, _ in kept.values()):
+        from . import skin_seams
+        seam_poses = skin_seams.bone_poses(plan)
     for b, (s, m) in list(kept.items()):
-        if s.skinned and (parts := rigid_skinned_parts(src, s, plan["bones"])) is not None:
+        if s.skinned and (parts := rigid_skinned_parts(src, s, plan["bones"], seam_poses, seam_limit_m)) is not None:
             del kept[b]
             for k, (bone, piece) in enumerate(parts):
                 key = b if len(parts) == 1 else f"{b}.{k}"
                 kept[key] = (piece, m)
                 rebound[key] = bone
+    dropped_blocks = {b for b, (s, _) in kept.items() if s.skinned}          # by block: shape names can repeat
     dropped_skinned = sorted(shape_name(b, s) for b, (s, _) in kept.items() if s.skinned)
     if dropped_skinned and not drop_skinned:
         raise nifmod.NifError("skinned door shapes cannot be rigged (blended or off-rig weights)")
@@ -637,7 +733,7 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
              2 * (y * z - w * x), 2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y))
         local = (tuple(v * unit_scale for v in b["translation_source_units"]), r, b["scale"])
         world.append(local if bone["parent"] == -1 else nifmod._compose(world[bone["parent"]], local))
-    animated = {t["node"] for clip in plan["clips"] for t in clip["tracks"]}
+    animated = {t["node"] for clip in plan["clips"] for t in clip["tracks"] if not t.get("static")}      # a static track moves nothing
     moving = set()
     for i, bone in enumerate(bones):
         if bone["node"] in animated or (bone["parent"] != -1 and bone["parent"] in moving):
@@ -666,7 +762,7 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
         raise ValueError("clip writer returned no rig or clips")
     for relative, data in extra.items():
         files[f"meshes/{out_name}/{relative}"] = data
-    door = {"origin_offset": [0.0, 0.0, 0.0], "anim_graph": sfnif.DOOR_TEMPLATE["anim_graph"],
+    door = {"origin_offset": [0.0, 0.0, 0.0], "anim_graph": anim_graph or sfnif.DOOR_TEMPLATE["anim_graph"],
             "bounds": [[round(min(p[k] for p in all_pts), 4) for k in range(3)],
                        [round(max(p[k] for p in all_pts), 4) for k in range(3)]],
             "skeleton": f"{out_name}/{native_door.RIG_FILE}".replace("/", "\\"),
@@ -674,7 +770,7 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
             "rig": "native",
             "animated_bones": sorted({bones[i]["name"] for i in range(len(bones)) if bones[i]["node"] in animated}),
             "moving_bodies": len(collision),
-            "open_motion": door_rig.open_motion(plan, unit_scale),
+            "open_motion": door_rig.open_motion(plan, unit_scale, motion_clip),
             "files": sorted(f"meshes/{out_name}/{relative}" for relative in extra)}
     if plan.get("ignored_tracks"):                  # shader / visibility tracks FO4 also plays: not ported, said so
         door["ignored_tracks"] = sorted({f'{t["target"]} ({t["reason"]})' for t in plan["ignored_tracks"]})
@@ -685,4 +781,29 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
         door["rebound_skinned_pieces"] = len(rebound)
     if aliases:
         door["sequence_aliases"] = dict(aliases)
+    if plan_hook is not None:                       # an animated object that is no door: say what became of every shape
+        bone_of = {a["shape"]: bones[a["bone"]]["name"] for a in plan["attachments"]}
+        report = []
+        for s, m in zip(shapes, material_paths):
+            name = shape_name(s.block, s)
+            keys = [k for k in bone_of if k == s.block or str(k).startswith(f"{s.block}.")]
+            if m is None:
+                fate = "left out: no material (effect shader or marker)"
+            elif s.block in dropped_blocks:
+                fate = "dropped: skinned, a rig cannot carry it"
+            elif keys:
+                fate = "kept"
+            else:
+                fate = "not attached"
+            report.append({"shape": name, "skinned": bool(s.skinned), "material": m, "fate": fate,
+                           "bones": sorted({bone_of[k] for k in keys})})
+        door["shapes"] = report
+        door["rig"] = [{"index": i, "name": bn["name"], "parent": bn["parent"],
+                        "bind_t_m": [round(v * unit_scale, 4) for v in bn["bind"]["translation_source_units"]]}
+                       for i, bn in enumerate(bones)]
+        door["attachments"] = [{"shape": shape_name(a["shape"] if isinstance(a["shape"], int) else int(str(a["shape"]).split(".")[0]),
+                                                    kept[a["shape"]][0]), "key": str(a["shape"]), "bone_index": a["bone"],
+                                "bone": bones[a["bone"]]["name"]} for a in plan["attachments"]]
+        rest, ends = _pose_boxes(plan, local_pts, unit_scale)
+        door["pose_boxes_m"] = {"rest": rest, "end_of_clip": ends}
     return files, door

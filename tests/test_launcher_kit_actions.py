@@ -43,7 +43,7 @@ class KitActions(unittest.TestCase):
         self.run = mock.Mock(return_value=subprocess.CompletedProcess([], 0))
 
     def execute(self, action='install', key='pipboy_probe', **kwargs):
-        return kits.execute(key, action, str(self.path), str(ROOT), expected_folder=kwargs.pop('expected_folder',str(self.game)),
+        return kits.execute(key, action, str(self.path), str(kwargs.pop('repo', ROOT)), expected_folder=kwargs.pop('expected_folder',str(self.game)),
                             running=kwargs.pop('running',lambda:False), run=kwargs.pop('run',self.run),
                             environ=self.env, **kwargs)
 
@@ -163,7 +163,7 @@ class KitActions(unittest.TestCase):
         stage.mkdir()
         (stage/'FO4SFRadsProbe.esm').write_bytes(b'synthetic')
         kits.register(kits.registry_path(self.path),'rads_probe',str(stage))
-        self.refuses('installer.*unavailable',key='rads_probe')
+        self.refuses('installer.*unavailable',key='rads_probe',repo=self.root/'missing-checkout')
         self.refuses('not installed',action='remove')
 
     def test_double_install_refuses(self):

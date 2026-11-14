@@ -2889,3 +2889,44 @@ Python 3.14.4, numpy 2.5.4/Pillow 12.3.0; commands and final results are in the 
 core-receipt-fix task receipt. Native Windows/game checks remain NOT_RUN at the fix.
 Missing archives/installers/cards and the bridge hold stay separate gates. Added a
 bounded read-only PC recheck; no merge until PC Play eligibility is observed.
+## 2026-11-11: Codex / The Lone Wanderer — preserve two-kit launcher load order (FAL-354)
+
+Paperclip Ubuntu OptiPlex (`games`), synthetic files only; base `ba286735f320a80d10164e0327559bfb68202ba7`.
+The old `scripts/game/load_order.py target()` forces markers/bridge to the tail, reproducing the reported order
+when two kits follow them. `python3 -m unittest` on the new two-kit load-order and toggle-pair regressions fails
+in three subcases before the correction; the pure hold-off/on control passes. Removing the remaining group priority
+preserves any valid order while retaining master dependency repair, refusals and guarded backups.
+
+`python3 -m unittest tests.test_load_order tests.test_plugin_toggle tests.test_launcher_crashwatch -v`: 107 pass.
+Launcher CLI/GUI/syntax checks: 43 run, OK (one skip). `python3 scripts/guard.py`: OK.
+Private before/after logs: `.paperclip-evidence/fal354/` in the task workspace; no PC files committed.
+
+PC snapshot timing and save/reload remain unresolved/NOT_RUN: the supplied snapshots leave Mission in place,
+move MapMarkers behind two active kits and leave Bridge unticked. The launcher fixer runs before launch, while
+the reported console index during play reflects the old order; its reproduction alone does not attribute the
+post-session PC write. See `docs/testing/load-order.md` for interpretation and the one-kit-until-PC-validation
+test-list line. Independent exact-head QA, CI and PC session acceptance precede integration.
+
+
+## 2026-11-14 — Codex / Lone: prepacked Main plus texture archives (FAL-743 / #723)
+
+Paperclip Ubuntu 26.04.1 LTS OptiPlex; normal merge of main c2578da3 into the existing
+codex/fal274-launcher-tests line at dde84927. Preserved both journal append histories.
+Current producer/receipt contract separates Data/Textures into a DX10 archive only
+with --textures-archive. Reconciled --prepacked so that mode requires the existing
+<first plugin> - Textures.ba2 beside the selected Main archive and never builds either.
+Missing or wrong archives refuse before publication. The default single General
+archive and normal separate-archive builds retain their behavior.
+
+Seven new synthetic controls reproduce the naive merge failure, then pass, including
+combined CLI install/relaunch/remove, missing either archive, wrong texture bytes/type/
+inventory, wrong Main coverage, no-texture inputs and default mode. Owner/core/plugin
+bytes and input archives stay unchanged; uninstall retains its normal receipt history.
+The main merge also brought the radiation/armor installers: three launcher tests now
+use an explicitly absent checkout for missing-installer refusals instead of relying on
+old source absence. 286 installer, 412 launcher (4 platform/display skips), and 16
+prepacked/packed-verifier tests pass; guard/diff clean. Full discovery and exact-head
+receipts are tracked in FAL-743 document reconciliation. Independent delta review and
+Minuteman FAL-741 landing gates remain. Earlier PC PASS dde84927 covers only the core
+receipt/Play-eligibility regression; actual kit/archive/Remove/instance/bridge gates
+remain separate. No native Windows, game, deploy or real-kit action in this run.

@@ -101,9 +101,12 @@ def _non_transform(source, interpolator, controller_type):
     return f"controller {controller_type}" if controller_type in NON_TRANSFORM_CONTROLLERS else None
 
 
-def inspect(source, aliases=None):
+def inspect(source, aliases=None, allowed=None):
     """aliases: {FO4 sequence name: "Open" or "Close"} for an animated object whose clips have other names (the Vault 111
-    cog door VltGearDoor01 plays Stage2 to open); the aliased sequence is reported under its door name."""
+    cog door VltGearDoor01 plays Stage2 to open); the aliased sequence is reported under its door name.
+    allowed: the names a sequence may be reported under (bytes), default Open / Close; an animated object that is no door
+    (the Vault 111 console on an activator graph, FAL-489 variant D) names its own clip slots."""
+    allowed = tuple(a if isinstance(a, bytes) else a.encode("latin-1") for a in allowed) if allowed else (b"Open", b"Close")
     aliases = {k.encode("latin-1"): v.encode("latin-1") for k, v in (aliases or {}).items()}
     nodes = {}
     for i, block in enumerate(source.blocks):
@@ -125,7 +128,7 @@ def inspect(source, aliases=None):
             raise nif.NifError("invalid sequence name")
         # an aliased object takes its clips from the aliases only; any other door from its own Open / Close
         seq_name = aliases.get(source.strings[name]) if aliases else source.strings[name]
-        if seq_name not in (b"Open", b"Close"):
+        if seq_name not in allowed:
             continue
         if 12 + 29 * count > len(block):
             raise nif.NifError("truncated door controlled-block list")

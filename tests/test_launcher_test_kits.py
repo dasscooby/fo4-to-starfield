@@ -52,7 +52,10 @@ class TestKitCatalog(unittest.TestCase):
         rows = self.rows(stages)
         self.assertEqual([r['key'] for r in rows], [k.key for k in kits.KITS])
         self.assertTrue(all(r['state'] == 'not installed' and not r['notice'] for r in rows))
-        self.assertFalse(rows[-1]['installer_available'])  # not yet on this base; no invented capability
+        self.assertTrue(all(row['installer_available'] for row in rows))
+        missing = kits.list_kits(str(self.game), stages, str(self.plugins), str(self.root / 'missing-checkout'))
+        self.assertEqual([row['key'] for row in missing], [k.key for k in kits.KITS])
+        self.assertTrue(all(not row['installer_available'] for row in missing))
 
     def test_multi_plugin_active_requires_every_plugin_and_unchanged_owned_bytes(self):
         kit = kits.KITS[0]
@@ -193,7 +196,7 @@ class TestKitCatalog(unittest.TestCase):
         with mock.patch.object(recovery, '_preserve_partial_plugins') as backup:
             with mock.patch.object(recovery, 'subprocess') as child:
                 with self.assertRaisesRegex(ValueError, 'installer.*unavailable'):
-                    recovery.recover(str(self.game), str(ROOT), apply=True, running=lambda: False,
+                    recovery.recover(str(self.game), str(self.root / 'missing-checkout'), apply=True, running=lambda: False,
                                      run=child.run, say=lambda _: None)
                 child.run.assert_not_called()
             backup.assert_not_called()

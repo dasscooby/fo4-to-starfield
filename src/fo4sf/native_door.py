@@ -37,7 +37,7 @@ def prepare(plan, unit_scale, fps=30):
     for i,bone in enumerate(bones):
         if bone['parent'] < -1 or bone['parent'] >= i or abs(bone['bind']['scale']-1)>1e-5:
             raise NifError('native prototype requires ordered bones with unit bind scale')
-    index={bone['node']:i for i,bone in enumerate(bones) if bone.get('node') is not None}
+    index={door_rig.bone_key(bone):i for i,bone in enumerate(bones)}
     clips=[]
     for clip in plan['clips']:
         last=round(clip['duration']*fps)
@@ -48,7 +48,8 @@ def prepare(plan, unit_scale, fps=30):
             if source['node'] not in index:
                 raise NifError('door clip track has no rig bone')
             bone_index=index[source['node']];bone=bones[bone_index];bind=bone['bind']
-            if not door_rig.is_identity_rotation(bind['quaternion_wxyz']):
+            static=bool(source.get('static'))        # anim_object.fill_static_tracks: a bone that stays at its bind pose, still given its block
+            if not static and not door_rig.is_identity_rotation(bind['quaternion_wxyz']):
                 raise NifError('animated door bone needs an identity bind rotation (door_rig.animated_identity_binds)')
             frames={};previous=None
             for sample in source['samples']:
@@ -57,14 +58,14 @@ def prepare(plan, unit_scale, fps=30):
                     raise NifError('native door sample is not on the 30 fps grid')
                 if abs(sample['scale']-1)>1e-5:
                     raise NifError('animated door scale is not supported')
-                q=list(sample['quaternion_wxyz']);length=math.sqrt(sum(x*x for x in q))
+                q=[1.0,0.0,0.0,0.0] if static else list(sample['quaternion_wxyz']);length=math.sqrt(sum(x*x for x in q))
                 q=[x/length for x in q]
                 if previous is not None and sum(a*b for a,b in zip(q,previous))<0:
                     q=[-x for x in q]                    # keep one hemisphere: no spurious 360 degree spin
                 previous=q
                 frames[frame]={'frame':frame,'quaternion_wxyz':q,
                                'translation':[(a-b)*unit_scale for a,b in zip(sample['translation_source_units'],
-                                                                             bind['translation_source_units'])]}
+                                                                             bind['translation_source_units'])] if not static else [0.0,0.0,0.0]}
             keys=[frames[f] for f in sorted(frames)]
             moves=any(abs(x)>MOVE_EPSILON for k in keys for x in k['translation'])
             tracks.append({'name':bone['name'],'bone':bone_index,'keys':keys,
@@ -89,8 +90,11 @@ def clip_descriptor(name):
     return ET.tostring(root, encoding='utf-8')
 
 
-def export(plan, dll, output, unit_scale):
+def export(plan, dll, output, unit_scale, descriptors=None):
+    """descriptors: {clip name: .afx bytes} for an object that is no door (anim_object); the clip names are then exactly its keys.
+    None: the door's Open / Close and their descriptors."""
     prepared=prepare(plan,unit_scale)
+    allowed=set(descriptors) if descriptors is not None else {'Open','Close'}
     output=pathlib.Path(output).resolve()
     repo=pathlib.Path(__file__).resolve().parents[2]
     if output==repo or repo in output.parents:raise ValueError('native assets must stay outside repository')
@@ -115,7 +119,7 @@ def export(plan, dll, output, unit_scale):
         rigpath=output/'door.rig'
         require(bind('SaveSkeletonRigToSFBGSFormatDirectC',[p,c.c_wchar_p,p],b)(rig,str(rigpath),error))
         for clip in prepared['clips']:
-            if clip['name'] not in ('Open','Close'):raise ValueError('unsupported door clip name')
+            if clip['name'] not in allowed:raise ValueError('unsupported door clip name')
             anim=bind('CreateAnimationC',[c.c_char_p,c.c_uint],p)(clip['name'].encode(),len(prepared['bones']))
             try:
                 require(anim)
@@ -139,7 +143,7 @@ def export(plan, dll, output, unit_scale):
                     finally:
                         if block:bind('DeleteAnimationBlockC',[p],b)(block)
                 require(bind('SaveAnimationToSFBGSFormatDirectC',[p,c.c_wchar_p,p,p],b)(anim,str(output/(clip['name']+'.af')),rig,error))
-                (output/(clip['name']+'.afx')).write_bytes(clip_descriptor(clip['name']))
+                (output/(clip['name']+'.afx')).write_bytes(descriptors[clip['name']] if descriptors is not None else clip_descriptor(clip['name']))
             finally:
                 if anim:bind('DeleteAnimationC',[p],b)(anim)
         (output/'events.json').write_text(json.dumps({'runtime_events_encoded':False,'clips':[
@@ -156,12 +160,12 @@ RIG_FILE = 'characterassets/skeleton.rig'
 CLIP_DIR = 'animations'
 
 
-def export_files(plan, dll, unit_scale, exporter=None):
+def export_files(plan, dll, unit_scale, exporter=None, descriptors=None):
     """Rig + Open/Close clips + .afx descriptors as {relative path: bytes} (RIG_FILE, CLIP_DIR/<name>.af/.afx).
     Written through a temporary folder outside the repository; the events sidecar is not part of the result."""
     exporter=exporter or export
     with tempfile.TemporaryDirectory(prefix='fo4port-door-') as tmp:
-        prepared=exporter(plan,dll,tmp,unit_scale)
+        prepared=exporter(plan,dll,tmp,unit_scale) if descriptors is None else exporter(plan,dll,tmp,unit_scale,descriptors=descriptors)
         out={RIG_FILE:(pathlib.Path(tmp)/'door.rig').read_bytes()}
         for clip in prepared['clips']:
             for suffix in ('.af','.afx'):

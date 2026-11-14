@@ -27,6 +27,61 @@ Every status on this page carries one of three labels: **seen in game** (on the 
 
 Newest first.
 
+- **12 Nov 2026: Vault 111's exit scene, first steps: moving objects.** Fallout 4's vault exit plays on a few objects,
+  among them the cog door and the control panel the player uses. We read the cog door in our converted Vault 111 and in
+  Fallout 4's own files, and the control panel in our converted vault, changing nothing
+  ([#742](https://github.com/fo4sf/fo4-to-starfield/pull/742) to [#745](https://github.com/fo4sf/fo4-to-starfield/pull/745)).
+  Our converted cog door opens and closes, but the two signals Fallout 4's scene waits for (the klaxon stopping, the
+  end of the door's sequence) exist only in the original. The animated objects of Starfield's that we read keep their
+  clips as files beside a skeleton, the recipe our converter already writes for doors. Then a script of ours played
+  animations on one of Starfield's own animated objects and heard the end of each clip
+  ([#746](https://github.com/fo4sf/fo4-to-starfield/pull/746)). **Seen in game, 12 Nov.** A converted Fallout 4 control
+  panel from the vault plays its clips in Starfield from a script of ours, and each ends at about the clip's own
+  length; its lid's parts are seen moving on the first call, and its button pressing and returning. **Seen in game,
+  12 Nov.** The glass itself and the motions in progress have not been seen yet, and the scene's four console stages in
+  a row are not built ([#747](https://github.com/fo4sf/fo4-to-starfield/pull/747), open). **Not working end to end
+  yet.**
+- **11 and 12 Nov: Fallout 4 pieces in Starfield's build menu.** At the Red Rocket workbench of our converted
+  Commonwealth, Starfield's build menu lists 34 Fallout 4 pieces (walls, roofs, crates, barrels and more, with the models
+  of our converted world) on its MISCELLANEOUS tab, each with a picture our tool draws. A wood crate and a metal barrel
+  were built, each for 1 iron ([#737](https://github.com/fo4sf/fo4-to-starfield/pull/737),
+  [#740](https://github.com/fo4sf/fo4-to-starfield/pull/740)). **Seen in game, 11 and 12 Nov.** The menu's tabs are
+  fixed (a tab of our own does not appear), and grouping pieces as variants of one entry crashed the game at load, so
+  that option stays off. Not yet tried: a wall on open ground, save and reload.
+- **11 Nov: the Pip-Boy gets its pages.** Our menu has Fallout 4's five tabs (STAT, INV, DATA, MAP, RADIO). Filled so
+  far: a STAT page with values read from the game and the game's clock and day, the player's inventory (names and
+  counts), a world page, and a quest page that reads our mission's name, "When Freedom Calls", from the running game
+  ([#736](https://github.com/fo4sf/fo4-to-starfield/pull/736), [#739](https://github.com/fo4sf/fo4-to-starfield/pull/739)).
+  Keys and the mouse move between pages. Tab and Esc close it without opening the game's own menus, as do F10 and its
+  CLOSE button ([#738](https://github.com/fo4sf/fo4-to-starfield/pull/738)). **Seen in game, 11 Nov.** The game does
+  not pause while it is open. Not yet tried: a controller, a second quest, a stack of more than one item.
+- **11 Nov: power armor, entered by a script of ours.** Starfield still has a call to enter power armor, but it refused
+  our test chair ("not valid power armor furniture"), and in a second try, with more of the records it expects, the
+  game crashed a second after the call ([#708](https://github.com/fo4sf/fo4-to-starfield/pull/708),
+  [#720](https://github.com/fo4sf/fo4-to-starfield/pull/720)). So a script of ours does the entry: sit on a chair, and a
+  stand-in suit (copies of a Starfield spacesuit, helmet and pack) goes on and is drawn, and our own "in power armor"
+  value is set; the exit takes it off and puts the character's own gear back
+  ([#733](https://github.com/fo4sf/fo4-to-starfield/pull/733)). **Seen in game, 11 Nov.** Not yet tried: first person,
+  the inventory with the suit on, save and reload.
+- **11 Nov: a settlement workbench and a C.A.M.P. beacon from a kit.** The player gets three kit items. Dropped, one
+  stands a workbench that Starfield accepts as a workshop (its build menu opens and a station was built), one stands
+  Starfield's outpost beacon, our stand-in for a C.A.M.P., and one gives the resources
+  ([#732](https://github.com/fo4sf/fo4-to-starfield/pull/732), [#734](https://github.com/fo4sf/fo4-to-starfield/pull/734)).
+  The converted Red Rocket workbench is a working workshop too. **Seen in game, 11 Nov.** Not yet tried: save and
+  reload, a new game.
+- **11 Nov: radiation in one test, end to end.** Our "Rads" value is raised by a spell, without the crash of 10 Nov; it
+  lowers the player's current health; and RadAway lowers it again, through a script of ours when the item is used
+  ([#709](https://github.com/fo4sf/fo4-to-starfield/pull/709), [#719](https://github.com/fo4sf/fo4-to-starfield/pull/719)).
+  **Seen in game, 11 Nov.** RadAway's own effect still moves nothing, and lowering the maximum health, as in Fallout 4,
+  is not shown yet.
+- **11 Nov: our native plugins keep their files out of the game folder.** Their logs and files go to a folder of their
+  own beside the saves. Without its setting file a plugin refuses to run and logs why. One table lists what each plugin
+  needs, for the launcher to check ([#727](https://github.com/fo4sf/fo4-to-starfield/pull/727),
+  [#728](https://github.com/fo4sf/fo4-to-starfield/pull/728), [#730](https://github.com/fo4sf/fo4-to-starfield/pull/730)).
+  **Seen in game, 11 Nov** (the folder and the refusals, on a build of the same native code). In a second test that
+  day, the plugin that keeps a small file beside each save heard no save and no load (two saves, four loads); the cause is being
+  looked for. The launcher now keeps any valid plugin order instead of moving two of our plugins to the end
+  ([#731](https://github.com/fo4sf/fo4-to-starfield/pull/731)). **Offline tests only.**
 - **10 Nov 2026: the Pip-Boy (Fallout's wrist menu), first step.** A plugin of ours adds its own menu to Starfield and
   shows its own interface file (a movie file) in it. In two runs (first with no movie, then with ours), ten toggles
   each (five opens, five closes), every one matched in its log, and our test card on screen in the second run
@@ -63,14 +118,15 @@ In the table below, "settlements" are Fallout 4's and "C.A.M.P.s" are Fallout 76
 
 | Track | What exists today | Where it was seen |
 |---|---|---|
-| **Launcher** | Finds both games, fixes the load order, starts the game (with a crash recorder when that setting is on); recovers an interrupted install; warns when script logging is off | Recovery: offline tests only (10 Nov) |
-| **Pip-Boy** | Our own menu opens and closes, shows live text and hears a button click. Decided: it sits on the wrist, as in Fallout 4; the flat menu is the base and fallback. A first test for a screen on an object in the world is a draft ([#717](https://github.com/fo4sf/fo4-to-starfield/pull/717)) | Flat menu: seen in game, 10 Nov. Wrist: offline tests only |
+| **Launcher** | Finds both games, fixes the load order (keeping any valid order), starts the game (with a crash recorder when that setting is on); recovers an interrupted install; warns when script logging is off. Our native plugins keep their files beside the saves, out of the game folder | Recovery and load order: offline tests only (10 and 11 Nov). Native plugins' folder: seen in game, 11 Nov |
+| **Pip-Boy** | Our own menu with Fallout 4's five tabs; filled so far: stats with the game's clock, the inventory, a world page, and a quest page with the mission's name read from the game. Since 12 Nov the quest page also shows the mission's current stage, read live, and shows the new stage after it changes ([#749](https://github.com/fo4sf/fo4-to-starfield/pull/749), open). Keys and the mouse move through it; Tab, Esc, F10 and its CLOSE button close it. Decided: it sits on the wrist, as in Fallout 4; the flat menu is the base and fallback. A first test for a screen on an object in the world is on main ([#717](https://github.com/fo4sf/fo4-to-starfield/pull/717)) | Flat menu: seen in game, 11 Nov; quest stage: seen in game, 12 Nov. Wrist: offline tests only |
 | **Map** | Commonwealth markers on the map (31 Oct). A storage test for the terrain core (our converted exterior) crashed 32 s after travel to Red Rocket, only with the test's add-on plugin installed (the same trip without it is fine); fix in progress | Seen in game, 31 Oct; crash seen 10 Nov |
-| **Radiation base** | A "Rads" value that stores and reads back; mutations and more will hang from it. Raising it crashed | Seen in game, 10 Nov (half works) |
-| **Power armor** | A test plugin and script that ask whether Starfield still runs Fallout 4's power armor path | Offline tests only (47 tests) |
+| **Radiation base** | A "Rads" value: a spell raises it, it lowers current health, and RadAway lowers it through a script of ours; mutations and more will hang from it. Lowering the maximum health is not shown yet | Seen in game, 11 Nov |
+| **Power armor** | Entered by a script of ours: a stand-in suit goes on and comes off, and our "in power armor" value follows. Starfield's own entry call refused our chair or crashed | Seen in game, 11 Nov |
 | **Player creation** | A survey of Starfield's character-creation functions | Not started |
-| **Settlements and C.A.M.P.s** | A survey of Starfield's outpost and workshop functions and menus | Not started |
+| **Settlements and C.A.M.P.s** | A kit stands a workbench that works as a workshop, and Starfield's outpost beacon as a C.A.M.P.; 34 Fallout 4 pieces are in the build menu with our own pictures, and two were built | Seen in game, 11 and 12 Nov |
 | **Our own planet** | A planet of ours, loaded from our records. Some always-loaded objects (persistent references) still land in the wrong world | Seen in game, 29 Oct (partial) |
+| **Vault 111's exit** | A script of ours plays animations on one of Starfield's own animated objects and hears each clip end. A converted Fallout 4 control panel plays its clips from a script of ours: its lid's parts are seen moving on the first call and its button pressing and returning; the glass itself and the motions in progress are not seen yet, and the scene's four console stages in a row are not built ([#747](https://github.com/fo4sf/fo4-to-starfield/pull/747)). A script of ours puts the player into four of Starfield's own play-once furnitures and receives the enter, sit, exit and get-up events. None of the four ends by itself; a second activation from the script ends it. No pose specific to a furniture was seen ([#748](https://github.com/fo4sf/fo4-to-starfield/pull/748)) | Starfield's object: seen in game, 12 Nov. Converted panel: seen in game, 12 Nov (button, and the lid's parts on the first call); not working end to end yet. Furnitures: seen in game, 12 Nov |
 
 On 10 Nov we read Starfield's own files, changing nothing. It has functions for outposts, workshops, character
 creation, map markers and fast travel. It has more than 70 environmental hazard records and affliction values, and

@@ -43,6 +43,7 @@ class SlidingRoutingTests(unittest.TestCase):
         single.assert_not_called()
         static.assert_not_called()
         self.assertTrue(multi.call_args.kwargs["rest_pose_check"])
+        self.assertIsNone(multi.call_args.kwargs["seam_limit_m"])            # a plain door allows no seam
         self.assertEqual(result["door"]["rig"], "native")
 
     def test_without_the_library_it_stays_passable_instead_of_swinging(self):
@@ -143,6 +144,22 @@ class SkinnedPanelTests(unittest.TestCase):
         self.assertEqual(door["rig"], "native")
         self.assertEqual(door["rebound_skinned_pieces"], 2)
         self.assertEqual(door["moving_bodies"], 2)                       # a piece on each panel
+
+    def test_a_triangle_across_two_bones_rides_one_when_the_caller_allows_a_seam(self):
+        """FAL-489 (the cog door's catwalk): with seam_limit_m a shape whose triangle runs across PanelA and PanelB rides the bone with the
+        smaller error instead of failing the door; a limit under that error, or none, is the old refusal."""
+        f = door_nif(sliding_panels())
+        names = node_names(f)
+        _, shapes, read_skin = self.skinned(f, names["PanelA"], second=names["PanelB"])
+        _, door = self.convert(f, shapes, read_skin, seam_limit_m=10.0)
+        self.assertEqual(door["rig"], "native")
+        self.assertEqual(len(door["rebound_skinned_shapes"]), 1)
+        self.assertNotIn("dropped_skinned_shapes", door)
+        with self.assertRaisesRegex(nif.NifError, "cannot be rigged"):
+            self.convert(f, shapes, read_skin, seam_limit_m=1e-9)           # the panels slide apart: the best side is still off
+        self.assertIn("dropped_skinned_shapes", self.convert(f, shapes, read_skin, seam_limit_m=1e-9, drop_skinned=True)[1])
+        with self.assertRaisesRegex(nif.NifError, "cannot be rigged"):
+            self.convert(f, shapes, read_skin)                              # default: no seam allowed
 
     def test_weights_split_over_slots_of_one_bone_still_count_as_rigid(self):
         f = door_nif(sliding_panels())
