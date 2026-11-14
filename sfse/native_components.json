@@ -1,0 +1,101 @@
+{
+  "about": "What each of our SFSE dlls declares to SFSE and checks for itself, read from its source (FAL-246 item 3; FAL-247 document native-launcher-contract). tests/test_native_components.py holds every field to the source, so a source change that moves a pin fails until this file follows. No hash here: a dll's sha256, size, source_commit and artifact_receipt come from a real build receipt into the runtime's `native` entry in scripts/launcher_recipes/known_runtimes.json, and that entry must agree with this file (same test). The launcher's comparison (src/fo4sf/launcher/runtimes.py) is The Lone Wanderer's.",
+  "schema": 1,
+  "runtime": "1.16.244.0",
+  "address_library": {
+    "file": "versionlib-1-16-244-0.bin",
+    "format": 5,
+    "why": "SFSE checks that a plugin marked as an Address Library user has the file beside it (sfse/FOCCSidecar/README.md); the dlls that read ids also check the header themselves (format 5, this runtime, 8-byte pointers)"
+  },
+  "libxse": {
+    "repo": "https://github.com/libxse/commonlibsf",
+    "commit": "9d090c4c521f4f2c1aa00bb05923c380d47ae596",
+    "shared_commit": "9fbb74d628134ab4ea3a3cf5c0ed3f7eeabbd01d"
+  },
+  "plugins": {
+    "FO4SFBorder.dll": {
+      "folder": "sfse/FO4SFBorder",
+      "source": "sfse/FO4SFBorder/FO4SFBorder.cpp",
+      "build": "pluginapi",
+      "role": "probe",
+      "required": false,
+      "address": "signatures",
+      "structure": "1.14.70_layout",
+      "sfse_compatible": ["1.16.244.0"],
+      "runtime_pin": "sfse",
+      "reads_address_library": false,
+      "needs_address_library": false,
+      "refuse_steps": ["runtime_dir"]
+    },
+    "FOCCSidecar.dll": {
+      "folder": "sfse/FOCCSidecar",
+      "source": "sfse/FOCCSidecar/src/main.cpp",
+      "build": "libxse",
+      "role": "probe",
+      "required": false,
+      "address": "address_library",
+      "structure": "1.14.70_layout",
+      "sfse_compatible": "latest",
+      "runtime_pin": "plugin",
+      "reads_address_library": false,
+      "needs_address_library": true,
+      "refuse_steps": ["listen", "runtime_dir", "version"]
+    },
+    "FOCCPing.dll": {
+      "folder": "sfse/FOCCPing",
+      "source": "sfse/FOCCPing/src/main.cpp",
+      "build": "libxse",
+      "role": "probe",
+      "required": false,
+      "address": "address_library",
+      "structure": "1.14.70_layout",
+      "sfse_compatible": "latest",
+      "runtime_pin": "plugin",
+      "reads_address_library": true,
+      "needs_address_library": true,
+      "refuse_steps": ["address_library", "id", "image", "object", "rtti", "slots", "version"]
+    },
+    "FO4SFPipboyMenu.dll": {
+      "folder": "sfse/FO4SFPipboyMenu",
+      "source": "sfse/FO4SFPipboyMenu/src/main.cpp",
+      "build": "libxse",
+      "role": "probe",
+      "required": false,
+      "address": "address_library",
+      "structure": "1.14.70_layout",
+      "sfse_compatible": "latest",
+      "runtime_pin": "plugin",
+      "reads_address_library": true,
+      "needs_address_library": true,
+      "refuse_steps": ["address_library", "channel", "channel_ids", "close", "create", "ctor", "id", "image", "ini",
+                       "key_thread", "listen", "object", "page", "page_ids", "pages", "register", "rtti", "slots",
+                       "toggle", "version", "world", "world_key_thread", "world_toggle"]
+    }
+  },
+  "refuse_causes": {
+    "address_library": "The Address Library file versionlib-1-16-244-0.bin is missing, unreadable, or for another game version.",
+    "channel": "The menu's data channel did not find the game objects it expects.",
+    "channel_ids": "An id the menu's data channel needs failed its check against the game.",
+    "close": "The game's interface was not there to close our menu.",
+    "create": "The game could not create our menu.",
+    "ctor": "The menu's constructor in the game is not the one the dll expects.",
+    "id": "An Address Library id the dll needs is missing or points outside the game.",
+    "image": "The running game executable is not the image the dll expects.",
+    "ini": "A setting in the dll's own ini is malformed.",
+    "key_thread": "The dll could not start its key watcher.",
+    "listen": "SFSE did not give the dll the interface it needs.",
+    "object": "A game object the dll reads is not where or what it expects.",
+    "page": "The string reader's self-test or the player's actor-value slot did not match what the dll expects; those reads show ? and the dll keeps running. (A form-list refusal is step object.)",
+    "page_ids": "An id a page needs failed its check against the game.",
+    "pages": "The page kit's own check failed, so the kit stays off.",
+    "register": "The game would not register our menu.",
+    "rtti": "A game type the dll checks by name is not the one it expects.",
+    "runtime_dir": "FO4SF-Runtime.ini is missing or malformed, or the save folder it names does not exist.",
+    "slots": "A game function table is not the one the dll expects.",
+    "toggle": "The game's interface was not there to show or hide our menu.",
+    "version": "The game is not Starfield 1.16.244, the only version this dll runs on.",
+    "world": "The world overlay probe's ini settings or movie stage are not usable, so the overlay probe runs alone.",
+    "world_key_thread": "The dll could not start the world overlay's key watcher.",
+    "world_toggle": "No world overlay menu name is set (WorldMenu empty: census only), or the game's UI had no registered menu by that name, or was not up yet; nothing was sent."
+  }
+}
