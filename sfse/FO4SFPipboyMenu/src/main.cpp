@@ -259,9 +259,13 @@ namespace
 	constexpr std::size_t   kProbeMenuScenesAt = 0x98;       // IMenu: the array of scene shared pointers
 	constexpr std::size_t   kProbeSceneTextureAt = 0x08;     // scene: its render texture
 	constexpr std::size_t   kProbeSceneRootAt = 0x10;        // scene: its 3D root
-	constexpr std::size_t   kProbeTextureStateAt = 0x14;     // texture: state bits 28 to 30 (1 or 2: usable)
+	constexpr std::size_t   kProbeTextureStateAt = 0x14;     // texture: state bits 28 to 30 (2 being made, 3 ready, 5 failed)
+	constexpr std::uint32_t kProbeTextureReady = 3;          // the phase the engine's own per-frame tests take (and 4)
 	constexpr std::size_t   kProbeNodeNameAt = 0x10;         // NiObjectNET::name (libxse)
-	constexpr std::size_t   kProbeNodeChildrenAt = 0x130;    // libxse NiNode::children, after NiAVObject (0x130)
+	constexpr std::size_t   kProbeNodeChildrenAt = 0x138;    // NiNode: its children array's data (the array is at +0x130)
+	constexpr std::size_t   kProbeNodeCountAt = 0x142;       // NiNode: that array's used count, u16; null entries occur
+	constexpr std::size_t   kProbeMenuSlotUpdate = 0x0B;     // IMenu: the per-frame slot (IMenu*, float dt, u64)
+	constexpr std::size_t   kProbeMenuListedAt = 0xCD;       // IMenu: two bytes, both non-zero for the per-frame list
 	constexpr std::uint32_t kProbeModelMode = 2;             // the model request's mode
 	constexpr std::size_t   kProbeMaxNodes = 256;            // nodes visited per walk, at most
 	constexpr std::size_t   kProbeMaxDepth = 16;
@@ -1669,6 +1673,7 @@ namespace
 		kProbeBind,
 		kProbeCellObject,
 		kProbeLookupById,
+		kProbeUpdate,
 		kProbeIdCount
 	};
 
@@ -1686,6 +1691,7 @@ namespace
 		{ 130595, "BSMenu3D.Scene.BindDisplayShape" },
 		{ 909463, "MenuDataSlate3DRenderCell_DO" },
 		{ 47401, "TESForm.LookupByID" },
+		{ 43215, "UICellRenderer_InventoryItem.Update" },
 	} };
 	std::array<std::uint32_t, kProbeIdCount> g_probeRva{};   // CheckProbeIds
 
@@ -1718,6 +1724,9 @@ namespace
 	using ProbeSceneTexture_t = std::int32_t (*)(void*, void*, void*);
 	using ProbeBind_t = std::uint64_t (*)(ProbeBindArgs*, void*);
 	using ProbeLookupById_t = void* (*)(std::uint32_t);
+	using ProbeUpdate_t = bool (*)(void*, float);
+	using MenuSlot_t = void (*)(void*, float, std::uint64_t);
+	MenuSlot_t g_engineMenuUpdate = nullptr;   // the engine's IMenu slot 0x0B, called first by ours (Probe=1 only)
 
 	struct ProbeState   // under g_probeLock
 	{
@@ -1726,8 +1735,10 @@ namespace
 		std::uintptr_t scene = 0;
 		bool           off = false;      // a check refused: nothing more is called
 		bool           bound = false;    // the bind ran on the model's Display* shapes
+		bool           ready = false;    // the renderer's update returned true once: its model is in the scene
 		std::uint32_t  opens = 0;
 		std::uint32_t  polls = 0;
+		std::uint32_t  updates = 0;      // the renderer's update calls, from the menu's per-frame slot
 		std::string    last;             // the last step=probe_state line, logged again only when it changes
 	};
 	ProbeState g_probeState;
@@ -1763,7 +1774,8 @@ namespace
 	};
 
 	// the scene's 3D below a_root, read only and guarded: every object is a NiAVObject by its RTTI before it is read, a
-	// NiNode's children are libxse's array at +0x130, at most kProbeMaxNodes objects and kProbeMaxDepth levels
+	// NiNode's children are its array's data at +0x138 with a u16 count at +0x142 (null entries skipped), at most
+	// kProbeMaxNodes objects and kProbeMaxDepth levels
 	std::vector<ProbeNode> ProbeWalk(std::uintptr_t a_root)
 	{
 		std::vector<ProbeNode>                            found;
@@ -1776,14 +1788,15 @@ namespace
 				continue;
 			}
 			found.push_back({ node, ProbeNodeName(node), ProbeIsA(type, "BSGeometry@@") });
-			ArrayHead children{};
+			std::uintptr_t children = 0;
+			std::uint16_t  count = 0;
 			if (depth >= kProbeMaxDepth || !ProbeIsA(type, "NiNode@@") || !Peek(node + kProbeNodeChildrenAt, children) ||
-				children.size > children.capacity || children.size > kProbeMaxNodes || !children.data) {
+				!Peek(node + kProbeNodeCountAt, count) || count > kProbeMaxNodes || !children) {
 				continue;
 			}
-			for (std::uint32_t i = children.size; i-- > 0;) {
+			for (std::uint32_t i = count; i-- > 0;) {
 				std::uintptr_t child = 0;
-				if (Peek(children.data + 8ull * i, child) && child) {
+				if (Peek(children + 8ull * i, child) && child) {
 					todo.emplace_back(child, depth + 1);
 				}
 			}
@@ -1871,7 +1884,9 @@ namespace
 		s.renderer = renderer;
 		s.scene = scene;
 		s.bound = false;
+		s.ready = false;
 		s.polls = 0;
+		s.updates = 0;
 		s.last.clear();
 		REX::INFO("step=probe_scene scene={} name={}", Hex(scene), sceneText);
 
@@ -1914,8 +1929,9 @@ namespace
 		REX::INFO("step=probe_model requested=1 form={:08X}", g_probeModelForm);
 	}
 
-	// at each kUpdate while open: the texture's state and the scene's 3D, and once both are there the bind on every
-	// BSGeometry whose name starts with Display. The state line is logged when it changes
+	// at each kUpdate while open: the menu's flags and its two bytes at +0xCD (flag 0x40, set at the show, and both
+	// bytes non-zero put the menu in the engine's per-frame list), the texture's state and the scene's 3D, and once both are there the bind on every BSGeometry whose name starts
+	// with Display. The state line is logged when it changes
 	void ProbePoll(void* a_menu)
 	{
 		static auto* const prefix = new RE::BSFixedString(kProbeShapePrefix);   // process lifetime, as MenuName
@@ -1934,7 +1950,10 @@ namespace
 			Peek(texture + kProbeTextureStateAt, state);
 		}
 		const auto  phase = (state >> 28) & 7;
-		const bool  usable = texture && (phase == 1 || phase == 2);
+		const bool  usable = texture && (phase == kProbeTextureReady || phase == kProbeTextureReady + 1);
+		const auto  flags = static_cast<const RE::IMenu*>(a_menu)->flags;
+		std::array<std::uint8_t, 2> listed{};
+		const bool  listedRead = Peek(reinterpret_cast<std::uintptr_t>(a_menu) + kProbeMenuListedAt, listed);
 		const auto  nodes = root ? ProbeWalk(root) : std::vector<ProbeNode>{};
 		std::size_t displays = 0;
 		std::string names;
@@ -1945,7 +1964,9 @@ namespace
 				names += std::format("{}{}{}", names.empty() ? "" : ",", node.geometry ? "*" : "", node.name.empty() ? "-" : node.name);
 			}
 		}
-		auto line = std::format("texture={} state={} usable={} root={} nodes={} display_shapes={} bound={} names=\"{}\"",
+		auto line = std::format("menu_flags={} menu_cd_ce={} updated={} ready={} texture={} state={} usable={} root={} "
+			"nodes={} display_shapes={} bound={} names=\"{}\"", Hex(flags),
+			listedRead ? std::format("{},{}", listed[0], listed[1]) : "unreadable", s.updates ? 1 : 0, s.ready ? 1 : 0,
 			texture ? 1 : 0, Hex(state), usable ? 1 : 0, root ? 1 : 0, nodes.size(), displays, s.bound ? 1 : 0, names);
 		if (line != s.last) {
 			REX::INFO("step=probe_state poll={} {}", n, line);
@@ -1967,11 +1988,32 @@ namespace
 		}
 	}
 
+	// from our IMenu slot 0x0B, once per frame while the engine lists the menu: the renderer's update, as the game's
+	// menus with an item renderer call it from theirs. It loads the cell, then the model, and attaches both under the
+	// scene's root; true on the frame the model is ready. Logged at the first call and at the first true only
+	void ProbeUpdate(void* a_menu, float a_dt)
+	{
+		std::scoped_lock lock(g_probeLock);
+		auto&            s = g_probeState;
+		if (s.off || !s.renderer || s.menu != a_menu) {
+			return;
+		}
+		if (++s.updates == 1) {
+			REX::INFO("step=probe_update first=1 dt={:.4f} menu_flags={}", a_dt, Hex(static_cast<const RE::IMenu*>(a_menu)->flags));
+		}
+		const bool done = reinterpret_cast<ProbeUpdate_t>(ProbeAddress(kProbeUpdate))(reinterpret_cast<void*>(s.renderer), a_dt);
+		if (done && !s.ready) {
+			s.ready = true;
+			REX::INFO("step=probe_update ready=1 updates={} polls={}", s.updates, s.polls);
+		}
+	}
+
 	void ProbeHide()
 	{
 		std::scoped_lock lock(g_probeLock);
-		REX::INFO("step=probe_hide renderer={} bound={} polls={} (the scene stays with the menu object)",
-			g_probeState.renderer ? 1 : 0, g_probeState.bound ? 1 : 0, g_probeState.polls);
+		REX::INFO("step=probe_hide renderer={} bound={} polls={} updates={} ready={} (the scene stays with the menu object)",
+			g_probeState.renderer ? 1 : 0, g_probeState.bound ? 1 : 0, g_probeState.polls, g_probeState.updates,
+			g_probeState.ready ? 1 : 0);
 	}
 
 	// from MenuDestroy, before the engine's IMenu destructor: the renderer's own destructor, then its memory
@@ -1987,6 +2029,7 @@ namespace
 		s.scene = 0;
 		s.menu = nullptr;
 		s.bound = false;
+		s.ready = false;
 		if (s.off) {   // a later check refused: the renderer is left as it is
 			REX::INFO("step=probe_destroy result=skipped reason=off");
 			return;
@@ -3557,6 +3600,15 @@ namespace
 
 	bool MenuIsMovieLoaded(void*) { return true; }   // stage a: the admission check the engine's answers with uiMovie
 
+	// FAL-739, Probe=1 only (slot 0x0B, replaced only then): the engine's own slot first, then the probe's renderer update
+	void MenuUpdate(void* a_self, float a_dt, std::uint64_t a_arg)
+	{
+		g_engineMenuUpdate(a_self, a_dt, a_arg);
+		if (g_probe) {
+			ProbeUpdate(a_self, a_dt);
+		}
+	}
+
 	// the creator UI calls on kShow. The engine passes uninitialised storage for a Scaleform::Ptr<IMenu> (MSVC's hidden
 	// return slot); the menu pointer is written there owning the constructor's reference, as the engine's own creators do
 	// FAL-414: the menu's own cancel handling. Both input slots are called with this = menu + 0x10 (BSInputEventUser).
@@ -3908,9 +3960,16 @@ namespace
 		if (g_stage == 1) {
 			g_vtbl.slots[0x0A] = reinterpret_cast<std::uintptr_t>(&MenuIsMovieLoaded);
 		}
-		REX::INFO("step=ready stage={} replaced=0x00,0x03,0x04,0x05,0x06,0x08{} locator={}",
+		if (g_probe) {   // FAL-739: the per-frame slot, so the probe's renderer is updated as the game's menus do theirs
+			if (!InImage(engine[kProbeMenuSlotUpdate], 1)) {
+				return Refuse("slots", "what=probe_update_slot reason=slot_outside_image");
+			}
+			g_engineMenuUpdate = reinterpret_cast<MenuSlot_t>(engine[kProbeMenuSlotUpdate]);
+			g_vtbl.slots[kProbeMenuSlotUpdate] = reinterpret_cast<std::uintptr_t>(&MenuUpdate);
+		}
+		REX::INFO("step=ready stage={} replaced=0x00,0x03,0x04,0x05,0x06,0x08{}{} locator={}",
 			g_stage == 1 ? "a" : g_stage == 2 ? "b" : g_stage == 3 ? "c" : g_stage == 4 ? "d" : "e", g_stage == 1 ? ",0x0A" : "",
-			Hex(g_vtbl.locator - g_base));
+			g_probe ? ",0x0B" : "", Hex(g_vtbl.locator - g_base));
 		return true;
 	}
 

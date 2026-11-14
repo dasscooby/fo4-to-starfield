@@ -8,7 +8,7 @@ import unittest
 
 PLUGIN = pathlib.Path(__file__).resolve().parents[1] / "sfse" / "FO4SFPipboyMenu"
 
-PROBE_IDS = {"43207", "43209", "43211", "44195", "140022", "130595", "909463", "47401"}
+PROBE_IDS = {"43207", "43209", "43211", "44195", "140022", "130595", "909463", "47401", "43215"}
 
 
 def function(src, head):
@@ -47,6 +47,7 @@ class PipboyProbe1Test(unittest.TestCase):
             "ProbePoll(a_self);": "RE::UI_MESSAGE_RESULT MenuProcessMessage(",
             "ProbeHide();": "RE::UI_MESSAGE_RESULT MenuProcessMessage(",
             "ProbeDestroy(a_self);": "void* MenuDestroy(",
+            "ProbeUpdate(a_self, a_dt);": "void MenuUpdate(",
         }
         for call, where in calls.items():
             body = function(self.src, where)
@@ -147,7 +148,7 @@ class PipboyProbe1Test(unittest.TestCase):
         casts = re.findall(r"reinterpret_cast<(Probe\w+_t)>\((\w+)\((\w+)\)\)", self.section)
         self.assertEqual(sorted(c[0] for c in casts),
                          ["ProbeBind_t", "ProbeLookupById_t", "ProbeModelRequest_t", "ProbeRendererCtor_t",
-                          "ProbeRendererDtor_t", "ProbeScenePush_t", "ProbeSceneTexture_t"])
+                          "ProbeRendererDtor_t", "ProbeScenePush_t", "ProbeSceneTexture_t", "ProbeUpdate_t"])
         for _, getter, name in casts:
             self.assertEqual(getter, "ProbeAddress")
             self.assertIn(name + ",", self.section[self.section.index("enum : std::size_t"):self.section.index("kProbeIdCount")])
@@ -192,7 +193,44 @@ class PipboyProbe1Test(unittest.TestCase):
         self.assertIn("if (!node.geometry || !node.name.starts_with(kProbeShapePrefix)) {\n\t\t\t\tcontinue;", poll)
         self.assertLess(poll.index("s.bound = true;"), poll.index("ProbeAddress(kProbeBind)"))
         self.assertIn('constexpr std::string_view kProbeShapePrefix = "Display";', self.src)
-        self.assertIn("const bool  usable = texture && (phase == 1 || phase == 2);", poll)
+        # FAL-794: phase 3 is ready (2 being made, 5 failed); the engine's own test also takes 4
+        self.assertIn("const bool  usable = texture && (phase == kProbeTextureReady || phase == kProbeTextureReady + 1);",
+                      poll)
+        self.assertIn("constexpr std::uint32_t kProbeTextureReady = 3;", self.src)
+        self.assertNotIn("phase == 1 || phase == 2", self.src)
+        # FAL-794: a NiNode's children are data at +0x138 and a u16 count at +0x142, null entries skipped
+        self.assertIn("constexpr std::size_t   kProbeNodeChildrenAt = 0x138;", self.src)
+        self.assertIn("constexpr std::size_t   kProbeNodeCountAt = 0x142;", self.src)
+        self.assertIn("std::uint16_t  count = 0;", walk)
+        self.assertIn("!Peek(node + kProbeNodeCountAt, count) || count > kProbeMaxNodes || !children", walk)
+        self.assertIn("if (Peek(children + 8ull * i, child) && child) {", walk)
+        self.assertNotIn("ArrayHead", walk)
+        # the per-frame list's gate: the menu's flags (0x40) and its two bytes at +0xCD in every state line, read only
+        self.assertIn('"menu_flags={} menu_cd_ce={} updated={} ready={} texture={}', poll)
+        self.assertIn("constexpr std::size_t   kProbeMenuListedAt = 0xCD;", self.src)
+        self.assertIn("Peek(reinterpret_cast<std::uintptr_t>(a_menu) + kProbeMenuListedAt, listed)", poll)
+
+    def test_renderer_update_runs_from_the_menu_slot_only_with_the_probe(self):
+        # FAL-794: the game's menus with an item renderer call its update (43215) from IMenu slot 0x0B each frame
+        self.assertIn("constexpr std::size_t   kProbeMenuSlotUpdate = 0x0B;", self.src)
+        check = function(self.src, "bool CheckEverything(")
+        gate = check[check.index("if (g_probe) {   // FAL-739: the per-frame slot"):check.index('REX::INFO("step=ready')]
+        self.assertIn("if (!InImage(engine[kProbeMenuSlotUpdate], 1)) {", gate)
+        self.assertIn("g_engineMenuUpdate = reinterpret_cast<MenuSlot_t>(engine[kProbeMenuSlotUpdate]);", gate)
+        self.assertIn("g_vtbl.slots[kProbeMenuSlotUpdate] = reinterpret_cast<std::uintptr_t>(&MenuUpdate);", gate)
+        self.assertEqual(self.src.count("&MenuUpdate"), 1)                        # replaced only behind g_probe
+        self.assertIn('g_probe ? ",0x0B" : ""', check)
+        load = self.src[self.src.index("SFSE_PLUGIN_LOAD"):]
+        self.assertLess(load.index("ReadProbe(ini)"), load.index("CheckEverything(dir)"))   # g_probe is known by then
+        slot = function(self.src, "void MenuUpdate(")
+        self.assertLess(slot.index("g_engineMenuUpdate(a_self, a_dt, a_arg);"), slot.index("ProbeUpdate(a_self, a_dt);"))
+        update = function(self.src, "void ProbeUpdate(")
+        self.assertLess(update.index("if (s.off || !s.renderer || s.menu != a_menu) {"), update.index("ProbeAddress(kProbeUpdate)"))
+        self.assertEqual(self.src.count("ProbeAddress(kProbeUpdate)"), 1)
+        self.assertIn("using ProbeUpdate_t = bool (*)(void*, float);", self.src)
+        self.assertIn("using MenuSlot_t = void (*)(void*, float, std::uint64_t);", self.src)
+        for text in ("43215", "0x0B", "step=probe_update", "updated=", "menu_flags=", "menu_cd_ce="):
+            self.assertIn(text, self.readme, text)
 
     def test_renderer_is_destroyed_before_the_menu(self):
         destroy = function(self.src, "void* MenuDestroy(")
@@ -213,7 +251,7 @@ class PipboyProbe1Test(unittest.TestCase):
         steps = set(re.findall(r"step=(probe_\w+)", self.section))
         self.assertEqual(steps, {"probe_open", "probe_inputs", "probe_renderer", "probe_scene", "probe_scene_push",
                                  "probe_texture", "probe_model", "probe_state", "probe_bind", "probe_hide",
-                                 "probe_destroy"})
+                                 "probe_destroy", "probe_update"})
         self.assertIn("## Probe 1: a menu movie on a model (FAL-739)", self.readme)
         for step in sorted(steps | {"probe_movie", "probe_id"}):
             self.assertIn("step=" + step, self.readme, step)

@@ -397,7 +397,7 @@ movie drawn onto a model in a menu scene, as the game's own menus with a model d
 | `ProbeModelForm` | empty | a vanilla data-slate book's Starfield.esm form id, in hex (`refuse step=ini reason=probe_model_form`); its model already has shapes named `Display*`, so the probe needs no new asset |
 | `ProbeWidth`, `ProbeHeight` | `1280`, `720` | the render texture's size, the staged movie's stage; 16 to 4096 (`refuse step=ini reason=probe_size`) |
 
-**Checked first (at load, `Probe=1`):** the keys, then eight ids in the same Address Library file with the checks
+**Checked first (at load, `Probe=1`):** the keys, then nine ids in the same Address Library file with the checks
 every other id gets (below the count, non-zero, inside the image, libxse's own lookup the same offset):
 `step=probe_id name= id= checked=1`, or `refuse step=probe_id`. They are kept out of the shared id list, so `Probe=0`
 reads and logs exactly the ids it did before.
@@ -411,6 +411,14 @@ reads and logs exactly the ids it did before.
 | 130595 | the bind of that texture onto one `Display*` shape |
 | 909463 | the data-slate menu cell's default object |
 | 47401 | `TESForm::LookupByID`, for the model's form |
+| 43215 | the renderer's per-frame update, `bool (renderer, float dt)`: it loads the menu cell, then the model, and attaches both under the scene's root; true on the frame the model is ready |
+
+**The per-frame slot (`Probe=1` only).** The game's menus with an item renderer call its update (43215) from their
+`IMenu` slot 0x0B, `void (IMenu*, float dt, u64)`, once per frame. With `Probe=1` our copy of the vtable replaces
+slot 0x0B too (`step=ready ... replaced=...,0x0B`): the engine's own slot first, then 43215 on the probe's renderer.
+The engine calls that slot only for a menu it lists that frame. That needs flag 0x40, the "shown" bit the engine sets
+at the show, and the two `IMenu` bytes at +0xCD and +0xCE non-zero; the state line logs the flags and both bytes
+(`menu_cd_ce=`) for that check.
 
 **The steps** (one line each, on the menu's thread, after the engine's own handling of the message):
 
@@ -421,12 +429,18 @@ reads and logs exactly the ids it did before.
    `UICellRenderer_InventoryItem` by RTTI), `step=probe_scene` (the scene carries our menu's name),
    `step=probe_scene_push result= index=`, `step=probe_texture result= texture= width= height= state=` and
    `step=probe_model requested=1`.
-3. Every update while open (one about every 0.5 s): `step=probe_state poll= texture= state= usable= root= nodes=
-   display_shapes= bound= names=`, logged when it changes. The names are the scene's objects, a `*` before each
-   geometry. Read only: each object is checked by RTTI before it is read.
-4. Once the texture is usable and the scene has a geometry named `Display*`: `step=probe_bind shape= result=` for each,
+3. Every frame while the engine lists the menu: the renderer's update (43215). `step=probe_update first=1 dt=
+   menu_flags=` at its first call, and `step=probe_update ready=1 updates= polls=` the first time it returns true.
+   Nothing else per frame.
+4. Every update while open (one about every 0.5 s): `step=probe_state poll= menu_flags= menu_cd_ce= updated= ready=
+   texture= state= usable= root= nodes= display_shapes= bound= names=`, logged when it changes. `updated=1` once slot 0x0B
+   has run for the renderer. `usable=1` at texture phase 3 (bits 28 to 30: 2 being made, 3 ready, 5 failed; the
+   engine's own test also takes 4). The names are the scene's objects, a `*` before each geometry. Read only: each
+   object is checked by RTTI before it is read; a `NiNode`'s children are its array's data at +0x138 with a u16 count
+   at +0x142, null entries skipped.
+5. Once the texture is usable and the scene has a geometry named `Display*`: `step=probe_bind shape= result=` for each,
    once per renderer.
-5. Close: `step=probe_hide`. Nothing of the probe is torn down at a close: the renderer and its scene stay with the
+6. Close: `step=probe_hide ... updates= ready=`. Nothing of the probe is torn down at a close: the renderer and its scene stay with the
    menu object until the engine destroys it. What a later open logs tells the three outcomes apart, and each is a
    result to record, not a failure:
    - **(a)** `step=destroy` after the close, with `step=probe_destroy result=1` before the engine's destructor; the
@@ -445,8 +459,8 @@ called until the game closes.
   put a shape's original texture back, and a bind that cannot be undone is not made.
 - **The movie's own viewport.** The texture has the size the ini gives; the movie keeps the viewport the engine gave
   it.
-- **The renderer's per-frame update.** If the model never appears (`root=0`, or no `Display*` shape), that is the
-  session's finding.
+- **The game's calls after the update returns true** (the renderer's view set-up). If the model is in the scene
+  (`ready=1`) but not in the picture, that is the session's finding.
 - **The game's engine object for a Fallout 4 movie** (its sounds and menu calls): nothing stands in for it here.
 
 **Not verified until a session:** every step above at runtime, whether the room stays visible around the model, and
