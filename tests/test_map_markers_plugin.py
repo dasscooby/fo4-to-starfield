@@ -510,6 +510,43 @@ class MapMarkersPluginTests(unittest.TestCase):
         self.assertEqual(missing.returncode, 1, missing.stdout)
         self.assertIn("SyntheticWorldLandingPadRedRocketNorth (--landing) is missing", missing.stdout)
 
+    def test_landing_undiscovered_writes_the_marker_without_discovered_and_tells_every_quest(self):
+        # --landing-undiscovered (FAL-489, the Vault 111 exit): the landing marker's flags are 0x13, not 0x33, and every quest carries
+        # ShowLandingMarker = false so FO4SF_MapMarkers.ShowLanding does not discover it; no script can clear Discovered later, so the
+        # plugin has to start it undiscovered. A default build is unchanged and carries no such property (the pinned build above).
+        landing = self.landing_file("landing-undisc", self.landing())
+        many = [{"tag": f"M{k:06X}", "name": f"Marker {k}", "pos": [10.0 + k * 0.5, 20.0 + k * 0.25, 1.0], "cell": [0, 0]} for k in range(45)]
+        extra = self.extra_file("extra-undisc", many)             # 3 core + 45 own + 4 landing = 52 markers: three quests of 20, 20 and 12
+        out, plain = self.root / "plugin-undisc", self.root / "plugin-disc"
+        built = self.tool_run("build", "--core", self.core, "--out", out, "--extra", extra, "--landing", landing, "--landing-undiscovered")
+        self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+        default = self.tool_run("build", "--core", self.core, "--out", plain, "--extra", extra, "--landing", landing)
+        self.assertEqual(default.returncode, 0, default.stdout + default.stderr)
+        plugin, plugin_plain = out / "FO4SFMapMarkers.esm", plain / "FO4SFMapMarkers.esm"
+        args = ("--extra", extra, "--landing", landing)
+        self.assertEqual(self.tool_run("check", plugin, self.core, *args, "--landing-undiscovered").returncode, 0)
+        self.assertEqual(self.tool_run("check", plugin_plain, self.core, *args).returncode, 0)
+        recs, recs_plain = self.records_by_form(plugin), self.records_by_form(plugin_plain)    # by full FormID: three quests
+        flags = lambda r: struct.unpack("<I", tlw.field(r[0x020008F2][1], b"FNAM"))[0]   # noqa: E731
+        self.assertEqual((flags(recs), flags(recs_plain)), (0x13, 0x33))
+        quests = [k for k, r in recs.items() if r[0] == b"QUST" and k >> 24 == 2]
+        self.assertEqual(len(quests), 3)
+        for k in quests:                                                   # every quest, not only the one that holds the pad
+            self.assertIn(b"ShowLandingMarker", tlw.field(recs[k][1], b"VMAD"), hex(k))
+            self.assertNotIn(b"ShowLandingMarker", tlw.field(recs_plain[k][1], b"VMAD"), hex(k))
+        # check wants the same flag: an undiscovered build against a plain check, and a plain build against the flag, both fail
+        wrong = self.tool_run("check", plugin, self.core, *args)
+        self.assertEqual(wrong.returncode, 1, wrong.stdout)
+        self.assertIn("ShowLandingMarker false: only --landing-undiscovered writes it", wrong.stdout)
+        self.assertIn("is not the record --landing builds", wrong.stdout)                  # the marker's flags differ too
+        wrong = self.tool_run("check", plugin_plain, self.core, *args, "--landing-undiscovered")
+        self.assertEqual(wrong.returncode, 1, wrong.stdout)
+        self.assertIn("ShowLandingMarker missing: --landing-undiscovered wants false on every quest", wrong.stdout)
+        # the flag changes nothing without a landing spot
+        bare = self.tool_run("build", "--core", self.core, "--out", self.root / "plugin-undisc-bare", "--landing-undiscovered")
+        self.assertEqual(bare.returncode, 2, bare.stdout)
+        self.assertIn("--landing-undiscovered needs --landing", bare.stderr)
+
     def star_file(self, name, names, strict=True):
         path = self.root / f"{name}.json"
         path.write_text(json.dumps({"names": names, "strict": strict}))
@@ -1260,6 +1297,10 @@ class StageTests(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(d, "s4")))
             with self.assertRaises(SystemExit):                # one or the other
                 mm.main(["stage", "--core", core, "--out", os.path.join(d, "s5"), "--star-map", "Concord", "--star-map-all"])
+            with self.assertRaises(SystemExit) as cm:          # FAL-489: it changes the landing marker, so it needs a landing spot
+                mm.main(["stage", "--core", core, "--out", os.path.join(d, "s6"), "--landing-undiscovered"])
+            self.assertIn("--landing-undiscovered needs --landing", str(cm.exception))
+            self.assertFalse(os.path.exists(os.path.join(d, "s6")))
         build, comp, check, build2, comp2, check2, build3, _comp3, check3, build4, _comp4, check4 = calls
         star = os.path.join(out, "star_map.json")
         self.assertEqual(build[0][-10:], ["build", "--core", core, "--out", out, "--plugin", "FO4SFMapMarkers.esm", "--reload",
