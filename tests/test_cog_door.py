@@ -145,10 +145,19 @@ class CogDoorConversionTests(unittest.TestCase):
 
 
 class FakePack:
+    position, rotation = (0, 0, 0), (0, 0, 0, 1)
     def objects(self): return [(0, "hknpPhysicsSystemData")]
     def array(self, off): return 100, 1
     def pointer(self, off): return 1000
-    def unpack(self, fmt, off): return (0, 0, 0, 1) if fmt == "<4f" else (0, 0, 0)
+    def unpack(self, fmt, off): return self.rotation if fmt == "<4f" else self.position
+
+
+class OffsetPack(FakePack):
+    position = (-1.0, 2.0, 0.5)
+
+
+class RotatedPack(FakePack):
+    rotation = (0.0, 0.0, 0.7071, 0.7071)
 
 
 SLAB = [(x, y, z) for x in (-1.0, 1.0) for y in (-.5, .5) for z in (-.05, .05)]
@@ -163,16 +172,16 @@ def with_deck_collision(f):
     shape = struct.unpack_from("<i", part, len(part) - 4)[0]
     helper = len(f.blocks)
     f.blocks[1] = bytes(part[:-8]) + struct.pack("<Iii", 2, shape, helper)
-    f.add_block("NiNode", av_fields(f.string_index(b"c_Deck"), (0, 0, 0), IDENTITY, 1) + struct.pack("<I", 0))
+    f.add_block("NiNode", av_fields(f.string_index(b"c_Deck"), (-70, 140, 35), IDENTITY, 1) + struct.pack("<I", 0))
     system = f.add_block("bhkPhysicsSystem", struct.pack("<I", 4) + b"test")
     f.add_block("bhkNPCollisionObject", struct.pack("<iHiI", helper, 128, system, 0))
     return f
 
 
 class CogDoorFo4BodyTests(unittest.TestCase):
-    def run_convert(self, tris=SLAB_TRIS):
+    def run_convert(self, tris=SLAB_TRIS, pack=FakePack):
         from fo4sf import convert_static as cs, fo4collision, hkpackfile, meshcollision
-        with patch.object(hkpackfile, "Packfile", return_value=FakePack()), \
+        with patch.object(hkpackfile, "Packfile", return_value=pack()), \
                 patch.object(meshcollision, "_shape_parts", return_value=[("convex", 1000, meshcollision.IDENTITY3, (0, 0, 0))]), \
                 patch.object(fo4collision, "_convex", return_value=(SLAB, tris)):
             return convert(with_deck_collision(cog_nif()), aliases=ALIASES)
@@ -192,6 +201,25 @@ class CogDoorFo4BodyTests(unittest.TestCase):
         blob = sfcollision.physics_blob_from_nif(raw, name)
         _, half = sfcollision.read_box(blob)
         self.assertAlmostEqual(min(half), sfcollision.MIN_LEAF_HALF, places=3)   # thin, not the 0.7 m leaf-sized block
+
+    def test_body_position_is_model_space_and_not_doubled_by_the_helper_node(self):
+        # FO4 body transforms are absolute (model space): the helper node's own offset must not be added (PR #788 read: 2x).
+        files, door = self.run_convert(pack=OffsetPack)
+        model = nif.parse(files["meshes/fo4port/interiors/vault/vltgeardoor01.nif"])
+        worlds = nif.world_transforms(model)
+        body = next(i for i in range(len(model.blocks)) if model.type_of(i) == "bhkNPCollisionObject")
+        node = struct.unpack_from("<i", model.blocks[body])[0]
+        t = worlds(node)[0]
+        for got, want in zip(t, (-1.0, 2.0, 0.5)):
+            self.assertAlmostEqual(got, want, places=3)
+        self.assertEqual(door["fo4_collision"]["carried_bodies"][0]["model_centre_m"], [-1.0, 2.0, 0.5])
+
+    def test_a_bone_whose_only_fo4_body_is_rotated_keeps_its_bounding_box(self):
+        files, door = self.run_convert(pack=RotatedPack)
+        self.assertEqual(len(door["fo4_collision"]["skipped"]), 1)
+        self.assertIn("(rotated body)", door["fo4_collision"]["skipped"][0])
+        self.assertEqual(door["fo4_collision"]["carried_bodies"], [])
+        self.assertGreaterEqual(door["moving_bodies"], 1)          # not left without collision
 
     def test_a_large_mesh_part_is_refused(self):
         from fo4sf import fo4collision, meshcollision

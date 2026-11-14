@@ -651,23 +651,14 @@ def fo4_door_bodies(src, plan, unit_scale, report=None):
     moving = [a for a in found["attachments"] if a["follows_animated_ancestor"]]
     if not moving:
         return None
-    parents = {}
-    for node in range(len(src.blocks)):
-        if src.type_of(node).endswith("Node"):
-            for child in nifmod.node_children(src, node):
-                parents.setdefault(child, node)
+    worlds = nifmod.world_transforms(src, placed=True)      # FO4 body transforms are absolute (model space), not node-relative
     packs = {}
-    out, skipped = {}, []
+    out, skipped, carried, fallback = {}, [], [], set()
     for a in moving:
         bone_node = plan["bones"][a["bone"]]["node"]
-        rel = nifmod.IDENTITY_TRANSFORM                      # collision node -> bone, source units
-        n = a["node"]
-        while n != bone_node:
-            rel = nifmod._compose(nifmod._av_transform(src.blocks[n]), rel)
-            n = parents[n]
-        if abs(rel[2] - 1.0) > 1e-4:
-            raise nifmod.NifError("door collision node is scaled relative to its rig bone")
-        t_rel = tuple(v * unit_scale for v in rel[0])
+        wt, wr, ws = worlds(bone_node)                       # bone -> model, source units
+        if abs(ws - 1.0) > 1e-4:
+            raise nifmod.NifError("door rig bone is scaled")
         if a["system_block"] not in packs:
             pack = hkpackfile.Packfile(src.blocks[a["system_block"]][4:])
             packs[a["system_block"]] = (pack, dict(pack.objects()))
@@ -693,13 +684,23 @@ def fo4_door_bodies(src, plan, unit_scale, report=None):
             if not tris:
                 skipped.append(f"{label} (part without faces)")
                 continue
-            pts = [tuple(sum(R[3 * r + k] * v[k] for k in range(3)) + tr[r] + pos[r] for r in range(3)) for v in pts]
+            pts = [tuple(sum(R[3 * r + k] * v[k] for k in range(3)) + tr[r] + pos[r] for r in range(3)) for v in pts]   # model metres
             centre, half, rot = sfcollision.convex_obb(pts, tris)
-            c2 = tuple(sum(rel[1][3 * r + k] * centre[k] for k in range(3)) + t_rel[r] for r in range(3))
-            r2 = tuple(sum(rel[1][3 * r + j] * rot[3 * j + c] for j in range(3)) for r in range(3) for c in range(3))
-            out.setdefault(bone_node, []).append((c2, half, r2, a["node"]))
+            local = tuple(sum(wr[3 * k + r] * (centre[k] / unit_scale - wt[k]) for k in range(3)) * unit_scale for r in range(3))
+            rot_local = tuple(sum(wr[3 * k + r] * rot[3 * k + c] for k in range(3)) for r in range(3) for c in range(3))
+            out.setdefault(bone_node, []).append((local, half, rot_local, a["node"]))
+            carried.append({"node": a["node"], "bone": plan["bones"][a["bone"]]["name"], "model_centre_m": [round(v, 3) for v in centre],
+                            "half_m": [round(v, 3) for v in half]})
+    for a in moving:                                            # a bone whose FO4 bodies were all skipped keeps its bounding box
+        node = plan["bones"][a["bone"]]["node"]
+        if node not in out:
+            fallback.add(node)
     if report is not None:
         report["skipped"] = skipped
+        report["carried_bodies"] = carried
+        report["box_fallback_bones"] = sorted(plan["bones"][i]["name"] for i in range(len(plan["bones"])) if plan["bones"][i]["node"] in fallback)
+    if report is not None:
+        report["fallback_nodes"] = sorted(fallback)
     return out
 
 
@@ -828,7 +829,10 @@ def convert_multipart_door(fo4_nif: bytes, out_name: str, material_paths: list, 
                 blob = sfcollision.box_blob(collision_template, (0.0, 0.0, 0.0), tuple(max(sfcollision.MIN_LEAF_HALF, h) for h in half))
                 child_bodies.setdefault(node, []).append((f"Collision_{source_node}_{k}", centre, rot,
                                                           sfcollision.keyframed(blob, leaf_physics_donor)))
-    for i, pts in (sorted(bone_pts.items()) if fo4_bodies is None else []):
+    keep_box = {bones[i]["node"] for i in bone_pts} & set(fo4_report.get("fallback_nodes", [])) if fo4_bodies is not None else set()
+    for i, pts in sorted(bone_pts.items()):
+        if fo4_bodies is not None and bones[i]["node"] not in keep_box:
+            continue
         lo = [min(p[k] for p in pts) for k in range(3)]
         hi = [max(p[k] for p in pts) for k in range(3)]
         blob = sfcollision.box_blob(collision_template, tuple((lo[k] + hi[k]) / 2 for k in range(3)),
