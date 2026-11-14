@@ -639,7 +639,9 @@ def fo4_door_bodies(src, plan, unit_scale, report=None):
     Returns {bone node block: [(centre, half, rotation row-major, source collision node)]} (metres), or None when the source
     has no collision object on a moving bone (the caller then keeps the one-box-per-bone fallback). Each body is boxed with
     sfcollision.convex_obb, so a thin walkway deck stays thin instead of becoming a block up to its rails. Bodies with a
-    rotation, convex parts without faces, and spheres are skipped and listed in report["skipped"]; a mesh part with more
+    rotation (the quaternion convention is unverified against a real body), convex parts without faces, and spheres are
+    skipped and listed in report["skipped"]/report["bodies"]; a bone left with no carried body keeps its bounding box
+    (report["fallback_nodes"]) so it still blocks; a bone with some carried bodies does not get one. A mesh part with more
     than MAX_DOOR_MESH_PART_TRIS triangles, or a scaled collision node, is refused (NifError)."""
     from . import door_collision, fo4collision as fc, hkpackfile, meshcollision
     try:
@@ -653,9 +655,16 @@ def fo4_door_bodies(src, plan, unit_scale, report=None):
         return None
     worlds = nifmod.world_transforms(src, placed=True)      # FO4 body transforms are absolute (model space), not node-relative
     packs = {}
-    out, skipped, carried, fallback = {}, [], [], set()
+    out, skipped, carried, fallback, listing = {}, [], [], set(), []
+
+    def node_name(i):
+        k, = struct.unpack_from("<i", src.blocks[i], 0)
+        return src.strings[k].decode("latin-1") if 0 <= k < len(src.strings) else ""
+
     for a in moving:
         bone_node = plan["bones"][a["bone"]]["node"]
+        entry = {"bone": plan["bones"][a["bone"]]["name"], "source_node": a["node"], "source_node_name": node_name(a["node"]),
+                 "body": a["body_id"]}
         wt, wr, ws = worlds(bone_node)                       # bone -> model, source units
         if abs(ws - 1.0) > 1e-4:
             raise nifmod.NifError("door rig bone is scaled")
@@ -669,6 +678,7 @@ def fo4_door_bodies(src, plan, unit_scale, report=None):
         label = f"block {a['collision_block']} body {a['body_id']}"
         if any(abs(x) > 1e-4 for x in pack.unpack("<4f", body + fc.BODY_ROT)[:3]):
             skipped.append(label + " (rotated body)")
+            listing.append({**entry, "status": "skipped", "reason": "rotated body"})
             continue
         pos = pack.unpack("<3f", body + fc.BODY_POS)
         for kind, obj, R, tr in meshcollision._shape_parts(pack, classes, pack.pointer(body), meshcollision.IDENTITY3, (0.0, 0.0, 0.0)):
@@ -680,9 +690,11 @@ def fo4_door_bodies(src, plan, unit_scale, report=None):
                     raise nifmod.NifError(f"door collision mesh part has {len(tris)} triangles ({label}); not a thin deck")
             else:
                 skipped.append(f"{label} ({kind} part)")
+                listing.append({**entry, "status": "skipped", "reason": f"{kind} part"})
                 continue
             if not tris:
                 skipped.append(f"{label} (part without faces)")
+                listing.append({**entry, "status": "skipped", "reason": "part without faces"})
                 continue
             pts = [tuple(sum(R[3 * r + k] * v[k] for k in range(3)) + tr[r] + pos[r] for r in range(3)) for v in pts]   # model metres
             centre, half, rot = sfcollision.convex_obb(pts, tris)
@@ -691,6 +703,8 @@ def fo4_door_bodies(src, plan, unit_scale, report=None):
             out.setdefault(bone_node, []).append((local, half, rot_local, a["node"]))
             carried.append({"node": a["node"], "bone": plan["bones"][a["bone"]]["name"], "model_centre_m": [round(v, 3) for v in centre],
                             "half_m": [round(v, 3) for v in half]})
+            listing.append({**entry, "status": "carried", "shape": "oriented box", "source_shape": kind,
+                            "half_m": [round(v, 4) for v in half], "model_position_m": [round(v, 4) for v in centre]})
     for a in moving:                                            # a bone whose FO4 bodies were all skipped keeps its bounding box
         node = plan["bones"][a["bone"]]["node"]
         if node not in out:
@@ -698,6 +712,7 @@ def fo4_door_bodies(src, plan, unit_scale, report=None):
     if report is not None:
         report["skipped"] = skipped
         report["carried_bodies"] = carried
+        report["bodies"] = listing                      # every moving body, carried or skipped, so a run reads without a second tool
         report["box_fallback_bones"] = sorted(plan["bones"][i]["name"] for i in range(len(plan["bones"])) if plan["bones"][i]["node"] in fallback)
     if report is not None:
         report["fallback_nodes"] = sorted(fallback)

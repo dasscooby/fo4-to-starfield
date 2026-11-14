@@ -214,6 +214,38 @@ class CogDoorFo4BodyTests(unittest.TestCase):
             self.assertAlmostEqual(got, want, places=3)
         self.assertEqual(door["fo4_collision"]["carried_bodies"][0]["model_centre_m"], [-1.0, 2.0, 0.5])
 
+    def test_body_away_from_the_origin_under_a_bone_away_from_the_origin_stays_where_the_source_put_it(self):
+        from fo4sf import convert_static as cs, fo4collision, hkpackfile, meshcollision
+        f = with_deck_collision(cog_nif())
+        blk = bytearray(f.blocks[1])
+        _, nextra = struct.unpack_from("<iI", blk, 0)
+        struct.pack_into("<3f", blk, 8 + 4 * nextra + 8, 35.0, -70.0, 70.0)     # the part's own bone offset, FO4 units
+        f.blocks[1] = bytes(blk)
+        with patch.object(hkpackfile, "Packfile", return_value=OffsetPack()), \
+                patch.object(meshcollision, "_shape_parts", return_value=[("convex", 1000, meshcollision.IDENTITY3, (0, 0, 0))]), \
+                patch.object(fo4collision, "_convex", return_value=(SLAB, SLAB_TRIS)):
+            count = len([x for x in nif.fo4_trishapes(f) if x.positions and x.triangles])
+            files, door = convert_static.convert_multipart_door(           # the moved bone no longer starts at its clips' bind pose
+                nif.serialize(f), "fo4port/interiors/vault/vltgeardoor01", ["x.mat"] * count, fake_clip_files,
+                collision_template=fake_template(), leaf_physics_donor=donor(), rest_pose_check=False, aliases=ALIASES)
+        model = nif.parse(files["meshes/fo4port/interiors/vault/vltgeardoor01.nif"])
+        worlds = nif.world_transforms(model)
+        body = next(i for i in range(len(model.blocks)) if model.type_of(i) == "bhkNPCollisionObject")
+        for got, want in zip(worlds(struct.unpack_from("<i", model.blocks[body])[0])[0], (-1.0, 2.0, 0.5)):
+            self.assertAlmostEqual(got, want, places=3)
+
+    def test_the_report_lists_every_moving_body_with_bone_node_shape_size_and_position(self):
+        _, door = self.run_convert(pack=OffsetPack)
+        (entry,) = door["fo4_collision"]["bodies"]
+        self.assertEqual(entry["status"], "carried")
+        self.assertEqual(entry["model_position_m"], [-1.0, 2.0, 0.5])
+        self.assertEqual(entry["shape"], "oriented box")
+        for key in ("bone", "source_node", "source_node_name", "half_m"):
+            self.assertIn(key, entry)
+        _, door = self.run_convert(pack=RotatedPack)
+        (entry,) = door["fo4_collision"]["bodies"]
+        self.assertEqual((entry["status"], entry["reason"]), ("skipped", "rotated body"))
+
     def test_a_bone_whose_only_fo4_body_is_rotated_keeps_its_bounding_box(self):
         files, door = self.run_convert(pack=RotatedPack)
         self.assertEqual(len(door["fo4_collision"]["skipped"]), 1)
